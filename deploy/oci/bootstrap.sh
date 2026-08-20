@@ -2,8 +2,9 @@
 # OCI Phase 2 부트스트랩 — VM 위에서 한 번 실행.
 #
 # What this does:
-#   1. OS 방화벽 (iptables) 80/443 인그레스 열고 persist.
-#   2. k3s single-node 설치 (servicelb 비활성 — traefik 가 hostPort 로 잡음).
+#   1. OS 방화벽 (iptables): 80/443 인그레스 + k3s pod/service CIDR 열고 persist.
+#   2. k3s single-node 설치 (servicelb 유지 — klipper 가 호스트 80/443 → traefik).
+#      BOOTSTRAP_OIDC_CLIENT_ID 가 있으면 k3s config 에 OIDC 신뢰도 설정.
 #   3. kubectl/helm CLI 설치.
 #   4. cert-manager 설치 + ClusterIssuer (LetsEncrypt prod) 생성.
 #
@@ -16,6 +17,9 @@
 #   scp deploy/oci/bootstrap.sh ubuntu@<public-ip>:~
 #   ssh ubuntu@<public-ip>
 #   sudo BOOTSTRAP_EMAIL=you@example.com bash bootstrap.sh
+#   # 실제 배포까지 켜려면 (선택):
+#   sudo BOOTSTRAP_EMAIL=you@example.com \
+#        BOOTSTRAP_OIDC_CLIENT_ID=<google-client-id> bash bootstrap.sh
 #
 # After this completes, run helm install separately (deploy/oci/README.md).
 
@@ -48,6 +52,24 @@ ensure_rule() {
 ensure_rule 80
 ensure_rule 443
 
+# k3s pod (10.42.0.0/16) and service (10.43.0.0/16) CIDRs must be allowed to
+# reach the host: the apiserver runs in the host netns (:6443), and pod ->
+# apiserver traffic hits the host INPUT chain. Without these, the catch-all
+# REJECT drops it and EVERY release deploy fails (backend can't reach the
+# k8s API). This is the root cause the earlier manual fix addressed — see
+# deploy/oci/README.md §7.2.
+ensure_cidr() {
+  local cidr="$1"
+  if ! iptables -C INPUT -s "${cidr}" -j ACCEPT 2>/dev/null; then
+    iptables -I INPUT 1 -s "${cidr}" -j ACCEPT
+    echo "  inserted ACCEPT from ${cidr}"
+  else
+    echo "  rule already present for ${cidr}"
+  fi
+}
+ensure_cidr 10.42.0.0/16
+ensure_cidr 10.43.0.0/16
+
 # Persist across reboots
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iptables-persistent netfilter-persistent
@@ -56,6 +78,25 @@ echo "  iptables rules saved"
 
 echo
 echo "== Step 2/4: k3s single-node install =="
+# Optionally trust an external OIDC provider (e.g. Google) so end-user tokens
+# work for k8s RBAC — the backend forwards the user's id_token to the apiserver.
+# Enable by exporting BOOTSTRAP_OIDC_CLIENT_ID (and optionally _ISSUER). Written
+# BEFORE install so k3s picks it up on first start (no restart needed).
+# NB: values MUST be quoted — a trailing ':' in a value makes YAML parse the list
+# item as a map and k3s dies with "unknown flag". oidc-username-prefix=- means
+# "no prefix" so the k8s username is the raw email. See deploy/oci/README.md §7.1.
+if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
+  mkdir -p /etc/rancher/k3s
+  cat > /etc/rancher/k3s/config.yaml <<YAML
+kube-apiserver-arg:
+  - "oidc-issuer-url=${BOOTSTRAP_OIDC_ISSUER:-https://accounts.google.com}"
+  - "oidc-client-id=${BOOTSTRAP_OIDC_CLIENT_ID}"
+  - "oidc-username-claim=${BOOTSTRAP_OIDC_USERNAME_CLAIM:-email}"
+  - "oidc-username-prefix=-"
+YAML
+  echo "  wrote /etc/rancher/k3s/config.yaml (OIDC trust enabled)"
+fi
+
 if ! command -v k3s >/dev/null 2>&1; then
   # Keep the bundled klipper servicelb ENABLED: it is what binds host ports
   # 80/443 and forwards them to the traefik LoadBalancer Service. Disabling it
