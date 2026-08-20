@@ -186,17 +186,24 @@ sudo systemctl restart k3s
 - **롤백** (apiserver 가 crash-loop 하면): `sudo rm -f /etc/rancher/k3s/config.yaml && sudo systemctl restart k3s`.
   재기동 명령은 **롤백까지 한 번에 묶어** 실행할 것(컨트롤플레인 ~30초 블립, 앱 파드는 유지).
 
-### 7.2. pod → apiserver 방화벽 열기 (놓치기 쉬운 함정)
+### 7.2. pod → apiserver 방화벽 (bootstrap 이 처리 — 배경)
 
-OCI Ubuntu 이미지는 iptables 끝단에서 전부 REJECT 하고, `bootstrap.sh` 는 80/443 만 연다.
-그 결과 **pod → apiserver(6443) 가 막혀 배포가 전부 조용히 실패**한다. 클러스터 내부 CIDR 을 연다:
+OCI Ubuntu 이미지는 iptables 끝단에서 전부 REJECT 한다. k3s pod(`10.42.0.0/16`)/service
+(`10.43.0.0/16`) CIDR 을 안 열면 **pod → apiserver(6443) 가 막혀 배포가 전부 조용히 실패**한다.
+**`bootstrap.sh` 가 이제 이 CIDR ACCEPT 규칙을 자동으로 넣는다** (Step 1). 아래는 배경/검증용.
+
+이 픽스 이전에 부트스트랩된 인스턴스라면 수동으로:
 
 ```bash
 sudo iptables -I INPUT 1 -s 10.42.0.0/16 -j ACCEPT   # pod CIDR
 sudo iptables -I INPUT 1 -s 10.43.0.0/16 -j ACCEPT   # service CIDR
 sudo netfilter-persistent save
-# 검증: 파드에서 apiserver 로 curl → 401(연결 OK, 인증만 거부) 이면 정상. 000 이면 아직 막힘.
 ```
+
+검증: 파드에서 apiserver 로 `curl` → **401**(연결 OK, 인증만 거부) 이면 정상. **000** 이면 아직 막힘.
+
+> §7.1 의 k3s OIDC config 도 `bootstrap.sh` 에 `BOOTSTRAP_OIDC_CLIENT_ID` env 를 주면
+> 설치 전에 자동 작성된다(첫 기동부터 적용, 재기동 불필요).
 
 ### 7.3. RBAC 바인딩
 
