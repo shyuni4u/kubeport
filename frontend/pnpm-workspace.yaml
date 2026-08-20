@@ -1,0 +1,10 @@
+# These packages ship postinstall build scripts we do not run (native binaries
+# not needed for the Next.js build/runtime). pnpm >= 11 errors on any undeclared
+# ignored build (ERR_PNPM_IGNORED_BUILDS), so every one must be listed explicitly.
+ignoredBuiltDependencies:
+  - "@parcel/watcher"
+  - "@swc/core"
+  - esbuild
+  - msw
+  - sharp
+  - unrs-resolver

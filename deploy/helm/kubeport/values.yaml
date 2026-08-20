@@ -1,0 +1,150 @@
+# Default values for kubeport. Override per environment via -f or --set.
+#
+# Two install patterns:
+#   1. Embedded Postgres + chart-managed Secret (dev / Phase 1):
+#        auth.create=true, postgres.embedded=true
+#        Set auth.appEncryptionKeyB64, auth.oidcClientSecret, postgres.password.
+#        NEVER commit a values file with real secret values.
+#   2. External Secret + external Postgres (prod-grade):
+#        auth.create=false, auth.existingSecret=<name>
+#        postgres.embedded=false, postgres.externalUrl=<postgres URL>
+
+nameOverride: ""
+fullnameOverride: ""
+
+# ----- Images -------------------------------------------------------------
+images:
+  backend:
+    repository: ghcr.io/shyuni4u/kubeport-backend
+    tag: ""           # empty = use Chart.appVersion
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: ghcr.io/shyuni4u/kubeport-frontend
+    tag: ""           # empty = use Chart.appVersion
+    pullPolicy: IfNotPresent
+
+imagePullSecrets: []  # e.g. [{ name: ghcr-pull-secret }] when using private packages
+
+# ----- Public-facing host -------------------------------------------------
+host: kubeport.example.com  # override per environment
+
+# ----- OIDC (issuer + client) --------------------------------------------
+# kubeport delegates auth to an external IdP via OIDC. Set issuer to whatever
+# IdP you choose (Google: https://accounts.google.com, dex self-hosted, etc.)
+oidc:
+  issuer: ""          # required — chart fails template render if empty
+  audience: kubeport
+  clientId: ""        # required
+  # redirectUri auto-derived from .Values.host if left empty:
+  redirectUri: ""
+  # OAuth scopes requested at login. Empty = "openid email profile" (works with
+  # Google). Group-aware IdPs (Dex/Keycloak) can add groups: "openid email profile groups".
+  scopes: ""
+
+# ----- Auth secrets -------------------------------------------------------
+# Either let the chart create the Secret (auth.create=true) or reference an
+# externally managed one (auth.existingSecret). The Secret must contain:
+#   APP_ENCRYPTION_KEY_B64, OIDC_CLIENT_SECRET, DATABASE_URL
+auth:
+  create: true
+  existingSecret: ""
+  # Used only when create=true. Pass via --set or external values file.
+  appEncryptionKeyB64: ""   # 32 bytes, base64 — `openssl rand -base64 32`
+  oidcClientSecret: ""
+  # Comma-separated emails granted in-app admin when the IdP emits no groups
+  # claim (e.g. Google). Bootstrap/demo use only. Empty = no bootstrap admin.
+  devAdminEmails: ""
+
+# ----- Backend ------------------------------------------------------------
+backend:
+  replicaCount: 1
+  service:
+    port: 8080
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  # Optional non-secret config
+  openapiCacheMax: 64
+
+# ----- Frontend -----------------------------------------------------------
+frontend:
+  replicaCount: 1
+  service:
+    port: 3000
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 500m
+      memory: 384Mi
+
+# ----- Postgres -----------------------------------------------------------
+postgres:
+  embedded: true
+  # When embedded=true, chart provisions a single-replica StatefulSet.
+  # When embedded=false, set externalUrl to a postgres:// connection string.
+  externalUrl: ""
+  image: postgres:16-alpine
+  user: kubeport
+  database: kubeport
+  password: ""               # required when embedded=true
+  storage:
+    size: 10Gi
+    storageClassName: ""     # cloud-specific; "" = cluster default
+  service:
+    port: 5432
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+# ----- Ingress ------------------------------------------------------------
+ingress:
+  enabled: true
+  className: traefik         # k3s default; GKE = "gce", nginx = "nginx"
+  annotations: {}
+  # tls handled by .Values.tls below
+
+tls:
+  enabled: true
+  # cert-manager Certificate (recommended)
+  certManager:
+    enabled: true
+    issuerKind: ClusterIssuer
+    issuerName: letsencrypt-prod
+  # Or reference a pre-existing TLS Secret (skip cert-manager block above)
+  existingSecret: ""
+
+# ----- Migration (atlas schema apply, runs as backend initContainer) -----
+migration:
+  enabled: true
+  # Pin a specific tag — `:latest` would silently shift between deploys and
+  # reproducibility matters for migration logic. Bump deliberately.
+  image: arigaio/atlas:0.30.0
+  # The chart mounts files/schema.hcl + a chart-generated atlas.hcl via the
+  # migration ConfigMap. See chart README for the schema sync workflow.
+
+# ----- Pod-level common settings -----------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

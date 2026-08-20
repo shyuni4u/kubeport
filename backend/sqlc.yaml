@@ -1,0 +1,28 @@
+# schema.sql is derived from migrations/schema.hcl (atlas is source of truth).
+# Regenerate after editing schema.hcl:
+#   cd backend/migrations && atlas schema inspect --env local --format '{{ sql . }}' 2>/dev/null > schema.sql
+# (requires local compose postgres running — see deploy/docker/docker-compose.yml)
+version: "2"
+sql:
+  - engine: postgresql
+    schema: migrations/schema.sql
+    queries: internal/store/queries
+    gen:
+      go:
+        package: store
+        out: internal/store
+        sql_package: pgx/v5
+        emit_json_tags: true
+        emit_interface: true
+        overrides:
+          # jsonb columns — default []byte serializes as base64 in REST
+          # responses. RawMessage inlines the JSON instead so the editor can
+          # read ui_state_json back into an object on load.
+          - column: releases.values_json
+            go_type:
+              import: encoding/json
+              type: RawMessage
+          - column: template_versions.ui_state_json
+            go_type:
+              import: encoding/json
+              type: RawMessage

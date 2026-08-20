@@ -1,0 +1,211 @@
+{
+  "shell": {
+    "nav": {
+      "catalog": "카탈로그",
+      "myReleases": "내 릴리스",
+      "templates": "템플릿",
+      "releases": "릴리스",
+      "teams": "팀"
+    },
+    "logout": "로그아웃",
+    "login": "로그인",
+    "currentCluster": "현재 클러스터",
+    "noClusters": "등록된 클러스터 없음",
+    "openMenu": "메뉴 열기",
+    "localeSwitchLabel": "언어 선택"
+  },
+  "common": {
+    "save": "저장",
+    "cancel": "취소",
+    "delete": "삭제",
+    "edit": "편집",
+    "loading": "로딩 중…",
+    "empty": "데이터가 없습니다."
+  },
+  "catalog": {
+    "title": "카탈로그",
+    "searchPlaceholder": "템플릿 검색…",
+    "emptyNoTemplates": "관리자가 아직 템플릿을 만들지 않았습니다.",
+    "emptyNoMatch": "일치하는 템플릿이 없습니다. 검색어나 태그 필터를 바꿔보세요.",
+    "card": {
+      "deploy": "배포하기 →"
+    }
+  },
+  "releases": {
+    "myTitle": "내 릴리스",
+    "table": {
+      "name": "이름",
+      "template": "템플릿",
+      "namespace": "네임스페이스",
+      "empty": "아직 배포된 릴리스가 없습니다.",
+      "emptyCta": "카탈로그에서 배포하기 →"
+    },
+    "overview": {
+      "instancesHeading": "인스턴스 ({count})"
+    },
+    "instances": {
+      "logsLink": "로그 →"
+    },
+    "phase": {
+      "Running": "실행 중",
+      "Pending": "대기 중",
+      "Succeeded": "완료됨",
+      "Failed": "실패",
+      "Unknown": "알 수 없음",
+      "CrashLoopBackOff": "반복 재시작 중 (실행 실패)",
+      "ImagePullBackOff": "이미지를 가져올 수 없음",
+      "ErrImagePull": "이미지를 가져올 수 없음",
+      "CreateContainerConfigError": "컨테이너 설정 오류",
+      "ContainerCreating": "컨테이너 생성 중",
+      "Terminating": "종료 중",
+      "Completed": "완료됨"
+    },
+    "status": {
+      "healthy": "정상",
+      "warning": "주의",
+      "error": "오류",
+      "unknown": "알 수 없음",
+      "cluster-unreachable": "클러스터 응답 없음",
+      "resources-missing": "리소스 없음"
+    },
+    "stale": {
+      "title": {
+        "cluster-unreachable": "클러스터에 접근할 수 없습니다",
+        "resources-missing": "클러스터에 해당 리소스가 없습니다"
+      },
+      "body": {
+        "cluster-unreachable": "클러스터 {cluster} 가 응답하지 않습니다. 일시적인 네트워크 문제이거나, 더 이상 운영되지 않는 클러스터일 수 있습니다.",
+        "resources-missing": "릴리스 레코드는 있지만 클러스터에 매칭되는 리소스가 없습니다. 외부에서 삭제됐거나 클러스터가 재구성됐을 수 있습니다."
+      },
+      "contactAdmin": "이 릴리스를 정리하려면 관리자에게 문의하세요.",
+      "forceDelete": {
+        "button": "강제 삭제",
+        "confirm": "이 릴리스의 DB 레코드만 삭제합니다. 클러스터에는 영향을 주지 않습니다. 계속하시겠습니까?",
+        "failed": "삭제 실패: {error}"
+      }
+    }
+  },
+  "deploy": {
+    "titleNew": "새 배포",
+    "titleUpdate": "v{version} 로 업데이트",
+    "submit": "배포하기",
+    "submitting": "처리 중…",
+    "namePlaceholder": "릴리스 이름",
+    "namespacePlaceholder": "네임스페이스",
+    "noClusterPlaceholder": "등록된 클러스터가 없습니다 — 관리자에게 요청하세요",
+    "clusterPlaceholder": "클러스터 선택",
+    "noClusterWarning": "등록된 클러스터가 없어 배포할 수 없습니다. 관리자에게 클러스터 등록을 요청하세요.",
+    "errors": {
+      "forbidden": "이 작업을 수행할 권한이 없습니다. 관리자에게 문의하세요.",
+      "conflict": "같은 이름의 릴리스가 이미 있습니다. 다른 이름을 사용하거나 기존 릴리스를 확인하세요.",
+      "server": "서버에서 문제가 발생해 배포하지 못했습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요.",
+      "generic": "배포에 실패했습니다. 입력한 값을 확인한 뒤 다시 시도하세요."
+    }
+  },
+  "logs": {
+    "allInstances": "전체 인스턴스",
+    "autoscroll": "자동 스크롤",
+    "clear": "지우기",
+    "status": {
+      "connected": "연결됨",
+      "connecting": "연결 중",
+      "disconnected": "끊김"
+    }
+  },
+  "templates": {
+    "list": {
+      "title": "템플릿",
+      "new": "+ 새 템플릿",
+      "colName": "이름",
+      "colVersion": "현재 버전",
+      "colDescription": "설명"
+    },
+    "detail": {
+      "versionsHeading": "버전",
+      "readOnlyGlobal": "읽기 전용 — 글로벌 템플릿은 관리자만 편집할 수 있습니다.",
+      "readOnlyNoPerm": "읽기 전용 — 편집 권한이 없습니다.",
+      "readOnlyPrefix": "읽기 전용 — ",
+      "newVersion": "+ 새 버전",
+      "editDraft": "draft v{version} 편집",
+      "confirmPublish": "v{version} 을(를) 게시하시겠습니까? 게시하면 사용자에게 노출됩니다.",
+      "confirmDeprecate": "v{version} 을(를) 사용 중단하시겠습니까? 사용자가 새로 배포할 수 없게 됩니다.",
+      "confirmDeleteDraft": "draft v{version} 을(를) 삭제하시겠습니까? 되돌릴 수 없습니다."
+    },
+    "editor": {
+      "newTitle": "새 템플릿",
+      "uiMode": "UI 모드",
+      "yamlMode": "YAML 모드",
+      "editing": "편집 중 ({name} v{version})",
+      "editingNew": "편집 중",
+      "pickFieldHint": "왼쪽 트리에서 필드를 선택하세요.",
+      "loading": "로딩 중…",
+      "schemaCluster": "스키마 클러스터",
+      "noClusters": "클러스터가 등록되어 있지 않습니다. 먼저 클러스터를 등록하세요.",
+      "owningTeam": "소유 팀",
+      "globalTeamOption": "(글로벌 — admin 전용)",
+      "getStartedLead": "시작하려면",
+      "getStarted": " 아래 트리 패널에서 k8s 리소스 종류(Deployment, Service 등)를 선택해 추가하세요. 스키마가 로드되면 노출할 필드를 트리에서 고르고, 오른쪽 인스펙터에서 라벨·기본값을 편집할 수 있습니다.",
+      "previewYaml": "YAML",
+      "previewForm": "사용자 폼",
+      "userFormPreview": "사용자 폼 미리보기",
+      "save": "저장",
+      "saving": "저장 중…",
+      "saveAsNew": "새 버전으로 저장",
+      "convert": {
+        "yamlDraftPreview": "이 draft 는 YAML 모드로 작성되어 UI 에서는 미리보기만 가능합니다. UI 로 편집하려면 상세 페이지에서 이 draft 를 삭제한 뒤 새 버전을 시작하세요.",
+        "willSaveAsNew": "저장 시 새 UI 모드 버전으로 저장됩니다. 일부 구조는 변환 과정에서 누락될 수 있으니 트리에서 확인하세요.",
+        "convertedTitle": "YAML 에서 자동 변환됨.",
+        "warnings": "변환 경고 {count}건",
+        "warningsMore": "…외 {count}건",
+        "uiDraftPreview": "이 draft 는 UI 모드로 작성되었습니다. YAML 탭에서는 미리보기만 가능합니다 — 편집하려면 UI 탭으로 전환하세요.",
+        "nonDraftYaml": "v{version}은 {status} 상태입니다. 저장하면 새 draft 버전으로 저장됩니다."
+      }
+    },
+    "status": {
+      "draft": "초안",
+      "published": "게시됨",
+      "deprecated": "사용 중단"
+    },
+    "statusHelp": {
+      "draft": "아직 게시되지 않은 초안입니다. 사용자에게 노출되지 않습니다.",
+      "published": "게시되어 사용자가 배포할 수 있는 버전입니다.",
+      "deprecated": "사용 중단된 버전입니다. 새로 배포할 수 없습니다."
+    },
+    "publish": "게시",
+    "publishHelp": "이 버전을 게시해 사용자에게 노출합니다.",
+    "deprecate": "사용 중단",
+    "deprecateHelp": "이 버전의 신규 배포를 막습니다.",
+    "undeprecate": "사용 중단 해제",
+    "undeprecateHelp": "사용 중단을 해제해 다시 배포할 수 있게 합니다.",
+    "deleteDraft": "삭제",
+    "edit": "편집",
+    "rbac": {
+      "title": "권한 확인",
+      "checking": "확인 중…",
+      "hint": "클러스터/네임스페이스를 입력하면 권한을 확인합니다.",
+      "allAllowed": "모든 리소스 생성 권한 확인됨.",
+      "denied": "권한이 거부되었습니다.",
+      "httpError": "권한 확인에 실패했습니다 (HTTP {status})."
+    }
+  },
+  "admin": {
+    "teams": {
+      "title": "팀 관리",
+      "slugLabel": "슬러그",
+      "slugPlaceholder": "slug (예: platform)",
+      "displayNameLabel": "표시 이름",
+      "displayNamePlaceholder": "표시 이름",
+      "createButton": "새 팀",
+      "membersHeading": "멤버",
+      "colEmail": "이메일",
+      "colRole": "역할",
+      "removeMember": "제거",
+      "addMemberHeading": "새 멤버 추가",
+      "emailLabel": "이메일",
+      "emailPlaceholder": "이메일",
+      "roleLabel": "역할",
+      "addMemberButton": "추가",
+      "loginHint": "대상 유저가 최소 한 번 이상 로그인한 적이 있어야 합니다."
+    }
+  }
+}

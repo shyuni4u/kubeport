@@ -1,0 +1,40 @@
+name: uptime-ping
+
+# Keep the OCI Always Free A1 instance from being reclaimed as "idle".
+# OCI flags an instance for reclaim only if, over 7 days, its 95th-percentile
+# CPU < 20% AND network < 20% AND memory < 20% — ALL three. A low-traffic demo
+# can drift into that state, so we generate a little inbound traffic + app CPU
+# on a schedule. This also doubles as a cheap external liveness check.
+#
+# GitHub cron is best-effort (can be delayed under load) and only runs on the
+# default branch. ~every 10 minutes is plenty for the 7-day idle window.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uptime-ping
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the app
+        env:
+          URL: https://kubeport.enzo.kr/
+        run: |
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 --retry 2 "$URL" || echo 000)
+          echo "GET $URL -> $code"
+          # Any HTTP response (even a redirect/401) proves the ingress + app are
+          # serving and generates the network/CPU we need. Only a connection
+          # failure (000) is a real problem.
+          if [ "$code" = "000" ]; then
+            echo "::error::No HTTP response from $URL (connection failed)"
+            exit 1
+          fi

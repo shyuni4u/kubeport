@@ -1,0 +1,8 @@
+# Force LF for files that get embedded into deterministic artifacts
+# (helm golden snapshot, atlas schema apply). CRLF leaking into these
+# silently breaks the helm-snapshot CI check on machines where git
+# autocrlf differs.
+*.hcl text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.sh text eol=lf

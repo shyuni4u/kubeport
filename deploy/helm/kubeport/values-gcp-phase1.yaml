@@ -1,0 +1,80 @@
+# Phase 1 (GCP bootstrap) — see ADR 0003.
+#
+# Target: GCP e2-medium (asia-northeast3) with k3s single-node, used as the
+# bootstrap demo URL while we wait for OCI A1 capacity. 90-day window.
+#
+# Replace the <PLACEHOLDER> values before installing. Secrets MUST come in via
+# --set or a separate values file that is NOT committed to git:
+#
+#   helm install kubeport deploy/helm/kubeport \
+#     -f deploy/helm/kubeport/values-gcp-phase1.yaml \
+#     --set host=demo.kubeport.example \
+#     --set oidc.clientId=$GOOGLE_OAUTH_CLIENT_ID \
+#     --set auth.appEncryptionKeyB64=$(openssl rand -base64 32) \
+#     --set auth.oidcClientSecret=$GOOGLE_OAUTH_CLIENT_SECRET \
+#     --set postgres.password=$(openssl rand -hex 24)
+
+host: <your-domain.example>     # required — set via --set on install
+
+oidc:
+  # Google OAuth (recommended for Phase 1 — no self-hosted IdP to operate).
+  # Set up at https://console.cloud.google.com/apis/credentials.
+  # Add `<host>/api/auth/callback` to Authorized redirect URIs.
+  issuer: https://accounts.google.com
+  audience: kubeport
+  clientId: <set-via-flag>
+  # redirectUri auto-derived from host
+
+auth:
+  create: true
+  # appEncryptionKeyB64 / oidcClientSecret — pass via --set, never commit.
+  appEncryptionKeyB64: ""
+  oidcClientSecret: ""
+
+backend:
+  replicaCount: 1
+
+frontend:
+  replicaCount: 1
+
+postgres:
+  embedded: true
+  password: ""                  # pass via --set
+  storage:
+    size: 5Gi
+    storageClassName: local-path  # k3s default
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 800m
+      memory: 384Mi
+
+ingress:
+  enabled: true
+  className: traefik             # k3s default
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+
+tls:
+  enabled: true
+  certManager:
+    enabled: true
+    issuerKind: ClusterIssuer
+    issuerName: letsencrypt-prod  # provisioned out-of-band before install
+
+migration:
+  enabled: true
+
+images:
+  backend:
+    repository: ghcr.io/shyuni4u/kubeport-backend
+    tag: ""                      # empty = appVersion. Pin a SHA before going public.
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: ghcr.io/shyuni4u/kubeport-frontend
+    tag: ""
+    pullPolicy: IfNotPresent
+
+# Resource pressure: e2-medium is 2 vCPU / 4 GiB. Defaults in values.yaml fit.

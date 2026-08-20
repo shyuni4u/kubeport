@@ -1,0 +1,39 @@
+# Values for the CI kind-cluster smoke test. Disables the edge layer
+# (Ingress + cert-manager) to keep the test focused on pod readiness:
+# postgres → migration job → backend → frontend.
+host: kp.smoke.local
+
+oidc:
+  # Real issuer so backend's OIDC discovery on startup actually succeeds.
+  # Discovery only — no token verification happens during the smoke.
+  issuer: https://accounts.google.com
+  audience: kubeport
+  clientId: smoke-client
+
+auth:
+  create: true
+  appEncryptionKeyB64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+  oidcClientSecret: smoke-secret
+
+postgres:
+  embedded: true
+  password: smoke-pgpass
+  storage:
+    size: 1Gi
+    storageClassName: ""    # use kind's default standard StorageClass
+
+ingress:
+  enabled: false
+
+tls:
+  enabled: false
+  certManager:
+    enabled: false
+
+images:
+  backend:
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  frontend:
+    tag: "latest"
+    pullPolicy: IfNotPresent

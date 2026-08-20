@@ -1,0 +1,140 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubeport.backend.fullname" . }}
+  labels:
+    {{- include "kubeport.backend.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.backend.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kubeport.backend.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kubeport.backend.labels" . | nindent 8 }}
+      annotations:
+        # Roll the Pod when ConfigMap or Secret content changes.
+        checksum/config: {{ include (print $.Template.BasePath "/backend-configmap.yaml") . | sha256sum }}
+        {{- if .Values.migration.enabled }}
+        # schema.hcl 변경 시 backend pod 가 재시작되며 atlas initContainer
+        # 가 새 스키마를 적용. 이 어노테이션이 없으면 migration ConfigMap
+        # 갱신만으로는 Deployment template 해시가 안 바뀌어 롤이 안 됨.
+        checksum/migration: {{ include (print $.Template.BasePath "/migration-configmap.yaml") . | sha256sum }}
+        {{- end }}
+        {{- if .Values.auth.create }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.migration.enabled }}
+      # Migration runs as initContainers (not a Helm hook) so that fresh
+      # `helm install` works with embedded Postgres — at pre-install hook time
+      # the Postgres StatefulSet/Service don't exist yet, so a hook Job can't
+      # reach the DB. Atlas schema apply is idempotent; the cost of re-running
+      # on each backend pod restart is a few seconds.
+      initContainers:
+        {{- if .Values.postgres.embedded }}
+        # Only meaningful for embedded Postgres (in-chart Service). External
+        # Postgres is the operator's responsibility to keep reachable; the
+        # `migrate` container's own Pod-level restartPolicy retries it on
+        # transient connection failure.
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              # Block until Postgres TCP port is open. Avoids atlas's
+              # immediate DNS-resolution failure on first install.
+              until nc -z {{ include "kubeport.postgres.fullname" . }} {{ .Values.postgres.service.port }}; do
+                echo "waiting for postgres..."
+                sleep 2
+              done
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+        {{- end }}
+        - name: migrate
+          image: {{ .Values.migration.image | quote }}
+          workingDir: /migrations
+          # ENTRYPOINT ["atlas"] — use args, not command.
+          args:
+            - schema
+            - apply
+            - --env
+            - prod
+            - --auto-approve
+          env:
+            - name: DATABASE_URL
+              {{- if .Values.auth.create }}
+              value: {{ include "kubeport.databaseUrl" . | quote }}
+              {{- else }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kubeport.auth.secretName" . }}
+                  key: DATABASE_URL
+              {{- end }}
+          volumeMounts:
+            - name: migration-files
+              mountPath: /migrations
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+      {{- end }}
+      containers:
+        - name: backend
+          image: {{ include "kubeport.backend.image" . }}
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.backend.service.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "kubeport.backend.fullname" . }}
+            - secretRef:
+                name: {{ include "kubeport.auth.secretName" . }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.migration.enabled }}
+        - name: migration-files
+          configMap:
+            name: {{ include "kubeport.migration.fullname" . }}-files
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

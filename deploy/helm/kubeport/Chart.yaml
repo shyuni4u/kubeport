@@ -1,0 +1,20 @@
+apiVersion: v2
+name: kubeport
+description: |
+  kubeport — k8s self-service portal (admin templates → user-facing forms).
+  Single chart bundling Go backend, Next.js frontend BFF, optional in-cluster
+  Postgres, Ingress, cert-manager Certificate, and atlas migration Job.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - kubernetes
+  - self-service
+  - portal
+  - templates
+home: https://github.com/shyuni4u/kubeport
+sources:
+  - https://github.com/shyuni4u/kubeport
+maintainers:
+  - name: shyuniz
+    email: shyuniz@naver.com

@@ -1,0 +1,156 @@
+# kubeport
+
+[English](README.md) | **한국어**
+
+> Kubernetes 를 위한 템플릿 기반 셀프서비스 포털.
+> 관리자는 YAML + ui-spec 템플릿을 발행하고, 비전문 사용자는 추상화된 폼으로 배포·운영한다.
+
+**상태:** Plan 1·2 출시. 관리자는 UI 에디터로 템플릿을 만들고 팀으로 소유하며 버전을 deprecate할 수 있다. 사용자는 배포·상태 조회가 가능하고 카탈로그에 deprecated 버전은 보이지 않는다. Plan 3(User observability) 미작성.
+
+---
+
+## 왜 만드는가
+
+Kubernetes 를 제대로 운영하려면 여전히 많은 양의 YAML 을 읽어야 한다. 기존 도구들은 각자 일부만 해결한다:
+
+- `k9s` / `Lens` / `Headlamp` — 운영자에겐 훌륭하지만 k8s 지식을 전제로 한다.
+- `Rancher` / `OpenShift` 템플릿 카탈로그 — 존재하지만 Helm 에 기대고, 여전히 리소스 수준 개념을 그대로 노출한다.
+- `Backstage Software Templates` — 스캐폴딩은 되지만 일상 운영은 다루지 않는다.
+
+`kubeport` 는 그 교집합을 채운다: 관리자가 템플릿을 한 번 작성하면, 팀원 누구나 `Pod` / `Deployment` / `replicas` 같은 필드를 보지 않고도 배포하고 관찰할 수 있다. **"Kubernetes 를 위한 Swagger"** 라고 생각하면 된다 — 하나의 스펙이 클러스터에서 실제로 돌아가는 매니페스트이자, 일반 사용자가 채우는 친근한 폼이 된다.
+
+## 핵심 개념
+
+**템플릿(template)** 은 두 개(선택적으로 세 개) 파일의 묶음이다. 한 쌍이 앱 DB 의 버전 관리되는 레코드 하나로 저장된다.
+
+```
+# resources.yaml  — 순수 Kubernetes YAML, placeholder 없음
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: web }
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.25
+
+# ui-spec.yaml  — 어느 JSON 경로를 일반 사용자에게 노출할지
+fields:
+  - path: Deployment[web].spec.replicas
+    label: "인스턴스 개수"
+    type: integer
+    min: 1
+    max: 20
+    default: 3
+  - path: Deployment[web].spec.template.spec.containers[0].image
+    label: "컨테이너 이미지"
+    type: string
+```
+
+일반 사용자는 두 개의 필드(+ 릴리스 이름)만 있는 폼을 본다. `resources.yaml` 의 나머지는 전부 관리자가 고정한 값이다.
+
+**릴리스(release)** 는 템플릿 버전 한 개를 특정 클러스터 + 네임스페이스에 배포한 인스턴스다. 릴리스는 템플릿 버전에 pin 된다(Helm / ArgoCD 방식). 관리자가 새 버전을 발행해도 동작 중인 릴리스는 계속 돌아가고, "업데이트 가능" 알림만 뜬다.
+
+## 아키텍처 한눈에
+
+```
+Browser ── Next.js (k8s Pod, BFF) ── Go API (in k8s) ── Target k8s clusters (N)
+              │                         │
+              ▼                         ▼
+          Postgres                  (사용자 OIDC 토큰을 그대로 포워딩;
+       (sessions + meta)             k8s RBAC 가 최종 판정자)
+```
+
+- **프론트엔드**: Next.js 15 (App Router), Tailwind + shadcn/ui, YAML 은 Monaco, 동적 폼은 React Hook Form + Zod. Go API 와 같은 Helm chart 안의 k8s `Deployment` 로 배포 — `helm install` 한 번으로 스택 전체가 올라간다.
+- **백엔드**: Go 1.22, Gin, `client-go`, `sqlc`, `atlas`, `coreos/go-oidc`.
+- **데이터**: 운영은 PostgreSQL 16 (개발은 SQLite), OIDC + httpOnly 쿠키 세션, 리프레시 토큰은 저장 시 암호화.
+- **보안 모델**: 앱은 UX 레이어일 뿐이다. 모든 k8s 쓰기는 로그인한 사용자의 OIDC id_token 으로 수행되므로, 실제 허용 여부는 Kubernetes RBAC 가 결정한다.
+
+전체 내용: [docs/superpowers/specs/2026-04-16-initial-design.md](docs/superpowers/specs/2026-04-16-initial-design.md).
+
+## 빠른 시작
+
+```bash
+# 1. 로컬 Postgres + dex (OIDC) 띄우기
+docker compose -f deploy/docker/docker-compose.yml up -d
+
+# 2. DB 스키마 적용 (atlas.hcl 은 backend/migrations 에 있음)
+cd backend/migrations && atlas schema apply --env local --auto-approve && cd ..
+
+# 3. Go API 실행
+go run ./cmd/server
+
+# 4. 웹 앱 실행 (다른 터미널에서)
+cd ../frontend
+cp .env.example .env.local   # OIDC + DB 값 채우기
+pnpm install && pnpm dev
+
+# 5. http://localhost:3000 접속, alice / alice 로 로그인
+```
+
+브라우저 → kind 배포까지 가는 전체 로컬 셋업(자체서명 dex cert, Windows hosts 함정, OIDC 일관성 등)은 [docs/local-e2e.md](docs/local-e2e.md) 참조. 위의 "빠른 시작"은 백엔드+프런트+DB 까지만 충분하고, 실제 k8s 클러스터 e2e 는 몇 단계가 더 필요하다.
+
+## 테스트 실행
+
+```bash
+# Unit + integration (compose 기동 상태 필요, backend/CLAUDE.md 참조)
+make test                      # == cd backend && go test ./...
+
+# End-to-end (kind 클러스터 필요 — docs/local-e2e.md 참조)
+export KBP_KIND_API=https://127.0.0.1:6443
+make e2e
+```
+
+## 필수 도구
+
+- Docker (로컬 Postgres + dex)
+- Go 1.22+
+- Node 20+, pnpm 9+
+- [`atlas`](https://atlasgo.io) CLI, `sqlc`
+- (e2e 전용) kind 클러스터 + `kubectl`
+
+## 로드맵
+
+작업은 각자 동작 가능한 소프트웨어를 배달하는 세 개의 Plan 으로 쪼개진다:
+
+| # | Plan | 내용 | 링크 |
+|---|------|------|------|
+| 1 | **Vertical slice** | OIDC 로그인, YAML 모드 템플릿 CRUD, 배포 폼, 릴리스 목록·개요 | [plan](docs/superpowers/plans/2026-04-16-mvp-1-vertical-slice.md) ✅ |
+| 2 | **Admin UX** | UI 모드 에디터(트리 + 메타 + 라이브 프리뷰), publish/deprecate, 버전 히스토리, 팀 | [plan](docs/superpowers/plans/2026-04-18-mvp-2-admin-ux.md) ✅ |
+| 3 | **User observability** | 릴리스 로그(SSE), 이벤트, settings 탭, 업데이트 마이그레이션, 자가호스팅용 Helm chart | *(미작성)* |
+
+MVP 이후로 미룬 것: CRD 지원, Git 연동 템플릿, 팀/RBAC UI, Helm chart 임포트, 릴리스 히스토리.
+
+## 디렉터리 구조
+
+```
+kubeport/
+├── backend/                          # Go API (Plan 1)
+├── frontend/                         # Next.js (Plan 1)
+├── deploy/docker/                    # 로컬 compose (Plan 1)
+├── deploy/helm/                      # Helm chart (Plan 3)
+├── docs/
+│   ├── superpowers/specs/            # 디자인 스펙
+│   ├── superpowers/plans/            # 구현 계획
+│   ├── decisions/                    # ADR (필요 시 추가)
+│   └── brainstorming-summary.md      # 결정의 근거
+├── CLAUDE.md                         # Claude Code 세션 진입점
+└── README.md
+```
+
+## 컨텍스트 빠르게 찾기
+
+- **뭐라도 만들고 싶다** → [CLAUDE.md](CLAUDE.md) 읽고, `docs/superpowers/plans/` 의 현재 플랜으로.
+- **특정 결정의 이유가 궁금하다** → [docs/brainstorming-summary.md](docs/brainstorming-summary.md).
+- **시스템 전체 그림을 보고 싶다** → [docs/superpowers/specs/2026-04-16-initial-design.md](docs/superpowers/specs/2026-04-16-initial-design.md).
+- **로컬에서 돌려보고 싶다** → 위의 "빠른 시작".
+
+## 기여
+
+아직 외부 기여는 받지 않는다 — 시스템의 모양이 아직 안정화 중이다. Plan 3 스코프가 정리되고 머지되면 이슈·PR 을 받기 시작한다.
+
+## 라이선스
+
+[MIT License](LICENSE) — 자유롭게 사용·수정·재배포 가능. 저작권 표기와 라이선스 전문만 유지하면 된다.

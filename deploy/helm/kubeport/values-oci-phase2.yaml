@@ -1,0 +1,96 @@
+# Phase 2 (OCI Always Free A1.Flex) — see ADR 0003.
+#
+# Target: OCI VM.Standard.A1.Flex (Ampere ARM, 4 OCPU / 24 GB) with k3s
+# single-node. This is the long-term hosting target — $0 forever as long as
+# Always Free capacity holds.
+#
+# Differences vs Phase 1 (GCP):
+#  - Same ingress.className (traefik) and storageClassName (local-path) since
+#    k3s is identical.
+#  - Resources are *not* bumped from defaults: the A1 box has plenty of
+#    headroom, and keeping limits tight makes idle reclaim less likely (low
+#    memory request = low memory usage signal).
+#  - Larger Postgres PVC (10 → 20 GiB) since the A1 boot volume gives 100 GB
+#    out of an Always Free 200 GB pool, so storage is cheap and we won't have
+#    to resize for a long while.
+#
+# Replace the <PLACEHOLDER> values before installing. Secrets MUST come in
+# via --set or a separate values file that is NOT committed to git:
+#
+#   helm install kubeport deploy/helm/kubeport \
+#     -f deploy/helm/kubeport/values-oci-phase2.yaml \
+#     --namespace kubeport --create-namespace \
+#     --set host=<your-host> \
+#     --set oidc.clientId=$GOOGLE_OAUTH_CLIENT_ID \
+#     --set auth.appEncryptionKeyB64=$(openssl rand -base64 32) \
+#     --set auth.oidcClientSecret=$GOOGLE_OAUTH_CLIENT_SECRET \
+#     --set postgres.password=$(openssl rand -hex 24)
+
+host: <your-domain.example>     # required — set via --set on install
+
+oidc:
+  # Google OAuth (OIDC) — recommended for Phase 2. No self-hosted IdP to
+  # operate. Set up at https://console.cloud.google.com/apis/credentials.
+  # Authorized redirect URI: https://<host>/api/auth/callback
+  issuer: https://accounts.google.com
+  audience: kubeport
+  clientId: <set-via-flag>
+  # redirectUri auto-derived from host
+
+auth:
+  create: true
+  # appEncryptionKeyB64 / oidcClientSecret — pass via --set, never commit.
+  # appEncryptionKeyB64 once set cannot be rotated without re-encrypting all
+  # encrypted columns in the DB. Store it in a password manager at install.
+  appEncryptionKeyB64: ""
+  oidcClientSecret: ""
+
+backend:
+  replicaCount: 1
+
+frontend:
+  replicaCount: 1
+
+postgres:
+  embedded: true
+  password: ""                  # pass via --set
+  storage:
+    size: 20Gi                  # A1 has 200 GB free block storage, generous
+    storageClassName: local-path  # k3s default
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+ingress:
+  enabled: true
+  className: traefik             # k3s default
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+
+tls:
+  enabled: true
+  certManager:
+    enabled: true
+    issuerKind: ClusterIssuer
+    issuerName: letsencrypt-prod  # provisioned by deploy/oci/bootstrap.sh
+
+migration:
+  enabled: true
+
+images:
+  backend:
+    repository: ghcr.io/shyuni4u/kubeport-backend
+    tag: ""                      # empty = appVersion. Pin a SHA before going public.
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: ghcr.io/shyuni4u/kubeport-frontend
+    tag: ""
+    pullPolicy: IfNotPresent
+
+# Resource pressure: A1.Flex is 4 OCPU / 24 GiB. Defaults in values.yaml fit
+# with massive headroom — k3s + cert-manager + traefik take ~600 MiB total,
+# leaving ~20+ GiB for app pods.

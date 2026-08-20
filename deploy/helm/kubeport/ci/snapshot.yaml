@@ -1,0 +1,978 @@
+---
+# Source: kubeport/templates/postgres-secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kp-kubeport-postgres
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: postgres
+type: Opaque
+stringData:
+  POSTGRES_USER: "kubeport"
+  POSTGRES_PASSWORD: "golden-snapshot-pgpass"
+  POSTGRES_DB: "kubeport"
+---
+# Source: kubeport/templates/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kp-kubeport-auth
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+type: Opaque
+stringData:
+  DATABASE_URL: "postgres://kubeport:golden-snapshot-pgpass@kp-kubeport-postgres:5432/kubeport?sslmode=disable"
+  APP_ENCRYPTION_KEY_B64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  OIDC_CLIENT_SECRET: "golden-snapshot-secret"
+---
+# Source: kubeport/templates/backend-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kp-kubeport-backend
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: backend
+data:
+  LISTEN_ADDR: ":8080"
+  OIDC_ISSUER: "https://accounts.google.com"
+  OIDC_AUDIENCE: "kubeport"
+  KBP_OPENAPI_CACHE_MAX: "64"
+---
+# Source: kubeport/templates/frontend-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kp-kubeport-frontend
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: frontend
+data:
+  OIDC_ISSUER: "https://accounts.google.com"
+  OIDC_CLIENT_ID: "golden-snapshot-client"
+  OIDC_REDIRECT_URI: "https://kp.test.local/api/auth/callback"
+  GO_API_BASE_URL: "http://kp-kubeport-backend:8080"
+---
+# Source: kubeport/templates/migration-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kp-kubeport-migrate-files
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+data:
+  schema.hcl: |
+    schema "public" {}
+    
+    table "users" {
+      schema = schema.public
+      column "id" {
+        type    = uuid
+        null    = false
+        default = sql("gen_random_uuid()")
+      }
+      column "oidc_subject" {
+        type = text
+        null = false
+      }
+      column "email" {
+        type = text
+        null = true
+      }
+      column "display_name" {
+        type = text
+        null = true
+      }
+      column "first_seen_at" {
+        type    = timestamptz
+        null    = false
+        default = sql("now()")
+      }
+      column "last_seen_at" {
+        type    = timestamptz
+        null    = false
+        default = sql("now()")
+      }
+      primary_key {
+        columns = [column.id]
+      }
+      index "users_oidc_sub" {
+        columns = [column.oidc_subject]
+        unique  = true
+      }
+    }
+    
+    table "clusters" {
+      schema = schema.public
+      column "id" {
+        type    = uuid
+        null    = false
+        default = sql("gen_random_uuid()")
+      }
+      column "name" {
+        type = text
+        null = false
+      }
+      column "display_name" {
+        type = text
+        null = true
+      }
+      column "api_url" {
+        type = text
+        null = false
+      }
+      column "ca_bundle" {
+        type = text
+        null = true
+      }
+      column "oidc_issuer_url" {
+        type = text
+        null = false
+      }
+      column "default_namespace" {
+        type = text
+        null = true
+      }
+      column "created_at" {
+        type    = timestamptz
+        null    = false
+        default = sql("now()")
+      }
+      column "updated_at" {
+        type    = timestamptz
+        null    = false
+        default = sql("now()")
+      }
+      primary_key {
+        columns = [column.id]
+      }
+      index "clusters_name_uq" {
+        columns = [column.name]
+        unique  = true
+      }
+    }
+    
+    table "templates" {
+      schema = schema.public
+      column "id" {
+        type    = uuid
+        null    = false
+        default = sql("gen_random_uuid()")
+      }
+      column "name" {
+        type = text
+        null = false
+      }
+      column "display_name" {
+        type = text
+        null = false
+      }
+      column "description" {
+        type = text
+        null = true
+      }
+      column "tags" {
+        type = sql("text[]")
+        null = true
+      }
+      column "owner_user_id" {
+        type = uuid
+        null = false
+      }
+      column "current_version_id" {
+        type = uuid
+        null = true
+      }
+      column "created_at" {
+        type    = timestamptz
+        null    = false
+        default = sql("now()")
+      }
+      column "updated_at" {
+        type    = timestamptz
+        null    = false
+        default = sql("now()")
+      }
+      column "owning_team_id" {
+        type = uuid
+        null = true
+      }
+      primary_key {
+        columns = [column.id]
+      }
+      index "templates_name_uq" {
+        columns = [column.name]
+        unique  = true
+      }
+      foreign_key "t_owner_fk" {
+        columns     = [column.owner_user_id]
+        ref_columns = [table.users.column.id]
+        on_delete   = RESTRICT
+      }
+      foreign_key "t_current_version_fk" {
+        columns     = [column.current_version_id]
+        ref_columns = [table.template_versions.column.id]
+        on_delete   = SET_NULL
+        on_update   = NO_ACTION
+      }
+      foreign_key "t_team_fk" {
+        columns     = [column.owning_team_id]
+        ref_columns = [table.teams.column.id]
+        on_delete   = SET_NULL
+      }
+    }
+    
+    table "template_versions" {
+      schema = schema.public
+      column "id" {
+        type    = uuid
+        null    = false
+        default = sql("gen_random_uuid()")
+      }
+      column "template_id" {
+        type = uuid
+        null = false
+      }
+      column "version" {
+        type = integer
+        null = false
+      }
+      column "resources_yaml" {
+        type = text
+        null = false
+      }
+      column "ui_spec_yaml" {
+        type = text
+        null = false
+      }
+      column "metadata_yaml" {
+        type = text
+        null = true
+      }
+      column "status" {
+        type = text
+        null = false
+      }
+      column "notes" {
+        type = text
+        null = true
+      }
+      column "created_by_user_id" {
+        type = uuid
+        null = false
+      }
+      column "created_at" {
+        type    = timestamptz
+        null    = false
+        default = sql("now()")
+      }
+      column "published_at" {
+        type = timestamptz
+        null = true
+      }
+      column "authoring_mode" {
+        type    = text
+        null    = false
+        default = "yaml"
+      }
+      column "ui_state_json" {
+        type = jsonb
+        null = true
+      }
+      primary_key {
+        columns = [column.id]
+      }
+      foreign_key "tv_template_fk" {
+        columns     = [column.template_id]
+        ref_columns = [table.templates.column.id]
+        on_delete   = CASCADE
+      }
+      index "tv_unique_version" {
+        columns = [column.template_id, column.version]
+        unique  = true
+      }
+      index "tv_draft_unique" {
+        columns = [column.template_id]
+        unique  = true
+        where   = "status = 'draft'"
+      }
+    }
+    
+    table "releases" {
+      schema = schema.public
+      column "id" {
+        type    = uuid
+        null    = false
+        default = sql("gen_random_uuid()")
+      }
+      column "name" {
+        type = text
+        null = false
+      }
+      column "template_version_id" {
+        type = uuid
+        null = false
+      }
+      column "cluster_id" {
+        type = uuid
+        null = false
+      }
+      column "namespace" {
+        type = text
+        null = false
+      }
+      column "values_json" {
+        type = jsonb
+        null = false
+      }
+      column "rendered_yaml" {
+        type = text
+        null = false
+      }
+      column "created_by_user_id" {
+        type = uuid
+        null = false
+      }
+      column "created_at" {
+        type    = timestamptz
+        null    = false
+        default = sql("now()")
+      }
+      column "updated_at" {
+        type    = timestamptz
+        null    = false
+        default = sql("now()")
+      }
+      primary_key {
+        columns = [column.id]
+      }
+      foreign_key "r_tv_fk" {
+        columns     = [column.template_version_id]
+        ref_columns = [table.template_versions.column.id]
+        on_delete   = RESTRICT
+      }
+      foreign_key "r_cluster_fk" {
+        columns     = [column.cluster_id]
+        ref_columns = [table.clusters.column.id]
+        on_delete   = RESTRICT
+      }
+      foreign_key "r_owner_fk" {
+        columns     = [column.created_by_user_id]
+        ref_columns = [table.users.column.id]
+        on_delete   = RESTRICT
+      }
+      index "r_name_uq" {
+        columns = [column.cluster_id, column.namespace, column.name]
+        unique  = true
+      }
+      index "r_owner" {
+        columns = [column.created_by_user_id]
+      }
+    }
+    
+    table "sessions" {
+      schema = schema.public
+      column "id" {
+        type    = uuid
+        null    = false
+        default = sql("gen_random_uuid()")
+      }
+      column "user_id" {
+        type = uuid
+        null = false
+      }
+      column "id_token_encrypted" {
+        type = text
+        null = false
+      }
+      column "refresh_token_encrypted" {
+        type = text
+        null = true
+      }
+      column "id_token_exp" {
+        type = timestamptz
+        null = false
+      }
+      column "created_at" {
+        type    = timestamptz
+        null    = false
+        default = sql("now()")
+      }
+      column "expires_at" {
+        type = timestamptz
+        null = false
+      }
+      primary_key {
+        columns = [column.id]
+      }
+      foreign_key "s_user_fk" {
+        columns     = [column.user_id]
+        ref_columns = [table.users.column.id]
+        on_delete   = CASCADE
+      }
+      index "s_expires_at" {
+        columns = [column.expires_at]
+      }
+    }
+    
+    table "teams" {
+      schema = schema.public
+      column "id" {
+        type    = uuid
+        null    = false
+        default = sql("gen_random_uuid()")
+      }
+      column "name" {
+        type = text
+        null = false
+      }
+      column "display_name" {
+        type = text
+        null = true
+      }
+      column "created_at" {
+        type    = timestamptz
+        null    = false
+        default = sql("now()")
+      }
+      primary_key {
+        columns = [column.id]
+      }
+      index "teams_name_uq" {
+        columns = [column.name]
+        unique  = true
+      }
+    }
+    
+    table "team_memberships" {
+      schema = schema.public
+      column "user_id" {
+        type = uuid
+        null = false
+      }
+      column "team_id" {
+        type = uuid
+        null = false
+      }
+      column "role" {
+        type = text
+        null = false
+      }
+      column "created_at" {
+        type    = timestamptz
+        null    = false
+        default = sql("now()")
+      }
+      primary_key {
+        columns = [column.user_id, column.team_id]
+      }
+      foreign_key "tm_user_fk" {
+        columns     = [column.user_id]
+        ref_columns = [table.users.column.id]
+        on_delete   = CASCADE
+      }
+      foreign_key "tm_team_fk" {
+        columns     = [column.team_id]
+        ref_columns = [table.teams.column.id]
+        on_delete   = CASCADE
+      }
+      index "tm_team" {
+        columns = [column.team_id]
+      }
+    }
+    
+  atlas.hcl: |
+    env "prod" {
+      src = "file:///migrations/schema.hcl"
+      url = getenv("DATABASE_URL")
+    }
+---
+# Source: kubeport/templates/backend-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: kp-kubeport-backend
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: backend
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/component: backend
+---
+# Source: kubeport/templates/frontend-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: kp-kubeport-frontend
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: frontend
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/component: frontend
+---
+# Source: kubeport/templates/postgres-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: kp-kubeport-postgres
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: postgres
+spec:
+  type: ClusterIP
+  clusterIP: None       # headless — required for StatefulSet stable DNS
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/component: postgres
+---
+# Source: kubeport/templates/backend-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kp-kubeport-backend
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubeport
+      app.kubernetes.io/instance: kp
+      app.kubernetes.io/component: backend
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: kubeport-0.1.0
+        app.kubernetes.io/name: kubeport
+        app.kubernetes.io/instance: kp
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/component: backend
+      annotations:
+        # Roll the Pod when ConfigMap or Secret content changes.
+        checksum/config: 017e483f368b20ecf8654646f06ae4cfdf9b9d63ea0e6d7c1074dd984d98bf64
+        # schema.hcl 변경 시 backend pod 가 재시작되며 atlas initContainer
+        # 가 새 스키마를 적용. 이 어노테이션이 없으면 migration ConfigMap
+        # 갱신만으로는 Deployment template 해시가 안 바뀌어 롤이 안 됨.
+        checksum/migration: d5a24f28a85ac357b74d463402b4518b7cf47638c94fa602e711f812583a2b6b
+        checksum/secret: b2b34f5a7442896105165289bc087db9ed4fbb962a77258c0a6059d6b289a7e8
+    spec:
+      securityContext:
+        fsGroup: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+      # Migration runs as initContainers (not a Helm hook) so that fresh
+      # `helm install` works with embedded Postgres — at pre-install hook time
+      # the Postgres StatefulSet/Service don't exist yet, so a hook Job can't
+      # reach the DB. Atlas schema apply is idempotent; the cost of re-running
+      # on each backend pod restart is a few seconds.
+      initContainers:
+        # Only meaningful for embedded Postgres (in-chart Service). External
+        # Postgres is the operator's responsibility to keep reachable; the
+        # `migrate` container's own Pod-level restartPolicy retries it on
+        # transient connection failure.
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              # Block until Postgres TCP port is open. Avoids atlas's
+              # immediate DNS-resolution failure on first install.
+              until nc -z kp-kubeport-postgres 5432; do
+                echo "waiting for postgres..."
+                sleep 2
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+        - name: migrate
+          image: "arigaio/atlas:0.30.0"
+          workingDir: /migrations
+          # ENTRYPOINT ["atlas"] — use args, not command.
+          args:
+            - schema
+            - apply
+            - --env
+            - prod
+            - --auto-approve
+          env:
+            - name: DATABASE_URL
+              value: "postgres://kubeport:golden-snapshot-pgpass@kp-kubeport-postgres:5432/kubeport?sslmode=disable"
+          volumeMounts:
+            - name: migration-files
+              mountPath: /migrations
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+      containers:
+        - name: backend
+          image: ghcr.io/shyuni4u/kubeport-backend:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: kp-kubeport-backend
+            - secretRef:
+                name: kp-kubeport-auth
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: migration-files
+          configMap:
+            name: kp-kubeport-migrate-files
+---
+# Source: kubeport/templates/frontend-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kp-kubeport-frontend
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubeport
+      app.kubernetes.io/instance: kp
+      app.kubernetes.io/component: frontend
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: kubeport-0.1.0
+        app.kubernetes.io/name: kubeport
+        app.kubernetes.io/instance: kp
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/component: frontend
+      annotations:
+        checksum/config: c649ad959ed82d39a345fd772834b4871ffe7ba2c70fe5141ec283143af5937a
+        checksum/secret: b2b34f5a7442896105165289bc087db9ed4fbb962a77258c0a6059d6b289a7e8
+    spec:
+      securityContext:
+        fsGroup: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+      # Frontend reads/writes the same DB as backend. Wait until the backend
+      # Service is responding /healthz — that signals migrations have been
+      # applied and the schema is current.
+      initContainers:
+        - name: wait-for-backend
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              until wget -q -O - --timeout=2 http://kp-kubeport-backend:8080/healthz >/dev/null; do
+                echo "waiting for backend..."
+                sleep 3
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+      containers:
+        - name: frontend
+          image: ghcr.io/shyuni4u/kubeport-frontend:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: kp-kubeport-frontend
+            - secretRef:
+                name: kp-kubeport-auth
+          # Frontend has no dedicated health endpoint; "/" returns 200 once
+          # Next.js is ready (and 307 to a login redirect counts as healthy
+          # under the default kubelet HTTP probe acceptance range 200–399).
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+          resources:
+            limits:
+              cpu: 500m
+              memory: 384Mi
+            requests:
+              cpu: 50m
+              memory: 96Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            # Next.js standalone server writes traces / temp files under /app/.next/cache.
+            - name: nextcache
+              mountPath: /app/.next/cache
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: nextcache
+          emptyDir: {}
+---
+# Source: kubeport/templates/postgres-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kp-kubeport-postgres
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: postgres
+spec:
+  serviceName: kp-kubeport-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubeport
+      app.kubernetes.io/instance: kp
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: kubeport-0.1.0
+        app.kubernetes.io/name: kubeport
+        app.kubernetes.io/instance: kp
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/component: postgres
+    spec:
+      securityContext:
+        # postgres image runs as uid 999 (postgres). fsGroup so it can write
+        # the mounted PVC.
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: kp-kubeport-postgres
+          env:
+            # PGDATA cannot be the mount root — pg refuses to init on top of
+            # the lost+found directory created by some PVC provisioners.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1'
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1'
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          helm.sh/chart: kubeport-0.1.0
+          app.kubernetes.io/name: kubeport
+          app.kubernetes.io/instance: kp
+          app.kubernetes.io/version: "0.1.0"
+          app.kubernetes.io/managed-by: Helm
+          app.kubernetes.io/component: postgres
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: "standard"
+        resources:
+          requests:
+            storage: "10Gi"
+---
+# Source: kubeport/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kp-kubeport
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  ingressClassName: "traefik"
+  tls:
+    - hosts:
+        - "kp.test.local"
+      secretName: "kp-kubeport-tls"
+  rules:
+    - host: "kp.test.local"
+      http:
+        paths:
+          # All external traffic goes to the frontend BFF.
+          # The Go backend stays on its in-cluster Service only —
+          # frontend Route Handlers proxy to it server-side.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kp-kubeport-frontend
+                port:
+                  number: 3000
+---
+# Source: kubeport/templates/certificate.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kp-kubeport
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  secretName: "kp-kubeport-tls"
+  dnsNames:
+    - "kp.test.local"
+  issuerRef:
+    kind: "ClusterIssuer"
+    name: "letsencrypt-prod"

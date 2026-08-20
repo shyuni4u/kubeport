@@ -1,0 +1,15 @@
+{{- if and .Values.tls.enabled .Values.tls.certManager.enabled -}}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "kubeport.fullname" . }}
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
+spec:
+  secretName: {{ printf "%s-tls" (include "kubeport.fullname" .) | quote }}
+  dnsNames:
+    - {{ required "host is required" .Values.host | quote }}
+  issuerRef:
+    kind: {{ .Values.tls.certManager.issuerKind | quote }}
+    name: {{ required "tls.certManager.issuerName is required" .Values.tls.certManager.issuerName | quote }}
+{{- end -}}

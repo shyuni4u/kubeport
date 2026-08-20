@@ -1,0 +1,16 @@
+{{- if .Values.migration.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kubeport.migration.fullname" . }}-files
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
+data:
+  schema.hcl: |
+{{ .Files.Get "files/schema.hcl" | indent 4 }}
+  atlas.hcl: |
+    env "prod" {
+      src = "file:///migrations/schema.hcl"
+      url = getenv("DATABASE_URL")
+    }
+{{- end -}}

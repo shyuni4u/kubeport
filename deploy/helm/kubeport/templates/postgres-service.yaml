@@ -1,0 +1,18 @@
+{{- if .Values.postgres.embedded -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubeport.postgres.fullname" . }}
+  labels:
+    {{- include "kubeport.postgres.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  clusterIP: None       # headless — required for StatefulSet stable DNS
+  ports:
+    - name: postgres
+      port: {{ .Values.postgres.service.port }}
+      targetPort: postgres
+      protocol: TCP
+  selector:
+    {{- include "kubeport.postgres.selectorLabels" . | nindent 4 }}
+{{- end -}}

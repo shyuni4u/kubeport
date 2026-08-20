@@ -1,0 +1,40 @@
+# Dependencies (re-installed inside container)
+node_modules/
+.pnp
+.pnp.*
+.yarn/
+
+# Build output (built fresh inside container)
+.next/
+out/
+dist/
+
+# Tests / fixtures (not needed in production image)
+tests/
+playwright-report/
+test-results/
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Env files (secrets injected at runtime via k8s Secret, not baked into image)
+.env*
+
+# Git / Docker / CI
+.git/
+.gitignore
+.gitattributes
+Dockerfile
+.dockerignore
+
+# Coverage
+coverage/

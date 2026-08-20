@@ -1,0 +1,44 @@
+{{- if .Values.ingress.enabled -}}
+{{- $tlsSecret := "" -}}
+{{- if .Values.tls.enabled -}}
+  {{- if and .Values.tls.certManager.enabled }}
+    {{- $tlsSecret = printf "%s-tls" (include "kubeport.fullname" .) -}}
+  {{- else if .Values.tls.existingSecret -}}
+    {{- $tlsSecret = .Values.tls.existingSecret -}}
+  {{- end -}}
+{{- end -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "kubeport.fullname" . }}
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- end }}
+  {{- if $tlsSecret }}
+  tls:
+    - hosts:
+        - {{ required "host is required" .Values.host | quote }}
+      secretName: {{ $tlsSecret | quote }}
+  {{- end }}
+  rules:
+    - host: {{ required "host is required" .Values.host | quote }}
+      http:
+        paths:
+          # All external traffic goes to the frontend BFF.
+          # The Go backend stays on its in-cluster Service only —
+          # frontend Route Handlers proxy to it server-side.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "kubeport.frontend.fullname" . }}
+                port:
+                  number: {{ .Values.frontend.service.port }}
+{{- end -}}

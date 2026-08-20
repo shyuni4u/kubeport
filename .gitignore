@@ -1,0 +1,36 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# Brainstorming session scratch (Claude Code superpowers)
+.superpowers/
+
+# Per-developer Claude Code settings (shared ones can be committed separately)
+.claude/settings.local.json
+
+# Go (once backend/ lands in Plan 1)
+backend/bin/
+backend/*.test
+backend/coverage.out
+backend/vendor/
+
+# Node (once frontend/ lands in Plan 1)
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Docker / runtime
+*.pid
+
+# Git worktrees (superpowers convention)
+.worktrees/

@@ -1,0 +1,26 @@
+{{ include "kubeport.fullname" . }} {{ .Chart.AppVersion }} installed in namespace {{ .Release.Namespace }}.
+
+Reach the app:
+{{- if .Values.ingress.enabled }}
+  {{- if .Values.tls.enabled }}
+  https://{{ .Values.host }}/
+  {{- else }}
+  http://{{ .Values.host }}/
+  {{- end }}
+{{- else }}
+  Ingress disabled. Use port-forward:
+    kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "kubeport.frontend.fullname" . }} 3000:{{ .Values.frontend.service.port }}
+{{- end }}
+
+OIDC configured against issuer: {{ required "oidc.issuer is required" .Values.oidc.issuer }}
+Redirect URI: {{ include "kubeport.oidc.redirectUri" . }}
+
+Verify backend health (in-cluster):
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "kubeport.backend.fullname" . }} 8080:{{ .Values.backend.service.port }}
+  curl http://localhost:8080/healthz
+
+{{- if and .Values.auth.create (not .Values.auth.appEncryptionKeyB64) }}
+
+WARNING: auth.create=true but auth.appEncryptionKeyB64 is empty. Backend will fail to start.
+Generate one with: openssl rand -base64 32
+{{- end }}

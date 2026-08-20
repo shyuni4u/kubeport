@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kubeport.frontend.fullname" . }}
+  labels:
+    {{- include "kubeport.frontend.labels" . | nindent 4 }}
+data:
+  OIDC_ISSUER: {{ required "oidc.issuer is required" .Values.oidc.issuer | quote }}
+  OIDC_CLIENT_ID: {{ required "oidc.clientId is required" .Values.oidc.clientId | quote }}
+  OIDC_REDIRECT_URI: {{ include "kubeport.oidc.redirectUri" . | quote }}
+  {{- with .Values.oidc.scopes }}
+  OIDC_SCOPES: {{ . | quote }}
+  {{- end }}
+  GO_API_BASE_URL: {{ printf "http://%s:%v" (include "kubeport.backend.fullname" .) .Values.backend.service.port | quote }}

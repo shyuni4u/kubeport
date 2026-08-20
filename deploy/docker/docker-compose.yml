@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: kubeport
+      POSTGRES_PASSWORD: kubeport
+      POSTGRES_DB: kubeport
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+
+  dex:
+    image: dexidp/dex:v2.39.0
+    command: ["dex", "serve", "/config/dex.yaml"]
+    # Binds on all interfaces so kind cluster containers can reach via host-gateway.
+    ports: ["5556:5556"]
+    volumes:
+      - ./dex.yaml:/config/dex.yaml:ro
+      - ./certs:/config/certs:ro
+
+volumes:
+  pgdata:

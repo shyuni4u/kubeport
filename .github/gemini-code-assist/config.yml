@@ -1,0 +1,3 @@
+code_review:
+  auto_review: false
+  comment_severity: MEDIUM

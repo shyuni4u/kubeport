@@ -1,0 +1,259 @@
+name: Playwright E2E
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - 'deploy/docker/**'
+      - '.github/workflows/playwright.yml'
+  push:
+    branches: [main]
+
+jobs:
+  playwright:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Add host.docker.internal to hosts
+        # Dex's issuer claim is https://host.docker.internal:5556; tokens only
+        # validate when both k8s apiserver and backend can resolve it to dex.
+        run: echo "127.0.0.1 host.docker.internal" | sudo tee -a /etc/hosts
+
+      - name: Generate self-signed dex cert
+        run: |
+          mkdir -p deploy/docker/certs
+          openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+            -keyout deploy/docker/certs/dex.key \
+            -out deploy/docker/certs/dex.crt \
+            -subj "/CN=host.docker.internal" \
+            -addext "subjectAltName=DNS:host.docker.internal,DNS:localhost,IP:127.0.0.1"
+          chmod 644 deploy/docker/certs/dex.key
+
+      - name: Start compose (postgres + dex)
+        run: docker compose -f deploy/docker/docker-compose.yml up -d
+
+      - name: Wait for dex
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sk https://localhost:5556/.well-known/openid-configuration >/dev/null; then
+              echo "dex ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "dex failed to start"; exit 1
+
+      - uses: ariga/setup-atlas@v0
+
+      - name: Apply DB schema
+        # atlas.hcl lives in backend/migrations/ — matches docs/local-e2e.md §3.
+        run: cd backend/migrations && atlas schema apply --env local --auto-approve
+
+      - name: Write kind config
+        run: |
+          cat > /tmp/kind-config.yaml <<EOF
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          name: kubeport
+          nodes:
+            - role: control-plane
+              extraMounts:
+                - hostPath: ${{ github.workspace }}/deploy/docker/certs/dex.crt
+                  containerPath: /etc/kubernetes/pki/dex-ca.crt
+                  readOnly: true
+              extraPortMappings:
+                - containerPort: 6443
+                  hostPort: 6443
+                  listenAddress: 127.0.0.1
+              kubeadmConfigPatches:
+                - |
+                  kind: ClusterConfiguration
+                  apiServer:
+                    extraArgs:
+                      oidc-issuer-url: https://host.docker.internal:5556
+                      oidc-client-id: kubeport
+                      oidc-username-claim: email
+                      oidc-groups-claim: groups
+                      oidc-ca-file: /etc/kubernetes/pki/dex-ca.crt
+          EOF
+
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: kubeport
+          config: /tmp/kind-config.yaml
+
+      - name: Expose host.docker.internal to kube-apiserver
+        # GitHub Actions Linux runners do not auto-inject host.docker.internal
+        # into container networking (Docker Desktop does). The kube-apiserver
+        # static pod has its OWN /etc/hosts — modifying the kind node's
+        # /etc/hosts is not enough. Patch the static pod manifest to add a
+        # hostAliases entry; kubelet detects the change and restarts apiserver,
+        # which then resolves the Dex issuer on the next JWKS fetch.
+        run: |
+          set -eo pipefail
+          # Kind node's default route IS the kind docker network gateway
+          # (i.e. the host-side of the bridge). This works for both IPv4-only
+          # and dual-stack runners without parsing docker network JSON, and
+          # matches what hostNetwork pods see through their shared netns.
+          GATEWAY=$(docker exec kubeport-control-plane sh -c "ip -4 route show default | awk '{print \$3}'" | head -1)
+          if [ -z "$GATEWAY" ]; then
+            echo "could not determine kind node default gateway" >&2
+            docker exec kubeport-control-plane ip route >&2 || true
+            exit 1
+          fi
+          echo "gateway: $GATEWAY"
+          docker cp kubeport-control-plane:/etc/kubernetes/manifests/kube-apiserver.yaml /tmp/apiserver.yaml
+          awk -v gw="$GATEWAY" '
+            /^spec:$/ && !done {
+              print
+              print "  hostAliases:"
+              print "  - ip: " gw
+              print "    hostnames:"
+              print "    - host.docker.internal"
+              done = 1
+              next
+            }
+            { print }
+          ' /tmp/apiserver.yaml > /tmp/apiserver-patched.yaml
+          docker cp /tmp/apiserver-patched.yaml kubeport-control-plane:/etc/kubernetes/manifests/kube-apiserver.yaml
+          # Also patch the node /etc/hosts for good measure (anything that execs
+          # in the node directly, e.g. crictl debug, benefits from resolution).
+          docker exec kubeport-control-plane sh -c "echo '$GATEWAY host.docker.internal' >> /etc/hosts"
+          # Wait for kubelet to pick up the manifest change and restart apiserver.
+          # A successful /healthz response means the apiserver came back up from
+          # the patched manifest — i.e. hostAliases is in effect. We don't exec
+          # into the pod to verify /etc/hosts because the apiserver image is
+          # distroless (no shell/cat).
+          for i in $(seq 1 40); do
+            if kubectl --context kind-kubeport get --raw /healthz 2>/dev/null | grep -q ok; then
+              echo "apiserver healthy after patch (attempt $i)"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "apiserver did not recover after patch" >&2
+          docker exec kubeport-control-plane crictl ps -a >&2 || true
+          exit 1
+
+      - name: Build backend
+        run: cd backend && go build -o ../bin/kubeport-server ./cmd/server
+
+      - name: Run backend
+        # Secrets below are documented local-dev values (see docs/local-e2e.md
+        # and deploy/docker/dex.yaml). They're ephemeral per CI run — do NOT
+        # move to Actions secrets; keeping them inline preserves "clone → run
+        # locally" parity. Never use these values in prod.
+        env:
+          LISTEN_ADDR: ":8080"
+          DATABASE_URL: "postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable"
+          OIDC_ISSUER: "https://host.docker.internal:5556"
+          OIDC_AUDIENCE: "kubeport"
+          OIDC_CA_FILE: "${{ github.workspace }}/deploy/docker/certs/dex.crt"
+          APP_ENCRYPTION_KEY_B64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          KBP_DEV_ADMIN_EMAILS: "admin@example.com"
+        run: |
+          nohup ./bin/kubeport-server > /tmp/backend.log 2>&1 &
+          echo $! > /tmp/backend.pid
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/healthz >/dev/null; then
+              echo "backend ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "backend failed to start"
+          cat /tmp/backend.log
+          exit 1
+
+      - name: Register kind cluster + warm users
+        run: |
+          ADM=$(curl -sk -X POST https://host.docker.internal:5556/token \
+            -d grant_type=password -d client_id=kubeport -d client_secret=local-dev-secret \
+            -d username=admin@example.com -d password=admin \
+            -d 'scope=openid email profile groups' | jq -r .id_token)
+          KIND_CA=$(kubectl --context kind-kubeport config view --raw --minify --flatten -o json \
+            | jq -r '.clusters[0].cluster."certificate-authority-data"' | base64 -d)
+          jq -n --arg ca "$KIND_CA" '{name:"kind",api_url:"https://127.0.0.1:6443",ca_bundle:$ca,oidc_issuer_url:"https://host.docker.internal:5556"}' \
+            | curl -fs -H "Authorization: Bearer $ADM" -H 'content-type: application/json' \
+              -X POST http://localhost:8080/v1/clusters -d @- >/dev/null
+          ALI=$(curl -sk -X POST https://host.docker.internal:5556/token \
+            -d grant_type=password -d client_id=kubeport -d client_secret=local-dev-secret \
+            -d username=alice@example.com -d password=alice \
+            -d 'scope=openid email profile groups' | jq -r .id_token)
+          # /v1/me is the warm-up endpoint that upserts the user row so
+          # admin can add them to teams.
+          curl -fs -H "Authorization: Bearer $ALI" http://localhost:8080/v1/me >/dev/null
+
+      - name: Install frontend deps
+        run: cd frontend && pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers + system deps
+        run: cd frontend && pnpm exec playwright install --with-deps chromium
+
+      - name: Write frontend .env.local
+        # Values must agree with the backend env above. OIDC_CLIENT_SECRET and
+        # issuer match deploy/docker/dex.yaml.
+        run: |
+          cat > frontend/.env.local <<EOF
+          DATABASE_URL=postgres://kubeport:kubeport@localhost:5432/kubeport
+          APP_ENCRYPTION_KEY_B64=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          GO_API_BASE_URL=http://localhost:8080
+          OIDC_ISSUER=https://host.docker.internal:5556
+          OIDC_CLIENT_ID=kubeport
+          OIDC_CLIENT_SECRET=local-dev-secret
+          OIDC_REDIRECT_URI=http://localhost:3000/api/auth/callback
+          EOF
+
+      - name: Run frontend
+        env:
+          NODE_EXTRA_CA_CERTS: "${{ github.workspace }}/deploy/docker/certs/dex.crt"
+        run: |
+          cd frontend && nohup pnpm dev > /tmp/frontend.log 2>&1 &
+          echo $! > /tmp/frontend.pid
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:3000/ >/dev/null; then
+              echo "frontend ready"; exit 0
+            fi
+            sleep 3
+          done
+          echo "frontend failed to start"
+          cat /tmp/frontend.log
+          exit 1
+
+      - name: Run Playwright
+        env:
+          NODE_EXTRA_CA_CERTS: "${{ github.workspace }}/deploy/docker/certs/dex.crt"
+        run: cd frontend && pnpm test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
+      - name: Upload server logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs
+          path: |
+            /tmp/backend.log
+            /tmp/frontend.log
+          retention-days: 7

@@ -1,0 +1,73 @@
+{{- if .Values.postgres.embedded -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "kubeport.postgres.fullname" . }}
+  labels:
+    {{- include "kubeport.postgres.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "kubeport.postgres.fullname" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "kubeport.postgres.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kubeport.postgres.labels" . | nindent 8 }}
+    spec:
+      securityContext:
+        # postgres image runs as uid 999 (postgres). fsGroup so it can write
+        # the mounted PVC.
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: {{ .Values.postgres.service.port }}
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: {{ include "kubeport.postgres.fullname" . }}
+          env:
+            # PGDATA cannot be the mount root — pg refuses to init on top of
+            # the lost+found directory created by some PVC provisioners.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1'
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1'
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "kubeport.postgres.labels" . | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.postgres.storage.storageClassName }}
+        storageClassName: {{ .Values.postgres.storage.storageClassName | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage.size | quote }}
+{{- end -}}

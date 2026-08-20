@@ -1,0 +1,37 @@
+# Fixed inputs for the golden snapshot CI test. NEVER use these values in real
+# deployments. The point is reproducibility, not security.
+host: kp.test.local
+
+oidc:
+  issuer: https://accounts.google.com
+  audience: kubeport
+  clientId: golden-snapshot-client
+  redirectUri: https://kp.test.local/api/auth/callback
+
+auth:
+  create: true
+  appEncryptionKeyB64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+  oidcClientSecret: golden-snapshot-secret
+
+postgres:
+  embedded: true
+  password: golden-snapshot-pgpass
+  storage:
+    storageClassName: standard
+
+ingress:
+  enabled: true
+  className: traefik
+
+tls:
+  enabled: true
+  certManager:
+    enabled: true
+    issuerKind: ClusterIssuer
+    issuerName: letsencrypt-prod
+
+images:
+  backend:
+    tag: "0.1.0"
+  frontend:
+    tag: "0.1.0"

@@ -1,0 +1,117 @@
+name: helm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/helm/**"
+      - "backend/migrations/schema.hcl"
+      - ".github/workflows/helm.yml"
+      - "Makefile"
+  pull_request:
+    branches: [main]
+    paths:
+      - "deploy/helm/**"
+      - "backend/migrations/schema.hcl"
+      - ".github/workflows/helm.yml"
+      - "Makefile"
+  workflow_dispatch:
+
+jobs:
+  lint-and-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.20.2
+
+      - name: Verify schema.hcl is in sync
+        run: |
+          if ! diff -q backend/migrations/schema.hcl deploy/helm/kubeport/files/schema.hcl; then
+            echo "::error::deploy/helm/kubeport/files/schema.hcl is out of sync with backend/migrations/schema.hcl"
+            echo "Run 'make helm-sync' (or copy manually) and commit the result."
+            diff -u backend/migrations/schema.hcl deploy/helm/kubeport/files/schema.hcl || true
+            exit 1
+          fi
+
+      - name: helm lint
+        run: make helm-lint
+
+      - name: Golden snapshot diff
+        run: make helm-snapshot
+
+  kind-smoke:
+    runs-on: ubuntu-latest
+    needs: lint-and-snapshot
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.20.2
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          version: v0.23.0
+          cluster_name: kubeport-smoke
+          wait: 120s
+
+      - name: helm install (smoke)
+        run: |
+          # NOTE: chart references published images on ghcr. Rolling tag
+          # `latest` keeps the smoke independent of per-PR image build state.
+          helm install kp deploy/helm/kubeport \
+            --namespace kubeport --create-namespace \
+            -f deploy/helm/kubeport/ci/smoke-values.yaml \
+            --wait --timeout 5m
+
+      - name: Verify backend /healthz
+        run: |
+          kubectl --namespace kubeport port-forward svc/kp-kubeport-backend 18080:8080 &
+          PF_PID=$!
+          # wait until the port forward is actually listening
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:18080/healthz; then
+              echo
+              kill $PF_PID 2>/dev/null || true
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::backend /healthz never returned 2xx"
+          kubectl --namespace kubeport get pods,events
+          kubectl --namespace kubeport logs -l app.kubernetes.io/component=backend --tail=200 || true
+          kill $PF_PID 2>/dev/null || true
+          exit 1
+
+      - name: Verify frontend /
+        run: |
+          kubectl --namespace kubeport port-forward svc/kp-kubeport-frontend 13000:3000 &
+          PF_PID=$!
+          for i in $(seq 1 20); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:13000/ || echo 000)
+            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 400 ]; then
+              echo "frontend / returned HTTP $CODE"
+              kill $PF_PID 2>/dev/null || true
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::frontend / never returned 2xx/3xx"
+          kubectl --namespace kubeport get pods,events
+          kubectl --namespace kubeport logs -l app.kubernetes.io/component=frontend --tail=200 || true
+          kill $PF_PID 2>/dev/null || true
+          exit 1
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl --namespace kubeport get all
+          kubectl --namespace kubeport describe pods
+          kubectl --namespace kubeport logs -l app.kubernetes.io/component=migration --tail=500 || true
+          kubectl --namespace kubeport logs -l app.kubernetes.io/component=postgres --tail=200 || true

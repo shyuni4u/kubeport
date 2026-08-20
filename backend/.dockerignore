@@ -1,0 +1,29 @@
+# Build artifacts (created by `go build` outside container)
+bin/
+*.test
+coverage.out
+
+# Vendor directory — we use go mod download in builder
+vendor/
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Tests not needed in image (go test runs in CI separately)
+e2e/
+
+# Migrations are applied as separate Helm Job / init container, not bundled in API image
+# (kept here for context — schema.hcl/schema.sql still get COPY'd by `COPY . .` but
+#  the binary doesn't read them at runtime; they're harmless ballast)
+
+# Git metadata
+.git/
+.gitignore
+.gitattributes
+
+# Docker / CI
+Dockerfile
+.dockerignore

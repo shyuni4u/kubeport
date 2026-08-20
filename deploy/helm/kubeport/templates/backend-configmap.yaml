@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kubeport.backend.fullname" . }}
+  labels:
+    {{- include "kubeport.backend.labels" . | nindent 4 }}
+data:
+  LISTEN_ADDR: {{ printf ":%v" .Values.backend.service.port | quote }}
+  OIDC_ISSUER: {{ required "oidc.issuer is required" .Values.oidc.issuer | quote }}
+  OIDC_AUDIENCE: {{ required "oidc.audience is required" .Values.oidc.audience | quote }}
+  KBP_OPENAPI_CACHE_MAX: {{ .Values.backend.openapiCacheMax | quote }}
+  {{- with .Values.auth.devAdminEmails }}
+  # Bootstrap admin(s): matching login emails are granted the kubeport-admin
+  # group in-app. Intended for demo/bootstrap when the IdP (e.g. Google) emits
+  # no groups claim. Leave empty for group-aware IdPs.
+  KBP_DEV_ADMIN_EMAILS: {{ . | quote }}
+  {{- end }}

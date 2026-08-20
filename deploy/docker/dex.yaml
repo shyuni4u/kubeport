@@ -1,0 +1,25 @@
+issuer: https://host.docker.internal:5556
+storage:
+  type: memory
+web:
+  https: 0.0.0.0:5556
+  tlsCert: /config/certs/dex.crt
+  tlsKey: /config/certs/dex.key
+oauth2:
+  passwordConnector: local
+enablePasswordDB: true
+staticClients:
+  - id: kubeport
+    redirectURIs:
+      - http://localhost:3000/api/auth/callback
+    name: kubeport
+    secret: local-dev-secret
+staticPasswords:
+  - email: alice@example.com
+    hash: "$2a$10$vECrnrZp1stcCkukSTINn.2ijRZSS3RUnNnvP.gg0vUvS8IhNBL7S"  # password: alice (regenerated 2026-04-17)
+    username: alice
+    userID: "alice-000"
+  - email: admin@example.com
+    hash: "$2b$10$OeoKvlVUL3BBgFRH1HmZWugw7GbUjHXhcHhO5Hg0ER75Hk6X6QWTi"  # password: admin
+    username: admin
+    userID: "admin-000"

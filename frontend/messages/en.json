@@ -1,0 +1,211 @@
+{
+  "shell": {
+    "nav": {
+      "catalog": "Catalog",
+      "myReleases": "My releases",
+      "templates": "Templates",
+      "releases": "Releases",
+      "teams": "Teams"
+    },
+    "logout": "Log out",
+    "login": "Log in",
+    "currentCluster": "Current cluster",
+    "noClusters": "No clusters registered",
+    "openMenu": "Open menu",
+    "localeSwitchLabel": "Select language"
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "loading": "Loading…",
+    "empty": "No data."
+  },
+  "catalog": {
+    "title": "Catalog",
+    "searchPlaceholder": "Search templates…",
+    "emptyNoTemplates": "No templates have been published yet.",
+    "emptyNoMatch": "No templates match your search or tag filter.",
+    "card": {
+      "deploy": "Deploy →"
+    }
+  },
+  "releases": {
+    "myTitle": "My releases",
+    "table": {
+      "name": "Name",
+      "template": "Template",
+      "namespace": "Namespace",
+      "empty": "No releases yet.",
+      "emptyCta": "Deploy from the catalog →"
+    },
+    "overview": {
+      "instancesHeading": "Instances ({count})"
+    },
+    "instances": {
+      "logsLink": "Logs →"
+    },
+    "phase": {
+      "Running": "Running",
+      "Pending": "Pending",
+      "Succeeded": "Succeeded",
+      "Failed": "Failed",
+      "Unknown": "Unknown",
+      "CrashLoopBackOff": "Repeatedly restarting (failing to run)",
+      "ImagePullBackOff": "Cannot pull image",
+      "ErrImagePull": "Cannot pull image",
+      "CreateContainerConfigError": "Container configuration error",
+      "ContainerCreating": "Creating container",
+      "Terminating": "Terminating",
+      "Completed": "Completed"
+    },
+    "status": {
+      "healthy": "healthy",
+      "warning": "warning",
+      "error": "error",
+      "unknown": "unknown",
+      "cluster-unreachable": "cluster unreachable",
+      "resources-missing": "resources missing"
+    },
+    "stale": {
+      "title": {
+        "cluster-unreachable": "Cluster is unreachable",
+        "resources-missing": "Resources not found in cluster"
+      },
+      "body": {
+        "cluster-unreachable": "Cluster {cluster} is not responding. This may be a transient network issue or the cluster may no longer be operational.",
+        "resources-missing": "The release record exists but no matching resources were found in the cluster. They may have been deleted externally or the cluster may have been rebuilt."
+      },
+      "contactAdmin": "Contact an admin to clean up this release.",
+      "forceDelete": {
+        "button": "Force delete",
+        "confirm": "This deletes only the DB record. The cluster will not be touched. Continue?",
+        "failed": "Delete failed: {error}"
+      }
+    }
+  },
+  "deploy": {
+    "titleNew": "New deployment",
+    "titleUpdate": "Update to v{version}",
+    "submit": "Deploy",
+    "submitting": "Working…",
+    "namePlaceholder": "Release name",
+    "namespacePlaceholder": "Namespace",
+    "noClusterPlaceholder": "No clusters registered — ask an admin",
+    "clusterPlaceholder": "Select a cluster",
+    "noClusterWarning": "No clusters are registered, so nothing can be deployed. Ask an admin to register a cluster.",
+    "errors": {
+      "forbidden": "You do not have permission to perform this action. Please contact an admin.",
+      "conflict": "A release with the same name already exists. Use a different name or check the existing release.",
+      "server": "Something went wrong on the server and the deployment failed. Try again shortly or contact an admin.",
+      "generic": "The deployment failed. Please review your inputs and try again."
+    }
+  },
+  "logs": {
+    "allInstances": "All instances",
+    "autoscroll": "Auto-scroll",
+    "clear": "Clear",
+    "status": {
+      "connected": "Connected",
+      "connecting": "Connecting",
+      "disconnected": "Disconnected"
+    }
+  },
+  "templates": {
+    "list": {
+      "title": "Templates",
+      "new": "+ New template",
+      "colName": "Name",
+      "colVersion": "Current version",
+      "colDescription": "Description"
+    },
+    "detail": {
+      "versionsHeading": "Versions",
+      "readOnlyGlobal": "Read-only — only admins can edit global templates.",
+      "readOnlyNoPerm": "Read-only — you don't have edit permission.",
+      "readOnlyPrefix": "Read-only — ",
+      "newVersion": "+ New version",
+      "editDraft": "Edit draft v{version}",
+      "confirmPublish": "Publish v{version}? Once published it becomes visible to users.",
+      "confirmDeprecate": "Deprecate v{version}? Users will no longer be able to deploy it.",
+      "confirmDeleteDraft": "Delete draft v{version}? This cannot be undone."
+    },
+    "editor": {
+      "newTitle": "New template",
+      "uiMode": "UI mode",
+      "yamlMode": "YAML mode",
+      "editing": "Editing ({name} v{version})",
+      "editingNew": "Editing",
+      "pickFieldHint": "Select a field from the tree on the left.",
+      "loading": "Loading…",
+      "schemaCluster": "Schema cluster",
+      "noClusters": "No clusters are registered. Register a cluster first.",
+      "owningTeam": "Owning team",
+      "globalTeamOption": "(Global — admin only)",
+      "getStartedLead": "To get started",
+      "getStarted": ", pick a k8s resource kind (Deployment, Service, etc.) from the tree panel below. Once the schema loads, choose the fields to expose in the tree and edit labels and defaults in the inspector on the right.",
+      "previewYaml": "YAML",
+      "previewForm": "User form",
+      "userFormPreview": "User form preview",
+      "save": "Save",
+      "saving": "Saving…",
+      "saveAsNew": "Save as new version",
+      "convert": {
+        "yamlDraftPreview": "This draft was authored in YAML mode, so the UI editor is preview-only. To edit it in the UI, delete this draft from the detail page and start a new version.",
+        "willSaveAsNew": "Saving will create a new UI-mode version. Some structures may be lost in conversion — verify them in the tree.",
+        "convertedTitle": "Auto-converted from YAML.",
+        "warnings": "{count} conversion warning(s)",
+        "warningsMore": "…and {count} more",
+        "uiDraftPreview": "This draft was authored in UI mode. The YAML tab is preview-only — switch to the UI tab to edit it.",
+        "nonDraftYaml": "v{version} is {status}. Saving will create a new draft version."
+      }
+    },
+    "status": {
+      "draft": "Draft",
+      "published": "Published",
+      "deprecated": "Deprecated"
+    },
+    "statusHelp": {
+      "draft": "An unpublished draft. It is not visible to users.",
+      "published": "Published and available for users to deploy.",
+      "deprecated": "Deprecated. It can no longer be deployed."
+    },
+    "publish": "Publish",
+    "publishHelp": "Publish this version to make it visible to users.",
+    "deprecate": "Deprecate",
+    "deprecateHelp": "Block new deployments of this version.",
+    "undeprecate": "Undeprecate",
+    "undeprecateHelp": "Remove deprecation so it can be deployed again.",
+    "deleteDraft": "Delete",
+    "edit": "Edit",
+    "rbac": {
+      "title": "Permission check",
+      "checking": "Checking…",
+      "hint": "Enter a cluster and namespace to check permissions.",
+      "allAllowed": "All resource create permissions confirmed.",
+      "denied": "Permission denied.",
+      "httpError": "Permission check failed (HTTP {status})."
+    }
+  },
+  "admin": {
+    "teams": {
+      "title": "Team management",
+      "slugLabel": "Slug",
+      "slugPlaceholder": "slug (e.g. platform)",
+      "displayNameLabel": "Display name",
+      "displayNamePlaceholder": "Display name",
+      "createButton": "New team",
+      "membersHeading": "Members",
+      "colEmail": "Email",
+      "colRole": "Role",
+      "removeMember": "Remove",
+      "addMemberHeading": "Add a new member",
+      "emailLabel": "Email",
+      "emailPlaceholder": "Email",
+      "roleLabel": "Role",
+      "addMemberButton": "Add",
+      "loginHint": "The target user must have logged in at least once."
+    }
+  }
+}
