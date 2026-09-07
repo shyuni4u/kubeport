@@ -154,3 +154,33 @@ OIDC redirect URI — derived from host if not explicitly set.
 {{- printf "%s://%s/api/auth/callback" $scheme .Values.host -}}
 {{- end -}}
 {{- end -}}
+
+{{- define "kubeport.dex.fullname" -}}
+{{- printf "%s-dex" (include "kubeport.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "kubeport.dex.issuer" -}}
+{{- printf "https://%s" (required "dex.host is required when dex.enabled" .Values.dex.host) -}}
+{{- end -}}
+
+{{/* JSON array for KBP_OIDC_ISSUERS: primary + (optional) dex */}}
+{{- define "kubeport.oidcIssuersJSON" -}}
+{{- $list := list (dict "issuer" .Values.oidc.issuer "client_id" .Values.oidc.audience) -}}
+{{- if .Values.dex.enabled -}}
+{{- $list = append $list (dict "issuer" (include "kubeport.dex.issuer" .) "client_id" .Values.dex.clientId) -}}
+{{- end -}}
+{{- $list | toJson -}}
+{{- end -}}
+
+{{/* KBP_DEV_ADMIN_EMAILS with demo admin appended when demo is enabled */}}
+{{- define "kubeport.devAdminEmails" -}}
+{{- $emails := .Values.auth.devAdminEmails -}}
+{{- if .Values.demo.enabled -}}
+{{- if eq $emails "" -}}
+{{- $emails = .Values.demo.adminEmail -}}
+{{- else -}}
+{{- $emails = printf "%s,%s" $emails .Values.demo.adminEmail -}}
+{{- end -}}
+{{- end -}}
+{{- $emails -}}
+{{- end -}}

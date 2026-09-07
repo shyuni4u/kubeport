@@ -130,6 +130,64 @@ git commit -m "..."
 snapshot — that's what CI runs; non-zero exit signals an unintended
 template change.
 
+## Demo mode (Dex)
+
+Optional self-hosted [Dex](https://dexidp.io/) IdP for a public demo login,
+in addition to the primary `oidc.*` IdP (e.g. Google). The backend accepts
+tokens from both issuers via `KBP_OIDC_ISSUERS`.
+
+Enable with:
+
+```yaml
+dex:
+  enabled: true
+  host: dex.example.com          # required — needs its own DNS A record
+  clientSecret: <random>          # --set dex.clientSecret=$(openssl rand -hex 24)
+  staticPasswords:
+    - email: demo-admin@demo.kubeport
+      username: demo-admin
+      userID: demo-admin-000
+      hash: <bcrypt hash>
+    - email: demo-user@demo.kubeport
+      username: demo-user
+      userID: demo-user-000
+      hash: <bcrypt hash>
+
+demo:
+  enabled: true
+  adminPassword: <random>         # --set; used by the reset CronJob only
+  userPassword: <random>          # --set
+  passwordHint: ""                # shown on the landing page — public by design
+```
+
+Generate a static-password bcrypt hash:
+
+```bash
+htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
+```
+
+`demo.enabled=true` also creates:
+
+- A `demo` namespace (name from `demo.namespace`) with a `ResourceQuota`,
+  `LimitRange`, and an egress-only `NetworkPolicy` (DNS + outbound, no
+  in-cluster lateral traffic, no LoadBalancer Services, no Ingresses).
+- `demo-admin`/`demo-user` `Role`s + `RoleBinding`s scoped to that namespace,
+  plus a cluster-scoped `ClusterRole`/`ClusterRoleBinding` granting
+  `selfsubjectaccessreviews` (create) — the RBAC panel needs this even for
+  non-admin demo users.
+- A `demo-reset` `CronJob` (`demo.resetSchedule`, default every 6 hours) that
+  wipes all objects in the demo namespace and re-seeds it via
+  `/seed-demo --reset` (shipped in the backend image).
+
+`dex.enabled=true` renders a `ClusterIP` Service + Deployment for Dex, plus
+an `Ingress`/`Certificate` on `dex.host` (mirrors the main chart's
+`ingress.className` / `tls.certManager.*`).
+
+**k3s must trust the Dex issuer** for the RBAC bindings above to resolve —
+see [`deploy/oci/README.md` §7.6](../../oci/README.md#76). `dex.host` needs
+its own DNS record pointing at the cluster ingress, separate from the main
+`host`.
+
 ## Templates
 
 | Template | When rendered |
@@ -137,6 +195,8 @@ template change.
 | `backend-{deployment,service,configmap}.yaml` | always |
 | `frontend-{deployment,service,configmap}.yaml` | always |
 | `secret.yaml` | `auth.create=true` |
+| `dex-{configmap,secret,deployment,service,ingress,certificate}.yaml` | `dex.enabled=true` (certificate also requires `tls.enabled` + `tls.certManager.enabled`) |
+| `demo-namespace.yaml`, `demo-rbac.yaml`, `demo-reset-cronjob.yaml` | `demo.enabled=true` |
 | `postgres-{statefulset,service,secret}.yaml` | `postgres.embedded=true` |
 | `ingress.yaml` | `ingress.enabled=true` |
 | `certificate.yaml` | `tls.enabled=true` AND `tls.certManager.enabled=true` |

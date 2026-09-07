@@ -1,0 +1,34 @@
+{{- if .Values.dex.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "kubeport.dex.fullname" . }}
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dex
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- end }}
+  {{- if and .Values.tls.enabled .Values.tls.certManager.enabled }}
+  tls:
+    - hosts:
+        - {{ required "dex.host is required when dex.enabled" .Values.dex.host | quote }}
+      secretName: {{ printf "%s-tls" (include "kubeport.dex.fullname" .) | quote }}
+  {{- end }}
+  rules:
+    - host: {{ required "dex.host is required when dex.enabled" .Values.dex.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "kubeport.dex.fullname" . }}
+                port:
+                  number: 5556
+{{- end -}}

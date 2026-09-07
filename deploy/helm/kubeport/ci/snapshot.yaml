@@ -1,4 +1,106 @@
 ---
+# Source: kubeport/templates/demo-namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+  labels:
+    kubeport.io/demo: "true"
+---
+# Source: kubeport/templates/demo-namespace.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: demo-egress
+  namespace: demo
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+---
+# Source: kubeport/templates/demo-namespace.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: demo-quota
+  namespace: demo
+spec:
+  hard:
+    requests.cpu: "1"
+    requests.memory: 2Gi
+    pods: "10"
+    services: "5"
+    services.loadbalancers: "0"
+    count/ingresses.networking.k8s.io: "0"
+---
+# Source: kubeport/templates/demo-namespace.yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: demo-limits
+  namespace: demo
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      max:
+        cpu: 500m
+        memory: 512Mi
+---
+# Source: kubeport/templates/demo-reset-cronjob.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: demo-reset
+  namespace: kubeport
+---
+# Source: kubeport/templates/demo-reset-cronjob.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kp-kubeport-demo
+type: Opaque
+data:
+  DEMO_ADMIN_PASSWORD: "ZGVtbw=="
+  DEMO_USER_PASSWORD: "ZGVtbw=="
+---
+# Source: kubeport/templates/dex-secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kp-kubeport-dex
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: dex
+type: Opaque
+stringData:
+  DEX_CLIENT_SECRET: "test"
+---
 # Source: kubeport/templates/postgres-secret.yaml
 apiVersion: v1
 kind: Secret
@@ -33,6 +135,7 @@ stringData:
   DATABASE_URL: "postgres://kubeport:golden-snapshot-pgpass@kp-kubeport-postgres:5432/kubeport?sslmode=disable"
   APP_ENCRYPTION_KEY_B64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
   OIDC_CLIENT_SECRET: "golden-snapshot-secret"
+  DEMO_OIDC_CLIENT_SECRET: "test"
 ---
 # Source: kubeport/templates/backend-configmap.yaml
 apiVersion: v1
@@ -50,7 +153,53 @@ data:
   LISTEN_ADDR: ":8080"
   OIDC_ISSUER: "https://accounts.google.com"
   OIDC_AUDIENCE: "kubeport"
+  KBP_OIDC_ISSUERS: "[{\"client_id\":\"kubeport\",\"issuer\":\"https://accounts.google.com\"},{\"client_id\":\"kubeport-demo\",\"issuer\":\"https://dex.example.test\"}]"
   KBP_OPENAPI_CACHE_MAX: "64"
+  KBP_DEMO_EMAIL_DOMAIN: "demo.kubeport"
+  # Bootstrap admin(s): matching login emails are granted the kubeport-admin
+  # group in-app. Intended for demo/bootstrap when the IdP (e.g. Google) emits
+  # no groups claim. Leave empty for group-aware IdPs. Includes demo.adminEmail
+  # when demo.enabled=true.
+  KBP_DEV_ADMIN_EMAILS: "demo-admin@demo.kubeport"
+---
+# Source: kubeport/templates/dex-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kp-kubeport-dex
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: dex
+data:
+  config.yaml: |
+    issuer: https://dex.example.test
+    storage:
+      type: memory
+    web:
+      http: 0.0.0.0:5556
+    oauth2:
+      passwordConnector: local
+      skipApprovalScreen: true
+    enablePasswordDB: true
+    staticClients:
+      - id: kubeport-demo
+        name: kubeport demo
+        secretEnv: DEX_CLIENT_SECRET
+        redirectURIs:
+          - https://kp.test.local/api/auth/callback
+    staticPasswords:
+      - email: "demo-admin@demo.kubeport"
+        username: "demo-admin"
+        userID: "demo-admin-000"
+        hash: "$2y$10$wvTSwatbRSSK8WDYkH70LeiRigmZqFsJlz2.8miz8fNrzOm5kFJDG"
+      - email: "demo-user@demo.kubeport"
+        username: "demo-user"
+        userID: "demo-user-000"
+        hash: "$2y$10$wvTSwatbRSSK8WDYkH70LeiRigmZqFsJlz2.8miz8fNrzOm5kFJDG"
 ---
 # Source: kubeport/templates/frontend-configmap.yaml
 apiVersion: v1
@@ -69,6 +218,11 @@ data:
   OIDC_CLIENT_ID: "golden-snapshot-client"
   OIDC_REDIRECT_URI: "https://kp.test.local/api/auth/callback"
   GO_API_BASE_URL: "http://kp-kubeport-backend:8080"
+  DEMO_OIDC_ISSUER: "https://dex.example.test"
+  DEMO_OIDC_CLIENT_ID: "kubeport-demo"
+  DEMO_EMAIL_DOMAIN: "demo.kubeport"
+  DEMO_ADMIN_EMAIL: "demo-admin@demo.kubeport"
+  DEMO_USER_EMAIL: "demo-user@demo.kubeport"
 ---
 # Source: kubeport/templates/migration-configmap.yaml
 apiVersion: v1
@@ -514,6 +668,114 @@ data:
       url = getenv("DATABASE_URL")
     }
 ---
+# Source: kubeport/templates/demo-rbac.yaml
+# SelfSubjectAccessReview is cluster-scoped; demo users need it for the RBAC panel.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kp-kubeport-demo-ssar
+rules:
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["selfsubjectaccessreviews"]
+    verbs: ["create"]
+---
+# Source: kubeport/templates/demo-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kp-kubeport-demo-ssar
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kp-kubeport-demo-ssar
+subjects:
+  - kind: User
+    name: "dex:demo-admin@demo.kubeport"
+  - kind: User
+    name: "dex:demo-user@demo.kubeport"
+---
+# Source: kubeport/templates/demo-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: demo-admin
+  namespace: demo
+rules:
+  - apiGroups: ["", "apps", "batch", "networking.k8s.io"]
+    resources: ["*"]
+    verbs: ["*"]
+---
+# Source: kubeport/templates/demo-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: demo-user
+  namespace: demo
+rules:
+  - apiGroups: ["", "apps", "batch"]
+    resources: ["pods", "pods/log", "services", "configmaps", "deployments", "statefulsets", "jobs", "cronjobs", "events", "replicasets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "update", "patch", "delete"]   # no get/list: users can write but not read back secrets
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["selfsubjectaccessreviews"]
+    verbs: ["create"]
+---
+# Source: kubeport/templates/demo-reset-cronjob.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: demo-reset
+  namespace: demo
+rules:
+  - apiGroups: ["", "apps", "batch", "networking.k8s.io"]
+    resources: ["*"]
+    verbs: ["get", "list", "delete", "deletecollection"]
+---
+# Source: kubeport/templates/demo-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: demo-admin
+  namespace: demo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: demo-admin
+subjects:
+  - kind: User
+    name: "dex:demo-admin@demo.kubeport"
+---
+# Source: kubeport/templates/demo-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: demo-user
+  namespace: demo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: demo-user
+subjects:
+  - kind: User
+    name: "dex:demo-user@demo.kubeport"
+---
+# Source: kubeport/templates/demo-reset-cronjob.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: demo-reset
+  namespace: demo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: demo-reset
+subjects:
+  - kind: ServiceAccount
+    name: demo-reset
+    namespace: kubeport
+---
 # Source: kubeport/templates/backend-service.yaml
 apiVersion: v1
 kind: Service
@@ -537,6 +799,30 @@ spec:
     app.kubernetes.io/name: kubeport
     app.kubernetes.io/instance: kp
     app.kubernetes.io/component: backend
+---
+# Source: kubeport/templates/dex-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: kp-kubeport-dex
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: dex
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/component: dex
+  ports:
+    - name: http
+      port: 5556
+      targetPort: http
+      protocol: TCP
 ---
 # Source: kubeport/templates/frontend-service.yaml
 apiVersion: v1
@@ -617,12 +903,12 @@ spec:
         app.kubernetes.io/component: backend
       annotations:
         # Roll the Pod when ConfigMap or Secret content changes.
-        checksum/config: 017e483f368b20ecf8654646f06ae4cfdf9b9d63ea0e6d7c1074dd984d98bf64
+        checksum/config: 32a011b73e6af8dd51d53c5d406f524f4d2f9aa54c0980e9f8d07783732bb67c
         # schema.hcl 변경 시 backend pod 가 재시작되며 atlas initContainer
         # 가 새 스키마를 적용. 이 어노테이션이 없으면 migration ConfigMap
         # 갱신만으로는 Deployment template 해시가 안 바뀌어 롤이 안 됨.
         checksum/migration: dc17a8ef747dc3fd15eaf566dcf9a8ea1ad781c0bda0abff0e534a2853defc6b
-        checksum/secret: b2b34f5a7442896105165289bc087db9ed4fbb962a77258c0a6059d6b289a7e8
+        checksum/secret: e7dde2c9f0d9e6ff324c1fe9ec29e374b1dfb55ceb2fe06c296a8b108aa27451
     spec:
       securityContext:
         fsGroup: 65532
@@ -728,6 +1014,92 @@ spec:
           configMap:
             name: kp-kubeport-migrate-files
 ---
+# Source: kubeport/templates/dex-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kp-kubeport-dex
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: dex
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubeport
+      app.kubernetes.io/instance: kp
+      app.kubernetes.io/component: dex
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: kubeport-0.1.0
+        app.kubernetes.io/name: kubeport
+        app.kubernetes.io/instance: kp
+        app.kubernetes.io/version: "0.1.0"
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/component: dex
+      annotations:
+        checksum/config: ddbfc8d46c789c77932400189b8ed50030da32401b940e9ea00719d4c497dc13
+        checksum/secret: 1824b9dc1ddcc5edee8b6b8ed5c534d384a031ba69bb51028e9c7be0f651038e
+    spec:
+      securityContext:
+        fsGroup: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+      containers:
+        - name: dex
+          image: "ghcr.io/dexidp/dex:v2.39.0"
+          command: ["dex", "serve", "/etc/dex/config.yaml"]
+          ports:
+            - name: http
+              containerPort: 5556
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: kp-kubeport-dex
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+          resources:
+            limits:
+              cpu: 200m
+              memory: 128Mi
+            requests:
+              cpu: 20m
+              memory: 64Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dex
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: kp-kubeport-dex
+        - name: tmp
+          emptyDir: {}
+---
 # Source: kubeport/templates/frontend-deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -757,8 +1129,8 @@ spec:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/component: frontend
       annotations:
-        checksum/config: c649ad959ed82d39a345fd772834b4871ffe7ba2c70fe5141ec283143af5937a
-        checksum/secret: b2b34f5a7442896105165289bc087db9ed4fbb962a77258c0a6059d6b289a7e8
+        checksum/config: f2cd57a0b4d7e180e94df0535ec84196c3465a4153db84f87b69843527a0f10c
+        checksum/secret: e7dde2c9f0d9e6ff324c1fe9ec29e374b1dfb55ceb2fe06c296a8b108aa27451
     spec:
       securityContext:
         fsGroup: 65532
@@ -932,6 +1304,118 @@ spec:
           requests:
             storage: "10Gi"
 ---
+# Source: kubeport/templates/demo-reset-cronjob.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kp-kubeport-demo-reset
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 600
+      template:
+        spec:
+          serviceAccountName: demo-reset
+          restartPolicy: Never
+          securityContext:
+            fsGroup: 65532
+            runAsGroup: 65532
+            runAsNonRoot: true
+            runAsUser: 65532
+          initContainers:
+            - name: wipe-k8s
+              image: "bitnami/kubectl:1.31"
+              command: ["sh", "-c"]
+              args:
+                - kubectl -n demo delete deploy,sts,ds,job,cronjob,svc,cm,secret,pod --all --wait=false --ignore-not-found
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                  - ALL
+                readOnlyRootFilesystem: true
+          containers:
+            - name: seed
+              image: ghcr.io/shyuni4u/kubeport-backend:0.1.0
+              command: ["/seed-demo", "--reset"]
+              envFrom:
+                - secretRef:
+                    name: kp-kubeport-auth
+              env:
+                - name: KBP_API_BASE_URL
+                  value: "http://kp-kubeport-backend:8080"
+                - name: DEMO_OIDC_ISSUER
+                  value: "https://dex.example.test"
+                - name: DEMO_OIDC_CLIENT_ID
+                  value: "kubeport-demo"
+                - name: DEMO_ADMIN_EMAIL
+                  value: "demo-admin@demo.kubeport"
+                - name: DEMO_USER_EMAIL
+                  value: "demo-user@demo.kubeport"
+                - name: DEMO_CLUSTER
+                  value: "oci-a1"
+                - name: DEMO_NAMESPACE
+                  value: "demo"
+                - name: KBP_DEMO_EMAIL_DOMAIN
+                  value: "demo.kubeport"
+                - name: DEMO_ADMIN_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: kp-kubeport-demo
+                      key: DEMO_ADMIN_PASSWORD
+                - name: DEMO_USER_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: kp-kubeport-demo
+                      key: DEMO_USER_PASSWORD
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                  - ALL
+                readOnlyRootFilesystem: true
+---
+# Source: kubeport/templates/dex-ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kp-kubeport-dex
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: dex
+spec:
+  ingressClassName: "traefik"
+  tls:
+    - hosts:
+        - "dex.example.test"
+      secretName: "kp-kubeport-dex-tls"
+  rules:
+    - host: "dex.example.test"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kp-kubeport-dex
+                port:
+                  number: 5556
+---
 # Source: kubeport/templates/ingress.yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -979,6 +1463,26 @@ spec:
   secretName: "kp-kubeport-tls"
   dnsNames:
     - "kp.test.local"
+  issuerRef:
+    kind: "ClusterIssuer"
+    name: "letsencrypt-prod"
+---
+# Source: kubeport/templates/dex-certificate.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kp-kubeport-dex
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: dex
+spec:
+  secretName: "kp-kubeport-dex-tls"
+  dnsNames:
+    - "dex.example.test"
   issuerRef:
     kind: "ClusterIssuer"
     name: "letsencrypt-prod"

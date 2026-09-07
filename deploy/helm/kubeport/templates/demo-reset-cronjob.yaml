@@ -1,0 +1,106 @@
+{{- if .Values.demo.enabled -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: demo-reset
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: demo-reset
+  namespace: {{ .Values.demo.namespace }}
+rules:
+  - apiGroups: ["", "apps", "batch", "networking.k8s.io"]
+    resources: ["*"]
+    verbs: ["get", "list", "delete", "deletecollection"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: demo-reset
+  namespace: {{ .Values.demo.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: demo-reset
+subjects:
+  - kind: ServiceAccount
+    name: demo-reset
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "kubeport.fullname" . }}-demo-reset
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.demo.resetSchedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 600
+      template:
+        spec:
+          serviceAccountName: demo-reset
+          restartPolicy: Never
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          initContainers:
+            - name: wipe-k8s
+              image: {{ .Values.demo.kubectlImage | quote }}
+              command: ["sh", "-c"]
+              args:
+                - kubectl -n {{ .Values.demo.namespace }} delete deploy,sts,ds,job,cronjob,svc,cm,secret,pod --all --wait=false --ignore-not-found
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+          containers:
+            - name: seed
+              image: {{ include "kubeport.backend.image" . }}
+              command: ["/seed-demo", "--reset"]
+              envFrom:
+                - secretRef:
+                    name: {{ include "kubeport.auth.secretName" . }}
+              env:
+                - name: KBP_API_BASE_URL
+                  value: {{ printf "http://%s:%v" (include "kubeport.backend.fullname" .) .Values.backend.service.port | quote }}
+                - name: DEMO_OIDC_ISSUER
+                  value: {{ include "kubeport.dex.issuer" . | quote }}
+                - name: DEMO_OIDC_CLIENT_ID
+                  value: {{ .Values.dex.clientId | quote }}
+                - name: DEMO_ADMIN_EMAIL
+                  value: {{ .Values.demo.adminEmail | quote }}
+                - name: DEMO_USER_EMAIL
+                  value: {{ .Values.demo.userEmail | quote }}
+                - name: DEMO_CLUSTER
+                  value: {{ .Values.demo.cluster | quote }}
+                - name: DEMO_NAMESPACE
+                  value: {{ .Values.demo.namespace | quote }}
+                - name: KBP_DEMO_EMAIL_DOMAIN
+                  value: {{ .Values.demo.emailDomain | quote }}
+                - name: DEMO_ADMIN_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "kubeport.fullname" . }}-demo
+                      key: DEMO_ADMIN_PASSWORD
+                - name: DEMO_USER_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "kubeport.fullname" . }}-demo
+                      key: DEMO_USER_PASSWORD
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "kubeport.fullname" . }}-demo
+type: Opaque
+data:
+  DEMO_ADMIN_PASSWORD: {{ required "demo.adminPassword is required when demo.enabled=true" .Values.demo.adminPassword | b64enc | quote }}
+  DEMO_USER_PASSWORD: {{ required "demo.userPassword is required when demo.enabled=true" .Values.demo.userPassword | b64enc | quote }}
+{{- end -}}

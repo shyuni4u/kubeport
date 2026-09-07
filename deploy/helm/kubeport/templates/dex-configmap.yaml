@@ -1,0 +1,33 @@
+{{- if .Values.dex.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kubeport.dex.fullname" . }}
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dex
+data:
+  config.yaml: |
+    issuer: {{ include "kubeport.dex.issuer" . }}
+    storage:
+      type: memory
+    web:
+      http: 0.0.0.0:5556
+    oauth2:
+      passwordConnector: local
+      skipApprovalScreen: true
+    enablePasswordDB: true
+    staticClients:
+      - id: {{ .Values.dex.clientId }}
+        name: kubeport demo
+        secretEnv: DEX_CLIENT_SECRET
+        redirectURIs:
+          - {{ include "kubeport.oidc.redirectUri" . }}
+    staticPasswords:
+      {{- range .Values.dex.staticPasswords }}
+      - email: {{ .email | quote }}
+        username: {{ .username | quote }}
+        userID: {{ .userID | quote }}
+        hash: {{ required "dex.staticPasswords[].hash is required" .hash | quote }}
+      {{- end }}
+{{- end -}}

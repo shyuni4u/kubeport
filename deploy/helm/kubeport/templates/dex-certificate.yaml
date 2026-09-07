@@ -1,0 +1,16 @@
+{{- if and .Values.dex.enabled .Values.tls.enabled .Values.tls.certManager.enabled -}}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "kubeport.dex.fullname" . }}
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dex
+spec:
+  secretName: {{ printf "%s-tls" (include "kubeport.dex.fullname" .) | quote }}
+  dnsNames:
+    - {{ required "dex.host is required when dex.enabled" .Values.dex.host | quote }}
+  issuerRef:
+    kind: {{ .Values.tls.certManager.issuerKind | quote }}
+    name: {{ required "tls.certManager.issuerName is required" .Values.tls.certManager.issuerName | quote }}
+{{- end -}}

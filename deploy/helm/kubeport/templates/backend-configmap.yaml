@@ -8,10 +8,15 @@ data:
   LISTEN_ADDR: {{ printf ":%v" .Values.backend.service.port | quote }}
   OIDC_ISSUER: {{ required "oidc.issuer is required" .Values.oidc.issuer | quote }}
   OIDC_AUDIENCE: {{ required "oidc.audience is required" .Values.oidc.audience | quote }}
+  KBP_OIDC_ISSUERS: {{ include "kubeport.oidcIssuersJSON" . | quote }}
   KBP_OPENAPI_CACHE_MAX: {{ .Values.backend.openapiCacheMax | quote }}
-  {{- with .Values.auth.devAdminEmails }}
+  {{- if .Values.demo.enabled }}
+  KBP_DEMO_EMAIL_DOMAIN: {{ .Values.demo.emailDomain | quote }}
+  {{- end }}
+  {{- with include "kubeport.devAdminEmails" . }}
   # Bootstrap admin(s): matching login emails are granted the kubeport-admin
   # group in-app. Intended for demo/bootstrap when the IdP (e.g. Google) emits
-  # no groups claim. Leave empty for group-aware IdPs.
+  # no groups claim. Leave empty for group-aware IdPs. Includes demo.adminEmail
+  # when demo.enabled=true.
   KBP_DEV_ADMIN_EMAILS: {{ . | quote }}
   {{- end }}

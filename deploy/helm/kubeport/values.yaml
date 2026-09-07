@@ -145,6 +145,51 @@ securityContext:
   capabilities:
     drop: ["ALL"]
 
+# ----- Dex (optional self-hosted demo IdP) --------------------------------
+# Static-password OIDC IdP for a public demo login, alongside the primary
+# oidc.* IdP (e.g. Google). Backend accepts tokens from both issuers
+# (KBP_OIDC_ISSUERS). See README "Demo mode (Dex)" for setup.
+dex:
+  enabled: false
+  host: ""                       # e.g. dex.kubeport.enzo.kr (required when enabled)
+  image: ghcr.io/dexidp/dex:v2.39.0
+  clientId: kubeport-demo
+  clientSecret: ""                # --set, never commit. Also set via an
+                                   # external Secret's DEMO_OIDC_CLIENT_SECRET
+                                   # key when auth.create=false.
+  # bcrypt hashes: htpasswd -bnBC 10 "" '<pw>' | tr -d ':\n'
+  staticPasswords:
+    - email: demo-admin@demo.kubeport
+      username: demo-admin
+      userID: demo-admin-000
+      hash: ""
+    - email: demo-user@demo.kubeport
+      username: demo-user
+      userID: demo-user-000
+      hash: ""
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ----- Demo mode (namespace + quota + RBAC + reset CronJob) --------------
+demo:
+  enabled: false
+  namespace: demo
+  emailDomain: demo.kubeport
+  adminEmail: demo-admin@demo.kubeport
+  userEmail: demo-user@demo.kubeport
+  passwordHint: ""                # shown on landing (public by design)
+  adminPassword: ""               # --set; used by the reset job only
+  userPassword: ""                # --set
+  cluster: oci-a1
+  resetSchedule: "0 */6 * * *"
+  kubectlImage: bitnami/kubectl:1.31
+  usernamePrefix: "dex:"          # must match k3s AuthenticationConfiguration
+
 nodeSelector: {}
 tolerations: []
 affinity: {}
