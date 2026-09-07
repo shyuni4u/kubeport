@@ -9,6 +9,7 @@ import { useDebouncedCallback } from "use-debounce";
 import { DynamicForm } from "@/components/DynamicForm";
 import { RBACCheckPanel } from "@/components/RBACCheckPanel";
 import { ResourcesPreview } from "@/components/ResourcesPreview";
+import { withDemoSuffix } from "@/lib/demo";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -26,6 +27,7 @@ type Props = {
   spec: UISpec;
   updateReleaseId?: string;
   initialValues?: Record<string, unknown>;
+  isDemo?: boolean;
 };
 
 type Meta = { name: string; cluster: string; namespace: string };
@@ -37,6 +39,7 @@ export function DeployClient({
   spec,
   updateReleaseId,
   initialValues,
+  isDemo,
 }: Props) {
   const router = useRouter();
   const t = useTranslations("deploy");
@@ -56,7 +59,7 @@ export function DeployClient({
   );
 
   const [meta, setMeta] = useState<Meta>({
-    name: "",
+    name: isDemo && !isUpdate ? withDemoSuffix(templateName, true) : "",
     cluster: "",
     namespace: "default",
   });

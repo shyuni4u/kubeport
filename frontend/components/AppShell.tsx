@@ -1,6 +1,8 @@
 import { getTranslations } from "next-intl/server";
 import { apiFetch } from "@/lib/api-server";
+import { isDemoEmail, nextResetAt } from "@/lib/demo";
 import { roleFromGroups } from "@/lib/role";
+import { DemoBanner } from "./DemoBanner";
 import { LocaleSwitch } from "./LocaleSwitch";
 import { MobileSidebar } from "./MobileSidebar";
 import { Sidebar } from "./Sidebar";
@@ -34,6 +36,9 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
             </a>
           )}
         </header>
+        {isDemoEmail(me?.email) && (
+          <DemoBanner resetAtIso={nextResetAt(new Date()).toISOString()} />
+        )}
         <main className="flex-1 overflow-auto">
           <div className="mx-auto w-full max-w-7xl p-6">{children}</div>
         </main>

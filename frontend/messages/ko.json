@@ -23,7 +23,18 @@
     "empty": "데이터가 없습니다."
   },
   "demo": {
+    "banner": "데모 세션입니다. 다음 초기화: {time}",
+    "dismiss": "닫기",
     "restricted": "데모 계정에서는 사용할 수 없습니다."
+  },
+  "landing": {
+    "tagline": "YAML 은 관리자가, 폼은 사용자가. Kubernetes 셀프서비스 포털.",
+    "tryAdmin": "관리자로 체험",
+    "tryUser": "사용자로 체험",
+    "loginPrimary": "Google 로 로그인",
+    "demoNote": "실제 클러스터에 배포됩니다 · 6시간마다 초기화 · 개인 데이터를 남기지 마세요",
+    "demoCreds": "데모 비밀번호: {password}",
+    "goCatalog": "카탈로그로 이동"
   },
   "catalog": {
     "title": "카탈로그",

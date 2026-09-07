@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api-server";
+import { isDemoEmail } from "@/lib/demo";
 import { notFound } from "next/navigation";
 import YAML from "yaml";
 
@@ -39,6 +40,8 @@ export default async function DeployPage({
     fields: [],
   };
 
+  const me = await apiFetch("/v1/me").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+
   return (
     <DeployClient
       templateName={name}
@@ -46,6 +49,7 @@ export default async function DeployPage({
       team={t.owning_team_name}
       spec={spec}
       updateReleaseId={updateReleaseId}
+      isDemo={isDemoEmail(me?.email)}
     />
   );
 }
