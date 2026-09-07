@@ -61,6 +61,23 @@ func TestMultiVerifier_UnknownIssuerRejected(t *testing.T) {
 	require.Contains(t, err.Error(), "unknown issuer")
 }
 
+// Discovery is lazy: an unreachable issuer must not fail construction, but
+// verifying a token minted by it must surface the discovery error (-> 401),
+// and the failure must not be cached.
+func TestMultiVerifier_UnreachableIssuerIsLazy(t *testing.T) {
+	ctx := context.Background()
+	const dead = "https://127.0.0.1:1/dead-issuer"
+	m, err := auth.NewMultiVerifier(ctx, []auth.IssuerConfig{{Issuer: dead, ClientID: "kubeport"}})
+	require.NoError(t, err, "unreachable issuer must not be fatal at construction")
+	require.Equal(t, []string{dead}, m.Issuers())
+
+	tok := fakeJWT(t, map[string]any{"iss": dead, "sub": "x"})
+	_, err = m.Verify(ctx, tok)
+	require.Error(t, err, "verify against an undiscoverable issuer must fail")
+	_, err = m.Verify(ctx, tok)
+	require.Error(t, err, "retry must still fail, not panic on a cached nil")
+}
+
 func TestMultiVerifier_RoutesToDex(t *testing.T) {
 	if os.Getenv("SKIP_OIDC") != "" {
 		t.Skip("SKIP_OIDC set")

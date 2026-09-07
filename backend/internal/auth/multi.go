@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
+	"sync"
 )
 
 // IssuerConfig is one trusted OIDC issuer + the audience (client_id) tokens
@@ -44,25 +46,64 @@ func ParseIssuersJSON(raw string) ([]IssuerConfig, error) {
 // unverified `iss` claim to pick the right per-issuer Verifier; that
 // Verifier then performs full signature/audience/expiry validation, so a
 // forged `iss` only ever selects a verifier that will reject the token.
+//
+// Discovery is lazy: a per-issuer *Verifier is built on first use and cached.
+// An issuer that is unreachable at startup (e.g. the demo Dex is deployed
+// after the backend, or its Certificate is not Ready yet) therefore logs a
+// warning instead of killing the process; requests carrying its tokens get
+// 401 until discovery succeeds, and every request retries.
 type MultiVerifier struct {
+	cfgs  map[string]IssuerConfig
+	order []string
+
+	mu       sync.Mutex
 	byIssuer map[string]*Verifier
-	order    []string
 }
 
 func NewMultiVerifier(ctx context.Context, cfgs []IssuerConfig) (*MultiVerifier, error) {
 	if len(cfgs) == 0 {
 		return nil, errors.New("NewMultiVerifier: no issuers")
 	}
-	m := &MultiVerifier{byIssuer: make(map[string]*Verifier, len(cfgs))}
+	m := &MultiVerifier{
+		cfgs:     make(map[string]IssuerConfig, len(cfgs)),
+		byIssuer: make(map[string]*Verifier, len(cfgs)),
+	}
 	for _, c := range cfgs {
-		v, err := NewVerifier(ctx, c.Issuer, c.ClientID)
-		if err != nil {
-			return nil, fmt.Errorf("issuer %s: %w", c.Issuer, err)
+		if c.Issuer == "" || c.ClientID == "" {
+			return nil, errors.New("NewMultiVerifier: issuer and client_id are required")
 		}
-		m.byIssuer[c.Issuer] = v
+		if _, dup := m.cfgs[c.Issuer]; dup {
+			return nil, fmt.Errorf("NewMultiVerifier: duplicate issuer %q", c.Issuer)
+		}
+		m.cfgs[c.Issuer] = c
 		m.order = append(m.order, c.Issuer)
+		// Warm the cache so a healthy deploy fails fast on a *config* mistake,
+		// but never make an unreachable issuer fatal.
+		if _, err := m.verifierFor(ctx, c.Issuer); err != nil {
+			log.Printf("WARN: issuer %s discovery failed: %v (will retry on first use)", c.Issuer, err)
+		}
 	}
 	return m, nil
+}
+
+// verifierFor returns the cached Verifier for iss, performing OIDC discovery
+// on first use. Failures are not cached, so the next request retries.
+func (m *MultiVerifier) verifierFor(ctx context.Context, iss string) (*Verifier, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if v, ok := m.byIssuer[iss]; ok {
+		return v, nil
+	}
+	c, ok := m.cfgs[iss]
+	if !ok {
+		return nil, fmt.Errorf("unknown issuer %q", iss)
+	}
+	v, err := NewVerifier(ctx, c.Issuer, c.ClientID)
+	if err != nil {
+		return nil, fmt.Errorf("issuer %s: %w", c.Issuer, err)
+	}
+	m.byIssuer[iss] = v
+	return v, nil
 }
 
 // Issuers returns the configured issuer URLs in configuration order.
@@ -73,9 +114,9 @@ func (m *MultiVerifier) Verify(ctx context.Context, rawToken string) (Claims, er
 	if err != nil {
 		return Claims{}, err
 	}
-	v, ok := m.byIssuer[iss]
-	if !ok {
-		return Claims{}, fmt.Errorf("unknown issuer %q", iss)
+	v, err := m.verifierFor(ctx, iss)
+	if err != nil {
+		return Claims{}, err
 	}
 	return v.Verify(ctx, rawToken)
 }
