@@ -166,7 +166,8 @@ jobs:
           OIDC_AUDIENCE: "kubeport"
           OIDC_CA_FILE: "${{ github.workspace }}/deploy/docker/certs/dex.crt"
           APP_ENCRYPTION_KEY_B64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-          KBP_DEV_ADMIN_EMAILS: "admin@example.com"
+          KBP_DEV_ADMIN_EMAILS: "admin@example.com,demo-admin@demo.kubeport"
+          KBP_DEMO_EMAIL_DOMAIN: "demo.kubeport"
         run: |
           nohup ./bin/kubeport-server > /tmp/backend.log 2>&1 &
           echo $! > /tmp/backend.pid
@@ -198,6 +199,35 @@ jobs:
           # /v1/me is the warm-up endpoint that upserts the user row so
           # admin can add them to teams.
           curl -fs -H "Authorization: Bearer $ALI" http://localhost:8080/v1/me >/dev/null
+          DEMO_ADMIN_TOK=$(curl -sk -X POST https://host.docker.internal:5556/token \
+            -d grant_type=password -d client_id=kubeport -d client_secret=local-dev-secret \
+            -d username=demo-admin@demo.kubeport -d password=demo \
+            -d 'scope=openid email profile groups' | jq -r .id_token)
+          curl -fs -H "Authorization: Bearer $DEMO_ADMIN_TOK" http://localhost:8080/v1/me >/dev/null
+          DEMO_USER_TOK=$(curl -sk -X POST https://host.docker.internal:5556/token \
+            -d grant_type=password -d client_id=kubeport -d client_secret=local-dev-secret \
+            -d username=demo-user@demo.kubeport -d password=demo \
+            -d 'scope=openid email profile groups' | jq -r .id_token)
+          curl -fs -H "Authorization: Bearer $DEMO_USER_TOK" http://localhost:8080/v1/me >/dev/null
+          # kind trusts the id_token email claim verbatim (no username prefix).
+          kubectl --context kind-kubeport create rolebinding demo-admin --clusterrole=admin --user=demo-admin@demo.kubeport -n default
+          kubectl --context kind-kubeport create rolebinding demo-user  --clusterrole=edit  --user=demo-user@demo.kubeport  -n default
+
+      - name: Seed demo data
+        env:
+          DEMO_OIDC_ISSUER: "https://host.docker.internal:5556"
+          DEMO_OIDC_CLIENT_ID: "kubeport"
+          DEMO_OIDC_CLIENT_SECRET: "local-dev-secret"
+          OIDC_CA_FILE: "${{ github.workspace }}/deploy/docker/certs/dex.crt"
+          KBP_API_BASE_URL: "http://localhost:8080"
+          DEMO_ADMIN_EMAIL: "demo-admin@demo.kubeport"
+          DEMO_ADMIN_PASSWORD: "demo"
+          DEMO_USER_EMAIL: "demo-user@demo.kubeport"
+          DEMO_USER_PASSWORD: "demo"
+          DEMO_CLUSTER: "kind"
+          DEMO_NAMESPACE: "default"
+          KBP_DEMO_EMAIL_DOMAIN: "demo.kubeport"
+        run: cd backend && go run ./cmd/seed-demo
 
       - name: Install frontend deps
         run: cd frontend && pnpm install --frozen-lockfile
@@ -217,6 +247,14 @@ jobs:
           OIDC_CLIENT_ID=kubeport
           OIDC_CLIENT_SECRET=local-dev-secret
           OIDC_REDIRECT_URI=http://localhost:3000/api/auth/callback
+
+          DEMO_OIDC_ISSUER=https://host.docker.internal:5556
+          DEMO_OIDC_CLIENT_ID=kubeport
+          DEMO_OIDC_CLIENT_SECRET=local-dev-secret
+          DEMO_EMAIL_DOMAIN=demo.kubeport
+          DEMO_ADMIN_EMAIL=demo-admin@demo.kubeport
+          DEMO_USER_EMAIL=demo-user@demo.kubeport
+          DEMO_PASSWORD_HINT=demo
           EOF
 
       - name: Run frontend

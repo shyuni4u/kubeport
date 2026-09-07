@@ -14,6 +14,7 @@ async function loginAs(
   email: string,
   password: string,
   stateFile: string,
+  provider: "primary" | "demo" = "primary",
 ): Promise<void> {
   if (existsSync(stateFile)) return;
   const browser = await chromium.launch();
@@ -21,7 +22,11 @@ async function loginAs(
   // own context here), so all URLs must be absolute.
   const ctx = await browser.newContext({ baseURL: BASE_URL, ignoreHTTPSErrors: true });
   const page = await ctx.newPage();
-  await page.goto(`${BASE_URL}/api/auth/login`);
+  const loginUrl =
+    provider === "demo"
+      ? `${BASE_URL}/api/auth/login?provider=demo&hint=${encodeURIComponent(email)}`
+      : `${BASE_URL}/api/auth/login`;
+  await page.goto(loginUrl);
   // Dex login form — input names are "login" (email) and "password"
   await page.locator('input[name="login"]').fill(email);
   await page.locator('input[name="password"]').fill(password);
@@ -53,5 +58,17 @@ export async function adminStorage(): Promise<string> {
 export async function aliceStorage(): Promise<string> {
   const p = "tests/e2e/.auth/alice.json";
   await loginAs("alice@example.com", "alice", p);
+  return p;
+}
+
+export async function demoAdminStorage(): Promise<string> {
+  const p = "tests/e2e/.auth/demo-admin.json";
+  await loginAs("demo-admin@demo.kubeport", "demo", p, "demo");
+  return p;
+}
+
+export async function demoUserStorage(): Promise<string> {
+  const p = "tests/e2e/.auth/demo-user.json";
+  await loginAs("demo-user@demo.kubeport", "demo", p, "demo");
   return p;
 }

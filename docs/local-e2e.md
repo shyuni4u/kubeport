@@ -151,6 +151,17 @@ YAML
 claims (see **Known limits**). The `system:authenticated` binding is what
 actually lets alice deploy.
 
+Demo users need their own bindings — the `system:authenticated` binding above
+already covers `edit`-level access, but the demo admin needs `admin` to
+manage its own seeded resources. kind's OIDC integration trusts the id_token
+`email` claim verbatim (no `dex:` username prefix like some managed
+clusters), so bind the raw email addresses:
+
+```bash
+kubectl create rolebinding demo-admin --clusterrole=admin --user=demo-admin@demo.kubeport -n default
+kubectl create rolebinding demo-user  --clusterrole=edit  --user=demo-user@demo.kubeport  -n default
+```
+
 ### 7. Backend
 
 ```bash
@@ -161,12 +172,18 @@ LISTEN_ADDR=:8080 \
   OIDC_AUDIENCE=kubeport \
   OIDC_CA_FILE="$(pwd)/../deploy/docker/certs/dex.crt" \
   APP_ENCRYPTION_KEY_B64="$(openssl rand -base64 32)" \
-  KBP_DEV_ADMIN_EMAILS=admin@example.com \
+  KBP_DEV_ADMIN_EMAILS=admin@example.com,demo-admin@demo.kubeport \
+  KBP_DEMO_EMAIL_DOMAIN=demo.kubeport \
   go run ./cmd/server
 ```
 
 `KBP_DEV_ADMIN_EMAILS` is how we fake the `kubeport-admin` group locally —
 see **Known limits**. Never set in prod.
+
+`KBP_DEMO_EMAIL_DOMAIN` marks any user whose email ends in that domain as a
+demo account — the backend then rejects mutating requests outside the
+seeded demo scope (`demo-restricted`, see `internal/api/middleware.go`).
+Leave unset to disable demo restrictions entirely.
 
 ### 8. Frontend
 
@@ -181,6 +198,15 @@ OIDC_ISSUER=https://host.docker.internal:5556
 OIDC_CLIENT_ID=kubeport
 OIDC_CLIENT_SECRET=local-dev-secret
 OIDC_REDIRECT_URI=http://localhost:3000/api/auth/callback
+
+# Demo provider (locally the same dex + client as primary)
+DEMO_OIDC_ISSUER=https://host.docker.internal:5556
+DEMO_OIDC_CLIENT_ID=kubeport
+DEMO_OIDC_CLIENT_SECRET=local-dev-secret
+DEMO_EMAIL_DOMAIN=demo.kubeport
+DEMO_ADMIN_EMAIL=demo-admin@demo.kubeport
+DEMO_USER_EMAIL=demo-user@demo.kubeport
+DEMO_PASSWORD_HINT=demo
 ```
 
 Start with the CA path exported (Next.js openid-client must trust the self-
@@ -227,6 +253,33 @@ JSON
 curl -s -H "Authorization: Bearer $ADM" -X POST \
   http://localhost:8080/v1/templates/web/versions/1/publish
 ```
+
+### 9b. Seed demo data
+
+Populates the demo catalog (3 templates, incl. the "웹 앱" / "야간 배치" ones
+the e2e demo spec asserts on) and a couple of releases, owned by the two demo
+dex users from Step 1 above. Requires the demo RBAC bindings from §6 and the
+backend running with `KBP_DEMO_EMAIL_DOMAIN` set (§7).
+
+```bash
+cd backend
+DEMO_OIDC_ISSUER=https://host.docker.internal:5556 \
+  DEMO_OIDC_CLIENT_ID=kubeport \
+  DEMO_OIDC_CLIENT_SECRET=local-dev-secret \
+  OIDC_CA_FILE="$(pwd)/../deploy/docker/certs/dex.crt" \
+  KBP_API_BASE_URL=http://localhost:8080 \
+  DEMO_ADMIN_EMAIL=demo-admin@demo.kubeport \
+  DEMO_ADMIN_PASSWORD=demo \
+  DEMO_USER_EMAIL=demo-user@demo.kubeport \
+  DEMO_USER_PASSWORD=demo \
+  DEMO_CLUSTER=kind \
+  DEMO_NAMESPACE=default \
+  KBP_DEMO_EMAIL_DOMAIN=demo.kubeport \
+  go run ./cmd/seed-demo
+```
+
+Pass `-reset` to delete demo-owned rows first (requires `DATABASE_URL`) before
+reseeding — useful after schema changes or a dirty local DB.
 
 ### 10. Browser
 
@@ -380,6 +433,22 @@ manual playbook.
 - **Self-signed cert.** Browsers need the one-time exception. `NODE_EXTRA_CA_CERTS` (Next.js) and `OIDC_CA_FILE` (Go) handle the server-side trust.
 
 - **kindest/node image.** Default pulled by kind v0.23 is k8s 1.30. That's the one that requires https OIDC. On older kind versions pinned to 1.29, plain http works but you then diverge from the current kind defaults.
+
+- **Restarting dex rotates its signing keys.** dex's `storage.type` is `memory`
+  (see `deploy/docker/dex.yaml`) — it has no persisted key material, so every
+  `docker compose restart dex` mints a fresh signing key on boot. The kind
+  apiserver caches dex's JWKS response and doesn't notice the rotation, so
+  tokens issued after the restart fail apiserver-side verification with a
+  generic 401 until the apiserver's JWKS cache is invalidated. Force a refresh
+  by restarting the apiserver static pod:
+
+  ```bash
+  docker exec kubeport-control-plane sh -c 'touch /etc/kubernetes/manifests/kube-apiserver.yaml'
+  ```
+
+  kubelet detects the manifest mtime change and restarts the pod, which
+  re-fetches JWKS on the next token verification. If that doesn't clear it,
+  recreate the kind cluster (§5) — cheaper than debugging a wedged JWKS cache.
 
 ## Tear down
 
