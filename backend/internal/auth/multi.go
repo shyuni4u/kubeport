@@ -9,7 +9,19 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 )
+
+// discoveryTimeout bounds how long a single OIDC discovery attempt (HTTP GET
+// of /.well-known/openid-configuration + JWKS fetch inside oidc.NewProvider)
+// may take. Without this, an unreachable/blackholed issuer would hang the
+// request indefinitely.
+const discoveryTimeout = 5 * time.Second
+
+// negativeCacheTTL bounds how often a failed issuer is retried. Without it,
+// every request against a persistently-unreachable issuer pays a full
+// discoveryTimeout dial on every call.
+const negativeCacheTTL = 10 * time.Second
 
 // IssuerConfig is one trusted OIDC issuer + the audience (client_id) tokens
 // from it must carry. Serialized as JSON in KBP_OIDC_ISSUERS.
@@ -52,12 +64,25 @@ func ParseIssuersJSON(raw string) ([]IssuerConfig, error) {
 // after the backend, or its Certificate is not Ready yet) therefore logs a
 // warning instead of killing the process; requests carrying its tokens get
 // 401 until discovery succeeds, and every request retries.
+// issuerState holds the lazily-built Verifier for one issuer plus its own
+// lock, so that discovery for one issuer never blocks verification of
+// tokens from any other issuer.
+type issuerState struct {
+	mu       sync.Mutex
+	verifier *Verifier
+	lastFail time.Time
+	failErr  error
+}
+
 type MultiVerifier struct {
 	cfgs  map[string]IssuerConfig
 	order []string
 
-	mu       sync.Mutex
-	byIssuer map[string]*Verifier
+	// states is populated once at construction (one entry per configured
+	// issuer) and never mutated afterwards, so it can be read without a
+	// lock; only the *issuerState values it points to are mutated, each
+	// under its own mutex.
+	states map[string]*issuerState
 }
 
 func NewMultiVerifier(ctx context.Context, cfgs []IssuerConfig) (*MultiVerifier, error) {
@@ -65,8 +90,8 @@ func NewMultiVerifier(ctx context.Context, cfgs []IssuerConfig) (*MultiVerifier,
 		return nil, errors.New("NewMultiVerifier: no issuers")
 	}
 	m := &MultiVerifier{
-		cfgs:     make(map[string]IssuerConfig, len(cfgs)),
-		byIssuer: make(map[string]*Verifier, len(cfgs)),
+		cfgs:   make(map[string]IssuerConfig, len(cfgs)),
+		states: make(map[string]*issuerState, len(cfgs)),
 	}
 	for _, c := range cfgs {
 		if c.Issuer == "" || c.ClientID == "" {
@@ -77,6 +102,9 @@ func NewMultiVerifier(ctx context.Context, cfgs []IssuerConfig) (*MultiVerifier,
 		}
 		m.cfgs[c.Issuer] = c
 		m.order = append(m.order, c.Issuer)
+		m.states[c.Issuer] = &issuerState{}
+	}
+	for _, c := range cfgs {
 		// Warm the cache so a healthy deploy fails fast on a *config* mistake,
 		// but never make an unreachable issuer fatal.
 		if _, err := m.verifierFor(ctx, c.Issuer); err != nil {
@@ -87,22 +115,41 @@ func NewMultiVerifier(ctx context.Context, cfgs []IssuerConfig) (*MultiVerifier,
 }
 
 // verifierFor returns the cached Verifier for iss, performing OIDC discovery
-// on first use. Failures are not cached, so the next request retries.
+// (bounded by discoveryTimeout) on first use. Each issuer has its own lock,
+// so a slow/unreachable issuer only ever blocks callers for that same
+// issuer, never callers verifying tokens from other issuers. A failed
+// discovery is negatively cached for negativeCacheTTL so a persistently
+// unreachable issuer doesn't pay a full discoveryTimeout dial on every call.
 func (m *MultiVerifier) verifierFor(ctx context.Context, iss string) (*Verifier, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if v, ok := m.byIssuer[iss]; ok {
-		return v, nil
-	}
-	c, ok := m.cfgs[iss]
+	st, ok := m.states[iss]
 	if !ok {
 		return nil, fmt.Errorf("unknown issuer %q", iss)
 	}
-	v, err := NewVerifier(ctx, c.Issuer, c.ClientID)
-	if err != nil {
-		return nil, fmt.Errorf("issuer %s: %w", c.Issuer, err)
+	c := m.cfgs[iss]
+
+	st.mu.Lock()
+	defer st.mu.Unlock()
+
+	if st.verifier != nil {
+		return st.verifier, nil
 	}
-	m.byIssuer[iss] = v
+	if !st.lastFail.IsZero() && time.Since(st.lastFail) < negativeCacheTTL {
+		return nil, st.failErr
+	}
+
+	dctx, cancel := context.WithTimeout(ctx, discoveryTimeout)
+	defer cancel()
+
+	v, err := NewVerifier(dctx, c.Issuer, c.ClientID)
+	if err != nil {
+		wrapped := fmt.Errorf("issuer %s: %w", c.Issuer, err)
+		st.lastFail = time.Now()
+		st.failErr = wrapped
+		return nil, wrapped
+	}
+	st.verifier = v
+	st.lastFail = time.Time{}
+	st.failErr = nil
 	return v, nil
 }
 
