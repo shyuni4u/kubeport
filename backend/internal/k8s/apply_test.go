@@ -1,9 +1,17 @@
 package k8s_test
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	clientgotesting "k8s.io/client-go/testing"
 
 	"kubeport/internal/k8s"
 )
@@ -68,4 +76,40 @@ func TestPluralize_KnownKinds(t *testing.T) {
 func TestPluralize_UnknownKindReturnsEmpty(t *testing.T) {
 	require.Equal(t, "", k8s.Pluralize("Foo"))
 	require.Equal(t, "", k8s.Pluralize(""))
+}
+
+// TestDeleteByRelease_ToleratesForbiddenAndNotFound covers RBAC-scoped
+// callers such as the demo Roles (deploy/helm/kubeport/templates/demo-rbac.yaml),
+// which deliberately omit some MVP resource groups/kinds. A Forbidden or
+// NotFound on one resource in the fixed mvpResources sweep must not fail the
+// whole release delete.
+func TestDeleteByRelease_ToleratesForbiddenAndNotFound(t *testing.T) {
+	scheme := runtime.NewScheme()
+	dyn := dynamicfake.NewSimpleDynamicClient(scheme)
+
+	dyn.PrependReactor("delete-collection", "ingresses", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(
+			schema.GroupResource{Group: "networking.k8s.io", Resource: "ingresses"}, "", errors.New("demo RBAC does not grant this"))
+	})
+	dyn.PrependReactor("delete-collection", "persistentvolumeclaims", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: "persistentvolumeclaims"}, "")
+	})
+
+	cli := k8s.NewForTest(dyn)
+	err := cli.DeleteByRelease(context.Background(), "default", "rel-1")
+	require.NoError(t, err, "forbidden/not-found on individual resources must not fail the whole delete")
+}
+
+func TestDeleteByRelease_SurfacesOtherErrors(t *testing.T) {
+	scheme := runtime.NewScheme()
+	dyn := dynamicfake.NewSimpleDynamicClient(scheme)
+
+	dyn.PrependReactor("delete-collection", "deployments", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("boom")
+	})
+
+	cli := k8s.NewForTest(dyn)
+	err := cli.DeleteByRelease(context.Background(), "default", "rel-1")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "boom")
 }

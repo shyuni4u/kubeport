@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -129,6 +130,15 @@ func (c *Client) DeleteByRelease(ctx context.Context, namespace, release string)
 		}
 		if err := c.dyn.Resource(r).Namespace(namespace).
 			DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: sel}); err != nil {
+			// RBAC-scoped callers (e.g. demo accounts, see
+			// deploy/helm/kubeport/templates/demo-rbac.yaml) may lack access
+			// to resource groups/kinds this release never actually used
+			// (no networking group, no daemonsets/pvc, ...). Skip those
+			// instead of failing the whole release delete; a resource that's
+			// simply already gone is likewise not an error here.
+			if apierrors.IsForbidden(err) || apierrors.IsNotFound(err) {
+				continue
+			}
 			errs = append(errs, fmt.Errorf("delete %s: %w", r.Resource, err))
 		}
 	}
