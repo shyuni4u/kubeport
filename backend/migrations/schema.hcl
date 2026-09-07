@@ -338,6 +338,12 @@ table "sessions" {
     type = timestamptz
     null = false
   }
+  column "provider" {
+    type    = text
+    null    = false
+    default = "primary"
+    comment = "OIDC provider key used to mint/refresh this session: primary | demo"
+  }
   primary_key {
     columns = [column.id]
   }
