@@ -1954,6 +1954,11 @@ git commit -m "feat(helm): optional Dex demo IdP, demo namespace policy/RBAC, an
 
 ### Task 10: Local dev parity + e2e demo fixtures + smoke spec
 
+> **Carried to Plan 11**: the deploy→release→logs happy path and the admin
+> new-version authoring scenario are *not* covered by `04-demo-user.spec.ts`
+> here — they need a live cluster and are folded into Plan 11's e2e expansion
+> against the live OCI deploy.
+
 **Files:**
 - Modify: `deploy/docker/dex.yaml`, `docs/local-e2e.md`, `frontend/tests/e2e/fixtures.ts`
 - Create: `frontend/tests/e2e/04-demo-user.spec.ts`
@@ -2164,7 +2169,7 @@ DEMO_PW=$(openssl rand -base64 9 | tr -d '/+=' | cut -c1-10)   # human-typeable,
 DEX_SECRET=$(openssl rand -hex 24)
 HASH=$(htpasswd -bnBC 10 "" "$DEMO_PW" | tr -d ':\n')
 ```
-- [ ] **Step 3: helm upgrade** (from the VM, chart copy per runbook §3):
+- [ ] **Step 3: helm upgrade** (from the VM, chart copy per runbook §3). `values-oci-phase2.yaml` ships `dex.enabled: false` / `demo.enabled: false` on purpose (so routine upgrades never need these secrets), so this **first** flip must pass the full `--set` list. Afterwards `--reuse-values` carries them and later upgrades only need the image tags:
 ```bash
 helm upgrade kubeport ~/kubeport-chart/kubeport -n kubeport --reuse-values \
   -f ~/kubeport-chart/kubeport/values-oci-phase2.yaml \
@@ -2174,7 +2179,11 @@ helm upgrade kubeport ~/kubeport-chart/kubeport -n kubeport --reuse-values \
   --set demo.enabled=true --set demo.passwordHint=$DEMO_PW --set demo.adminPassword=$DEMO_PW --set demo.userPassword=$DEMO_PW
 kubectl -n kubeport get certificate   # wait for kubeport-dex Ready
 curl -s https://dex.kubeport.enzo.kr/.well-known/openid-configuration | jq .issuer
+# from INSIDE the cluster too — the backend is what has to reach Dex:
+kubectl -n kubeport exec deploy/kubeport-backend -- \
+  wget -qO- https://dex.kubeport.enzo.kr/.well-known/openid-configuration | head -c 200
 ```
+> Two-phase note: the backend does OIDC discovery **lazily** per issuer, so flipping `KBP_OIDC_ISSUERS` before Dex is up no longer crashes it — it logs `WARN: issuer … discovery failed` and 401s Dex tokens until Dex answers. Still bring Dex + its Certificate `Ready` up first and confirm the in-cluster reachability above before announcing demo login.
 - [ ] **Step 4: k3s trust** — `GOOGLE_CLIENT_ID=… bash k3s-auth-config.sh` then the `kubectl --token` checks from Task 11 Step 3.
 - [ ] **Step 5: Seed** — `kubectl -n kubeport create job --from=cronjob/kubeport-demo-reset demo-seed-initial && kubectl -n kubeport logs job/demo-seed-initial -c seed -f` → `seed-demo: done`.
 - [ ] **Step 6: Smoke in a browser** — `/` shows both demo buttons + password; "사용자로 체험" → Dex prefilled → `/catalog` shows 3 templates + banner; deploy `web-app` into `demo` → release detail shows pods; `nightly-job-demo` shows the failure explainer; as demo-admin `/admin/teams` "새 팀" returns the demo-restricted message. Google login still works.
