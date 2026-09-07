@@ -255,13 +255,29 @@ admin UI 에 클러스터 등록 화면이 아직 없으므로, admin 토큰으�
 
 ### 7.6. Demo IdP (Dex) 신뢰 추가
 
-§7.1 은 Google 만 신뢰한다. 데모용 Dex IdP(체크박스 로그인, `demo-admin@demo.kubeport` /
+§7.1 은 Google 만 신뢰한다. 데모용 Dex IdP(비밀번호 로그인, `demo-admin@demo.kubeport` /
 `demo-user@demo.kubeport`)도 신뢰하려면 `deploy/oci/k3s-auth-config.sh` 를 VM 에서 실행한다.
 
-**사전 준비**:
+**사전 준비** (순서 중요 — Dex 가 먼저 살아 있어야 한다):
 - DNS `dex.kubeport.enzo.kr` → VM 공인 IP (A 레코드 등록·전파 완료).
-- `helm upgrade` 로 `dex.enabled=true` 배포 완료 (Dex Deployment/Service/Ingress 존재).
+- `helm upgrade` 로 `dex.enabled=true` / `demo.enabled=true` 배포 완료.
+  `values-oci-phase2.yaml` 은 둘 다 `false` 이므로 **최초 1회는 아래 `--set` 목록을 반드시 명시**한다
+  (이후 `--reuse-values` 가 유지):
+
+  ```bash
+  DEMO_PW=$(openssl rand -hex 12)
+  HASH=$(htpasswd -bnBC 10 "" "$DEMO_PW" | tr -d ':
+')
+  helm upgrade kubeport deploy/helm/kubeport     -f deploy/helm/kubeport/values-oci-phase2.yaml     --namespace kubeport --reuse-values     --set dex.enabled=true     --set dex.clientSecret=$(openssl rand -hex 24)     --set "dex.staticPasswords[0].hash=$HASH"     --set "dex.staticPasswords[1].hash=$HASH"     --set demo.enabled=true     --set demo.passwordHint="$DEMO_PW"     --set demo.adminPassword="$DEMO_PW"     --set demo.userPassword="$DEMO_PW"
+  ```
+
 - Dex 인증서 발급 완료 (`kubectl get certificate -n kubeport` 에서 Dex cert `Ready=True`).
+- 클러스터 **내부에서** Dex 에 닿는지 확인. backend 는 issuer discovery 를 lazy 하게 하므로
+  Dex 가 안 뜨면 부팅이 죽지는 않지만 데모 로그인이 401 로 떨어진다:
+
+  ```bash
+  kubectl -n kubeport exec deploy/kubeport-backend --     wget -qO- https://dex.kubeport.enzo.kr/.well-known/openid-configuration | head -c 200
+  ```
 
 **실행**:
 
@@ -283,6 +299,12 @@ kubectl --token="$TOKEN" -n demo auth can-i create deployments   # yes
 kubectl --token="$TOKEN" -n default auth can-i create deployments # no
 ```
 
+데모 계정이 가드레일(quota/limitrange/networkpolicy)을 못 건드리는지도 확인:
+
+```bash
+kubectl auth can-i delete resourcequota --as=dex:demo-admin@demo.kubeport -n demo   # → no
+```
+
 **롤백**: `sudo ROLLBACK=1 bash deploy/oci/k3s-auth-config.sh` — `config.yaml.bak` 을 복원하고
 재기동·검증까지 수행한다.
 
@@ -299,7 +321,9 @@ helm upgrade kubeport deploy/helm/kubeport \
   --set images.frontend.tag=$NEW_SHA
 ```
 
-`--reuse-values` 가 첫 install 의 secret 들을 유지. backend Pod 의 `migrate` initContainer 가 매번 `atlas schema apply` 를 다시 돌리므로 schema 변경도 자동 반영.
+`--reuse-values` 가 첫 install 의 secret 들을 유지 — 데모 모드(`dex.*`/`demo.*`) 도 마찬가지로,
+§7.6 의 최초 `--set` 목록을 한 번만 주면 이후 업그레이드에서는 다시 줄 필요가 없다.
+반대로 `--reuse-values` 없이 `-f values-oci-phase2.yaml` 만 쓰면 데모 모드가 **꺼진다**. backend Pod 의 `migrate` initContainer 가 매번 `atlas schema apply` 를 다시 돌리므로 schema 변경도 자동 반영.
 
 ## Troubleshooting
 

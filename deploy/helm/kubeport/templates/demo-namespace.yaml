@@ -1,16 +1,29 @@
 {{- if .Values.demo.enabled -}}
+{{- if not .Values.dex.enabled -}}
+{{- fail "demo.enabled requires dex.enabled=true" -}}
+{{- end -}}
 apiVersion: v1
 kind: Namespace
 metadata:
   name: {{ .Values.demo.namespace }}
   labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
     kubeport.io/demo: "true"
+    # Pod Security Admission: enforce `baseline` (blocks privileged, hostPath,
+    # hostNetwork/PID/IPC, most capability escalation) while warning/auditing at
+    # `restricted`. `restricted` is not enforced because arbitrary user templates
+    # (which rarely set runAsNonRoot/seccompProfile) would be rejected outright.
+    pod-security.kubernetes.io/enforce: {{ .Values.demo.podSecurityEnforce | quote }}
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
 ---
 apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: demo-quota
   namespace: {{ .Values.demo.namespace }}
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
 spec:
   hard:
     requests.cpu: "1"
@@ -25,6 +38,8 @@ kind: LimitRange
 metadata:
   name: demo-limits
   namespace: {{ .Values.demo.namespace }}
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
 spec:
   limits:
     - type: Container
@@ -43,6 +58,8 @@ kind: NetworkPolicy
 metadata:
   name: demo-egress
   namespace: {{ .Values.demo.namespace }}
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
 spec:
   podSelector: {}
   policyTypes: [Egress]

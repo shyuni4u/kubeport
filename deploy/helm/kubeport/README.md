@@ -169,8 +169,13 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
 `demo.enabled=true` also creates:
 
 - A `demo` namespace (name from `demo.namespace`) with a `ResourceQuota`,
-  `LimitRange`, and an egress-only `NetworkPolicy` (DNS + outbound, no
-  in-cluster lateral traffic, no LoadBalancer Services, no Ingresses).
+  `LimitRange`, an egress-only `NetworkPolicy` (DNS + outbound, no
+  in-cluster lateral traffic, no LoadBalancer Services, no Ingresses), and
+  Pod Security Admission labels — `enforce: {{ demo.podSecurityEnforce }}`
+  (default `baseline`), `warn`/`audit: restricted`. `baseline` is the default
+  because `restricted` would reject ordinary user templates that do not set
+  `runAsNonRoot`/`seccompProfile`; raise it with
+  `--set demo.podSecurityEnforce=restricted` for a stricter demo.
 - `demo-admin`/`demo-user` `Role`s + `RoleBinding`s scoped to that namespace,
   plus a cluster-scoped `ClusterRole`/`ClusterRoleBinding` granting
   `selfsubjectaccessreviews` (create) — the RBAC panel needs this even for
@@ -178,6 +183,17 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
 - A `demo-reset` `CronJob` (`demo.resetSchedule`, default every 6 hours) that
   wipes all objects in the demo namespace and re-seeds it via
   `/seed-demo --reset` (shipped in the backend image).
+
+Both demo `Role`s enumerate workload resources explicitly — neither can touch
+the guardrails (`resourcequotas`, `limitranges`, `networkpolicies`) or use
+`pods/exec`. Verify after install:
+
+```bash
+kubectl auth can-i delete resourcequota --as=dex:demo-admin@demo.kubeport -n demo   # → no
+```
+
+`demo.enabled=true` requires `dex.enabled=true` (the chart fails the render
+otherwise) — the demo RBAC subjects are Dex-issued usernames.
 
 `dex.enabled=true` renders a `ClusterIP` Service + Deployment for Dex, plus
 an `Ingress`/`Certificate` on `dex.host` (mirrors the main chart's

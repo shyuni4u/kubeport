@@ -189,6 +189,10 @@ demo:
   resetSchedule: "0 */6 * * *"
   kubectlImage: bitnami/kubectl:1.31
   usernamePrefix: "dex:"          # must match k3s AuthenticationConfiguration
+  # Pod Security Admission enforce level for the demo namespace.
+  # `baseline` blocks privileged/hostPath/hostNetwork while still allowing
+  # ordinary user templates; raise to `restricted` for a stricter demo.
+  podSecurityEnforce: baseline
 
 nodeSelector: {}
 tolerations: []
