@@ -165,25 +165,39 @@ OCI 콘솔 → Compute → Instances → `kubeport` → 좌측 Resources → **B
 
 ### 7.1. k3s 가 Google 토큰을 인증으로 수용
 
-VM 에서 `/etc/rancher/k3s/config.yaml` 생성 후 k3s 재기동:
+k8s `--oidc-*` 플래그는 `--authentication-config` 와 **동시에 쓸 수 없다.** Dex 데모 IdP(§7.6)를
+나중에 추가할 것을 감안해 처음부터 구조화된 `AuthenticationConfiguration` 형식을 쓴다. `bootstrap.sh`
+가 `BOOTSTRAP_OIDC_CLIENT_ID` 를 주면 이 형식으로 자동 작성한다(Step 2 코드 참조). 수동으로 하려면:
 
 ```bash
+sudo tee /etc/rancher/k3s/auth.yaml >/dev/null <<'EOF'
+apiVersion: apiserver.config.k8s.io/v1
+kind: AuthenticationConfiguration
+jwt:
+  - issuer:
+      url: https://accounts.google.com
+      audiences: ["<GOOGLE_CLIENT_ID>"]
+    claimMappings:
+      username: { claim: email, prefix: "" }
+EOF
 sudo tee /etc/rancher/k3s/config.yaml >/dev/null <<'EOF'
 kube-apiserver-arg:
-  - "oidc-issuer-url=https://accounts.google.com"
-  - "oidc-client-id=<GOOGLE_CLIENT_ID>"
-  - "oidc-username-claim=email"
-  - "oidc-username-prefix=-"
+  - "authentication-config=/etc/rancher/k3s/auth.yaml"
 EOF
 sudo systemctl restart k3s
 # 검증 (반드시): sudo k3s kubectl get --raw=/readyz  →  "ok"
 ```
 
-- ⚠️ **값은 반드시 큰따옴표로.** `oidc-username-prefix=oidc:` 처럼 값 끝에 콜론이 있으면 YAML 이
-  그 리스트 항목을 **맵으로 파싱**해서 k3s 가 `Error: unknown flag: --[{oidc-username-prefix ...}]`
-  로 죽는다. `oidc-username-prefix=-` 의 `-` 는 "접두어 없음" → k8s username 이 raw 이메일이 된다.
-- ⚠️ `oidc-client-id` 는 Google Client ID (backend `oidc.audience` 와 동일 값).
-- **롤백** (apiserver 가 crash-loop 하면): `sudo rm -f /etc/rancher/k3s/config.yaml && sudo systemctl restart k3s`.
+- `apiVersion` 은 k8s ≥ 1.34 면 `apiserver.config.k8s.io/v1`(GA), 1.30–1.33 이면
+  `apiserver.config.k8s.io/v1beta1`(beta). `bootstrap.sh` 는 `BOOTSTRAP_AUTH_API` 로 오버라이드 가능
+  (기본값 `v1`).
+- ⚠️ **값은 반드시 큰따옴표로.** YAML 리스트 항목 값 끝에 콜론이 있으면 맵으로 잘못 파싱돼 k3s 가
+  `Error: unknown flag: --[{...}]` 로 죽는다.
+- ⚠️ `audiences` 는 Google Client ID (backend `oidc.audience` 와 동일 값).
+- `claimMappings.username.prefix: ""` = 접두어 없음 → k8s username 이 raw 이메일이 된다(`--oidc-*`
+  플래그 시절의 `oidc-username-prefix=-` 와 동등).
+- **롤백** (apiserver 가 crash-loop 하면): `sudo rm -f /etc/rancher/k3s/config.yaml && sudo systemctl restart k3s`
+  (또는 `k3s-auth-config.sh` 로 세팅한 뒤라면 `ROLLBACK=1 sudo bash deploy/oci/k3s-auth-config.sh`).
   재기동 명령은 **롤백까지 한 번에 묶어** 실행할 것(컨트롤플레인 ~30초 블립, 앱 파드는 유지).
 
 ### 7.2. pod → apiserver 방화벽 (bootstrap 이 처리 — 배경)
@@ -235,6 +249,39 @@ admin UI 에 클러스터 등록 화면이 아직 없으므로, admin 토큰으�
 배포(클러스터 선택) → 릴리스 상세의 로그/인스턴스에 **실제 파드**가 보이면 성공.
 
 > 운영 중 이 값들을 만질 때는 [docs/oci-prod-runbook.md](../../docs/oci-prod-runbook.md) 참조.
+
+### 7.6. Demo IdP (Dex) 신뢰 추가
+
+§7.1 은 Google 만 신뢰한다. 데모용 Dex IdP(체크박스 로그인, `demo-admin@demo.kubeport` /
+`demo-user@demo.kubeport`)도 신뢰하려면 `deploy/oci/k3s-auth-config.sh` 를 VM 에서 실행한다.
+
+**사전 준비**:
+- DNS `dex.kubeport.enzo.kr` → VM 공인 IP (A 레코드 등록·전파 완료).
+- `helm upgrade` 로 `dex.enabled=true` 배포 완료 (Dex Deployment/Service/Ingress 존재).
+- Dex 인증서 발급 완료 (`kubectl get certificate -n kubeport` 에서 Dex cert `Ready=True`).
+
+**실행**:
+
+```bash
+ssh ubuntu@<public-ip>
+sudo GOOGLE_CLIENT_ID=<google-client-id> bash deploy/oci/k3s-auth-config.sh
+# 필요 시 오버라이드: DEX_ISSUER / DEX_CLIENT_ID / DEX_USERNAME_PREFIX
+```
+
+스크립트는 `/etc/rancher/k3s/auth.yaml` 에 Google + Dex 두 issuer 를 모두 쓰고, `config.yaml.bak` 을
+남기고, k3s 를 재기동해 `/readyz` 를 확인하며, 실패 시 자동 롤백한다.
+
+**검증** — Dex 토큰으로 로그인해 RBAC 스코프 확인:
+
+```bash
+TOKEN=$(curl -s -X POST https://dex.kubeport.enzo.kr/token -d grant_type=password -d client_id=kubeport-demo -d client_secret=$DEX_SECRET -d username=demo-user@demo.kubeport -d password=$DEMO_PW -d scope='openid email' | jq -r .id_token)
+kubectl --token="$TOKEN" auth whoami          # → dex:demo-user@demo.kubeport
+kubectl --token="$TOKEN" -n demo auth can-i create deployments   # yes
+kubectl --token="$TOKEN" -n default auth can-i create deployments # no
+```
+
+**롤백**: `sudo ROLLBACK=1 bash deploy/oci/k3s-auth-config.sh` — `config.yaml.bak` 을 복원하고
+재기동·검증까지 수행한다.
 
 ## Upgrade
 
