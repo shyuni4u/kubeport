@@ -265,10 +265,20 @@ admin UI 에 클러스터 등록 화면이 아직 없으므로, admin 토큰으�
   (이후 `--reuse-values` 가 유지):
 
   ```bash
-  DEMO_PW=$(openssl rand -hex 12)
-  HASH=$(htpasswd -bnBC 10 "" "$DEMO_PW" | tr -d ':
-')
-  helm upgrade kubeport deploy/helm/kubeport     -f deploy/helm/kubeport/values-oci-phase2.yaml     --namespace kubeport --reuse-values     --set dex.enabled=true     --set dex.clientSecret=$(openssl rand -hex 24)     --set "dex.staticPasswords[0].hash=$HASH"     --set "dex.staticPasswords[1].hash=$HASH"     --set demo.enabled=true     --set demo.passwordHint="$DEMO_PW"     --set demo.adminPassword="$DEMO_PW"     --set demo.userPassword="$DEMO_PW"
+  DEMO_PW=$(openssl rand -base64 9 | tr -d '/+=' | cut -c1-10)   # 사람이 칠 수 있게 짧게 — 공개되는 값
+  DEX_SECRET=$(openssl rand -hex 24)                             # 비밀번호 관리자에 저장
+  HASH=$(htpasswd -bnBC 10 "" "$DEMO_PW" | tr -d ':\n')
+  helm upgrade kubeport deploy/helm/kubeport \
+    -f deploy/helm/kubeport/values-oci-phase2.yaml \
+    --namespace kubeport --reuse-values \
+    --set dex.enabled=true --set dex.host=dex.kubeport.enzo.kr \
+    --set dex.clientSecret="$DEX_SECRET" \
+    --set "dex.staticPasswords[0].hash=$HASH" \
+    --set "dex.staticPasswords[1].hash=$HASH" \
+    --set demo.enabled=true \
+    --set demo.passwordHint="$DEMO_PW" \
+    --set demo.adminPassword="$DEMO_PW" \
+    --set demo.userPassword="$DEMO_PW"
   ```
 
 - Dex 인증서 발급 완료 (`kubectl get certificate -n kubeport` 에서 Dex cert `Ready=True`).
@@ -276,7 +286,8 @@ admin UI 에 클러스터 등록 화면이 아직 없으므로, admin 토큰으�
   Dex 가 안 뜨면 부팅이 죽지는 않지만 데모 로그인이 401 로 떨어진다:
 
   ```bash
-  kubectl -n kubeport exec deploy/kubeport-backend --     wget -qO- https://dex.kubeport.enzo.kr/.well-known/openid-configuration | head -c 200
+  kubectl -n kubeport exec deploy/kubeport-backend -- \
+    wget -qO- https://dex.kubeport.enzo.kr/.well-known/openid-configuration | head -c 200
   ```
 
 **실행**:
