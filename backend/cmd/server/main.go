@@ -65,7 +65,7 @@ func main() {
 	}
 	defer st.Close()
 
-	r := api.NewRouter(cfg, api.Deps{Verifier: verifier, Store: st, K8sFactory: k8sFactory{}})
+	r := api.NewRouter(cfg, api.Deps{Verifier: verifier, Store: st, K8sFactory: k8sFactory{}, DemoEmailDomain: cfg.DemoEmailDomain})
 	log.Printf("listening on %s", cfg.ListenAddr)
 	if err := r.Run(cfg.ListenAddr); err != nil {
 		log.Fatal(err)

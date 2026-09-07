@@ -22,6 +22,9 @@
     "loading": "로딩 중…",
     "empty": "데이터가 없습니다."
   },
+  "demo": {
+    "restricted": "데모 계정에서는 사용할 수 없습니다."
+  },
   "catalog": {
     "title": "카탈로그",
     "searchPlaceholder": "템플릿 검색…",
