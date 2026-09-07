@@ -58,6 +58,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("OIDC verifier init: %v", err)
 	}
+	// Discovery is lazy per issuer; any issuer that was unreachable just now
+	// logged a WARN above and will be retried on its first token.
 	log.Printf("trusting OIDC issuers: %v", verifier.Issuers())
 	st, err := store.NewStore(ctx, cfg.DatabaseURL)
 	if err != nil {
