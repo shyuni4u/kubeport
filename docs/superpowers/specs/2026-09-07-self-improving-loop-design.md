@@ -1,7 +1,7 @@
 # 자율 개선 루프 + 데모 모드 디자인 스펙
 
 - 날짜: 2026-09-07
-- 상태: 초안 (사용자 리뷰 대기) → 승인 시 `writing-plans` 로 Plan 13(데모 모드)·Plan 14(UX 루프)·Plan 15(기록 자동화) 작성
+- 상태: **승인됨 (2026-09-07)** → 승인 시 `writing-plans` 로 Plan 13(데모 모드)·Plan 14(UX 루프)·Plan 15(기록 자동화) 작성
 - 근거 조사: [docs/research/2026-09-07-self-improving-loop-research.md](../../research/2026-09-07-self-improving-loop-research.md)
 - 관련: [CLAUDE.md](../../../CLAUDE.md) 잔여 항목 (c) 데모 시드, Plan 11 e2e 확장, Plan 12 reconciler
 
@@ -124,13 +124,13 @@
 **Routine** (`kubeport-weekly-ux-review`)
 - 프롬프트: `/role-review` 실행 → 백로그 갱신 → 이슈 ≤3건 생성(템플릿: 제목 `[ux-loop] ...`, 본문에 근거·측정·제안·예상 규모 S/M/L). 코드 변경 금지 명시.
 - 커넥터: GitHub, Sentry MCP, Umami MCP, Playwright MCP, Chrome DevTools MCP. 데모 비밀번호는 Routine 시크릿.
-- 실패 시(로그인 불가 등) 이슈 대신 `docs/ux-loop-log.md` 에 `skipped` 기록.
+- 실패·차단 시(데모 로그인 불가, MCP 권한 오류, 커넥터 만료 등): 리뷰 이슈 대신 **GitHub Issue `[ux-loop-blocked] <원인>`** 을 열고(같은 원인 이슈가 열려 있으면 코멘트 추가), `docs/ux-loop-log.md` 에 `skipped` 기록. Routine 실행 로그는 사람이 잘 안 보므로 모든 차단은 GitHub 이슈로 표면화한다.
 
 **Action** (`.github/workflows/ux-loop-implement.yml`)
 - `on: issues: [labeled]`, `if: label == 'agent-go' && contains(labels, 'ux-loop')`.
 - `anthropics/claude-code-action@v1`, `claude_args: --max-turns 25 --max-budget-usd 3 --allowedTools "Edit,Write,Read,Grep,Glob,Bash(pnpm *),Bash(go *),Bash(git *)"`, `timeout-minutes: 30`, `concurrency: {group: ux-loop, cancel-in-progress: false}`.
 - 리포 `.claude/settings.json` hooks: PreToolUse 에서 `kubectl|helm|ssh|curl .*enzo\.kr` 매칭 시 exit 2. Routine·로컬에도 동일 적용.
-- PR 은 draft, 라벨 `ux-loop` 상속, 본문에 이슈 링크 + 검증 방법. 봇 트리거 방지: `allowed_bots` 미설정(기본 거부).
+- PR 은 draft, 라벨 `ux-loop` 상속, 본문에 이슈 링크 + 검증 방법. 구현 중 차단(권한·시크릿·캡 초과)되면 그 시점까지의 draft PR 을 남기고 PR/이슈에 `blocked: <원인>` 코멘트 + 라벨 `ux-loop-blocked`. 봇 트리거 방지: `allowed_bots` 미설정(기본 거부).
 - 주간 캡: 워크플로 시작 시 지난 7일 `ux-loop` PR 수 ≥3 이면 코멘트 남기고 종료.
 
 **PR 게이트**
