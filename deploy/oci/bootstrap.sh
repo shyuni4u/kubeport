@@ -82,19 +82,33 @@ echo "== Step 2/4: k3s single-node install =="
 # work for k8s RBAC — the backend forwards the user's id_token to the apiserver.
 # Enable by exporting BOOTSTRAP_OIDC_CLIENT_ID (and optionally _ISSUER). Written
 # BEFORE install so k3s picks it up on first start (no restart needed).
+# Uses a structured AuthenticationConfiguration (Google issuer only) rather
+# than --oidc-* flags: the two forms cannot coexist, and adding the Dex demo
+# IdP later (deploy/oci/k3s-auth-config.sh) requires the structured form, so
+# bootstrap writes it directly to avoid a config-format migration afterwards.
 # NB: values MUST be quoted — a trailing ':' in a value makes YAML parse the list
-# item as a map and k3s dies with "unknown flag". oidc-username-prefix=- means
-# "no prefix" so the k8s username is the raw email. See deploy/oci/README.md §7.1.
+# item as a map and k3s dies with "unknown flag". See deploy/oci/README.md §7.1.
+# BOOTSTRAP_AUTH_API overrides the AuthenticationConfiguration apiVersion —
+# default apiserver.config.k8s.io/v1 (GA, k8s >= 1.34); k8s 1.30–1.33 needs
+# apiserver.config.k8s.io/v1beta1.
 if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
   mkdir -p /etc/rancher/k3s
+  cat > /etc/rancher/k3s/auth.yaml <<YAML
+apiVersion: ${BOOTSTRAP_AUTH_API:-apiserver.config.k8s.io/v1}
+kind: AuthenticationConfiguration
+jwt:
+  - issuer:
+      url: ${BOOTSTRAP_OIDC_ISSUER:-https://accounts.google.com}
+      audiences: ["${BOOTSTRAP_OIDC_CLIENT_ID}"]
+    claimMappings:
+      username: { claim: "${BOOTSTRAP_OIDC_USERNAME_CLAIM:-email}", prefix: "" }
+YAML
   cat > /etc/rancher/k3s/config.yaml <<YAML
 kube-apiserver-arg:
-  - "oidc-issuer-url=${BOOTSTRAP_OIDC_ISSUER:-https://accounts.google.com}"
-  - "oidc-client-id=${BOOTSTRAP_OIDC_CLIENT_ID}"
-  - "oidc-username-claim=${BOOTSTRAP_OIDC_USERNAME_CLAIM:-email}"
-  - "oidc-username-prefix=-"
+  - "authentication-config=/etc/rancher/k3s/auth.yaml"
 YAML
-  echo "  wrote /etc/rancher/k3s/config.yaml (OIDC trust enabled)"
+  echo "  wrote /etc/rancher/k3s/auth.yaml + config.yaml (Google structured auth enabled)"
+  echo "  Dex demo IdP trust is added later via deploy/oci/k3s-auth-config.sh (needs Dex ingress up first)"
 fi
 
 if ! command -v k3s >/dev/null 2>&1; then

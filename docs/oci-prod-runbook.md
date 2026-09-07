@@ -70,16 +70,29 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
 앱이 **실제로 k8s 에 배포**하려면 아래 4가지가 서버에 세팅돼 있어야 한다.
 (상세 절차·재현은 [deploy/oci/README.md §7](../deploy/oci/README.md) 참조.)
 
-1. **k3s 가 Google 토큰을 인증으로 수용** — `/etc/rancher/k3s/config.yaml`:
+1. **k3s 가 Google(+ Dex 데모) 토큰을 인증으로 수용** — 구조화된 `AuthenticationConfiguration`
+   (`/etc/rancher/k3s/auth.yaml`, `--oidc-*` 플래그와 동시 사용 불가):
    ```yaml
-   kube-apiserver-arg:
-     - "oidc-issuer-url=https://accounts.google.com"
-     - "oidc-client-id=<GOOGLE_CLIENT_ID>"
-     - "oidc-username-claim=email"
-     - "oidc-username-prefix=-"      # '-' = 접두어 없음 → username == raw email
+   apiVersion: apiserver.config.k8s.io/v1   # k8s 1.30–1.33 은 v1beta1
+   kind: AuthenticationConfiguration
+   jwt:
+     - issuer:
+         url: https://accounts.google.com
+         audiences: ["<GOOGLE_CLIENT_ID>"]
+       claimMappings:
+         username: { claim: email, prefix: "" }      # '' = 접두어 없음 → username == raw email
+     - issuer:
+         url: https://dex.kubeport.enzo.kr
+         audiences: ["kubeport-demo"]
+       claimMappings:
+         username: { claim: email, prefix: "dex:" }
    ```
-   ⚠️ **값을 반드시 따옴표로.** `oidc-username-prefix=oidc:` 처럼 끝에 콜론이 있으면 YAML 이
-   맵으로 파싱해 apiserver 가 `unknown flag: --[{...}]` 로 죽는다. 적용: `sudo systemctl restart k3s`.
+   `/etc/rancher/k3s/config.yaml` 은 `kube-apiserver-arg: ["authentication-config=/etc/rancher/k3s/auth.yaml"]`
+   만 남긴다. `bootstrap.sh` 가 Google 부분을 먼저 쓰고, Dex 는 `deploy/oci/k3s-auth-config.sh` 로
+   나중에(Dex ingress 가 뜬 뒤) 추가한다 — 상세: [deploy/oci/README.md §7.1, §7.6](../deploy/oci/README.md).
+   ⚠️ **값을 반드시 따옴표로.** 끝에 콜론이 있으면 YAML 이 맵으로 파싱해 apiserver 가
+   `unknown flag: --[{...}]` 로 죽는다. 적용: `sudo systemctl restart k3s`.
+   **롤백**: `sudo ROLLBACK=1 bash deploy/oci/k3s-auth-config.sh` — `config.yaml.bak` 복원 + 재기동 + 검증까지 자동.
 2. **pod → apiserver 방화벽** — OCI Ubuntu 이미지는 끝단에서 전부 REJECT 한다. bootstrap 이
    80/443 만 열어서, **pod/service CIDR 을 안 열면 pod→apiserver(6443) 가 막혀 배포가 전부 실패**한다:
    ```bash
@@ -87,21 +100,30 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
    sudo iptables -I INPUT 1 -s 10.43.0.0/16 -j ACCEPT   # service CIDR
    sudo netfilter-persistent save
    ```
-3. **RBAC** — Google 사용자(username = 이메일)를 role 에 바인딩:
+3. **RBAC** — 오너(Google) 이메일은 cluster-admin 유지, 데모 사용자(`dex:demo-admin@demo.kubeport` /
+   `dex:demo-user@demo.kubeport`)는 **chart 가 네임스페이스(`demo`) 스코프 RoleBinding 을 만들어준다**
+   (cluster-admin 바인딩 불필요 — Plan 13 Dex chart 참조):
    ```bash
-   kubectl create clusterrolebinding kubeport-demo-admin \
-     --clusterrole=cluster-admin --user="<email>"
+   kubectl create clusterrolebinding kubeport-owner-admin \
+     --clusterrole=cluster-admin --user="<owner Google email>"
    ```
-   (데모는 cluster-admin. 운영 시 네임스페이스 스코프 role 로 좁힐 것.)
 4. **클러스터를 배포 대상으로 등록** — `POST /v1/clusters`(admin 전용). in-cluster 값:
    - `api_url`: `https://kubernetes.default.svc`
    - `ca_bundle`: k3s 서버 CA (`/var/lib/rancher/k3s/server/tls/server-ca.crt`)
    - `oidc_issuer_url`: `https://accounts.google.com`, `default_namespace`: `default`
    현재 `oci-a1` 이 이렇게 등록돼 있다.
 
+> **Dex 서명 키 회전 주의**: 데모 Dex chart 는 `storage: memory` — Dex pod 가 재시작하면 서명 키가
+> 바뀐다. apiserver 는 issuer 의 JWKS 를 캐싱하므로 재시작 직후 짧은 창 동안 기존 발급 토큰이
+> 아니라도 **새로 발급된** 토큰이 401 로 거부될 수 있다(캐시가 아직 새 키를 못 받아옴). 보통
+> k8s 가 자동으로 짧은 주기 뒤 JWKS 를 다시 받아오며 해결된다. 안 풀리면 `sudo systemctl restart k3s`
+> 로 캐시를 강제로 비운다.
+
 ### k3s 재기동 롤백 (apiserver 가 안 뜰 때)
 ```bash
-sudo rm -f /etc/rancher/k3s/config.yaml   # 또는 문제 인자만 제거
+sudo ROLLBACK=1 bash deploy/oci/k3s-auth-config.sh   # config.yaml.bak 복원 + 재기동 + 검증
+# 스크립트 없이 수동으로:
+sudo cp /etc/rancher/k3s/config.yaml.bak /etc/rancher/k3s/config.yaml
 sudo systemctl restart k3s
 # 검증: sudo k3s kubectl get --raw=/readyz  → "ok"
 ```
@@ -128,13 +150,15 @@ sudo systemctl restart k3s
 | 홈 `502` | 롤아웃 순간 일시적. 30초 뒤 재확인. 지속되면 파드 로그 |
 | 좌측하단 클러스터 비어있음 | 등록 클러스터 0개 — §5-4. `kubectl exec ... psql -c "select name from clusters"` |
 | 로그아웃 무반응 | 프록시 origin(§4) 또는 리다이렉트 status(303 이어야 함) |
+| 데모 로그인 후 배포 401/403 | k3s `auth.yaml` 에 Dex issuer 있는지, prefix `dex:` 와 RoleBinding subject 일치하는지 |
 
 ## 8. 보안 후속 (권장)
 
 - **SSH 키 회전** — 공인 IP 노출 + 키가 OCI capacity 폴링 GHA 시크릿에 있음. 안전 절차:
   새 키 생성 → `authorized_keys` 에 추가 → 새 키 접속 검증 → 구 키 제거 → gpg 번들/GHA 시크릿 갱신.
 - **공인 IP reserved 전환** — stop/start 대비. 전환 시 IP 변경 → DNS·인증서 재발급(유지보수 창 필요).
-- **RBAC 스코프 축소** — 데모 cluster-admin → 네임스페이스 스코프 role.
+- ~~**RBAC 스코프 축소** — 데모 cluster-admin → 네임스페이스 스코프 role.~~ **완료** — 데모 사용자는
+  chart 의 네임스페이스(`demo`) 스코프 RoleBinding 사용, 오너만 cluster-admin (§5-3).
 
 ## See also
 - [deploy/oci/README.md](../deploy/oci/README.md) — 최초 부트스트랩 절차
