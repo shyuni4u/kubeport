@@ -80,7 +80,7 @@
 **권한·격리**
 - k3s 네임스페이스 `demo`: `ResourceQuota`(cpu 1 / mem 2Gi / pods 10 / services 5, LoadBalancer·Ingress 0), `LimitRange`(컨테이너 기본 100m/128Mi, 상한 500m/512Mi), `NetworkPolicy` 로 다른 네임스페이스 egress 차단.
 - RBAC: `Role demo-admin`(demo ns 전체 CRUD) ↔ `dex:demo-admin@...`, `Role demo-user`(get/list/watch + Deployment/Service/ConfigMap/Job/CronJob create·update·delete, Secret 은 create 만) ↔ `dex:demo-user@...`. 기존 runbook §5-3 의 cluster-admin 데모 바인딩은 사용자 본인 이메일만 남기고 제거.
-- 앱 내 권한: `KBP_DEV_ADMIN_EMAILS` 에 `demo-admin@demo.kubeport` 추가 → `kubeport-admin` 그룹. demo-user 는 일반 사용자. 데모 팀 `demo` 에 두 계정 소속.
+- 앱 내 권한: `KBP_DEV_ADMIN_EMAILS` 에 `demo-admin@demo.kubeport` 추가 → `kubeport-admin` 그룹. demo-user 는 일반 사용자. 데모 팀 `demo` 에 두 계정 소속 (구현 시 변경: 데모 팀은 만들지 않음 — demo-admin 은 팀 관리가 차단되고 데모 흐름에 기여가 없어 템플릿은 글로벌로 생성).
 - 데모 계정은 `POST /v1/clusters`·팀 관리·`?force=true` 삭제 **금지**: 미들웨어에서 `claims.Email` 도메인이 `@demo.kubeport` 이면 해당 경로 403 (사용자 문구 "데모 계정에서는 사용할 수 없습니다"). 이 한 곳이 데모 특수 처리의 유일한 코드 분기.
 
 **시드 데이터** (`backend/cmd/seed-demo/`, 멱등)
@@ -92,13 +92,13 @@
 - 시드는 admin 토큰이 아닌 **dex demo-admin 토큰으로 API 를 호출**해 생성 → 실제 RBAC 경로 검증 겸용.
 
 **리셋**
-- k8s `CronJob demo-reset`(6시간마다, `demo` ns 리소스 전부 삭제 → DB 에서 demo 팀 소유 템플릿·릴리스·세션 삭제 → seed-demo 재실행). 이미지는 backend 이미지 재사용(`seed-demo` 서브커맨드).
+- k8s `CronJob demo-reset`(6시간마다, `demo` ns 리소스 전부 삭제 → DB 에서 데모 계정(`*@demo.kubeport`) 소유 템플릿·릴리스·세션 삭제 → seed-demo 재실행). 이미지는 backend 이미지 재사용(`seed-demo` 서브커맨드).
 - 릴리스 이름 충돌 방지: 데모 폼의 기본 릴리스명에 4자리 랜덤 접미사.
 - 세션: 데모 세션 쿠키 만료 60분, 리셋 시 무효화.
 
 **UI**
 - `app/page.tsx` 랜딩 재작성: 한 줄 설명 + 버튼 3개 — **관리자로 체험** / **사용자로 체험** / Google 로 로그인. 데모 버튼 아래 "실제 클러스터에 배포됩니다 · 6시간마다 초기화 · 데이터를 남기지 마세요".
-- 데모 세션 중 상단 배너(닫기 가능, 세션 내 1회): 남은 리셋 시간 + Sentry 피드백 위젯 열기 버튼.
+- 데모 세션 중 상단 배너(닫기 가능, 세션 내 1회): 남은 리셋 시간 + Sentry 피드백 위젯 열기 버튼 (Plan 14 로 이월 — Sentry SDK 가 그때 도입됨).
 - i18n ko/en.
 
 **테스트**
@@ -197,5 +197,5 @@
 ## 9. 열린 항목
 
 - 월 예산 상한 확정(§2 가정).
-- Dex 데모 비밀번호 노출 방식: 랜딩 버튼이 `login_hint` 만 넘기고 비밀번호는 사용자가 입력(화면에 표기) vs dex `mockCallback` 류 자동 로그인. 초안은 **표기+입력**(정직하고 봇 남용 완화).
+- Dex 데모 비밀번호 노출 방식: 랜딩 버튼이 `login_hint` 만 넘기고 비밀번호는 사용자가 입력(화면에 표기) vs dex `mockCallback` 류 자동 로그인. 초안은 **표기+입력**(정직하고 봇 남용 완화) — **구현됨**: 표기+입력 (`DEMO_PASSWORD_HINT` 로 랜딩에 표기, Dex 폼에 `login_hint` 프리필).
 - `/blog` 를 Next.js 라우트로 둘지 GitHub Pages 로 분리할지 — 초안은 Next.js(단일 배포).
