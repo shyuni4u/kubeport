@@ -44,10 +44,13 @@ CREATE TABLE "public"."sessions" (
   "id_token_exp" timestamptz NOT NULL,
   "created_at" timestamptz NOT NULL DEFAULT now(),
   "expires_at" timestamptz NOT NULL,
+  "provider" text NOT NULL DEFAULT 'primary',
   PRIMARY KEY ("id")
 );
 -- Create index "s_expires_at" to table: "sessions"
 CREATE INDEX "s_expires_at" ON "public"."sessions" ("expires_at");
+-- Set comment to column: "provider" on table: "sessions"
+COMMENT ON COLUMN "public"."sessions"."provider" IS 'OIDC provider key used to mint/refresh this session: primary | demo';
 -- Create "team_memberships" table
 CREATE TABLE "public"."team_memberships" (
   "user_id" uuid NOT NULL,
