@@ -221,12 +221,15 @@ sudo netfilter-persistent save
 
 ### 7.3. RBAC 바인딩
 
-Google username(=이메일)을 role 에 바인딩. 데모는 cluster-admin(운영 시 스코프 축소):
+오너(운영자) Google 이메일만 cluster-admin 으로 바인딩한다. **데모 사용자는 여기서 수동으로
+바인딩하지 않는다** — Helm chart(`demo.enabled=true`)가 `dex:demo-admin@demo.kubeport` /
+`dex:demo-user@demo.kubeport` 를 `demo` 네임스페이스 스코프 Role 에 자동으로 바인딩한다
+(§7.6 참조).
 
 ```bash
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-kubectl create clusterrolebinding kubeport-demo-admin \
-  --clusterrole=cluster-admin --user="<로그인할 Google 이메일>"
+kubectl create clusterrolebinding kubeport-owner-admin \
+  --clusterrole=cluster-admin --user="<오너 Google 이메일>"
 ```
 
 ### 7.4. 클러스터를 배포 대상으로 등록
