@@ -17,10 +17,10 @@ metadata:
 rules:
   - apiGroups: ["", "apps", "batch"]
     resources: ["pods", "pods/log", "services", "configmaps", "deployments", "statefulsets", "jobs", "cronjobs", "events", "replicasets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"]
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["create", "update", "patch", "delete"]   # no get/list: users can write but not read back secrets
+    verbs: ["create", "update", "patch", "delete", "deletecollection"]   # no get/list: users can write but not read back secrets
   - apiGroups: ["authorization.k8s.io"]
     resources: ["selfsubjectaccessreviews"]
     verbs: ["create"]

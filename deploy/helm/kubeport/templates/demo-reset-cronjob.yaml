@@ -56,8 +56,16 @@ spec:
               command: ["sh", "-c"]
               args:
                 - kubectl -n {{ .Values.demo.namespace }} delete deploy,sts,ds,job,cronjob,svc,cm,secret,pod --all --wait=false --ignore-not-found
+              env:
+                # kubectl writes its discovery cache under $HOME/.kube/cache;
+                # readOnlyRootFilesystem forces it into the tmp emptyDir below.
+                - name: HOME
+                  value: /tmp
               securityContext:
                 {{- toYaml .Values.securityContext | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
           containers:
             - name: seed
               image: {{ include "kubeport.backend.image" . }}
@@ -94,6 +102,12 @@ spec:
                       key: DEMO_USER_PASSWORD
               securityContext:
                 {{- toYaml .Values.securityContext | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}
 ---
 apiVersion: v1
 kind: Secret
