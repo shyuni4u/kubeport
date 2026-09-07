@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { pool } from "./db";
-import { getConfig, client } from "./oidc";
+import { getConfig, client, parseProvider } from "./oidc";
+import type { Provider } from "./oidc";
 import crypto from "node:crypto";
 
 const COOKIE = "kbp_sid";
@@ -11,7 +12,13 @@ export interface Session {
   idToken: string;
   refreshToken?: string;
   idTokenExp: Date;
+  provider: Provider;
 }
+
+const SESSION_TTL_MS: Record<Provider, number> = {
+  primary: 24 * 3600 * 1000,
+  demo: 60 * 60 * 1000, // spec §4.1: demo sessions live 60 minutes
+};
 
 function getKey(): Buffer {
   const raw = process.env.APP_ENCRYPTION_KEY_B64;
@@ -51,12 +58,13 @@ export async function createSession(
   idToken: string,
   refreshToken: string | undefined,
   exp: Date,
+  provider: Provider = "primary",
 ) {
   const id = crypto.randomUUID();
-  const expiresAt = new Date(Date.now() + 24 * 3600 * 1000);
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS[provider]);
   await pool.query(
-    `INSERT INTO sessions (id, user_id, id_token_encrypted, refresh_token_encrypted, id_token_exp, expires_at)
-     VALUES ($1,$2,$3,$4,$5,$6)`,
+    `INSERT INTO sessions (id, user_id, id_token_encrypted, refresh_token_encrypted, id_token_exp, expires_at, provider)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
     [
       id,
       userId,
@@ -64,6 +72,7 @@ export async function createSession(
       refreshToken ? encrypt(refreshToken) : null,
       exp,
       expiresAt,
+      provider,
     ],
   );
   const cookieStore = await cookies();
@@ -81,7 +90,7 @@ export async function getSession(): Promise<Session | null> {
   const id = cookieStore.get(COOKIE)?.value;
   if (!id) return null;
   const { rows } = await pool.query(
-    `SELECT id, user_id, id_token_encrypted, refresh_token_encrypted, id_token_exp
+    `SELECT id, user_id, id_token_encrypted, refresh_token_encrypted, id_token_exp, provider
        FROM sessions WHERE id=$1 AND expires_at > now()`,
     [id],
   );
@@ -95,6 +104,7 @@ export async function getSession(): Promise<Session | null> {
         ? decrypt(rows[0].refresh_token_encrypted)
         : undefined,
       idTokenExp: rows[0].id_token_exp,
+      provider: parseProvider(rows[0].provider),
     };
   } catch {
     // Tampered or key-rotated session — treat as invalid and force re-login.
@@ -143,7 +153,7 @@ export async function getValidToken(
   if (!session.refreshToken) return null;
 
   try {
-    const config = await getConfig();
+    const config = await getConfig(session.provider);
     const tokens = await client.refreshTokenGrant(config, session.refreshToken);
     if (!tokens.id_token) return null;
 
