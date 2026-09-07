@@ -51,7 +51,6 @@ data:
   OIDC_ISSUER: "https://accounts.google.com"
   OIDC_AUDIENCE: "kubeport"
   KBP_OPENAPI_CACHE_MAX: "64"
-
 ---
 # Source: kubeport/templates/frontend-configmap.yaml
 apiVersion: v1
@@ -70,7 +69,6 @@ data:
   OIDC_CLIENT_ID: "golden-snapshot-client"
   OIDC_REDIRECT_URI: "https://kp.test.local/api/auth/callback"
   GO_API_BASE_URL: "http://kp-kubeport-backend:8080"
-
 ---
 # Source: kubeport/templates/migration-configmap.yaml
 apiVersion: v1
@@ -539,7 +537,6 @@ spec:
     app.kubernetes.io/name: kubeport
     app.kubernetes.io/instance: kp
     app.kubernetes.io/component: backend
-
 ---
 # Source: kubeport/templates/frontend-service.yaml
 apiVersion: v1
@@ -564,7 +561,6 @@ spec:
     app.kubernetes.io/name: kubeport
     app.kubernetes.io/instance: kp
     app.kubernetes.io/component: frontend
-
 ---
 # Source: kubeport/templates/postgres-service.yaml
 apiVersion: v1
@@ -621,12 +617,12 @@ spec:
         app.kubernetes.io/component: backend
       annotations:
         # Roll the Pod when ConfigMap or Secret content changes.
-        checksum/config: f5ec7d78499b97c09c08f230d1a8786f38ae8e2394d0b33d322fa9dd316682af
+        checksum/config: 017e483f368b20ecf8654646f06ae4cfdf9b9d63ea0e6d7c1074dd984d98bf64
         # schema.hcl 변경 시 backend pod 가 재시작되며 atlas initContainer
         # 가 새 스키마를 적용. 이 어노테이션이 없으면 migration ConfigMap
         # 갱신만으로는 Deployment template 해시가 안 바뀌어 롤이 안 됨.
-        checksum/migration: b860283b3ca2d36736dec07dd7580fa61ff614153f10698f9fe2768b2410275b
-        checksum/secret: 93eba1305fd893dca04f898bba91f04a43f0c832d8aff4d3fad544237e8d1632
+        checksum/migration: dc17a8ef747dc3fd15eaf566dcf9a8ea1ad781c0bda0abff0e534a2853defc6b
+        checksum/secret: b2b34f5a7442896105165289bc087db9ed4fbb962a77258c0a6059d6b289a7e8
     spec:
       securityContext:
         fsGroup: 65532
@@ -731,7 +727,6 @@ spec:
         - name: migration-files
           configMap:
             name: kp-kubeport-migrate-files
-
 ---
 # Source: kubeport/templates/frontend-deployment.yaml
 apiVersion: apps/v1
@@ -762,8 +757,8 @@ spec:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/component: frontend
       annotations:
-        checksum/config: c8dca78899411d1dfa69c280c67bb2af394acdd878f16603e729db0021cd194e
-        checksum/secret: 93eba1305fd893dca04f898bba91f04a43f0c832d8aff4d3fad544237e8d1632
+        checksum/config: c649ad959ed82d39a345fd772834b4871ffe7ba2c70fe5141ec283143af5937a
+        checksum/secret: b2b34f5a7442896105165289bc087db9ed4fbb962a77258c0a6059d6b289a7e8
     spec:
       securityContext:
         fsGroup: 65532
@@ -843,7 +838,6 @@ spec:
           emptyDir: {}
         - name: nextcache
           emptyDir: {}
-
 ---
 # Source: kubeport/templates/postgres-statefulset.yaml
 apiVersion: apps/v1
