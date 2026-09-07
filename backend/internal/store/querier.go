@@ -45,6 +45,10 @@ type Querier interface {
 	InsertTemplateVersionV2(ctx context.Context, arg InsertTemplateVersionV2Params) (TemplateVersion, error)
 	ListAllReleases(ctx context.Context, arg ListAllReleasesParams) ([]ListAllReleasesRow, error)
 	ListClusters(ctx context.Context) ([]Cluster, error)
+	// Releases created by any user whose email is in the demo domain ($1, e.g.
+	// "demo.kubeport"). Backs the scoped admin view for demo accounts: a demo
+	// admin sees the demo user's releases but nothing from real users.
+	ListReleasesForDemoDomain(ctx context.Context, arg ListReleasesForDemoDomainParams) ([]ListReleasesForDemoDomainRow, error)
 	ListReleasesForUser(ctx context.Context, arg ListReleasesForUserParams) ([]ListReleasesForUserRow, error)
 	ListTeamMembers(ctx context.Context, teamID pgtype.UUID) ([]ListTeamMembersRow, error)
 	ListTeams(ctx context.Context) ([]Team, error)

@@ -76,11 +76,19 @@
 - 백엔드 `auth.Verifier` → `MultiVerifier`: 발급자 목록(`KBP_OIDC_ISSUERS`, JSON 배열 `{issuer, client_id}`)을 순회. 토큰의 `iss` 클레임을 먼저 읽어 해당 검증기만 호출. 기존 단일 env 는 하위호환 유지.
 - 프론트 `lib/oidc.ts`: provider 2개(`google`, `dex`). `/api/auth/login?provider=dex&hint=demo-admin` → dex 로그인 페이지로 리다이렉트(`login_hint` 로 이메일 프리필). 세션 쿠키에 `provider` 저장. 콜백은 provider 별 config 로 토큰 교환.
 - 클러스터 등록: `clusters.oidc_issuer_url` 은 현재 단일 문자열 — 데모 클러스터는 같은 `oci-a1` 이므로 **컬럼 변경 없음**. 백엔드는 클러스터 발급자 체크를 "토큰 iss 가 클러스터가 신뢰하는 발급자 집합에 포함" 으로 완화하되, 집합은 당장 `[cluster.oidc_issuer_url, dex issuer]` 로 코드 상수화(컬럼 추가는 Plan 12 로 이월).
+  - **구현 시 확인**: 백엔드에는 애초에 클러스터별 issuer 체크가 없다 — `clusters.oidc_issuer_url` 은 정보성 컬럼이고, 토큰 검증은 `MultiVerifier`(전역 issuer 집합) + k8s API 서버가 담당한다. 따라서 "완화" 할 코드가 없어 이 항목은 no-op.
+- MultiVerifier 의 issuer discovery 는 **lazy** — 최초 토큰 도착 시 1회 수행하고 성공 시에만 캐시. Dex 가 백엔드보다 늦게 뜨거나 인증서가 아직 Ready 가 아니어도 부팅이 죽지 않고 WARN 로그 + 해당 issuer 토큰만 401(다음 요청에서 재시도).
 
 **권한·격리**
 - k3s 네임스페이스 `demo`: `ResourceQuota`(cpu 1 / mem 2Gi / pods 10 / services 5, LoadBalancer·Ingress 0), `LimitRange`(컨테이너 기본 100m/128Mi, 상한 500m/512Mi), `NetworkPolicy` 로 다른 네임스페이스 egress 차단.
 - RBAC: `Role demo-admin`(demo ns 전체 CRUD) ↔ `dex:demo-admin@...`, `Role demo-user`(get/list/watch + Deployment/Service/ConfigMap/Job/CronJob create·update·delete, Secret 은 create 만) ↔ `dex:demo-user@...`. 기존 runbook §5-3 의 cluster-admin 데모 바인딩은 사용자 본인 이메일만 남기고 제거.
 - 앱 내 권한: `KBP_DEV_ADMIN_EMAILS` 에 `demo-admin@demo.kubeport` 추가 → `kubeport-admin` 그룹. demo-user 는 일반 사용자. 데모 팀 `demo` 에 두 계정 소속 (구현 시 변경: 데모 팀은 만들지 않음 — demo-admin 은 팀 관리가 차단되고 데모 흐름에 기여가 없어 템플릿은 글로벌로 생성).
+- 앱 내 admin 우회의 데모 스코핑: demo-admin 은 템플릿 저작을 위해 `kubeport-admin` 을 유지하지만, admin short-circuit 이 무제한이면 실제 운영자의 글로벌 템플릿·릴리스까지 만질 수 있다. 따라서 호출자 이메일이 데모 도메인이면
+  - `ensureTemplateEditor`: 템플릿 소유자(`templates.owner_user_id`)가 데모 도메인 사용자일 때만 통과, 아니면 403 `demo-restricted`("데모 계정은 데모 소유 템플릿만 편집할 수 있습니다").
+  - `ListReleases`: `ListAllReleases` 대신 `ListReleasesForDemoDomain`(생성자 이메일이 `%@<도메인>`) — demo-admin 은 demo-user 의 시드 릴리스까지는 보되 실제 사용자 릴리스는 못 본다.
+  - `authorizeReleaseAccess`: 릴리스 생성자가 데모 도메인 사용자일 때만 admin 통과.
+
+  비데모 admin 의 동작은 그대로다.
 - 데모 계정은 `POST /v1/clusters`·팀 관리·`?force=true` 삭제 **금지**: 미들웨어에서 `claims.Email` 도메인이 `@demo.kubeport` 이면 해당 경로 403 (사용자 문구 "데모 계정에서는 사용할 수 없습니다"). 이 한 곳이 데모 특수 처리의 유일한 코드 분기.
 
 **시드 데이터** (`backend/cmd/seed-demo/`, 멱등)
