@@ -178,6 +178,75 @@ func (q *Queries) ListAllReleases(ctx context.Context, arg ListAllReleasesParams
 	return items, nil
 }
 
+const listReleasesForDemoDomain = `-- name: ListReleasesForDemoDomain :many
+SELECT r.id, r.name, r.template_version_id, r.cluster_id, r.namespace,
+       r.created_by_user_id, r.created_at, r.updated_at,
+       c.name AS cluster_name, t.name AS template_name, tv.version AS template_version
+  FROM releases r
+  JOIN clusters c          ON c.id = r.cluster_id
+  JOIN template_versions tv ON tv.id = r.template_version_id
+  JOIN templates t         ON t.id = tv.template_id
+  JOIN users u             ON u.id = r.created_by_user_id
+ WHERE u.email ILIKE '%@' || $1::text
+ ORDER BY r.created_at DESC
+ LIMIT $3::int OFFSET $2::int
+`
+
+type ListReleasesForDemoDomainParams struct {
+	Domain string `json:"domain"`
+	Off    int32  `json:"off"`
+	Lim    int32  `json:"lim"`
+}
+
+type ListReleasesForDemoDomainRow struct {
+	ID                pgtype.UUID        `json:"id"`
+	Name              string             `json:"name"`
+	TemplateVersionID pgtype.UUID        `json:"template_version_id"`
+	ClusterID         pgtype.UUID        `json:"cluster_id"`
+	Namespace         string             `json:"namespace"`
+	CreatedByUserID   pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ClusterName       string             `json:"cluster_name"`
+	TemplateName      string             `json:"template_name"`
+	TemplateVersion   int32              `json:"template_version"`
+}
+
+// Releases created by any user whose email is in the demo domain ($1, e.g.
+// "demo.kubeport"). Backs the scoped admin view for demo accounts: a demo
+// admin sees the demo user's releases but nothing from real users.
+func (q *Queries) ListReleasesForDemoDomain(ctx context.Context, arg ListReleasesForDemoDomainParams) ([]ListReleasesForDemoDomainRow, error) {
+	rows, err := q.db.Query(ctx, listReleasesForDemoDomain, arg.Domain, arg.Off, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListReleasesForDemoDomainRow
+	for rows.Next() {
+		var i ListReleasesForDemoDomainRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.TemplateVersionID,
+			&i.ClusterID,
+			&i.Namespace,
+			&i.CreatedByUserID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ClusterName,
+			&i.TemplateName,
+			&i.TemplateVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReleasesForUser = `-- name: ListReleasesForUser :many
 SELECT r.id, r.name, r.template_version_id, r.cluster_id, r.namespace,
        r.created_by_user_id, r.created_at, r.updated_at,

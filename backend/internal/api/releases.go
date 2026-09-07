@@ -66,6 +66,20 @@ func isAdmin(c *gin.Context) bool {
 // same rule is applied everywhere (Get/Delete/Update/Logs).
 func (h *Handlers) authorizeReleaseAccess(c *gin.Context, rel store.GetReleaseByIDRow) bool {
 	if isAdmin(c) {
+		// Demo admins keep admin UX but only over demo-owned releases.
+		if h.isDemoCaller(c) {
+			demoOwned, err := h.isDemoOwnedRelease(c.Request.Context(), rel.CreatedByUserID)
+			if err != nil {
+				log.Printf("authorizeReleaseAccess: resolve owner: %v", err)
+				writeError(c, http.StatusInternalServerError, "internal", "failed to resolve release owner")
+				return false
+			}
+			if !demoOwned {
+				writeError(c, http.StatusForbidden, "demo-restricted",
+					"demo accounts can only access demo-owned releases")
+				return false
+			}
+		}
 		return true
 	}
 	user, ok := h.resolveUser(c)
@@ -212,9 +226,45 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 	c.JSON(http.StatusCreated, rel)
 }
 
+// isDemoCaller reports whether the authenticated caller is a demo-domain
+// account. Demo accounts are granted kubeport-admin (they must be able to
+// author templates for the demo) but their admin powers are deliberately
+// scoped to demo-owned objects - see internal/api/permissions.go.
+func (h *Handlers) isDemoCaller(c *gin.Context) bool {
+	u, _ := auth.UserFrom(c.Request.Context())
+	return auth.IsDemoEmail(u.Email, h.deps.DemoEmailDomain)
+}
+
+// isDemoOwnedRelease reports whether the release was created by a demo-domain
+// user. The bool is only meaningful when err == nil.
+func (h *Handlers) isDemoOwnedRelease(ctx context.Context, createdBy pgtype.UUID) (bool, error) {
+	owner, err := h.deps.Store.GetUserByID(ctx, createdBy)
+	if err != nil {
+		return false, err
+	}
+	return auth.IsDemoEmail(owner.Email.String, h.deps.DemoEmailDomain), nil
+}
+
 func (h *Handlers) ListReleases(c *gin.Context) {
 	ctx := c.Request.Context()
 	limit, offset := parsePagination(c)
+
+	// A demo admin gets an admin-shaped list, but scoped to releases created
+	// by demo accounts - never a real user's workloads.
+	if isAdmin(c) && h.isDemoCaller(c) {
+		rows, err := h.deps.Store.ListReleasesForDemoDomain(ctx, store.ListReleasesForDemoDomainParams{
+			Domain: h.deps.DemoEmailDomain, Lim: limit, Off: offset,
+		})
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, "internal", err.Error())
+			return
+		}
+		if rows == nil {
+			rows = []store.ListReleasesForDemoDomainRow{}
+		}
+		c.JSON(http.StatusOK, gin.H{"releases": rows})
+		return
+	}
 
 	if isAdmin(c) {
 		rows, err := h.deps.Store.ListAllReleases(ctx, store.ListAllReleasesParams{

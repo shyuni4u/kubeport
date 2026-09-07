@@ -61,15 +61,38 @@ func (h *Handlers) ensureTeamEditor(c *gin.Context, teamID pgtype.UUID) bool {
 // Rules:
 // - Global template (owning_team_id null): caller must be kubeport-admin.
 // - Team template: caller must be a team editor OR kubeport-admin.
+// - Demo-domain caller with kubeport-admin: the admin short-circuit is scoped
+//   to templates owned by another demo-domain user. Demo accounts need admin
+//   UX to author their own templates, but must never be able to edit a real
+//   operator's global template.
 func (h *Handlers) ensureTemplateEditor(c *gin.Context, name string) (store.GetTemplateByNameRow, bool) {
+	ctx := c.Request.Context()
 	tpl, err := h.deps.Store.GetTemplateByName(c, name)
 	if err != nil {
 		writeError(c, http.StatusNotFound, "not-found", "template "+name)
 		return store.GetTemplateByNameRow{}, false
 	}
-	u, _ := auth.UserFrom(c.Request.Context())
+	u, _ := auth.UserFrom(ctx)
 
 	if isKubeportAdmin(u) {
+		if !auth.IsDemoEmail(u.Email, h.deps.DemoEmailDomain) {
+			return tpl, true
+		}
+		owner, err := h.deps.Store.GetUserByID(ctx, tpl.OwnerUserID)
+		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				log.Printf("ensureTemplateEditor: GetUserByID: %v", err)
+				writeError(c, http.StatusInternalServerError, "internal", "failed to resolve template owner")
+				return store.GetTemplateByNameRow{}, false
+			}
+			// Ownerless template (seeded/imported): not demo-owned.
+			owner = store.User{}
+		}
+		if !auth.IsDemoEmail(owner.Email.String, h.deps.DemoEmailDomain) {
+			writeError(c, http.StatusForbidden, "demo-restricted",
+				"demo accounts can only edit demo-owned templates")
+			return store.GetTemplateByNameRow{}, false
+		}
 		return tpl, true
 	}
 
