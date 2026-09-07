@@ -1,24 +1,66 @@
 import * as client from "openid-client";
 
-let cached: client.Configuration | null = null;
+export type Provider = "primary" | "demo";
 
-export async function getConfig(): Promise<client.Configuration> {
-  if (cached) return cached;
+export function parseProvider(v: string | null | undefined): Provider {
+  return v === "demo" ? "demo" : "primary";
+}
 
-  const issuerUrl = new URL(process.env.OIDC_ISSUER!);
+export function demoEnabled(): boolean {
+  return Boolean(
+    process.env.DEMO_OIDC_ISSUER &&
+      process.env.DEMO_OIDC_CLIENT_ID &&
+      process.env.DEMO_OIDC_CLIENT_SECRET,
+  );
+}
+
+export function providerEnv(p: Provider): {
+  issuer: string;
+  clientId: string;
+  clientSecret: string;
+  scopes: string;
+} {
+  if (p === "demo") {
+    return {
+      issuer: process.env.DEMO_OIDC_ISSUER!,
+      clientId: process.env.DEMO_OIDC_CLIENT_ID!,
+      clientSecret: process.env.DEMO_OIDC_CLIENT_SECRET!,
+      scopes: process.env.DEMO_OIDC_SCOPES || "openid email profile",
+    };
+  }
+  return {
+    issuer: process.env.OIDC_ISSUER!,
+    clientId: process.env.OIDC_CLIENT_ID!,
+    clientSecret: process.env.OIDC_CLIENT_SECRET!,
+    scopes: process.env.OIDC_SCOPES || "openid email profile",
+  };
+}
+
+const cached: Partial<Record<Provider, client.Configuration>> = {};
+
+export async function getConfig(
+  provider: Provider = "primary",
+): Promise<client.Configuration> {
+  const hit = cached[provider];
+  if (hit) return hit;
+  if (provider === "demo" && !demoEnabled()) {
+    throw new Error("demo provider requested but DEMO_OIDC_* env is not set");
+  }
+  const env = providerEnv(provider);
   const opts: Parameters<typeof client.discovery>[4] =
     process.env.NODE_ENV !== "production"
       ? { execute: [client.allowInsecureRequests] }
       : undefined;
 
-  cached = await client.discovery(
-    issuerUrl,
-    process.env.OIDC_CLIENT_ID!,
-    process.env.OIDC_CLIENT_SECRET!,
+  const cfg = await client.discovery(
+    new URL(env.issuer),
+    env.clientId,
+    env.clientSecret,
     undefined,
     opts,
   );
-  return cached;
+  cached[provider] = cfg;
+  return cfg;
 }
 
 export {
