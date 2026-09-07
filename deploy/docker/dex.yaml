@@ -23,3 +23,11 @@ staticPasswords:
     hash: "$2b$10$OeoKvlVUL3BBgFRH1HmZWugw7GbUjHXhcHhO5Hg0ER75Hk6X6QWTi"  # password: admin
     username: admin
     userID: "admin-000"
+  - email: demo-admin@demo.kubeport
+    hash: "$2y$10$wvTSwatbRSSK8WDYkH70LeiRigmZqFsJlz2.8miz8fNrzOm5kFJDG"  # password: demo
+    username: demo-admin
+    userID: "demo-admin-000"
+  - email: demo-user@demo.kubeport
+    hash: "$2y$10$wvTSwatbRSSK8WDYkH70LeiRigmZqFsJlz2.8miz8fNrzOm5kFJDG"  # password: demo
+    username: demo-user
+    userID: "demo-user-000"

@@ -30,12 +30,19 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -ldflags="-s -w -X main.version=${VERSION}" \
       -trimpath \
       -o /out/server \
-      ./cmd/server
+      ./cmd/server && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build \
+      -ldflags="-s -w" \
+      -trimpath \
+      -o /out/seed-demo \
+      ./cmd/seed-demo
 
 # Distroless static — minimal attack surface, no shell, runs as nonroot (uid 65532).
 # `:nonroot` tag is multi-arch (amd64 + arm64).
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=builder /out/server /server
+COPY --from=builder /out/seed-demo /seed-demo
 
 # Backend listens on :8080 by default (override via LISTEN_ADDR env).
 EXPOSE 8080

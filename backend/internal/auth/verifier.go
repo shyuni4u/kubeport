@@ -49,6 +49,11 @@ func httpClientForIssuer() (*http.Client, error) {
 	return httpClientFromCAFile(path)
 }
 
+// HTTPClientFromCAFilePublic is the exported form of httpClientFromCAFile for auxiliary binaries.
+func HTTPClientFromCAFilePublic(path string) (*http.Client, error) {
+	return httpClientFromCAFile(path)
+}
+
 // httpClientFromCAFile builds an *http.Client that trusts the PEM-encoded CA at
 // path in addition to the system trust store. The transport is cloned from
 // http.DefaultTransport so timeouts / HTTP/2 / connection pool tuning are

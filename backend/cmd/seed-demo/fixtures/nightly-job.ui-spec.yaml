@@ -1,0 +1,14 @@
+fields:
+  - path: CronJob[nightly].spec.schedule
+    label: "실행 주기"
+    type: enum
+    values: ["0 3 * * *", "0 */6 * * *", "*/5 * * * *"]
+    default: "0 3 * * *"
+  - path: CronJob[nightly].spec.jobTemplate.spec.template.spec.containers[0].image
+    label: "이미지"
+    type: string
+    default: "busybox:1.36"
+  - path: CronJob[nightly].spec.jobTemplate.spec.template.spec.containers[0].args[1]
+    label: "출력 문구"
+    type: string
+    default: "nightly report"
