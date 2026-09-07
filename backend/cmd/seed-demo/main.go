@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"kubeport/internal/auth"
 )
@@ -87,18 +89,31 @@ func resetDB(ctx context.Context, dsn, demoDomain string) error {
 	}
 	defer conn.Close(ctx)
 	like := "%@" + demoDomain
-	stmts := []string{
-		`DELETE FROM releases WHERE created_by_user_id IN (SELECT id FROM users WHERE lower(email) LIKE lower($1))`,
-		`DELETE FROM template_versions WHERE template_id IN (SELECT id FROM templates WHERE owner_user_id IN (SELECT id FROM users WHERE lower(email) LIKE lower($1)))`,
-		`DELETE FROM templates WHERE owner_user_id IN (SELECT id FROM users WHERE lower(email) LIKE lower($1))`,
-		`DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE lower(email) LIKE lower($1))`,
+	stmts := []struct {
+		what string
+		sql  string
+		// tolerateFK: a foreign-key violation means something outside the demo
+		// still references this row (e.g. a real user deployed a release from a
+		// demo template). Losing that reference would be worse than skipping
+		// the delete, and the seeder 409-skips the surviving template anyway.
+		tolerateFK bool
+	}{
+		{"releases", `DELETE FROM releases WHERE created_by_user_id IN (SELECT id FROM users WHERE lower(email) LIKE lower($1))`, false},
+		{"template_versions", `DELETE FROM template_versions WHERE template_id IN (SELECT id FROM templates WHERE owner_user_id IN (SELECT id FROM users WHERE lower(email) LIKE lower($1)))`, true},
+		{"templates", `DELETE FROM templates WHERE owner_user_id IN (SELECT id FROM users WHERE lower(email) LIKE lower($1))`, true},
+		{"sessions", `DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE lower(email) LIKE lower($1))`, false},
 	}
-	for _, q := range stmts {
-		tag, err := conn.Exec(ctx, q, like)
+	for _, st := range stmts {
+		tag, err := conn.Exec(ctx, st.sql, like)
 		if err != nil {
+			var pgErr *pgconn.PgError
+			if st.tolerateFK && errors.As(err, &pgErr) && pgErr.Code == "23503" {
+				log.Printf("WARN: reset: %s skipped \u2014 referenced by non-demo releases: %v", st.what, err)
+				continue
+			}
 			return err
 		}
-		log.Printf("reset: %s → %d rows", q[:30], tag.RowsAffected())
+		log.Printf("reset: %s → %d rows", st.what, tag.RowsAffected())
 	}
 	return nil
 }
