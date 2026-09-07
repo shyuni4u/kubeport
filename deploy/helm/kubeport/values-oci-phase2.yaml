@@ -94,3 +94,21 @@ images:
 # Resource pressure: A1.Flex is 4 OCPU / 24 GiB. Defaults in values.yaml fit
 # with massive headroom — k3s + cert-manager + traefik take ~600 MiB total,
 # leaving ~20+ GiB for app pods.
+
+# ----- Demo mode (public Dex demo login) ----------------------------------
+# See deploy/helm/kubeport/README.md "Demo mode (Dex)" and
+# deploy/oci/README.md §7.6 (k3s must trust the Dex issuer).
+dex:
+  enabled: true
+  host: dex.kubeport.enzo.kr
+  clientSecret: ""             # --set dex.clientSecret=$(openssl rand -hex 24)
+  staticPasswords:             # hashes via: htpasswd -bnBC 10 "" "$DEMO_PW" | tr -d ':\n'
+    - { email: demo-admin@demo.kubeport, username: demo-admin, userID: demo-admin-000, hash: "" }
+    - { email: demo-user@demo.kubeport,  username: demo-user,  userID: demo-user-000,  hash: "" }
+
+demo:
+  enabled: true
+  cluster: oci-a1
+  passwordHint: ""             # --set demo.passwordHint=$DEMO_PW  (public)
+  adminPassword: ""            # --set
+  userPassword: ""             # --set

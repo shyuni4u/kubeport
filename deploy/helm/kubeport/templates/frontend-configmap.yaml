@@ -12,3 +12,13 @@ data:
   OIDC_SCOPES: {{ . | quote }}
   {{- end }}
   GO_API_BASE_URL: {{ printf "http://%s:%v" (include "kubeport.backend.fullname" .) .Values.backend.service.port | quote }}
+  {{- if .Values.dex.enabled }}
+  DEMO_OIDC_ISSUER: {{ include "kubeport.dex.issuer" . | quote }}
+  DEMO_OIDC_CLIENT_ID: {{ .Values.dex.clientId | quote }}
+  DEMO_EMAIL_DOMAIN: {{ .Values.demo.emailDomain | quote }}
+  DEMO_ADMIN_EMAIL: {{ .Values.demo.adminEmail | quote }}
+  DEMO_USER_EMAIL: {{ .Values.demo.userEmail | quote }}
+  {{- with .Values.demo.passwordHint }}
+  DEMO_PASSWORD_HINT: {{ . | quote }}
+  {{- end }}
+  {{- end }}

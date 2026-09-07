@@ -35,3 +35,18 @@ images:
     tag: "0.1.0"
   frontend:
     tag: "0.1.0"
+
+# Dex + demo mode enabled here so the golden snapshot covers those templates.
+dex:
+  enabled: true
+  host: dex.example.test
+  clientSecret: test
+  staticPasswords:
+    # password: demo
+    - { email: demo-admin@demo.kubeport, username: demo-admin, userID: demo-admin-000, hash: "$2y$10$wvTSwatbRSSK8WDYkH70LeiRigmZqFsJlz2.8miz8fNrzOm5kFJDG" }
+    - { email: demo-user@demo.kubeport,  username: demo-user,  userID: demo-user-000,  hash: "$2y$10$wvTSwatbRSSK8WDYkH70LeiRigmZqFsJlz2.8miz8fNrzOm5kFJDG" }
+
+demo:
+  enabled: true
+  adminPassword: demo
+  userPassword: demo

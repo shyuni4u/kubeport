@@ -1,0 +1,65 @@
+{{- if .Values.dex.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubeport.dex.fullname" . }}
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dex
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "kubeport.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dex
+  template:
+    metadata:
+      labels:
+        {{- include "kubeport.labels" . | nindent 8 }}
+        app.kubernetes.io/component: dex
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/dex-configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/dex-secret.yaml") . | sha256sum }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: dex
+          image: {{ .Values.dex.image | quote }}
+          command: ["dex", "serve", "/etc/dex/config.yaml"]
+          ports:
+            - name: http
+              containerPort: 5556
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: {{ include "kubeport.dex.fullname" . }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.dex.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dex
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "kubeport.dex.fullname" . }}
+        - name: tmp
+          emptyDir: {}
+{{- end -}}
