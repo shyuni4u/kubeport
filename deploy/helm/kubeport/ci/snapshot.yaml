@@ -714,10 +714,10 @@ metadata:
 rules:
   - apiGroups: ["", "apps", "batch"]
     resources: ["pods", "pods/log", "services", "configmaps", "deployments", "statefulsets", "jobs", "cronjobs", "events", "replicasets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"]
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["create", "update", "patch", "delete"]   # no get/list: users can write but not read back secrets
+    verbs: ["create", "update", "patch", "delete", "deletecollection"]   # no get/list: users can write but not read back secrets
   - apiGroups: ["authorization.k8s.io"]
     resources: ["selfsubjectaccessreviews"]
     verbs: ["create"]
@@ -1339,12 +1339,20 @@ spec:
               command: ["sh", "-c"]
               args:
                 - kubectl -n demo delete deploy,sts,ds,job,cronjob,svc,cm,secret,pod --all --wait=false --ignore-not-found
+              env:
+                # kubectl writes its discovery cache under $HOME/.kube/cache;
+                # readOnlyRootFilesystem forces it into the tmp emptyDir below.
+                - name: HOME
+                  value: /tmp
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities:
                   drop:
                   - ALL
                 readOnlyRootFilesystem: true
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
           containers:
             - name: seed
               image: ghcr.io/shyuni4u/kubeport-backend:0.1.0
@@ -1385,6 +1393,12 @@ spec:
                   drop:
                   - ALL
                 readOnlyRootFilesystem: true
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}
 ---
 # Source: kubeport/templates/dex-ingress.yaml
 apiVersion: networking.k8s.io/v1
