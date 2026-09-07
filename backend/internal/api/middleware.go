@@ -70,3 +70,21 @@ func requireAdmin() gin.HandlerFunc {
 		writeError(c, http.StatusForbidden, "rbac-denied", "admin group required")
 	}
 }
+
+// denyDemo returns 403 for demo-domain accounts. Mounted only on routes that
+// would let a demo visitor change shared infrastructure (cluster registration,
+// team management, force delete). Everything else stays governed by k8s RBAC.
+func denyDemo(domain string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if domain == "" {
+			c.Next()
+			return
+		}
+		u, _ := auth.UserFrom(c.Request.Context())
+		if auth.IsDemoEmail(u.Email, domain) {
+			writeError(c, http.StatusForbidden, "demo-restricted", "demo accounts cannot perform this action")
+			return
+		}
+		c.Next()
+	}
+}

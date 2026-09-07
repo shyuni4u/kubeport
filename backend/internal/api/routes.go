@@ -28,9 +28,10 @@ type K8sClientFactory interface {
 }
 
 type Deps struct {
-	Verifier   TokenVerifier
-	Store      *store.Store
-	K8sFactory K8sClientFactory
+	Verifier        TokenVerifier
+	Store           *store.Store
+	K8sFactory      K8sClientFactory
+	DemoEmailDomain string // "" = no demo restrictions
 }
 
 type Handlers struct {
@@ -44,10 +45,11 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 
 	h := &Handlers{deps: deps, openapi: newOpenAPIProxy(cfg.OpenAPICacheMax)}
+	noDemo := denyDemo(deps.DemoEmailDomain)
 	v := r.Group("/v1", requireAuth(deps.Verifier))
 	v.GET("/me", h.GetMe)
 	v.GET("/clusters", h.ListClusters)
-	v.POST("/clusters", requireAdmin(), h.CreateCluster)
+	v.POST("/clusters", requireAdmin(), noDemo, h.CreateCluster)
 	v.GET("/clusters/:name/openapi", h.GetOpenAPIIndex)
 	v.GET("/clusters/:name/openapi/*gv", h.GetOpenAPIGroupVersion)
 	v.POST("/clusters/:name/openapi/refresh", h.RefreshOpenAPI)
@@ -73,9 +75,9 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	v.PUT("/releases/:id", h.UpdateRelease)
 	v.DELETE("/releases/:id", h.DeleteRelease)
 	v.GET("/teams", h.ListTeams)
-	v.POST("/teams", requireAdmin(), h.CreateTeam)
+	v.POST("/teams", requireAdmin(), noDemo, h.CreateTeam)
 	v.GET("/teams/:id/members", h.ListTeamMembers)
-	v.POST("/teams/:id/members", requireAdmin(), h.AddTeamMember)
-	v.DELETE("/teams/:id/members/:user_id", requireAdmin(), h.RemoveTeamMember)
+	v.POST("/teams/:id/members", requireAdmin(), noDemo, h.AddTeamMember)
+	v.DELETE("/teams/:id/members/:user_id", requireAdmin(), noDemo, h.RemoveTeamMember)
 	return r
 }

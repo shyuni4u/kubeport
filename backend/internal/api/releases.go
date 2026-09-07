@@ -358,16 +358,6 @@ func (h *Handlers) DeleteRelease(c *gin.Context) {
 	ctx := c.Request.Context()
 	u, _ := auth.UserFrom(ctx)
 
-	rel, err := h.deps.Store.GetReleaseByID(ctx, id)
-	if err != nil {
-		writeError(c, http.StatusNotFound, "not-found", "release")
-		return
-	}
-
-	if !h.authorizeReleaseAccess(c, rel) {
-		return
-	}
-
 	// Plan 8 escape hatch: when the cluster is unreachable or its workloads
 	// have been externally removed, an admin needs to clean up the orphan
 	// DB row without going through k8s. Restricted to admins because it
@@ -377,6 +367,22 @@ func (h *Handlers) DeleteRelease(c *gin.Context) {
 	force := c.Query("force") == "true"
 	if force && !isAdmin(c) {
 		writeError(c, http.StatusForbidden, "rbac-denied", "force delete requires admin")
+		return
+	}
+	if force {
+		if auth.IsDemoEmail(u.Email, h.deps.DemoEmailDomain) {
+			writeError(c, http.StatusForbidden, "demo-restricted", "demo accounts cannot force-delete")
+			return
+		}
+	}
+
+	rel, err := h.deps.Store.GetReleaseByID(ctx, id)
+	if err != nil {
+		writeError(c, http.StatusNotFound, "not-found", "release")
+		return
+	}
+
+	if !h.authorizeReleaseAccess(c, rel) {
 		return
 	}
 

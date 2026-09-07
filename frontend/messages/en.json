@@ -22,6 +22,9 @@
     "loading": "Loading…",
     "empty": "No data."
   },
+  "demo": {
+    "restricted": "Not available for demo accounts."
+  },
   "catalog": {
     "title": "Catalog",
     "searchPlaceholder": "Search templates…",
