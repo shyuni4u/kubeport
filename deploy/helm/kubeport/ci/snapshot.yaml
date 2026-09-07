@@ -5,7 +5,19 @@ kind: Namespace
 metadata:
   name: demo
   labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
     kubeport.io/demo: "true"
+    # Pod Security Admission: enforce `baseline` (blocks privileged, hostPath,
+    # hostNetwork/PID/IPC, most capability escalation) while warning/auditing at
+    # `restricted`. `restricted` is not enforced because arbitrary user templates
+    # (which rarely set runAsNonRoot/seccompProfile) would be rejected outright.
+    pod-security.kubernetes.io/enforce: "baseline"
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
 ---
 # Source: kubeport/templates/demo-namespace.yaml
 apiVersion: networking.k8s.io/v1
@@ -13,6 +25,12 @@ kind: NetworkPolicy
 metadata:
   name: demo-egress
   namespace: demo
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
 spec:
   podSelector: {}
   policyTypes: [Egress]
@@ -40,6 +58,12 @@ kind: ResourceQuota
 metadata:
   name: demo-quota
   namespace: demo
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
 spec:
   hard:
     requests.cpu: "1"
@@ -55,6 +79,12 @@ kind: LimitRange
 metadata:
   name: demo-limits
   namespace: demo
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
 spec:
   limits:
     - type: Container
@@ -74,12 +104,24 @@ kind: ServiceAccount
 metadata:
   name: demo-reset
   namespace: kubeport
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
 ---
 # Source: kubeport/templates/demo-reset-cronjob.yaml
 apiVersion: v1
 kind: Secret
 metadata:
   name: kp-kubeport-demo
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
 type: Opaque
 data:
   DEMO_ADMIN_PASSWORD: "ZGVtbw=="
@@ -674,6 +716,12 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: kp-kubeport-demo-ssar
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
 rules:
   - apiGroups: ["authorization.k8s.io"]
     resources: ["selfsubjectaccessreviews"]
@@ -684,6 +732,12 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: kp-kubeport-demo-ssar
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -700,10 +754,25 @@ kind: Role
 metadata:
   name: demo-admin
   namespace: demo
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
 rules:
-  - apiGroups: ["", "apps", "batch", "networking.k8s.io"]
-    resources: ["*"]
-    verbs: ["*"]
+  # Explicitly enumerated: no resourcequotas / limitranges / networkpolicies
+  # (the demo guardrails must not be editable from inside the demo), no
+  # pods/exec, no networking.k8s.io (ingress is quota-blocked anyway).
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services", "configmaps", "secrets", "events", "serviceaccounts", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"]
 ---
 # Source: kubeport/templates/demo-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -711,6 +780,12 @@ kind: Role
 metadata:
   name: demo-user
   namespace: demo
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
 rules:
   - apiGroups: ["", "apps", "batch"]
     resources: ["pods", "pods/log", "services", "configmaps", "deployments", "statefulsets", "jobs", "cronjobs", "events", "replicasets"]
@@ -728,6 +803,12 @@ kind: Role
 metadata:
   name: demo-reset
   namespace: demo
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
 rules:
   - apiGroups: ["", "apps", "batch", "networking.k8s.io"]
     resources: ["*"]
@@ -739,6 +820,12 @@ kind: RoleBinding
 metadata:
   name: demo-admin
   namespace: demo
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -753,6 +840,12 @@ kind: RoleBinding
 metadata:
   name: demo-user
   namespace: demo
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -767,6 +860,12 @@ kind: RoleBinding
 metadata:
   name: demo-reset
   namespace: demo
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -1338,7 +1437,7 @@ spec:
               image: "bitnami/kubectl:1.31"
               command: ["sh", "-c"]
               args:
-                - kubectl -n demo delete deploy,sts,ds,job,cronjob,svc,cm,secret,pod --all --wait=false --ignore-not-found
+                - kubectl -n demo delete deploy,sts,ds,job,cronjob,svc,cm,secret,pod --all --wait=true --ignore-not-found
               env:
                 # kubectl writes its discovery cache under $HOME/.kube/cache;
                 # readOnlyRootFilesystem forces it into the tmp emptyDir below.
@@ -1357,10 +1456,17 @@ spec:
             - name: seed
               image: ghcr.io/shyuni4u/kubeport-backend:0.1.0
               command: ["/seed-demo", "--reset"]
-              envFrom:
-                - secretRef:
-                    name: kp-kubeport-auth
               env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: kp-kubeport-auth
+                      key: DATABASE_URL
+                - name: DEMO_OIDC_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: kp-kubeport-auth
+                      key: DEMO_OIDC_CLIENT_SECRET
                 - name: KBP_API_BASE_URL
                   value: "http://kp-kubeport-backend:8080"
                 - name: DEMO_OIDC_ISSUER

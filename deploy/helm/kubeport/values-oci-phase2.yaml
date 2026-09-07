@@ -98,8 +98,14 @@ images:
 # ----- Demo mode (public Dex demo login) ----------------------------------
 # See deploy/helm/kubeport/README.md "Demo mode (Dex)" and
 # deploy/oci/README.md §7.6 (k3s must trust the Dex issuer).
+#
+# Both stay `enabled: false` here on purpose: enabling them makes the chart
+# `required` several secrets (dex.clientSecret, the two bcrypt hashes, the two
+# demo passwords), which would break every routine `helm upgrade -f` that does
+# not carry them. Turn demo mode on once with an explicit --set list (see
+# deploy/oci/README.md, "Upgrade" + §7.6); afterwards `--reuse-values` keeps it.
 dex:
-  enabled: true
+  enabled: false
   host: dex.kubeport.enzo.kr
   clientSecret: ""             # --set dex.clientSecret=$(openssl rand -hex 24)
   staticPasswords:             # hashes via: htpasswd -bnBC 10 "" "$DEMO_PW" | tr -d ':\n'
@@ -107,7 +113,7 @@ dex:
     - { email: demo-user@demo.kubeport,  username: demo-user,  userID: demo-user-000,  hash: "" }
 
 demo:
-  enabled: true
+  enabled: false
   cluster: oci-a1
   passwordHint: ""             # --set demo.passwordHint=$DEMO_PW  (public)
   adminPassword: ""            # --set

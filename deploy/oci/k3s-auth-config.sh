@@ -19,9 +19,20 @@ restart_and_verify() {
   return 1
 }
 
+# Restore the pre-cutover config.yaml. If no .bak exists the node never had a
+# config.yaml, so "restore" means removing the one we wrote.
+restore_cfg() {
+  if [[ -f "${CFG}.bak" ]]; then
+    echo "restoring ${CFG} from ${CFG}.bak"
+    sudo cp "${CFG}.bak" "$CFG"
+  else
+    echo "no ${CFG}.bak — removing ${CFG} (node had no config.yaml before)"
+    sudo rm -f "$CFG"
+  fi
+}
+
 if [[ "${ROLLBACK:-0}" == "1" ]]; then
-  echo "rolling back to ${CFG}.bak"
-  sudo cp "${CFG}.bak" "$CFG"
+  restore_cfg
   restart_and_verify
   exit $?
 fi
@@ -45,7 +56,11 @@ if (( MINOR >= 34 )); then API=apiserver.config.k8s.io/v1; elif (( MINOR >= 30 )
 # The apiserver must be able to fetch ${DEX_ISSUER}/.well-known/openid-configuration.
 curl -fsS "${DEX_ISSUER}/.well-known/openid-configuration" >/dev/null || { echo "dex discovery unreachable from the node"; exit 1; }
 
-sudo cp -n "$CFG" "${CFG}.bak" 2>/dev/null || true
+# Back up the original config.yaml exactly once (first run). A missing $CFG is
+# fine and meaningful: rollback then removes the file we are about to write.
+if [[ ! -f "${CFG}.bak" && -f "$CFG" ]]; then
+  sudo cp "$CFG" "${CFG}.bak"
+fi
 
 # ⚠️ values MUST be quoted — a trailing ':' in a value makes YAML parse the
 # list item as a map and k3s dies with "unknown flag". See README §7.1.
@@ -77,5 +92,5 @@ if restart_and_verify; then
   echo "verify with: kubectl --token <token> auth whoami"
 else
   echo "apiserver did not become ready — rolling back"
-  sudo cp "${CFG}.bak" "$CFG"; restart_and_verify; exit 1
+  restore_cfg; restart_and_verify; exit 1
 fi

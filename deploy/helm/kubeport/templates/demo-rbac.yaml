@@ -4,16 +4,29 @@ kind: Role
 metadata:
   name: demo-admin
   namespace: {{ .Values.demo.namespace }}
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
 rules:
-  - apiGroups: ["", "apps", "batch", "networking.k8s.io"]
-    resources: ["*"]
-    verbs: ["*"]
+  # Explicitly enumerated: no resourcequotas / limitranges / networkpolicies
+  # (the demo guardrails must not be editable from inside the demo), no
+  # pods/exec, no networking.k8s.io (ingress is quota-blocked anyway).
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services", "configmaps", "secrets", "events", "serviceaccounts", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: demo-user
   namespace: {{ .Values.demo.namespace }}
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["", "apps", "batch"]
     resources: ["pods", "pods/log", "services", "configmaps", "deployments", "statefulsets", "jobs", "cronjobs", "events", "replicasets"]
@@ -30,6 +43,8 @@ kind: RoleBinding
 metadata:
   name: demo-admin
   namespace: {{ .Values.demo.namespace }}
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -43,6 +58,8 @@ kind: RoleBinding
 metadata:
   name: demo-user
   namespace: {{ .Values.demo.namespace }}
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -56,6 +73,8 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: {{ include "kubeport.fullname" . }}-demo-ssar
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["authorization.k8s.io"]
     resources: ["selfsubjectaccessreviews"]
@@ -65,6 +84,8 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: {{ include "kubeport.fullname" . }}-demo-ssar
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole

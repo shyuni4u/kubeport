@@ -4,12 +4,16 @@ kind: ServiceAccount
 metadata:
   name: demo-reset
   namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: demo-reset
   namespace: {{ .Values.demo.namespace }}
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["", "apps", "batch", "networking.k8s.io"]
     resources: ["*"]
@@ -20,6 +24,8 @@ kind: RoleBinding
 metadata:
   name: demo-reset
   namespace: {{ .Values.demo.namespace }}
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -55,7 +61,7 @@ spec:
               image: {{ .Values.demo.kubectlImage | quote }}
               command: ["sh", "-c"]
               args:
-                - kubectl -n {{ .Values.demo.namespace }} delete deploy,sts,ds,job,cronjob,svc,cm,secret,pod --all --wait=false --ignore-not-found
+                - kubectl -n {{ .Values.demo.namespace }} delete deploy,sts,ds,job,cronjob,svc,cm,secret,pod --all --wait=true --ignore-not-found
               env:
                 # kubectl writes its discovery cache under $HOME/.kube/cache;
                 # readOnlyRootFilesystem forces it into the tmp emptyDir below.
@@ -70,10 +76,17 @@ spec:
             - name: seed
               image: {{ include "kubeport.backend.image" . }}
               command: ["/seed-demo", "--reset"]
-              envFrom:
-                - secretRef:
-                    name: {{ include "kubeport.auth.secretName" . }}
               env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "kubeport.auth.secretName" . }}
+                      key: DATABASE_URL
+                - name: DEMO_OIDC_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "kubeport.auth.secretName" . }}
+                      key: DEMO_OIDC_CLIENT_SECRET
                 - name: KBP_API_BASE_URL
                   value: {{ printf "http://%s:%v" (include "kubeport.backend.fullname" .) .Values.backend.service.port | quote }}
                 - name: DEMO_OIDC_ISSUER
@@ -113,6 +126,8 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: {{ include "kubeport.fullname" . }}-demo
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
 type: Opaque
 data:
   DEMO_ADMIN_PASSWORD: {{ required "demo.adminPassword is required when demo.enabled=true" .Values.demo.adminPassword | b64enc | quote }}
