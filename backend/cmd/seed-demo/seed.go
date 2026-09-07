@@ -123,6 +123,12 @@ func (s *Seeder) Run(ctx context.Context) error {
 			}
 		case http.StatusConflict:
 			log.Printf("template %s exists, skipping", f.Name)
+			// A partially-seeded template (created but never published, or its
+			// draft deleted by a demo visitor) must still end up in the shape
+			// the demo expects: v1 published + a v2 draft to edit.
+			if err := s.repairVersions(ctx, f.Name, f.ResourcesYAML, f.UISpecYAML); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("create template %s: %d %s", f.Name, code, b)
 		}
@@ -141,10 +147,68 @@ func (s *Seeder) Run(ctx context.Context) error {
 		case http.StatusConflict:
 			log.Printf("release %s exists, skipping", r.Name)
 		default:
-			// The intentionally broken release may return a k8s-error after
-			// apply if the cluster rejects it synchronously; log, don't fail.
-			log.Printf("release %s: %d %s (continuing)", r.Name, code, b)
+			// Anything else is a real failure (bad values, cluster unreachable,
+			// RBAC). Fail loudly so the reset Job goes CrashLoop/Failed instead
+			// of leaving a half-seeded demo that looks healthy.
+			// NOTE: the intentionally broken release still returns 201 — the
+			// image only fails to pull later, inside the cluster.
+			return fmt.Errorf("create release %s: %d %s", r.Name, code, b)
 		}
 	}
+	return nil
+}
+
+// repairVersions brings an already-existing template back to the seeded shape:
+// v1 published, and at least one draft version to edit. Idempotent — a fully
+// seeded template produces no writes.
+func (s *Seeder) repairVersions(ctx context.Context, name, resourcesYAML, uiSpecYAML string) error {
+	code, b, err := s.admin.do(ctx, http.MethodGet, "/v1/templates/"+name+"/versions", nil)
+	if err != nil {
+		return err
+	}
+	if code != http.StatusOK {
+		return fmt.Errorf("list versions %s: %d %s", name, code, b)
+	}
+	var listed struct {
+		Versions []struct {
+			Version int    `json:"version"`
+			Status  string `json:"status"`
+		} `json:"versions"`
+	}
+	if err := json.Unmarshal(b, &listed); err != nil {
+		return fmt.Errorf("list versions %s: %w", name, err)
+	}
+
+	var v1Draft, otherDraft bool
+	for _, v := range listed.Versions {
+		if v.Status != "draft" {
+			continue
+		}
+		if v.Version == 1 {
+			v1Draft = true
+		} else {
+			otherDraft = true
+		}
+	}
+	// v1 must be published (it is what the catalog deploys).
+	if v1Draft {
+		if code, b, err := s.admin.do(ctx, http.MethodPost, "/v1/templates/"+name+"/versions/1/publish", nil); err != nil || code >= 300 {
+			return fmt.Errorf("publish %s v1: %d %s %v", name, code, b, err)
+		}
+		log.Printf("template %s v1 published", name)
+	}
+	// Publishing v1 does not leave an editable draft, so only a draft at some
+	// other version counts.
+	if otherDraft {
+		log.Printf("template %s already has a draft, skipping", name)
+		return nil
+	}
+	if code, b, err := s.admin.do(ctx, http.MethodPost, "/v1/templates/"+name+"/versions", map[string]any{
+		"authoring_mode": "yaml", "resources_yaml": resourcesYAML, "ui_spec_yaml": uiSpecYAML,
+		"notes": "데모용 초안 — 자유롭게 수정해 보세요",
+	}); err != nil || code >= 300 {
+		return fmt.Errorf("draft %s: %d %s %v", name, code, b, err)
+	}
+	log.Printf("template %s draft created", name)
 	return nil
 }
