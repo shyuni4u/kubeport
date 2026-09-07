@@ -1,24 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { getConfig, client } from "@/lib/oidc";
+import { getConfig, client, parseProvider } from "@/lib/oidc";
 import { createSession } from "@/lib/session";
 import { externalOrigin } from "@/lib/request-origin";
 import { pool } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
-  const config = await getConfig();
-
   const cookieStore = await cookies();
   const raw = cookieStore.get("kbp_oidc_state")?.value;
   if (!raw) return new NextResponse("missing state", { status: 400 });
 
-  let parsed: { state: string; nonce: string; verifier: string };
+  let parsed: { state: string; nonce: string; verifier: string; provider?: string };
   try {
     parsed = JSON.parse(raw);
   } catch {
     return new NextResponse("invalid state", { status: 400 });
   }
   const { state, nonce, verifier } = parsed;
+  const provider = parseProvider(parsed.provider);
+
+  const config = await getConfig(provider);
 
   // Behind the proxy req.url resolves to the internal bind host
   // (http://0.0.0.0:3000/...); openid-client derives the token-exchange
@@ -58,7 +59,7 @@ export async function GET(req: NextRequest) {
     ? new Date(Date.now() + tokens.expiresIn()! * 1000)
     : new Date(Date.now() + 3600 * 1000);
 
-  await createSession(userId, tokens.id_token, tokens.refresh_token, expiresAt);
+  await createSession(userId, tokens.id_token, tokens.refresh_token, expiresAt, provider);
   cookieStore.delete("kbp_oidc_state");
   return NextResponse.redirect(new URL("/catalog", externalOrigin(req)));
 }
