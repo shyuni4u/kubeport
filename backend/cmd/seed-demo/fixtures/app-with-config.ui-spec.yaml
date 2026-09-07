@@ -1,0 +1,20 @@
+fields:
+  - path: ConfigMap[app-config].data.LOG_LEVEL
+    label: "로그 레벨"
+    type: enum
+    values: ["debug", "info", "warn"]
+    default: "info"
+  - path: ConfigMap[app-config].data.REGION
+    label: "리전"
+    type: string
+    pattern: "^[a-z]{2}$"
+    default: "kr"
+  - path: ConfigMap[app-config].data.FEATURE_FLAG
+    label: "실험 기능"
+    type: boolean
+    default: false
+  - path: Secret[app-secret].stringData.API_KEY
+    label: "API 키"
+    help: "외부 서비스 키. 데모에서는 아무 값이나 넣으세요."
+    type: string
+    required: true
