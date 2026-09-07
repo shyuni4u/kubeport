@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"os"
 	"strconv"
@@ -31,15 +32,21 @@ func main() {
 		DatabaseURL:         os.Getenv("DATABASE_URL"),
 		OIDCIssuer:          os.Getenv("OIDC_ISSUER"),
 		OIDCAudience:        os.Getenv("OIDC_AUDIENCE"),
+		OIDCIssuersJSON:     os.Getenv("KBP_OIDC_ISSUERS"),
+		DemoEmailDomain:     os.Getenv("KBP_DEMO_EMAIL_DOMAIN"),
 		AppEncryptionKeyB64: os.Getenv("APP_ENCRYPTION_KEY_B64"),
 		OpenAPICacheMax:     getenvInt("KBP_OPENAPI_CACHE_MAX", 64),
 	}
 
-	if cfg.OIDCIssuer == "" || cfg.OIDCAudience == "" {
-		log.Fatal("OIDC_ISSUER and OIDC_AUDIENCE are required (local dev: OIDC_ISSUER=http://localhost:5556 OIDC_AUDIENCE=kubeport)")
+	issuers, err := resolveIssuers(cfg)
+	if err != nil {
+		log.Fatalf("OIDC config: %v (local dev: OIDC_ISSUER=https://host.docker.internal:5556 OIDC_AUDIENCE=kubeport, or KBP_OIDC_ISSUERS JSON)", err)
 	}
 	if cfg.DatabaseURL == "" {
 		log.Fatal("DATABASE_URL is required (local dev: postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable)")
+	}
+	if cfg.DemoEmailDomain != "" {
+		log.Printf("demo restrictions enabled for *@%s", cfg.DemoEmailDomain)
 	}
 
 	if emails := os.Getenv("KBP_DEV_ADMIN_EMAILS"); emails != "" {
@@ -47,10 +54,11 @@ func main() {
 	}
 
 	ctx := context.Background()
-	verifier, err := auth.NewVerifier(ctx, cfg.OIDCIssuer, cfg.OIDCAudience)
+	verifier, err := auth.NewMultiVerifier(ctx, issuers)
 	if err != nil {
 		log.Fatalf("OIDC verifier init: %v", err)
 	}
+	log.Printf("trusting OIDC issuers: %v", verifier.Issuers())
 	st, err := store.NewStore(ctx, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("store init: %v", err)
@@ -79,4 +87,16 @@ func getenvInt(k string, def int) int {
 		}
 	}
 	return def
+}
+
+// resolveIssuers prefers KBP_OIDC_ISSUERS; falls back to the legacy
+// OIDC_ISSUER/OIDC_AUDIENCE pair so existing deploys keep working.
+func resolveIssuers(cfg config.Config) ([]auth.IssuerConfig, error) {
+	if cfg.OIDCIssuersJSON != "" {
+		return auth.ParseIssuersJSON(cfg.OIDCIssuersJSON)
+	}
+	if cfg.OIDCIssuer == "" || cfg.OIDCAudience == "" {
+		return nil, errors.New("set KBP_OIDC_ISSUERS or both OIDC_ISSUER and OIDC_AUDIENCE")
+	}
+	return []auth.IssuerConfig{{Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCAudience}}, nil
 }
