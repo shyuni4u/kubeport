@@ -12,7 +12,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 > - **로그인/로그아웃 정상**, admin 부트스트랩(`auth.devAdminEmails`). UX 마감: role-review(admin/user 페르소나) **14건 반영** — raw 에러→사용자 문장, 이중제출 가드, admin 저작 UI i18n, 파괴적 액션 confirm 등.
 > - **운영 하드닝**: idle-reclaim ping(GHA 10분) + 주간 백업 정책.
 > - **남은 것**: (a) **`kuberport` 오타 → `kubeport` 통일** (docs/oci README·runbook·upload-gha-secrets.sh·CLAUDE.md 잔존), (b) `deploy/oci/bootstrap.sh` 에 §7 인프라 수정(iptables pod/service CIDR · OIDC config) 반영해 재현성 확보, (c) Plan 11 e2e 확장(이제 라이브 OCI 대상).
-> - **데모 모드(Plan 13) 코드 완료** — `/` 에서 관리자/사용자 체험 버튼(Dex 로그인, 비밀번호 화면 표기), `demo` 네임스페이스 격리, 6시간 리셋. **프로덕션 적용은 Task 12 체크리스트(runbook §5 + deploy/oci/README §7.6)를 사람이 실행해야 함.**
+> - **데모 모드(Plan 13) 코드 완료** — `/` 에서 관리자/사용자 체험 버튼(Dex 로그인, 비밀번호 화면 표기), `demo` 네임스페이스 격리, 6시간 리셋. **프로덕션 적용은 Task 12 체크리스트(runbook §5 + deploy/oci/README §7.6)를 사람이 실행해야 함 — 인계 체크리스트: [docs/plan13-handoff.md](docs/plan13-handoff.md).**
 > - **주의**: 공인 IP `168.107.55.95` 는 ephemeral(stop/start 시 변경), SSH 키는 gpg 번들→`~/.ssh/kuberport-oci/`. 재배포·RBAC·롤백은 runbook.
 
 스펙: [docs/superpowers/specs/2026-04-19-frontend-design-spec.md](docs/superpowers/specs/2026-04-19-frontend-design-spec.md) (4 화면: Admin UI 에디터 / 카탈로그 / 배포 폼 / 릴리스 상세)

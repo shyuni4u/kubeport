@@ -165,3 +165,4 @@ sudo systemctl restart k3s
 - [ADR 0003](decisions/0003-hosting-oci-always-free.md) — 호스팅 결정
 - [docs/local-e2e.md](local-e2e.md) — 로컬(kind+dex) 등가 셋업
 - [Plan 10](superpowers/plans/2026-06-24-plan10-oci-phase2-bootstrap.md) — Phase 2 플랜
+- [docs/plan13-handoff.md](plan13-handoff.md) — 데모 모드(Plan 13) 프로덕션 롤아웃·후속 과제 인계 체크리스트
