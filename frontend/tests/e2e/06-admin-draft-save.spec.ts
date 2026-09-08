@@ -15,15 +15,14 @@ test.describe("demo admin edits the seeded draft", () => {
   const MARKER = "# e2e-touched";
 
   async function openDraftEditor(page: Page): Promise<void> {
-    await page.goto("/templates/web-app");
-    // The draft is the newest version → last edit link on the page.
-    const editLinks = page.locator('a[href*="/versions/"][href*="/edit"]');
-    await editLinks.first().waitFor({ timeout: 10_000 });
-    const href = await editLinks.last().getAttribute("href");
-    expect(href).toBeTruthy();
-    const url = new URL(href!, "http://x");
-    url.searchParams.set("mode", "yaml");
-    await page.goto(url.pathname + url.search);
+    // Ask the API which version is the draft (the seed keeps exactly one)
+    // rather than guessing from link order on the detail page.
+    const res = await page.request.get("/api/v1/templates/web-app/versions");
+    expect(res.ok()).toBeTruthy();
+    const { versions } = (await res.json()) as { versions: Array<{ version: number; status: string }> };
+    const draft = versions.find((v) => v.status === "draft");
+    expect(draft, "seeded web-app draft must exist").toBeTruthy();
+    await page.goto(`/templates/web-app/versions/${draft!.version}/edit?mode=yaml`);
     await expect(page.locator(".monaco-editor").nth(1)).toBeVisible({ timeout: 20_000 });
     // Wait until both models (resources.yaml, ui-spec.yaml) are populated.
     await page.waitForFunction(() => {
