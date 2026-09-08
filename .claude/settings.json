@@ -1,9 +1,4 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(ssh -i */oci_kuberport *)"
-    ]
-  },
   "hooks": {
     "PreToolUse": [
       {

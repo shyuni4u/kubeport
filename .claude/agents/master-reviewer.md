@@ -24,7 +24,7 @@ model: inherit
 ## 2. 정적 검증 (항상, 각 1회)
 ```
 helm lint deploy/helm/kubeport
-helm template kubeport deploy/helm/kubeport --set ingress.host=example.com > /dev/null
+helm template kubeport deploy/helm/kubeport -f deploy/helm/kubeport/ci/test-values.yaml > /dev/null
 docker compose -f deploy/docker/docker-compose.yml config > /dev/null
 cd backend && go build ./... && cd ..
 ```
