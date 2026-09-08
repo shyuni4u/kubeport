@@ -1,5 +1,34 @@
 # Local end-to-end setup
 
+## §0. 빠른 시작 — 어느 PC 에서든 (권장 경로)
+
+**원칙: Playwright e2e 는 로컬에서 먼저 돌린다.** CI(`playwright.yml`) 는 백스톱이다 — kind 를 매번 새로 만들어 느리고(≈5분) 가끔 인프라 플레이크가 난다. 스펙을 고치거나 배포 폼·에디터·릴리스 화면을 건드렸으면 푸시 전에 로컬에서 13개 스펙을 통과시킨다.
+
+`scripts/e2e/` 가 §1~§9 를 코드로 옮긴 것이다. 전부 멱등이라 매 세션 그대로 다시 실행하면 된다. Git Bash(Windows)·WSL·macOS·Linux 공통 — `jq` 를 쓰지 않는다(node 로 대체).
+
+```bash
+# 한 번 (머신당): docs/dev-setup.md 툴 설치 + §1 hosts 항목 (host.docker.internal → 127.0.0.1)
+scripts/e2e/doctor.sh      # 무엇이 빠졌는지 먼저 본다 (읽기 전용)
+
+# 매 세션
+scripts/e2e/up.sh          # dex 인증서 · compose(postgres+dex) · atlas 스키마 · frontend/.env.local · kind 클러스터(OIDC 신뢰) · RBAC
+scripts/e2e/backend.sh     # 터미널 1 (Go :8080)
+scripts/e2e/frontend.sh    # 터미널 2 (Next :3000)
+scripts/e2e/seed.sh        # 클러스터 등록(1회) + 데모 시드. 픽스처를 바꿨으면 `seed.sh -reset`
+scripts/e2e/run.sh         # = pnpm exec playwright test. 특정 스펙: run.sh tests/e2e/05-user-deploy.spec.ts --headed
+```
+
+| 증상 | 원인·조치 |
+|---|---|
+| `dex not reachable` | hosts 에 `host.docker.internal` 이 없거나 LAN IP 로 잡힘 → §1. Docker Desktop 이 자동으로 넣은 항목은 지우고 `127.0.0.1 host.docker.internal` 로 |
+| 로그인 후 `/catalog` 로 안 감, 401 | `frontend/tests/e2e/.auth/*.json` 이 DB 리셋·dex 재시작 이후 stale → `run.sh --fresh` |
+| 05 스펙의 pattern 검증이 안 뜸 | 예전 시드 템플릿이 남아 있음 → `seed.sh -reset` |
+| 06 스펙 `draft must exist` | 시드가 draft 를 못 만듦(두 번 실행 필요한 케이스) → `seed.sh` 한 번 더 |
+| kind 가 `EOF` / 503 | apiserver 재시작 중 → 10초 후 재시도. `kubectl --context kind-kubeport get --raw /readyz` |
+| Windows 에서 `jq: command not found` | 스크립트는 jq 를 안 쓴다. §9 의 수동 curl 예시만 jq 를 쓰므로 스크립트를 쓸 것 |
+
+아래 §1~§10 은 스크립트가 하는 일의 설명서이자, 스크립트가 실패했을 때의 수동 경로다.
+
 Run the full browser → deploy-to-kind flow on one machine. Use this when you
 need to test a change that crosses the dex / Go / Next.js / k8s boundaries —
 unit and integration tests won't catch OIDC trust, BFF proxying, or actual pod
@@ -280,6 +309,20 @@ DEMO_OIDC_ISSUER=https://host.docker.internal:5556 \
 
 Pass `-reset` to delete demo-owned rows first (requires `DATABASE_URL`) before
 reseeding — useful after schema changes or a dirty local DB.
+
+### 9c. Playwright specs (what `pnpm test:e2e` runs, in order)
+
+| Spec | Persona | Covers |
+|---|---|---|
+| `01-team-admin` | admin (dex primary) | create team, add editor |
+| `02-ui-editor` | admin | new template in UI mode: expose `spec.replicas`, label it, save → detail page |
+| `03-deprecate-flow` | admin | publish → deprecate → hidden from catalog → undeprecate (confirm dialogs auto-accepted) |
+| `04-demo-user` | demo user / demo admin | demo banner, seeded catalog, demo-restricted 403, landing entry buttons |
+| `05-user-deploy` | demo user | deploy form: empty-name guard, Korean validation sentence, RBAC denial sentence for `kube-system`, deploy to `default`, delete own release |
+| `06-admin-draft-save` | demo admin | seeded `web-app` draft: unsaved-edits guard on tab switch, display-name PATCH save, restore |
+| `07-error-pages` | demo user | unknown template / release / team → localized not-found page with a way back |
+
+All specs assume the seed from §9b (templates `web-app`, `nightly-job`, `app-with-config` + a `web-app` draft) and the demo RBAC bindings from §6 (`demo-user` has `edit` in `default`). Anything that pops `window.confirm` needs `autoAcceptDialogs(page)` from `fixtures.ts` — Playwright dismisses dialogs by default, which cancels the action.
 
 ### 10. Browser
 

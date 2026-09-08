@@ -210,8 +210,22 @@ jobs:
             -d 'scope=openid email profile groups' | jq -r .id_token)
           curl -fs -H "Authorization: Bearer $DEMO_USER_TOK" http://localhost:8080/v1/me >/dev/null
           # kind trusts the id_token email claim verbatim (no username prefix).
-          kubectl --context kind-kubeport create rolebinding demo-admin --clusterrole=admin --user=demo-admin@demo.kubeport -n default
-          kubectl --context kind-kubeport create rolebinding demo-user  --clusterrole=edit  --user=demo-user@demo.kubeport  -n default
+          # The apiserver was restarted by the hostAliases patch above and can
+          # still be flapping here ("EOF" on the first write) — retry, and use
+          # apply so a retry after a half-applied create is idempotent.
+          bind() {
+            for attempt in 1 2 3 4 5 6; do
+              if kubectl --context kind-kubeport create rolebinding "$1" --clusterrole="$2" --user="$3" -n default \
+                   --dry-run=client -o yaml | kubectl --context kind-kubeport apply -f -; then
+                return 0
+              fi
+              echo "rolebinding $1: attempt $attempt failed, retrying" >&2
+              sleep 5
+            done
+            return 1
+          }
+          bind demo-admin admin demo-admin@demo.kubeport
+          bind demo-user  edit  demo-user@demo.kubeport
 
       - name: Seed demo data
         env:

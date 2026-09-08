@@ -1,7 +1,7 @@
 import { test, expect, adminStorage } from "./fixtures";
 
 test.describe("team admin", () => {
-  test.use({ storageState: async ({}, use) => use(await adminStorage()) });
+  test.use({ storageState: async ({}, provide) => provide(await adminStorage()) });
 
   test("create team and add alice as editor", async ({ page }) => {
     const slug = `e2e-team-${Date.now()}`;
