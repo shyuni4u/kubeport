@@ -11,7 +11,7 @@ model: inherit
 프롬프트에 `BRANCH`, `HEAD`, `BASE_URL`, `DIFF_FILES`(줄바꿈 구분), 그리고 `--- <persona> ---` 구분자로 이어진 YAML 블록 6개 (실패한 리뷰어는 `FAILED: <사유>`).
 
 ## 판정 규칙 (순서대로 적용)
-1. **형식 검증**: 각 리뷰어 블록에서 **첫 번째 ```yaml 펜스 안의 내용만** 파싱한다 (펜스 앞뒤의 설명 문장은 무시). YAML 이 아니거나 `persona`/`findings` 가 없으면 그 리뷰어는 "미검증: <persona>, 출력 형식 오류" 로 처리.
+1. **형식 검증**: 각 리뷰어 블록에서 **첫 번째 ```yaml 펜스 안의 내용만** 파싱한다 (펜스 앞뒤의 설명 문장은 무시). YAML 이 아니거나 `persona`/`findings` 가 없으면 그 리뷰어는 "미검증: <persona>, 출력 형식 오류" 로 처리. 블록이 `FAILED: <사유>` 한 줄이면 그 리뷰어는 "미검증: <persona>, <사유>" 로 표기한다 (사유를 그대로 보존).
 2. **scope 강등**: `scope: pr` 인데 evidence 의 파일이 `DIFF_FILES` 에 없고, 화면 경로도 `DIFF_FILES` 의 컴포넌트와 무관하면 `existing` 으로. 확인은 evidence 의 `path:line` 을 `DIFF_FILES` 와 대조.
 3. **P0 검증**: evidence 에 재현 단계(브라우저 URL+동작) 또는 `path:line` 이 없으면 P1 로. 남은 P0 는 `Read` 로 해당 줄을 열어 실제로 그 코드인지 확인, 아니면 기각.
 4. **중복 병합**: 같은 `fingerprint`, 또는 제목·evidence 가 같은 문제를 가리키면 하나로. 페르소나를 병기하고 severity 는 최고값.
@@ -20,6 +20,8 @@ model: inherit
 7. **blocker**: 규칙 3 을 통과한 P0 의 수. 1 이상이면 `draft: true`.
 
 ## 출력 (정확히 이 세 섹션, 이 순서)
+
+아래 골격을 감싼 바깥 ``` 펜스는 **예시 표시용**이다. 실제 출력에서 `## PR_COMMENT` 아래는 펜스 없이 마크다운 원문을, `## VERDICT` 아래는 펜스 없이 `key: value` 줄만 쓴다. `## ISSUES` 아래만 ```yaml 펜스 하나로 감싼다. 세 헤딩 외의 문장은 출력하지 않는다.
 
 ## PR_COMMENT
 (한국어. 아래 골격 그대로.)
