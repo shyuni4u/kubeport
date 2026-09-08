@@ -14,7 +14,7 @@
 | 라이브 URL | **https://kubeport.enzo.kr** |
 | 공인 IP | `168.107.55.95` (⚠️ **ephemeral** — 인스턴스 stop/start 시 바뀜, 재부팅은 유지) |
 | OCI 인스턴스 | `kubeport`, `VM.Standard.A1.Flex` 4 OCPU/24GB, Ubuntu 24.04 ARM, 리전 `ap-chuncheon-1` |
-| SSH | `ssh -i ~/.ssh/kuberport-oci/oci_kuberport ubuntu@168.107.55.95` |
+| SSH | `ssh -i ~/.ssh/kuberport-oci/oci_kuberport ubuntu@168.107.55.95` — `kuberport` 는 초기 오타지만 **실제 키 파일·디렉터리 이름**이라 그대로 쓴다 (이름을 바꾸면 gpg 번들·GHA 시크릿 스크립트도 같이 바꿔야 함; `upload-gha-secrets.sh` 는 `oci_kubeport.pub` 이 있으면 그것을 우선 쓴다) |
 | SSH 키 출처 | gpg 번들 `kubeport-ssh.tar.gz.gpg`(대칭 암호화 — 별도 터미널에서 `gpg --pinentry-mode loopback -d ... \| tar -xz -C ~/.ssh/kuberport-oci`). 번들엔 키·config 만 있고 prod 시크릿 파일은 없음 — 시크릿은 Helm values 에서 조회 |
 | 데모 시크릿 | Helm 릴리스 values 가 원본: `sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm -n kubeport get values kubeport -o json \| jq '{pw:.demo.passwordHint, dex:.dex.clientSecret}'`. `DEMO_PW` 는 랜딩에 공개되는 값, `DEX_SECRET` 은 비밀번호 관리자에도 보관 |
 | DNS | **GoDaddy** (`enzo.kr`, ns `domaincontrol.com`). A 레코드 2개: `kubeport` · `dex.kubeport` → 공인 IP. IP 변경 시 둘 다 갱신 |

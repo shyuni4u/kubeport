@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # .github/workflows/oci-a1-capacity-poll.yml 가 필요로 하는 GitHub secrets 를
-# 로컬 OCI 설정 (~/.oci/, ~/oci-capacity-retry/config.env, ~/.ssh/oci_kuberport.pub) 에서
+# 로컬 OCI 설정 (~/.oci/, ~/oci-capacity-retry/config.env, ~/.ssh/oci_kubeport.pub — 없으면 옛 이름 oci_kuberport.pub) 에서
 # 뽑아 한 번에 업로드. 한 번만 돌리면 됨.
 #
 # 전제:
@@ -12,7 +12,10 @@ set -euo pipefail
 OCI_CONFIG="$HOME/.oci/config"
 OCI_KEY="$HOME/.oci/oci_api_key.pem"
 RETRY_CONFIG="$HOME/oci-capacity-retry/config.env"
-SSH_PUB="$HOME/.ssh/oci_kuberport.pub"
+# The SSH key pair was originally created as `oci_kuberport` (historical
+# typo). Prefer the corrected name when present, fall back to the legacy one.
+SSH_PUB="$HOME/.ssh/oci_kubeport.pub"
+[[ -f "$SSH_PUB" ]] || SSH_PUB="$HOME/.ssh/oci_kuberport.pub"
 
 for f in "$OCI_CONFIG" "$OCI_KEY" "$RETRY_CONFIG" "$SSH_PUB"; do
   [[ -f "$f" ]] || { echo "missing: $f" >&2; exit 1; }

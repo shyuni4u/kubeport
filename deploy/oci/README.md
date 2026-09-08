@@ -6,7 +6,7 @@ ADR 0003 §"Phase 2 — Target (OCI Always Free A1.Flex)" 실행 가이드. Plan
 
 - [ ] OCI VM 확보: `VM.Standard.A1.Flex`, 4 OCPU / 24 GB, Ubuntu 24.04 ARM, Public IP 안정 (reserved 권장)
 - [ ] OCI Security List inbound: 80, 443, 22 허용 (SSH 는 본인 IP 만 권장)
-- [ ] SSH 키 (`~/.ssh/oci_kuberport`) 로 `ubuntu@<public-ip>` 접속 가능
+- [ ] SSH 키 (`~/.ssh/oci_kuberport` — 초기 오타지만 실제 파일명이라 그대로 사용) 로 `ubuntu@<public-ip>` 접속 가능
 - [ ] 도메인 보유 (예: Godaddy `<host>.example`)
 - [ ] Google Cloud Console 접근 (OAuth client 발급용)
 
