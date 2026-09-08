@@ -64,6 +64,24 @@ describe("FieldInspector", () => {
       harness({ mode: "exposed", uiSpec: { label: "", type: "string", required: false } });
       expect(screen.getByPlaceholderText("사용자에게 보일 이름 (예: image)")).toBeInTheDocument();
     });
+
+    it("lets the admin author the help text users see behind (?)", () => {
+      const { onChange } = harness({ mode: "exposed", uiSpec: { label: "이미지", type: "string", required: false } });
+      const input = screen.getByPlaceholderText(/사용자가 \(\?\) 를 눌렀을 때/);
+      fireEvent.change(input, { target: { value: "실행할 프로그램 이름입니다." } });
+      const next = onChange.mock.calls.at(-1)?.[0] as Extract<UIField, { mode: "exposed" }>;
+      expect(next.uiSpec.help).toBe("실행할 프로그램 이름입니다.");
+    });
+
+    it("clearing the help box drops the key so the ui-spec stays minimal", () => {
+      const { onChange } = harness({
+        mode: "exposed",
+        uiSpec: { label: "이미지", type: "string", required: false, help: "예전 설명" },
+      });
+      fireEvent.change(screen.getByDisplayValue("예전 설명"), { target: { value: "" } });
+      const cleared = onChange.mock.calls.at(-1)?.[0] as Extract<UIField, { mode: "exposed" }>;
+      expect(cleared.uiSpec.help).toBeUndefined();
+    });
   });
 
   describe("입력 방식 type toggle (string-compatible schema)", () => {

@@ -141,6 +141,10 @@ export function FieldInspector({
           <Labeled label={t("label")} v={value.uiSpec.label}
             placeholder={t("labelPlaceholder", { leaf })}
             onChange={x => onChange({ ...value, uiSpec: { ...value.uiSpec, label: x } })}/>
+          {/* Shown to users as the (?) tooltip and the line under the input. */}
+          <Labeled label={t("help")} v={value.uiSpec.help ?? ""}
+            placeholder={t("helpPlaceholder")}
+            onChange={x => onChange({ ...value, uiSpec: { ...value.uiSpec, help: x || undefined } })}/>
           <Labeled label={t("default")} v={String(value.uiSpec.default ?? "")}
             onChange={x => onChange({ ...value, uiSpec: { ...value.uiSpec, default: coerce(x, value.uiSpec.type) } })}/>
           {(value.uiSpec.type === "enum" || value.uiSpec.type === "autocomplete") && (

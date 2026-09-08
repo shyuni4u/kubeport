@@ -277,6 +277,8 @@
         "suggest": "Suggestions",
         "label": "Label",
         "labelPlaceholder": "Name shown to users (e.g. {leaf})",
+        "help": "Help text",
+        "helpPlaceholder": "Shown when a user opens (?). Plain words, with an example.",
         "default": "Default",
         "values": "Choices (Values)",
         "suggestions": "Suggested items (Suggestions)",

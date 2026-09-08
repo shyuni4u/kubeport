@@ -277,6 +277,8 @@
         "suggest": "추천",
         "label": "라벨",
         "labelPlaceholder": "사용자에게 보일 이름 (예: {leaf})",
+        "help": "도움말",
+        "helpPlaceholder": "사용자가 (?) 를 눌렀을 때 보일 설명. 쉬운 말로, 예시와 함께.",
         "default": "기본값",
         "values": "선택지 (Values)",
         "suggestions": "추천 항목 (Suggestions)",
