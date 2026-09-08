@@ -26,6 +26,9 @@ test.describe("UI mode editor", () => {
     // Open spec.replicas in the inspector and expose it.
     await page.locator("text=replicas").first().click();
     await page.getByRole("button", { name: "사용자 노출" }).click();
+    // Exposed fields start with an empty label and the editor refuses to save
+    // until every exposed field is labelled (users see this label on the form).
+    await page.getByPlaceholder(/사용자에게 보일 이름/).fill("복제 수");
 
     // Monaco renders via a virtualized canvas, so DOM-level text queries are
     // unreliable. We skip a preview assertion and rely on the save step +
