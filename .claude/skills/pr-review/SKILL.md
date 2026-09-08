@@ -16,6 +16,8 @@ description: >
 
 ## 1. 준비
 ```bash
+BASE_URL=${BASE_URL:-https://kubeport.enzo.kr}   # --base-url 인자가 있으면 그 값
+DEEP=false   # --deep 인자가 있으면 true
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 HEAD=$(git rev-parse HEAD)
 git fetch -q origin main
@@ -23,7 +25,7 @@ CHANGED_FILES=$(git diff --name-only origin/main...HEAD)
 DIFF=$(git diff origin/main...HEAD)          # 4000줄 넘으면 파일별로 나눠 각 리뷰어엔 관련 파일만
 SAFE_BRANCH=${BRANCH//\//__}
 mkdir -p .claude/reviews/shots
-curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/"   # 200 아니면 LIVE_OK=false
+curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/"   # 200 아니면 LIVE_OK=false, LIVE_OK=true/false 로 기록
 ```
 `CHANGED_FILES` 에 `deploy/`, `README.md`, `docs/dev-setup.md`, `docs/oci-prod-runbook.md` 가 있고 `--deep` 이 없으면 한 줄 안내: "설치 관련 변경이 있습니다. `--deep` 으로 실제 설치 검증을 권합니다." (계속 진행.)
 
@@ -52,8 +54,8 @@ LIVE_OK=false 면 셋 다 `FAILED: 대상 URL 응답 없음` 으로 건너뛴다
 각 리뷰어는 demo-accounts.md 의 절차로 시작 시 이전 세션을 확인하고 종료 시 UI 메뉴로 로그아웃한다 (`/api/auth/logout` 은 POST 전용). 리뷰어 출력의 `verified` 에 로그아웃 확인이 없으면 다음 리뷰어 프롬프트 맨 앞에 "먼저 demo-accounts.md 0단계로 남은 세션을 정리하라" 를 붙인다.
 
 ## 4. 매니저
-`Agent(subagent_type="reviewer-manager")` 로 띄운다 (호출 규칙 참조). `BRANCH`, `HEAD`, `BASE_URL`, `DIFF_FILES`(=CHANGED_FILES) 와 6개 블록을 `--- <persona> ---` 구분자로 이어 전달. 응답을 `## PR_COMMENT` / `## ISSUES` / `## VERDICT` 로 자른다.
-`## PR_COMMENT` 본문이 통째로 ``` 펜스로 감싸져 있으면 바깥 펜스 한 쌍을 벗긴다. `## VERDICT` 도 마찬가지. `## ISSUES` 는 ```yaml 펜스 안의 YAML 을 파싱한다.
+`Agent(subagent_type="reviewer-manager")` 로 띄운다 (호출 규칙 참조). `BRANCH`, `HEAD`, `BASE_URL`, `DIFF_FILES`(이 필드에 `CHANGED_FILES` 값을 그대로 넣어 전달)와 6개 블록을 `--- <persona> ---` 구분자로 이어 전달. 응답을 `## PR_COMMENT` / `## ISSUES` / `## VERDICT` 로 자른다.
+`## PR_COMMENT` 본문이 통째로 코드 펜스(세 개의 백틱)로 감싸져 있으면 바깥 펜스 한 쌍을 벗긴다. `## VERDICT` 도 마찬가지. `## ISSUES` 는 `yaml` 코드 펜스 안의 YAML 을 파싱한다.
 
 ## 5. 기록
 `.claude/reviews/<SAFE_BRANCH>.md` 에 쓴다:
@@ -69,7 +71,7 @@ DEEP: <bool>
 (이 파일의 `HEAD:` 줄을 훅이 검사한다. 리뷰 후 커밋이 추가되면 다시 실행해야 한다.)
 
 ## 6. PR 생성
-`--dry-run` 이면 6·7 은 실행할 명령과 본문을 코드 블록으로 출력만 하고 종료.
+`--dry-run` 이면 6·7·8 은 실행할 명령과 본문(PR 본문, 이슈 본문, PR 코멘트)을 코드 블록으로 출력만 하고 종료. `PR_URL` 은 `<dry-run>` 으로 표기.
 
 - 제목: Conventional Commits 접두어 영문 + 한국어 요약 (CLAUDE.md "PR 작성" 규칙). 브랜치 커밋들을 보고 작성.
 - 본문: `## 요약` / `## 테스트 계획` + 끝에
