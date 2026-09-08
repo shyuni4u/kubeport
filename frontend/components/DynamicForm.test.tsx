@@ -301,6 +301,25 @@ describe("DynamicForm onChange callback", () => {
     expect(lastCall).toMatchObject({ "metadata.name": "ab" });
   });
 
+  it("keeps bracket paths flat in onChange and onSubmit (regression)", async () => {
+    // RHF splits field names on `[` and `]` as well as `.`; before the
+    // bracket encoding, `Deployment[web]...containers[0].env[0].value`
+    // came back as a nested object and submit sent the stale default.
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const onSubmit = vi.fn();
+    const path = "Deployment[web].spec.template.spec.containers[0].env[0].value";
+    const spec: UISpec = {
+      fields: [{ path, label: "Msg", type: "string", default: "x" }],
+    };
+    render(<DynamicForm spec={spec} onSubmit={onSubmit} onChange={onChange} />);
+    await user.type(screen.getByLabelText(/Msg/), "y");
+    const last = onChange.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(last).toEqual({ [path]: "xy" });
+    await user.click(screen.getByRole("button"));
+    expect(onSubmit).toHaveBeenCalledWith({ [path]: "xy" });
+  });
+
   it("initialValues override spec defaults", () => {
     const spec: UISpec = {
       fields: [

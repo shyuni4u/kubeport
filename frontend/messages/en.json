@@ -20,7 +20,8 @@
     "delete": "Delete",
     "edit": "Edit",
     "loading": "Loading…",
-    "empty": "No data."
+    "empty": "No data.",
+    "help": "Help"
   },
   "demo": {
     "banner": "Demo session. Next reset: {time}",
@@ -34,7 +35,21 @@
     "loginPrimary": "Sign in with Google",
     "demoNote": "Deploys to a real cluster · resets every 6 hours · don't leave personal data",
     "demoCreds": "Demo password: {password}",
-    "goCatalog": "Go to catalog"
+    "goCatalog": "Go to catalog",
+    "compare": {
+      "heading": "The admin writes it once. The user fills in four fields.",
+      "subheading": "Change a value on the right — the line it edits on the left lights up.",
+      "adminTitle": "What the admin writes",
+      "adminHelp": "Running something on Kubernetes normally means writing a config file like this by hand. In kubeport the admin writes it once and registers it as a template.",
+      "userTitle": "What the user sees",
+      "userHelp": "Regular users consume the same template through this form. They never open the config file.",
+      "yamlLines": "{count} lines of YAML",
+      "yamlHelp": "YAML is the config file format Kubernetes reads. A single wrong indent breaks the deploy.",
+      "inputs": "{count} inputs",
+      "inputsHelp": "Only the fields the admin chose to expose appear in the form. Everything else stays fixed to the admin's values.",
+      "changedLine": "Line just changed",
+      "previewSubmit": "Deploy (for real after the demo login)"
+    }
   },
   "catalog": {
     "title": "Catalog",
