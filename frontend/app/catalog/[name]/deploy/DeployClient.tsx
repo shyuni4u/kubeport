@@ -221,7 +221,7 @@ export function DeployClient({
           </h1>
           <p className="text-xs text-muted-foreground">
             {templateName} · v{version}
-            {team ? ` · ${team} 팀` : ""}
+            {team ? ` · ${t("teamSuffix", { team })}` : ""}
           </p>
         </header>
         {!isUpdate && (
