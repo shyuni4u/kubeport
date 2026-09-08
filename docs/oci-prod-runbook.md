@@ -15,7 +15,9 @@
 | 공인 IP | `168.107.55.95` (⚠️ **ephemeral** — 인스턴스 stop/start 시 바뀜, 재부팅은 유지) |
 | OCI 인스턴스 | `kubeport`, `VM.Standard.A1.Flex` 4 OCPU/24GB, Ubuntu 24.04 ARM, 리전 `ap-chuncheon-1` |
 | SSH | `ssh -i ~/.ssh/kuberport-oci/oci_kuberport ubuntu@168.107.55.95` |
-| SSH 키 출처 | gpg 번들 `kuberport-ssh.tar.gz.gpg` → `~/.ssh/kuberport-oci/` 로 복호화 (`gpg -d ... | tar -xz`) |
+| SSH 키 출처 | gpg 번들 `kubeport-ssh.tar.gz.gpg`(대칭 암호화 — 별도 터미널에서 `gpg --pinentry-mode loopback -d ... \| tar -xz -C ~/.ssh/kuberport-oci`). 번들엔 키·config 만 있고 prod 시크릿 파일은 없음 — 시크릿은 Helm values 에서 조회 |
+| 데모 시크릿 | Helm 릴리스 values 가 원본: `sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm -n kubeport get values kubeport -o json \| jq '{pw:.demo.passwordHint, dex:.dex.clientSecret}'`. `DEMO_PW` 는 랜딩에 공개되는 값, `DEX_SECRET` 은 비밀번호 관리자에도 보관 |
+| DNS | **GoDaddy** (`enzo.kr`, ns `domaincontrol.com`). A 레코드 2개: `kubeport` · `dex.kubeport` → 공인 IP. IP 변경 시 둘 다 갱신 |
 | prod 시크릿 | `~/.ssh/kuberport-oci/kuberport-prod-secrets.env` (600). **password manager 로 옮길 것.** 담긴 것: `APP_ENCRYPTION_KEY_B64`(분실=DB 복호화 불가), `POSTGRES_PASSWORD`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` |
 | kubeconfig (VM 내) | `/etc/rancher/k3s/k3s.yaml` (`export KUBECONFIG=...` 후 `kubectl`) |
 | Helm 릴리스 | `kubeport` (ns `kubeport`), 차트 VM 사본 `~/kubeport-chart/kubeport` |
@@ -118,6 +120,21 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
 > 아니라도 **새로 발급된** 토큰이 401 로 거부될 수 있다(캐시가 아직 새 키를 못 받아옴). 보통
 > k8s 가 자동으로 짧은 주기 뒤 JWKS 를 다시 받아오며 해결된다. 안 풀리면 `sudo systemctl restart k3s`
 > 로 캐시를 강제로 비운다.
+
+### 데모 모드 운영 (Plan 13, 2026-09-08 롤아웃 완료)
+
+- **구성**: Helm revision ≥ 4 에 `dex.enabled=true` / `demo.enabled=true`, `demo.kubectlImage=alpine/k8s:1.31.9`.
+  k3s 는 `/etc/rancher/k3s/auth.yaml` 로 Google + Dex 를 신뢰(`config.yaml.bak` 이 전환 전 백업).
+- **데모 비밀번호 회전**: [deploy/oci/README.md §7.6](../deploy/oci/README.md) 의 `--set` 목록을
+  새 `DEMO_PW`/`HASH` 로 다시 실행 (`staticPasswords[N]` 네 필드 전부, `--reset-then-reuse-values`).
+  `DEX_SECRET` 은 유지해도 된다. Dex 는 `storage: memory` 라 재시작 시 서명 키가 바뀐다 (§5 주의 참조).
+- **리셋**: CronJob `kubeport-demo-reset` 6시간 주기. 수동: `kubectl -n kubeport create job --from=cronjob/kubeport-demo-reset demo-reset-manual`
+  → 로그 `seed-demo: done`. wipe 단계가 `demo` ns 의 configmap 을 전부 지우므로 `kube-root-ca.crt deleted` 가 찍히는 건 정상(자동 재생성).
+- **오너 RBAC**: 오너 Google 이메일의 cluster-admin 바인딩 이름은 `kubeport-owner-admin`
+  (예전 이름 `kubeport-demo-admin` 은 이름과 달리 오너 바인딩이었음 — 삭제 전 subject 확인).
+  데모 계정은 chart 의 `demo` ns RoleBinding 만 갖는다. 검증: `kubectl auth can-i create deployments --as=dex:demo-user@demo.kubeport -n default` → **no**.
+- **Dex 호스트도 ephemeral IP 를 본다**: VM stop/start 후 `dex.kubeport.enzo.kr` A 레코드까지 갱신하지 않으면
+  인증서 갱신·데모 로그인이 깨진다.
 
 ### k3s 재기동 롤백 (apiserver 가 안 뜰 때)
 ```bash

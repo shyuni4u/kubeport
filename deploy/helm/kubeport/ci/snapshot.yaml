@@ -1434,7 +1434,7 @@ spec:
             runAsUser: 65532
           initContainers:
             - name: wipe-k8s
-              image: "bitnami/kubectl:1.31"
+              image: "alpine/k8s:1.31.9"
               command: ["sh", "-c"]
               args:
                 - kubectl -n demo delete deploy,sts,ds,job,cronjob,svc,cm,secret,pod --all --wait=true --ignore-not-found

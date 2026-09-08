@@ -1,33 +1,33 @@
 # Plan 13 (데모 모드) — 사람이 직접 해야 할 일
 
 > 작성: 2026-09-07. 브랜치 `worktree-plan13-demo-mode` 구현·리뷰 완료 시점의 인계 문서.
-> 코드는 끝났지만 **프로덕션에는 아직 아무것도 적용되지 않았다.** 아래 A→B→C 순서로 진행한다.
+> **2026-09-08 갱신: A(PR #2 머지)·B(프로덕션 롤아웃) 완료.** 남은 사람 작업은 B9 브라우저 스모크와 B11 의 바인딩 이름 변경 두 가지.
 > 완료한 항목은 체크하고, 다 끝나면 이 문서를 삭제하거나 runbook §5 에 흡수한다.
 
 ## A. 브랜치 통합 (지금)
 
-- [ ] 통합 방식 결정: 로컬 merge / PR / 보류. 권장은 **PR** (변경 89 파일, 23 커밋 — 리뷰 흔적을 남길 가치가 있음).
-- [ ] 로컬 `main` 에는 아직 origin 에 없는 문서 커밋 3개(리서치·스펙·플랜)가 있다. 브랜치를 푸시하면 함께 올라간다. 먼저 `main` 을 푸시하려면 `git push origin main` (main 에서).
-- [ ] PR 본문은 한국어, 제목은 `feat(demo): Dex demo IdP, demo accounts with seed/reset, k3s structured auth`. 본문에 명시할 것:
+- [x] 통합 방식 결정: 로컬 merge / PR / 보류. 권장은 **PR** (변경 89 파일, 23 커밋 — 리뷰 흔적을 남길 가치가 있음).
+- [x] 로컬 `main` 에는 아직 origin 에 없는 문서 커밋 3개(리서치·스펙·플랜)가 있다. 브랜치를 푸시하면 함께 올라간다. 먼저 `main` 을 푸시하려면 `git push origin main` (main 에서).
+- [x] PR 본문은 한국어, 제목은 `feat(demo): Dex demo IdP, demo accounts with seed/reset, k3s structured auth`. 본문에 명시할 것:
   - `DeleteRelease` 의 검사 순서가 바뀌어 비소유자 강제삭제의 에러 문구가 `"force delete requires admin"` 으로 변경됨(동작 동일).
   - 프론트 lint 에러 3건이 새로 추가됨(기존 5건과 동일 패턴: `DemoBanner` set-state-in-effect, `04-demo-user.spec.ts` 의 Playwright `use` 오탐). lint 는 CI 게이트가 아님. → §D 후속.
-- [ ] PR 생성 후 `/gemini review` 를 **최종 코드에서 1회** 수동 실행 (CLAUDE.md 규칙).
-- [ ] CI 확인: `playwright.yml` 은 이번 브랜치에서 데모 시드·RBAC 스텝이 추가되어 처음 돌아간다. 실패하면 `Seed demo data` 스텝 로그부터 본다.
+- [ ] PR 생성 후 `/gemini review` 를 **최종 코드에서 1회** 수동 실행 (CLAUDE.md 규칙) — 미실행, 머지 후 생략.
+- [x] CI 확인 (`03-deprecate-flow` 는 main 과 동일한 기존 실패): `playwright.yml` 은 이번 브랜치에서 데모 시드·RBAC 스텝이 추가되어 처음 돌아간다. 실패하면 `Seed demo data` 스텝 로그부터 본다.
 
 ## B. 프로덕션 롤아웃 (Task 12) — VM 에서, 순서 중요
 
 전체 절차와 명령은 [deploy/oci/README.md §7.6](../deploy/oci/README.md) 과
 [플랜 Task 12](superpowers/plans/2026-09-07-plan13-demo-mode.md) 에 있다. 요약 체크리스트:
 
-- [ ] **B1. 이미지**: 브랜치가 main 에 머지되어 `build-images.yml` 이 새 태그를 푸시했는지 확인 (`seed-demo` 바이너리가 backend 이미지에 포함된 첫 빌드).
-- [ ] **B2. DNS**: Cloudflare A 레코드 `dex.kubeport.enzo.kr` → 현재 공인 IP. 공인 IP 는 ephemeral 이라 stop/start 시 두 레코드(`kubeport.`, `dex.`) 모두 갱신해야 한다.
-- [ ] **B3. 시크릿 생성 후 비밀번호 관리자에 저장**:
+- [x] **B1. 이미지**: 브랜치가 main 에 머지되어 `build-images.yml` 이 새 태그를 푸시했는지 확인 (`seed-demo` 바이너리가 backend 이미지에 포함된 첫 빌드).
+- [x] **B2. DNS**: GoDaddy(`enzo.kr`, 네임서버 `domaincontrol.com`) A 레코드 `dex.kubeport.enzo.kr` → 현재 공인 IP. 공인 IP 는 ephemeral 이라 stop/start 시 두 레코드(`kubeport.`, `dex.`) 모두 갱신해야 한다.
+- [x] **B3. 시크릿 생성 후 비밀번호 관리자에 저장**:
   ```bash
   DEMO_PW=$(openssl rand -base64 9 | tr -d '/+=' | cut -c1-10)   # 사람이 칠 수 있게 짧게, 공개됨
   DEX_SECRET=$(openssl rand -hex 24)
   HASH=$(htpasswd -bnBC 10 "" "$DEMO_PW" | tr -d ':\n')
   ```
-- [ ] **B4. helm upgrade (최초 1회 전체 `--set`)**: `values-oci-phase2.yaml` 은 의도적으로 `dex.enabled=false` / `demo.enabled=false` 다. 처음 켤 때만 아래를 전부 주고, 이후에는 `--reuse-values` 가 유지한다.
+- [x] **B4. helm upgrade (최초 1회 전체 `--set`)**: `values-oci-phase2.yaml` 은 의도적으로 `dex.enabled=false` / `demo.enabled=false` 다. 처음 켤 때만 아래를 전부 주고, 이후에는 `--reuse-values` 가 유지한다.
   ```bash
   helm upgrade kubeport ~/kubeport-chart/kubeport -n kubeport --reuse-values \
     -f ~/kubeport-chart/kubeport/values-oci-phase2.yaml \
@@ -38,18 +38,24 @@
     --set demo.adminPassword=$DEMO_PW --set demo.userPassword=$DEMO_PW
   ```
   주의: 이후 `--reuse-values` 없이 `-f values-oci-phase2.yaml` 만 쓰면 데모 모드가 **꺼진다**.
-- [ ] **B5. Dex 준비 확인**: `kubectl -n kubeport get certificate` 에서 Dex cert `Ready`, 그리고 **클러스터 내부에서** discovery 가 닿는지:
+- [x] **B5. Dex 준비 확인**: `kubectl -n kubeport get certificate` 에서 Dex cert `Ready`, 그리고 **클러스터 내부에서** discovery 가 닿는지:
   ```bash
   kubectl -n kubeport exec deploy/kubeport-backend -- \
     wget -qO- https://dex.kubeport.enzo.kr/.well-known/openid-configuration | head -c 200
   ```
   backend 는 issuer discovery 를 지연 수행하므로 Dex 가 늦어도 죽지 않지만, 닿기 전까지 데모 로그인은 401 이다.
-- [ ] **B6. k3s 구조화 인증 전환** (Google + Dex): `sudo GOOGLE_CLIENT_ID=<id> bash deploy/oci/k3s-auth-config.sh`. 실패 시 자동 롤백, 수동 롤백은 `sudo ROLLBACK=1 bash deploy/oci/k3s-auth-config.sh`. 컨트롤플레인 약 30초 블립.
-- [ ] **B7. RBAC 검증** (README §7.6 검증 블록): `kubectl --token=$TOKEN auth whoami` → `dex:demo-user@demo.kubeport`; `-n demo can-i create deployments` → yes; `-n default` → no; `kubectl auth can-i delete resourcequota --as=dex:demo-admin@demo.kubeport -n demo` → **no**.
-- [ ] **B8. 최초 시드**: `kubectl -n kubeport create job --from=cronjob/kubeport-demo-reset demo-seed-initial` 후 `kubectl -n kubeport logs job/demo-seed-initial -c seed -f` 에서 `seed-demo: done`.
-- [ ] **B9. 브라우저 스모크**: `/` 에 체험 버튼 2개 + 비밀번호 표기 → "사용자로 체험" → Dex 폼에 이메일 프리필 → `/catalog` 에 템플릿 3개 + 데모 배너 → `web-app` 을 `demo` 로 배포 → 릴리스 상세에 파드 표시 → `nightly-job-demo` 는 실패 설명 배너 → demo-admin 으로 `/admin/teams` "새 팀" 이 데모 제한 문구 → **Google 로그인은 그대로 동작**.
-- [ ] **B10. 리셋 확인**: 6시간 틱을 기다리거나 `kubectl -n kubeport create job --from=cronjob/kubeport-demo-reset demo-reset-manual`. 내가 만든 릴리스가 사라지고 시드가 복구되는지.
-- [ ] **B11. runbook 갱신**: Dex client secret 보관 위치, `DEMO_PW` 회전 절차(B3→B4 재실행), Dex 호스트의 ephemeral IP 주의를 `docs/oci-prod-runbook.md` §5 에 기록. 기존 `kubeport-demo-admin` cluster-admin 바인딩이 남아 있으면 오너 이메일용 `kubeport-owner-admin` 만 남기고 제거.
+- [x] **B6. k3s 구조화 인증 전환** (Google + Dex): `sudo GOOGLE_CLIENT_ID=<id> bash deploy/oci/k3s-auth-config.sh`. 실패 시 자동 롤백, 수동 롤백은 `sudo ROLLBACK=1 bash deploy/oci/k3s-auth-config.sh`. 컨트롤플레인 약 30초 블립.
+- [x] **B7. RBAC 검증** (README §7.6 검증 블록): `kubectl --token=$TOKEN auth whoami` → `dex:demo-user@demo.kubeport`; `-n demo can-i create deployments` → yes; `-n default` → no; `kubectl auth can-i delete resourcequota --as=dex:demo-admin@demo.kubeport -n demo` → **no**.
+- [x] **B8. 최초 시드**: `kubectl -n kubeport create job --from=cronjob/kubeport-demo-reset demo-seed-initial` 후 `kubectl -n kubeport logs job/demo-seed-initial -c seed -f` 에서 `seed-demo: done`.
+- [ ] **B9. 브라우저 스모크** (사람이 직접): `/` 에 체험 버튼 2개 + 비밀번호 표기 → "사용자로 체험" → Dex 폼에 이메일 프리필 → `/catalog` 에 템플릿 3개 + 데모 배너 → `web-app` 을 `demo` 로 배포 → 릴리스 상세에 파드 표시 → `nightly-job-demo` 는 실패 설명 배너 → demo-admin 으로 `/admin/teams` "새 팀" 이 데모 제한 문구 → **Google 로그인은 그대로 동작**.
+- [x] **B10. 리셋 확인**: 6시간 틱을 기다리거나 `kubectl -n kubeport create job --from=cronjob/kubeport-demo-reset demo-reset-manual`. 내가 만든 릴리스가 사라지고 시드가 복구되는지.
+- [ ] **B11. runbook 갱신** — 문서 갱신은 완료. 남은 것: 바인딩 이름 변경(아래 명령, 오너 권한 확인 후 옛 것 삭제)
+  ```bash
+  kubectl get clusterrolebinding kubeport-demo-admin -o json | jq 'del(.metadata.uid,.metadata.resourceVersion,.metadata.creationTimestamp,.metadata.managedFields) | .metadata.name="kubeport-owner-admin"' | kubectl apply -f -
+  kubectl auth can-i '*' '*' --as=<owner email>   # yes
+  kubectl delete clusterrolebinding kubeport-demo-admin
+  ```
+  원래 항목: Dex client secret 보관 위치, `DEMO_PW` 회전 절차(B3→B4 재실행), Dex 호스트의 ephemeral IP 주의를 `docs/oci-prod-runbook.md` §5 에 기록. 기존 `kubeport-demo-admin` cluster-admin 바인딩이 남아 있으면 오너 이메일용 `kubeport-owner-admin` 만 남기고 제거.
 
 ## C. 로컬 개발 환경 정리 (이 머신, 선택)
 
@@ -65,6 +71,12 @@
 ## D. 후속 과제 (머지 차단 아님)
 
 리뷰에서 나왔지만 이번 범위 밖으로 넘긴 것. 별도 이슈/PR 로.
+
+- **롤아웃에서 발견 (2026-09-08)**:
+  - `dex.staticPasswords` 가 리스트라 `--set hash` 만으로는 email 등이 날아간다. 차트를 `dex.adminPasswordHash` / `dex.userPasswordHash` 스칼라로 바꾸고 템플릿에서 리스트를 조립하면 README 레시피가 단순해진다.
+  - 리셋 Job 의 `wipe-k8s` 가 `kube-root-ca.crt` configmap 까지 지운다. `--field-selector metadata.name!=kube-root-ca.crt` 로 제외.
+  - `values-oci-phase2.yaml` 은 install 전용이라는 점을 파일 상단 주석에 명시 (업그레이드에 `-f` 금지).
+  - GHA `build-images` 의 arm64 프론트 빌드가 QEMU 에서 80분+ 멈춘 적 있음(취소 후 재실행으로 16분). `timeout-minutes` 를 걸거나 arm64 네이티브 러너 검토.
 
 - `DemoBanner.tsx` 의 `react-hooks/set-state-in-effect` lint 에러 → `useSyncExternalStore` 로 재작성하거나 eslint-disable. 같은 패턴이 `MobileSidebarShell.tsx`, `UserFormPreview.tsx` 에도 기존부터 있음.
 - Playwright 스펙의 `test.use({ storageState: async ({}, use) => ... })` 가 `react-hooks/rules-of-hooks` 오탐(01~04 스펙 전부). `tests/e2e/**` 를 eslint override 로 제외.
