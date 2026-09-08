@@ -89,7 +89,28 @@
       "emptyCta": "카탈로그에서 배포하기 →"
     },
     "overview": {
-      "instancesHeading": "인스턴스 ({count})"
+      "instancesHeading": "인스턴스 ({count})",
+      "noAccessUrlHint": "이 템플릿은 외부 주소를 열지 않습니다. 동작 확인은 '로그' 탭에서 할 수 있습니다."
+    },
+    "tabs": {
+      "overview": "개요",
+      "logs": "로그"
+    },
+    "kubeTermsToggle": "원본 k8s 용어 보기",
+    "terms": {
+      "readyInstances": "준비된 인스턴스",
+      "restarts": "재시작",
+      "memory": "메모리",
+      "accessURL": "접근 URL",
+      "instances": "인스턴스",
+      "instanceId": "인스턴스 ID",
+      "status": "상태"
+    },
+    "delete": {
+      "button": "삭제",
+      "confirm": "''{name}'' 을(를) 클러스터에서 내리고 목록에서 지웁니다. 되돌릴 수 없습니다. 계속할까요?",
+      "failed": "삭제하지 못했습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요.",
+      "forbidden": "이 릴리스를 삭제할 권한이 없습니다."
     },
     "instances": {
       "logsLink": "로그 →"
@@ -154,7 +175,13 @@
       "conflict": "같은 이름의 릴리스가 이미 있습니다. 다른 이름을 사용하거나 기존 릴리스를 확인하세요.",
       "server": "서버에서 문제가 발생해 배포하지 못했습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요.",
       "generic": "배포에 실패했습니다. 입력한 값을 확인한 뒤 다시 시도하세요."
-    }
+    },
+    "preview": {
+      "heading": "만들어질 것",
+      "rendering": "미리보기 준비 중…",
+      "empty": "폼을 채우면 여기에 미리보기가 표시됩니다."
+    },
+    "teamSuffix": "{team} 팀"
   },
   "logs": {
     "allInstances": "전체 인스턴스",
@@ -244,7 +271,10 @@
       "hint": "클러스터/네임스페이스를 입력하면 권한을 확인합니다.",
       "allAllowed": "모든 리소스 생성 권한 확인됨.",
       "denied": "권한이 거부되었습니다.",
-      "httpError": "권한 확인에 실패했습니다 (HTTP {status})."
+      "httpError": "권한 확인에 실패했습니다 (HTTP {status}).",
+      "skipped": "확인하지 못한 종류: {kinds} — 이 리소스는 배포 시점에 권한 오류가 날 수 있습니다.",
+      "deniedRow": "{resource}: {message}",
+      "deniedNext": "이 상태로는 배포가 실패합니다. 관리자에게 '이 클러스터·구역에 배포 권한' 을 요청하세요."
     }
   },
   "admin": {

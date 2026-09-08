@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useTranslations } from "next-intl";
 import YAML from "yaml";
 
 type Props = {
@@ -11,6 +12,7 @@ type Props = {
 type Resource = { kind: string; name: string };
 
 export function ResourcesPreview({ renderedYaml, pending }: Props) {
+  const t = useTranslations("deploy.preview");
   const resources = useMemo<Resource[]>(() => {
     if (!renderedYaml) return [];
     try {
@@ -29,10 +31,10 @@ export function ResourcesPreview({ renderedYaml, pending }: Props) {
 
   return (
     <aside className="flex flex-col gap-3 rounded-md bg-muted/40 p-4">
-      <h2 className="text-sm font-medium">만들어질 리소스</h2>
-      {pending && <p className="text-xs text-muted-foreground">렌더링 중…</p>}
+      <h2 className="text-sm font-medium">{t("heading")}</h2>
+      {pending && <p className="text-xs text-muted-foreground">{t("rendering")}</p>}
       {!pending && resources.length === 0 && (
-        <p className="text-xs text-muted-foreground">폼을 채우면 미리보기가 여기 표시됩니다.</p>
+        <p className="text-xs text-muted-foreground">{t("empty")}</p>
       )}
       {resources.length > 0 && (
         <ul className="flex flex-col gap-1">

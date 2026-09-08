@@ -89,7 +89,28 @@
       "emptyCta": "Deploy from the catalog →"
     },
     "overview": {
-      "instancesHeading": "Instances ({count})"
+      "instancesHeading": "Instances ({count})",
+      "noAccessUrlHint": "This template does not expose a public address. Check the 'Logs' tab to see it working."
+    },
+    "tabs": {
+      "overview": "Overview",
+      "logs": "Logs"
+    },
+    "kubeTermsToggle": "Show raw k8s terms",
+    "terms": {
+      "readyInstances": "Ready instances",
+      "restarts": "Restarts",
+      "memory": "Memory",
+      "accessURL": "Access URL",
+      "instances": "Instances",
+      "instanceId": "Instance ID",
+      "status": "Status"
+    },
+    "delete": {
+      "button": "Delete",
+      "confirm": "This takes ''{name}'' down from the cluster and removes it from the list. This cannot be undone. Continue?",
+      "failed": "Could not delete. Try again later or contact an admin.",
+      "forbidden": "You do not have permission to delete this release."
     },
     "instances": {
       "logsLink": "Logs →"
@@ -154,7 +175,13 @@
       "conflict": "A release with the same name already exists. Use a different name or check the existing release.",
       "server": "Something went wrong on the server and the deployment failed. Try again shortly or contact an admin.",
       "generic": "The deployment failed. Please review your inputs and try again."
-    }
+    },
+    "preview": {
+      "heading": "What will be created",
+      "rendering": "Preparing preview…",
+      "empty": "Fill in the form and a preview will appear here."
+    },
+    "teamSuffix": "{team} team"
   },
   "logs": {
     "allInstances": "All instances",
@@ -244,7 +271,10 @@
       "hint": "Enter a cluster and namespace to check permissions.",
       "allAllowed": "All resource create permissions confirmed.",
       "denied": "Permission denied.",
-      "httpError": "Permission check failed (HTTP {status})."
+      "httpError": "Permission check failed (HTTP {status}).",
+      "skipped": "Not checked: {kinds} — these may still be denied at deploy time.",
+      "deniedRow": "{resource}: {message}",
+      "deniedNext": "The deploy will fail like this. Ask an admin for permission to deploy into this cluster and area."
     }
   },
   "admin": {
