@@ -23,6 +23,25 @@
     "empty": "No data.",
     "help": "Help"
   },
+  "errors": {
+    "notFoundTitle": "Not found, or you don't have access",
+    "notFoundBody": "It may have been deleted or belong to another user. Ask an admin if you need access.",
+    "backToReleases": "Back to my releases",
+    "genericTitle": "Something went wrong",
+    "genericBody": "Please try again in a moment. If it keeps happening, contact an admin.",
+    "retry": "Try again"
+  },
+  "form": {
+    "validation": {
+      "required": "This field is required.",
+      "tooSmall": "Must be at least {min}.",
+      "tooBig": "Must be at most {max}.",
+      "pattern": "Not an allowed format. Check the rules in the help (?).",
+      "enum": "Pick one from the list.",
+      "invalid": "Please check this value.",
+      "hasPattern": "This value has a required format."
+    }
+  },
   "demo": {
     "banner": "Demo session. Next reset: {time}",
     "dismiss": "Dismiss",
@@ -124,6 +143,12 @@
     "noClusterPlaceholder": "No clusters registered — ask an admin",
     "clusterPlaceholder": "Select a cluster",
     "noClusterWarning": "No clusters are registered, so nothing can be deployed. Ask an admin to register a cluster.",
+    "nameLabel": "Deployment name",
+    "nameHelp": "How this shows up in 'My releases'. Lowercase letters, digits and hyphens only.",
+    "clusterLabel": "Where to run it",
+    "clusterHelp": "Pick one group of servers (a cluster). If there is only one, leave it.",
+    "namespaceLabel": "Area",
+    "namespaceHelp": "The compartment inside the cluster where your things live (a namespace). Leave the default unless an admin told you otherwise.",
     "errors": {
       "forbidden": "You do not have permission to perform this action. Please contact an admin.",
       "conflict": "A release with the same name already exists. Use a different name or check the existing release.",
@@ -150,6 +175,11 @@
       "colDescription": "Description"
     },
     "detail": {
+      "errors": {
+        "forbidden": "You don't have permission for this action. Only the kubeport-admin group can change global templates.",
+        "conflict": "The state changed and the request could not be processed (already published, or another draft exists). Refresh and check again.",
+        "generic": "The request failed (HTTP {status})."
+      },
       "versionsHeading": "Versions",
       "readOnlyGlobal": "Read-only — only admins can edit global templates.",
       "readOnlyNoPerm": "Read-only — you don't have edit permission.",
@@ -234,7 +264,14 @@
       "emailPlaceholder": "Email",
       "roleLabel": "Role",
       "addMemberButton": "Add",
-      "loginHint": "The target user must have logged in at least once."
+      "loginHint": "The target user must have logged in at least once.",
+      "confirmRemoveMember": "Remove {email} from this team? They will lose edit access to the team's templates.",
+      "errors": {
+        "forbidden": "You don't have permission for this action. Only the kubeport-admin group can manage teams.",
+        "conflict": "A team with that name already exists, or the user is already a member. Refresh and check again.",
+        "notFound": "That user could not be found. They must have logged in at least once.",
+        "generic": "The request failed (HTTP {status})."
+      }
     }
   }
 }

@@ -14,7 +14,12 @@ type ApiTemplate = {
 
 export default async function CatalogPage() {
   const res = await apiFetch("/v1/templates");
-  if (!res.ok) throw new Error(await res.text());
+  // A failed list must never surface the backend body to the user. Log it
+  // and render the (empty) catalog — the browser shows its own empty state.
+  if (!res.ok) {
+    console.error(`[catalog] templates fetch failed: ${res.status} ${await res.text()}`);
+    return <CatalogBrowser templates={[]} />;
+  }
   const data = (await res.json()) as { templates: ApiTemplate[] };
 
   const templates: CatalogCardTemplate[] = data.templates

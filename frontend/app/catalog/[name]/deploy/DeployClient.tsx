@@ -2,11 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import YAML from "yaml";
 import { useDebouncedCallback } from "use-debounce";
 
 import { DynamicForm } from "@/components/DynamicForm";
+import { HelpHint } from "@/components/HelpHint";
 import { RBACCheckPanel } from "@/components/RBACCheckPanel";
 import { ResourcesPreview } from "@/components/ResourcesPreview";
 import { Input } from "@/components/ui/input";
@@ -72,6 +73,12 @@ export function DeployClient({
   const [pending, setPending] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Move focus to the error notice when it appears so keyboard / screen
+  // reader users land on it instead of hunting below the (long) form.
+  const errRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (err) errRef.current?.focus();
+  }, [err]);
 
   // Load cluster list and hydrate meta.cluster on mount. Skipped for update
   // flows: cluster is immutable on PUT (backend ignores it) and the meta
@@ -219,47 +226,80 @@ export function DeployClient({
         </header>
         {!isUpdate && (
           <div className="mb-4 grid grid-cols-2 gap-3">
-            <Input
-              placeholder={t("namePlaceholder")}
-              value={meta.name}
-              onChange={(e) => setMeta({ ...meta, name: e.target.value })}
-            />
-            <Select
-              value={meta.cluster}
-              onValueChange={(v) => {
-                const next = v ?? "";
-                setMeta((m) => ({ ...m, cluster: next }));
-                if (
-                  next &&
-                  typeof window !== "undefined"
-                ) {
-                  localStorage.setItem("kbp_cluster", next);
-                }
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue
-                  placeholder={
-                    clusters.length === 0
-                      ? t("noClusterPlaceholder")
-                      : t("clusterPlaceholder")
+            {/*
+              HelpHint sits beside each label (not inside it) so the (?)
+              button's aria-label doesn't leak into the input's name.
+            */}
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-1">
+                <label htmlFor="deploy-name" className="text-sm font-medium">
+                  {t("nameLabel")}
+                </label>
+                <HelpHint text={t("nameHelp")} />
+              </div>
+              <Input
+                id="deploy-name"
+                placeholder={t("namePlaceholder")}
+                value={meta.name}
+                required
+                onChange={(e) => setMeta({ ...meta, name: e.target.value })}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-1">
+                <span id="deploy-cluster-label" className="text-sm font-medium">
+                  {t("clusterLabel")}
+                </span>
+                <HelpHint text={t("clusterHelp")} />
+              </div>
+              <Select
+                value={meta.cluster}
+                onValueChange={(v) => {
+                  const next = v ?? "";
+                  setMeta((m) => ({ ...m, cluster: next }));
+                  if (
+                    next &&
+                    typeof window !== "undefined"
+                  ) {
+                    localStorage.setItem("kbp_cluster", next);
                   }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {clusters.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Input
-              placeholder={t("namespacePlaceholder")}
-              className="col-span-2"
-              value={meta.namespace}
-              onChange={(e) => setMeta({ ...meta, namespace: e.target.value })}
-            />
+                }}
+              >
+                <SelectTrigger
+                  aria-label={t("clusterLabel")}
+                  aria-labelledby="deploy-cluster-label"
+                >
+                  <SelectValue
+                    placeholder={
+                      clusters.length === 0
+                        ? t("noClusterPlaceholder")
+                        : t("clusterPlaceholder")
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {clusters.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="col-span-2 flex flex-col gap-1">
+              <div className="flex items-center gap-1">
+                <label htmlFor="deploy-namespace" className="text-sm font-medium">
+                  {t("namespaceLabel")}
+                </label>
+                <HelpHint text={t("namespaceHelp")} />
+              </div>
+              <Input
+                id="deploy-namespace"
+                placeholder={t("namespacePlaceholder")}
+                value={meta.namespace}
+                onChange={(e) => setMeta({ ...meta, namespace: e.target.value })}
+              />
+            </div>
           </div>
         )}
         {!isUpdate && clusters.length === 0 && (
@@ -280,12 +320,21 @@ export function DeployClient({
                 ? t("titleUpdate", { version })
                 : t("submit")
           }
-          disabled={submitting || (!isUpdate && !meta.cluster)}
+          disabled={
+            submitting || (!isUpdate && (!meta.cluster || !meta.name.trim()))
+          }
           onChange={preview}
           onSubmit={submit}
         />
         {err && (
-          <p className="mt-2 whitespace-pre-wrap text-sm text-red-700">{err}</p>
+          <p
+            ref={errRef}
+            role="alert"
+            tabIndex={-1}
+            className="mt-2 whitespace-pre-wrap text-sm text-red-700 outline-none"
+          >
+            {err}
+          </p>
         )}
         {submitting && (
           <p className="mt-2 text-sm text-muted-foreground">{t("submitting")}</p>

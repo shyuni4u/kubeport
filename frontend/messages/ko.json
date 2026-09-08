@@ -23,6 +23,25 @@
     "empty": "데이터가 없습니다.",
     "help": "도움말"
   },
+  "errors": {
+    "notFoundTitle": "찾을 수 없거나 볼 권한이 없습니다",
+    "notFoundBody": "삭제됐거나 다른 사용자의 릴리스일 수 있습니다. 권한이 필요하면 관리자에게 문의하세요.",
+    "backToReleases": "내 릴리스로 돌아가기",
+    "genericTitle": "문제가 발생했습니다",
+    "genericBody": "잠시 후 다시 시도해 주세요. 계속되면 관리자에게 문의하세요.",
+    "retry": "다시 시도"
+  },
+  "form": {
+    "validation": {
+      "required": "필수 항목입니다.",
+      "tooSmall": "{min} 이상이어야 합니다.",
+      "tooBig": "{max} 이하여야 합니다.",
+      "pattern": "허용되지 않는 형식입니다. 도움말(?)의 규칙을 확인하세요.",
+      "enum": "목록에서 하나를 고르세요.",
+      "invalid": "값을 확인해 주세요.",
+      "hasPattern": "정해진 형식이 있는 값입니다."
+    }
+  },
   "demo": {
     "banner": "데모 세션입니다. 다음 초기화: {time}",
     "dismiss": "닫기",
@@ -124,6 +143,12 @@
     "noClusterPlaceholder": "등록된 클러스터가 없습니다 — 관리자에게 요청하세요",
     "clusterPlaceholder": "클러스터 선택",
     "noClusterWarning": "등록된 클러스터가 없어 배포할 수 없습니다. 관리자에게 클러스터 등록을 요청하세요.",
+    "nameLabel": "배포 이름",
+    "nameHelp": "내 릴리스 목록에서 이 배포를 알아볼 이름입니다. 영문 소문자·숫자·하이픈만 쓸 수 있습니다.",
+    "clusterLabel": "어디에 띄울까요",
+    "clusterHelp": "서버 묶음(클러스터) 중 하나를 고릅니다. 하나뿐이면 그대로 두세요.",
+    "namespaceLabel": "구역",
+    "namespaceHelp": "클러스터 안에서 내 것들이 모여 있는 칸(네임스페이스)입니다. 관리자가 따로 알려주지 않았다면 그대로 두세요.",
     "errors": {
       "forbidden": "이 작업을 수행할 권한이 없습니다. 관리자에게 문의하세요.",
       "conflict": "같은 이름의 릴리스가 이미 있습니다. 다른 이름을 사용하거나 기존 릴리스를 확인하세요.",
@@ -150,6 +175,11 @@
       "colDescription": "설명"
     },
     "detail": {
+      "errors": {
+        "forbidden": "이 작업을 수행할 권한이 없습니다. 글로벌 템플릿은 kubeport-admin 그룹만 변경할 수 있습니다.",
+        "conflict": "상태가 바뀌어 처리할 수 없습니다 (이미 게시됐거나 다른 draft 가 있습니다). 새로고침 후 다시 확인하세요.",
+        "generic": "요청이 실패했습니다 (HTTP {status})."
+      },
       "versionsHeading": "버전",
       "readOnlyGlobal": "읽기 전용 — 글로벌 템플릿은 관리자만 편집할 수 있습니다.",
       "readOnlyNoPerm": "읽기 전용 — 편집 권한이 없습니다.",
@@ -234,7 +264,14 @@
       "emailPlaceholder": "이메일",
       "roleLabel": "역할",
       "addMemberButton": "추가",
-      "loginHint": "대상 유저가 최소 한 번 이상 로그인한 적이 있어야 합니다."
+      "loginHint": "대상 유저가 최소 한 번 이상 로그인한 적이 있어야 합니다.",
+      "confirmRemoveMember": "{email} 을(를) 이 팀에서 제거하시겠습니까? 팀 템플릿 편집 권한이 사라집니다.",
+      "errors": {
+        "forbidden": "이 작업을 수행할 권한이 없습니다. 팀 관리는 kubeport-admin 그룹만 할 수 있습니다.",
+        "conflict": "이미 같은 이름의 팀이 있거나 이미 멤버입니다. 새로고침 후 다시 확인하세요.",
+        "notFound": "대상 유저를 찾을 수 없습니다. 최소 한 번 로그인한 사용자여야 합니다.",
+        "generic": "요청이 실패했습니다 (HTTP {status})."
+      }
     }
   }
 }
