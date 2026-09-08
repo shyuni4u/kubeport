@@ -37,10 +37,11 @@ test.describe("UI mode editor", () => {
     await page.getByPlaceholder(/표시 이름/).fill("E2E UI Template");
     await page.getByRole("button", { name: /저장/ }).click();
 
-    // Redirects to /templates on success. The list renders display_name as
-    // the link text and the slug only in the href; match the href directly
-    // to disambiguate from prior runs that share display_name.
-    await page.waitForURL(/\/templates$/);
+    // Redirects to the template detail page on success (where publish lives).
+    await page.waitForURL(new RegExp(`/templates/${slug}$`));
+    await expect(page.getByRole("heading", { name: "E2E UI Template" })).toBeVisible();
+    // And the list links to it.
+    await page.goto("/templates");
     await expect(page.locator(`a[href="/templates/${slug}"]`)).toBeVisible();
   });
 });
