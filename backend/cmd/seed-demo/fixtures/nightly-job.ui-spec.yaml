@@ -1,11 +1,13 @@
 fields:
   - path: CronJob[nightly].spec.schedule
     label: "실행 주기"
+    help: "얼마나 자주 실행할지 정합니다.\n0 3 * * * = 매일 새벽 3시\n0 */6 * * * = 6시간마다\n*/5 * * * * = 5분마다 (데모 확인용)"
     type: enum
     values: ["0 3 * * *", "0 */6 * * *", "*/5 * * * *"]
     default: "0 3 * * *"
   - path: CronJob[nightly].spec.jobTemplate.spec.template.spec.containers[0].image
     label: "이미지"
+    help: "실행할 프로그램 패키지 이름입니다. 데모에서는 그대로 두세요."
     type: string
     default: "busybox:1.36"
   - path: CronJob[nightly].spec.jobTemplate.spec.template.spec.containers[0].args[1]

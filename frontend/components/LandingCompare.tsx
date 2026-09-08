@@ -50,16 +50,22 @@ export function LandingCompare({ resourcesYaml, uiSpecYaml }: Props) {
   return (
     <section aria-labelledby="landing-compare-heading" className="flex w-full flex-col gap-6">
       <div className="flex flex-col gap-1 text-center">
-        <h2 id="landing-compare-heading" className="text-xl font-semibold">{t("heading")}</h2>
+        <h2 id="landing-compare-heading" className="text-xl font-semibold">
+          {t("heading", { count: spec.fields.length })}
+        </h2>
         <p className="text-sm text-muted-foreground">{t("subheading")}</p>
       </div>
 
+      {/* On narrow screens the panes stack; the form (the thing the visitor
+          is invited to touch) goes first so the page doesn't open on a wall
+          of YAML. Side by side on md+ the admin pane stays on the left. */}
       <div className="grid gap-4 md:grid-cols-2">
         <Pane
           title={t("adminTitle")}
           help={t("adminHelp")}
           badge={t("yamlLines", { count: lines.length })}
           badgeHelp={t("yamlHelp")}
+          className="order-2 md:order-1"
         >
           <YamlLines lines={lines} changed={changed} changedLabel={t("changedLine")} />
         </Pane>
@@ -69,6 +75,7 @@ export function LandingCompare({ resourcesYaml, uiSpecYaml }: Props) {
           help={t("userHelp")}
           badge={t("inputs", { count: spec.fields.length })}
           badgeHelp={t("inputsHelp")}
+          className="order-1 md:order-2"
         >
           <div className="p-4 text-left">
             <DynamicForm
@@ -90,16 +97,18 @@ function Pane({
   help,
   badge,
   badgeHelp,
+  className,
   children,
 }: {
   title: string;
   help: string;
   badge: string;
   badgeHelp: string;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex min-w-0 flex-col overflow-hidden rounded-lg border bg-card">
+    <div className={cn("flex min-w-0 flex-col overflow-hidden rounded-lg border bg-card", className)}>
       <div className="flex items-center justify-between gap-2 border-b px-4 py-2">
         <h3 className="flex items-center gap-1 text-sm font-medium">
           {title}

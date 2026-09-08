@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 
 type Props = {
@@ -19,21 +20,29 @@ export function BottomBar({
   onSave,
   onPublish,
 }: Props) {
+  const t = useTranslations("templates.editor");
   return (
-    <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t bg-white/90 px-4 py-3 backdrop-blur">
+    <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t bg-white/90 px-4 py-3 backdrop-blur">
+      {/*
+        Publishing lives on the template detail page (a new version always
+        starts as a draft). Rather than a permanently greyed-out button that
+        looks broken, tell the admin where publish happens.
+      */}
+      {!canPublish && (
+        <span className="text-xs text-muted-foreground">{t("publishFromDetail")}</span>
+      )}
       <Button
         variant="outline"
         onClick={onSave}
         disabled={!canSave || saving}
       >
-        {saving ? "저장 중…" : "Draft 저장"}
+        {saving ? t("saving") : t("saveDraft")}
       </Button>
-      <Button
-        onClick={onPublish}
-        disabled={!canPublish || publishing}
-      >
-        {publishing ? "퍼블리시 중…" : "Publish"}
-      </Button>
+      {canPublish && (
+        <Button onClick={onPublish} disabled={publishing}>
+          {publishing ? t("publishing") : t("publish")}
+        </Button>
+      )}
     </div>
   );
 }

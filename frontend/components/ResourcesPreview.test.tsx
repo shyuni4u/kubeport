@@ -1,12 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { renderWithIntl as render } from "@/tests/intl-test-utils";
 import { ResourcesPreview } from "./ResourcesPreview";
 
 describe("ResourcesPreview", () => {
   it("shows placeholder when renderedYaml is null and not pending", () => {
     render(<ResourcesPreview renderedYaml={null} pending={false} />);
     expect(
-      screen.getByText("폼을 채우면 미리보기가 여기 표시됩니다."),
+      screen.getByText("폼을 채우면 여기에 미리보기가 표시됩니다."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
   });
@@ -14,15 +15,16 @@ describe("ResourcesPreview", () => {
   it("shows placeholder when renderedYaml is an empty string", () => {
     render(<ResourcesPreview renderedYaml="" pending={false} />);
     expect(
-      screen.getByText("폼을 채우면 미리보기가 여기 표시됩니다."),
+      screen.getByText("폼을 채우면 여기에 미리보기가 표시됩니다."),
     ).toBeInTheDocument();
   });
 
   it("shows pending status while fetching", () => {
     render(<ResourcesPreview renderedYaml={null} pending={true} />);
-    expect(screen.getByText("렌더링 중…")).toBeInTheDocument();
+    expect(screen.getByText("미리보기 준비 중…")).toBeInTheDocument();
+    expect(screen.getByText("만들어질 것")).toBeInTheDocument();
     expect(
-      screen.queryByText("폼을 채우면 미리보기가 여기 표시됩니다."),
+      screen.queryByText("폼을 채우면 여기에 미리보기가 표시됩니다."),
     ).not.toBeInTheDocument();
   });
 
@@ -80,7 +82,7 @@ metadata:
     const yaml = "kind: [unterminated";
     render(<ResourcesPreview renderedYaml={yaml} pending={false} />);
     expect(
-      screen.getByText("폼을 채우면 미리보기가 여기 표시됩니다."),
+      screen.getByText("폼을 채우면 여기에 미리보기가 표시됩니다."),
     ).toBeInTheDocument();
   });
 });

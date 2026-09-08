@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import { screen, waitFor, cleanup } from "@testing-library/react";
+import { renderWithIntl as render } from "@/tests/intl-test-utils";
 import { RBACCheckPanel } from "./RBACCheckPanel";
 
 function okResponse(body: { allowed: boolean; reason?: string }): Response {
@@ -75,13 +76,20 @@ describe("RBACCheckPanel", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("renders denied list when some kinds are denied with reason", async () => {
+  it("shows the check scope (verb · namespace) in the header", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => okResponse({ allowed: true })));
+    render(<RBACCheckPanel cluster="dev" namespace="team-a" kinds={["Deployment"]} />);
+    expect(screen.getByText("create · team-a")).toBeInTheDocument();
+  });
+
+  it("renders a plain-language denied row (raw reason only as title) plus next step", async () => {
+    const raw = 'deployments.apps is forbidden: User "u" cannot create resource';
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { resource: string };
       if (body.resource === "deployments") {
         return okResponse({ allowed: true, reason: "" });
       }
-      return okResponse({ allowed: false, reason: "forbidden by RBAC" });
+      return okResponse({ allowed: false, reason: raw });
     });
     vi.stubGlobal("fetch", fetchMock);
     render(
@@ -91,25 +99,29 @@ describe("RBACCheckPanel", () => {
         kinds={["Deployment", "Service"]}
       />,
     );
-    await waitFor(() => {
-      expect(screen.getByText(/Service: forbidden by RBAC/)).toBeInTheDocument();
-    });
+    const row = await screen.findByText("❌ Service: 권한이 거부되었습니다.");
+    expect(row).toHaveAttribute("title", raw);
+    expect(screen.queryByText(/is forbidden/)).not.toBeInTheDocument();
+    expect(screen.getByText(/이 상태로는 배포가 실패합니다/)).toBeInTheDocument();
     // Deployment (allowed) should not be in the denied list.
     expect(screen.queryByText(/Deployment:/)).not.toBeInTheDocument();
+    expect(screen.queryByText("모든 리소스 생성 권한 확인됨.")).not.toBeInTheDocument();
   });
 
-  it("renders HTTP status when server returns 403", async () => {
+  it("renders HTTP status sentence when server returns 403", async () => {
     const fetchMock = vi.fn(async () => httpResponse(403));
     vi.stubGlobal("fetch", fetchMock);
     render(
       <RBACCheckPanel cluster="dev" namespace="default" kinds={["Deployment"]} />,
     );
     await waitFor(() => {
-      expect(screen.getByText(/Deployment: HTTP 403/)).toBeInTheDocument();
+      expect(
+        screen.getByText("❌ Deployment: 권한 확인에 실패했습니다 (HTTP 403)."),
+      ).toBeInTheDocument();
     });
   });
 
-  it("renders error message when fetch rejects (network error)", async () => {
+  it("renders the check-failed sentence, not the raw error, when fetch rejects", async () => {
     const fetchMock = vi.fn(async () => {
       throw new Error("network down");
     });
@@ -117,21 +129,41 @@ describe("RBACCheckPanel", () => {
     render(
       <RBACCheckPanel cluster="dev" namespace="default" kinds={["Deployment"]} />,
     );
-    await waitFor(() => {
-      expect(screen.getByText(/Deployment: network down/)).toBeInTheDocument();
-    });
+    const row = await screen.findByText("❌ Deployment: 권한 확인에 실패했습니다 (HTTP 0).");
+    expect(row).toHaveAttribute("title", "network down");
+    expect(screen.queryByText(/Deployment: network down/)).not.toBeInTheDocument();
   });
 
-  it("treats unknown kind as allowed (skipped) without fetching it", async () => {
+  it("reports unknown kinds as not-checked instead of allowed, without fetching them", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     render(
       <RBACCheckPanel cluster="dev" namespace="default" kinds={["TotallyMadeUpCRD"]} />,
     );
     await waitFor(() => {
+      expect(screen.getByText(/확인하지 못한 종류: TotallyMadeUpCRD/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText("모든 리소스 생성 권한 확인됨.")).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("shows all-allowed for checked kinds alongside the not-checked warning", async () => {
+    const fetchMock = vi.fn(async () => okResponse({ allowed: true, reason: "" }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <RBACCheckPanel
+        cluster="dev"
+        namespace="default"
+        kinds={["Deployment", "TotallyMadeUpCRD", "OtherCRD"]}
+      />,
+    );
+    await waitFor(() => {
       expect(screen.getByText("모든 리소스 생성 권한 확인됨.")).toBeInTheDocument();
     });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/확인하지 못한 종류: TotallyMadeUpCRD, OtherCRD/),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("rapid prop change — stale fetch result does not overwrite newer results", async () => {

@@ -13,6 +13,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 > - **운영 하드닝**: idle-reclaim ping(GHA 10분) + 주간 백업 정책.
 > - **남은 것**: (a) **`kuberport` 오타 → `kubeport` 통일** (docs/oci README·runbook·upload-gha-secrets.sh·CLAUDE.md 잔존), (b) `deploy/oci/bootstrap.sh` 에 §7 인프라 수정(iptables pod/service CIDR · OIDC config) 반영해 재현성 확보, (c) Plan 11 e2e 확장(이제 라이브 OCI 대상).
 > - **랜딩 비교 쇼케이스 (2026-09-08)** — `/` 에 "관리자가 쓰는 YAML(약 110줄) vs 사용자 폼(4칸)" 인터랙티브 비교. 폼 값 변경 → 클라이언트에서 YAML 재렌더 + 바뀐 줄 하이라이트(`lib/apply-values-to-yaml.ts`). 소재는 데모 시드 `web-app` 픽스처를 현실적 크기로 키운 것 (`frontend/lib/showcase/` 복사본, 백엔드 원본과 바이트 일치 테스트). 같이 잡은 버그: `DynamicForm` 이 `[...]` 포함 경로에서 사용자 입력을 버리고 기본값을 제출하던 문제 (RHF 가 `[`·`]` 도 경로 구분자로 해석) — 전 데모 템플릿에 영향. 어려운 용어에는 `(?)` 도움말(`HelpHint`).
+> - **role-review v2 (2026-09-08, PR #5)** — 관리자/사용자 페르소나 리뷰 20건 전부 반영. 전역 `error.tsx`/`not-found.tsx`, 서버 액션 인라인 에러(`ActionForm`), zod 검증 메시지 i18n, 에디터 미저장 가드(탭 전환·링크 이동·탭 닫기; 뒤로가기는 App Router 한계), 사용자 릴리스 삭제, RBAC 미매핑 kind 경고, 저작 UI 하드코딩 문자열 전부 i18n(ko/en 키 parity 테스트 가능: 285/285), 데모 픽스처 도움말. e2e `02/03` 스펙은 한국어 라벨·confirm 자동 수락으로 고침.
 > - **데모 모드(Plan 13) 라이브** (2026-09-08, Helm rev 4, 이미지 `sha-6bf1667`) — `/` 에서 관리자/사용자 체험 버튼(Dex 로그인, 비밀번호 화면 표기), `demo` 네임스페이스 격리, 6시간 리셋, k3s 가 Google+Dex 구조화 인증. 운영: runbook §5 "데모 모드 운영". 남은 사람 작업(브라우저 스모크): [docs/plan13-handoff.md](docs/plan13-handoff.md).
 > - **주의**: 공인 IP `168.107.55.95` 는 ephemeral(stop/start 시 변경), SSH 키는 gpg 번들→`~/.ssh/kuberport-oci/`. 재배포·RBAC·롤백은 runbook.
 

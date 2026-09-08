@@ -1,16 +1,19 @@
 fields:
   - path: ConfigMap[app-config].data.LOG_LEVEL
     label: "로그 레벨"
+    help: "얼마나 자세히 기록할지 정합니다. 평소엔 info, 문제를 찾을 땐 debug."
     type: enum
     values: ["debug", "info", "warn"]
     default: "info"
   - path: ConfigMap[app-config].data.REGION
-    label: "리전"
+    label: "서비스 지역"
+    help: "두 글자 영문 소문자 국가 코드입니다. 예: kr, jp, us"
     type: string
     pattern: "^[a-z]{2}$"
     default: "kr"
   - path: ConfigMap[app-config].data.FEATURE_FLAG
     label: "실험 기능"
+    help: "켜면 아직 시험 중인 기능이 활성화됩니다."
     type: boolean
     default: false
   - path: Secret[app-secret].stringData.API_KEY

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
+import { useTranslations } from "next-intl";
+import type { ZodIssue } from "zod";
 import {
   useForm,
   type Control,
@@ -122,8 +124,42 @@ export function DynamicForm({
   // RHF treats `.` in names as a nested-path separator. We keep RHF field
   // names dot-free (encoded) and write a thin resolver that decodes values
   // before validation, then returns errors flat-keyed by the encoded names.
+  const tv = useTranslations("form.validation");
   const resolver = useMemo<Resolver<FormShape>>(() => {
     const schema = schemaFromUISpec(spec);
+    // Zod's default messages are English developer strings ("Required",
+    // "String must contain at most 80 character(s)"). Translate by issue
+    // code so non-k8s users get a plain-language sentence in their locale.
+    const messageFor = (issue: ZodIssue): string => {
+      switch (issue.code) {
+        case "invalid_type":
+          return issue.received === "undefined" || issue.received === "null"
+            ? tv("required")
+            : tv("invalid");
+        case "too_small":
+          // A required string with min length 1 left empty reads better as
+          // "required" than "must be at least 1".
+          if (issue.type === "string" && Number(issue.minimum) <= 1) {
+            return tv("required");
+          }
+          if (issue.type === "string") {
+            return tv("tooShort", { min: String(issue.minimum) });
+          }
+          return tv("tooSmall", { min: String(issue.minimum) });
+        case "too_big":
+          // For strings the bound is a character count, not a numeric limit.
+          if (issue.type === "string") {
+            return tv("tooLong", { max: String(issue.maximum) });
+          }
+          return tv("tooBig", { max: String(issue.maximum) });
+        case "invalid_string":
+          return tv("pattern");
+        case "invalid_enum_value":
+          return tv("enum");
+        default:
+          return tv("invalid");
+      }
+    };
     return async (values) => {
       const decoded = decodeValues(values as Record<string, unknown>);
       const result = schema.safeParse(decoded);
@@ -136,12 +172,12 @@ export function DynamicForm({
         const flatPath = issue.path.join(".");
         const encoded = encodeKey(flatPath);
         if (!errors[encoded]) {
-          errors[encoded] = { type: issue.code, message: issue.message };
+          errors[encoded] = { type: issue.code, message: messageFor(issue) };
         }
       }
       return { values: {}, errors: errors as never };
     };
-  }, [spec]);
+  }, [spec, tv]);
 
   const defaults = useMemo<FormShape>(() => {
     const flat = { ...defaultsFromUISpec(spec), ...(initialValues ?? {}) };
@@ -196,6 +232,7 @@ function FieldRow({
   field: UISpecField;
   control: Control<FormShape>;
 }) {
+  const tv = useTranslations("form.validation");
   return (
     <FormField
       control={control}
@@ -236,13 +273,15 @@ function FieldRow({
             </datalist>
           )}
           {field.help ? <FormDescription>{field.help}</FormDescription> : null}
-          {/* Raw regex is only shown when the admin gave no plain-language help. */}
+          {/*
+            When the admin gave no plain-language help for a pattern-
+            constrained field, say only that a format exists — the raw
+            regex means nothing to a non-technical user.
+          */}
           {(field.type === "string" || field.type === "autocomplete") &&
           field.pattern &&
           !field.help ? (
-            <p className="text-xs text-muted-foreground">
-              pattern: /{field.pattern}/
-            </p>
+            <p className="text-xs text-muted-foreground">{tv("hasPattern")}</p>
           ) : null}
           <FormMessage />
         </FormItem>

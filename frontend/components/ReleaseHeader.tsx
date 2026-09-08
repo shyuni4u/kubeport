@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { StatusChip, statusChipVariantFromRelease } from "@/components/StatusChip";
 import { KubeTermsToggle } from "@/components/KubeTermsToggle";
+import { DeleteReleaseButton } from "@/components/DeleteReleaseButton";
 
 export type ReleaseHeaderData = {
   id: string;
@@ -31,8 +32,13 @@ export async function ReleaseHeader({ data }: { data: ReleaseHeaderData }) {
         <StatusChip variant={statusChipVariantFromRelease(data.status)}>
           {label}
         </StatusChip>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-4">
           <KubeTermsToggle />
+          {/* Stale releases (cluster gone / resources missing) can't be deleted the
+              normal way; ReleaseStaleBanner offers the admin force-delete instead. */}
+          {data.status !== "cluster-unreachable" && data.status !== "resources-missing" && (
+            <DeleteReleaseButton releaseId={data.id} name={data.name} />
+          )}
         </div>
       </div>
       <div className="text-sm text-muted-foreground">
