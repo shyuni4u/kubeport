@@ -1,7 +1,7 @@
 # Plan 13 (데모 모드) — 사람이 직접 해야 할 일
 
 > 작성: 2026-09-07. 브랜치 `worktree-plan13-demo-mode` 구현·리뷰 완료 시점의 인계 문서.
-> **2026-09-08 갱신: A(PR #2 머지)·B(프로덕션 롤아웃) 완료.** 남은 사람 작업은 B9 브라우저 스모크와 B11 의 바인딩 이름 변경 두 가지.
+> **2026-09-08 갱신: A(PR #2 머지)·B(프로덕션 롤아웃) 완료.** 남은 사람 작업은 B9 브라우저 스모크 하나.
 > 완료한 항목은 체크하고, 다 끝나면 이 문서를 삭제하거나 runbook §5 에 흡수한다.
 
 ## A. 브랜치 통합 (지금)
@@ -49,7 +49,7 @@
 - [x] **B8. 최초 시드**: `kubectl -n kubeport create job --from=cronjob/kubeport-demo-reset demo-seed-initial` 후 `kubectl -n kubeport logs job/demo-seed-initial -c seed -f` 에서 `seed-demo: done`.
 - [ ] **B9. 브라우저 스모크** (사람이 직접): `/` 에 체험 버튼 2개 + 비밀번호 표기 → "사용자로 체험" → Dex 폼에 이메일 프리필 → `/catalog` 에 템플릿 3개 + 데모 배너 → `web-app` 을 `demo` 로 배포 → 릴리스 상세에 파드 표시 → `nightly-job-demo` 는 실패 설명 배너 → demo-admin 으로 `/admin/teams` "새 팀" 이 데모 제한 문구 → **Google 로그인은 그대로 동작**.
 - [x] **B10. 리셋 확인**: 6시간 틱을 기다리거나 `kubectl -n kubeport create job --from=cronjob/kubeport-demo-reset demo-reset-manual`. 내가 만든 릴리스가 사라지고 시드가 복구되는지.
-- [ ] **B11. runbook 갱신** — 문서 갱신은 완료. 남은 것: 바인딩 이름 변경(아래 명령, 오너 권한 확인 후 옛 것 삭제)
+- [x] **B11. runbook 갱신** — 문서 갱신 완료. 바인딩 이름 변경도 2026-09-08 완료(`kubeport-owner-admin` 생성 → 오너 권한 확인 → `kubeport-demo-admin` 삭제). 참고용 명령:
   ```bash
   kubectl get clusterrolebinding kubeport-demo-admin -o json | jq 'del(.metadata.uid,.metadata.resourceVersion,.metadata.creationTimestamp,.metadata.managedFields) | .metadata.name="kubeport-owner-admin"' | kubectl apply -f -
   kubectl auth can-i '*' '*' --as=<owner email>   # yes
