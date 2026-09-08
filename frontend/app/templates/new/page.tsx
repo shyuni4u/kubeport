@@ -11,6 +11,8 @@ import { UserFormPreview } from "@/components/UserFormPreview";
 import { EditorLayout } from "@/components/editor/EditorLayout";
 import { MetaRow, TemplateMeta } from "@/components/editor/MetaRow";
 import { BottomBar } from "@/components/editor/BottomBar";
+import { saveErrorMessage } from "@/components/editor/saveError";
+import { findUnlabelledExposedField, useBeforeUnloadWhenDirty } from "@/components/editor/useDirtyGuard";
 import { YamlEditor } from "@/components/YamlEditor";
 import {
   Select,
@@ -62,8 +64,15 @@ function NewTemplatePageInner() {
   const t = useTranslations("templates");
   const searchParams = useSearchParams();
   const mode = searchParams.get("mode") === "yaml" ? "yaml" : "ui";
+  // Switching mode unmounts the inner editor and discards its state, so ask
+  // first when there are unsaved edits (and warn on tab close / reload).
+  const [dirty, setDirty] = useState(false);
+  useBeforeUnloadWhenDirty(dirty, t("editor.leaveLosesEdits"));
 
   function switchMode(next: string) {
+    if (next === mode) return;
+    if (dirty && !window.confirm(t("editor.switchModeLosesEdits"))) return;
+    setDirty(false);
     const params = new URLSearchParams(searchParams);
     params.set("mode", next);
     router.replace(`/templates/new?${params.toString()}`);
@@ -80,14 +89,17 @@ function NewTemplatePageInner() {
           </TabsList>
         </Tabs>
       </div>
-      {mode === "yaml" ? <YamlModeNew /> : <UIModeNew />}
+      {mode === "yaml" ? <YamlModeNew onDirty={setDirty} /> : <UIModeNew onDirty={setDirty} />}
     </div>
   );
 }
 
-function UIModeNew() {
+type ModeProps = { onDirty: (dirty: boolean) => void };
+
+function UIModeNew({ onDirty }: ModeProps) {
   const router = useRouter();
   const t = useTranslations("templates.editor");
+  const [loaded, setLoaded] = useState(false);
   const [clusters, setClusters] = useState<Array<{ name: string }>>([]);
   const [cluster, setCluster] = useState<string>("");
   const [teams, setTeams] = useState<Team[]>([]);
@@ -123,22 +135,27 @@ function UIModeNew() {
         }
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
+      } finally {
+        setLoaded(true);
       }
     })();
   }, []);
+
+  const touch = () => onDirty(true);
 
   async function addKind(k: KindRef) {
     const res = await fetch(`/api/v1/clusters/${encodeURIComponent(cluster)}/openapi/${k.gv}`);
     if (!res.ok) { setErr(await res.text()); return; }
     const doc = await res.json() as OpenAPISchemaDoc;
     const schema = findKindSchema(doc, k.group, k.version, k.kind);
-    if (!schema) { setErr(`스키마 없음: ${k.kind}`); return; }
+    if (!schema) { setErr(t("schemaMissing", { kind: k.kind })); return; }
     setResources(prev => [...prev, {
       gv: k.gv, kind: k.kind,
       name: `${k.kind.toLowerCase()}-${prev.length + 1}`,
       rootSchema: schema,
       fields: {},
     }]);
+    touch();
   }
 
   const uiState: UIModeTemplate = useMemo(() => ({
@@ -160,6 +177,9 @@ function UIModeNew() {
 
   async function saveDraft() {
     setErr(null);
+    // Every exposed field needs a label — it's what the end-user sees.
+    const unlabelled = findUnlabelledExposedField(resources);
+    if (unlabelled) { setErr(t("errors.missingLabel", { path: unlabelled })); return; }
     setSaving(true);
     try {
       // display_name is optional in MetaRow; fall back to the slug so the
@@ -177,14 +197,20 @@ function UIModeNew() {
           ui_state: uiState,
         }),
       });
-      if (!res.ok) { setErr(`${res.status}: ${await res.text()}`); return; }
-      router.push("/templates");
+      if (!res.ok) { setErr(await saveErrorMessage(t, res)); return; }
+      onDirty(false);
+      // The detail page is where the new draft gets published.
+      router.push(`/templates/${meta.name}`);
     } finally {
       setSaving(false);
     }
   }
 
-  if (clusters.length === 0) return <div>{t("noClusters")}</div>;
+  if (!loaded) return <div>{t("loading")}</div>;
+  if (clusters.length === 0) {
+    if (err) return <div className="text-red-600 text-sm whitespace-pre">{err}</div>;
+    return <div>{t("noClusters")}</div>;
+  }
 
   const tree = (
     <div className="space-y-4">
@@ -212,7 +238,11 @@ function UIModeNew() {
           <div key={i} className="border rounded p-2">
             <input
               value={r.name}
-              onChange={e => setResources(prev => prev.map((x, idx) => idx === i ? { ...x, name: e.target.value } : x))}
+              aria-label={t("resourceName")}
+              onChange={e => {
+                setResources(prev => prev.map((x, idx) => idx === i ? { ...x, name: e.target.value } : x));
+                touch();
+              }}
               className="w-full border-b text-sm font-mono mb-2"
             />
             <div className="text-xs text-muted-foreground mb-2">{r.gv} · {r.kind}</div>
@@ -232,16 +262,24 @@ function UIModeNew() {
     <FieldInspector
       path={active.path}
       node={active.node}
+      kind={resources[active.resIdx].kind}
+      resourceName={resources[active.resIdx].name}
       value={resources[active.resIdx].fields[active.path]}
-      onChange={v => setResources(prev => prev.map((r, i) => i === active.resIdx
-        ? { ...r, fields: { ...r.fields, [active.path]: v } }
-        : r
-      ))}
-      onClear={() => setResources(prev => prev.map((r, i) => {
-        if (i !== active.resIdx) return r;
-        const { [active.path]: _, ...rest } = r.fields;
-        return { ...r, fields: rest };
-      }))}
+      onChange={v => {
+        setResources(prev => prev.map((r, i) => i === active.resIdx
+          ? { ...r, fields: { ...r.fields, [active.path]: v } }
+          : r
+        ));
+        touch();
+      }}
+      onClear={() => {
+        setResources(prev => prev.map((r, i) => {
+          if (i !== active.resIdx) return r;
+          const { [active.path]: _, ...rest } = r.fields;
+          return { ...r, fields: rest };
+        }));
+        touch();
+      }}
     />
   ) : (
     <div className="text-muted-foreground text-sm">{t("pickFieldHint")}</div>
@@ -262,12 +300,12 @@ function UIModeNew() {
 
   return (
     <div className="space-y-3">
-      <MetaRow meta={meta} onChange={setMeta} hideTeam />
+      <MetaRow meta={meta} onChange={(m) => { setMeta(m); touch(); }} hideTeam />
       <div className="flex items-center gap-2 text-xs">
         <span className="text-muted-foreground">{t("owningTeam")}</span>
         <Select
           value={owningTeamId === "" ? GLOBAL_TEAM : owningTeamId}
-          onValueChange={(v) => setOwningTeamId(!v || v === GLOBAL_TEAM ? "" : v)}
+          onValueChange={(v) => { setOwningTeamId(!v || v === GLOBAL_TEAM ? "" : v); touch(); }}
         >
           <SelectTrigger className="w-64">
             <SelectValue>{(v) => renderTeamLabel(v, teams, t("globalTeamOption"))}</SelectValue>
@@ -328,7 +366,7 @@ const STARTER_UISPEC = `fields:
     default: 3
 `;
 
-function YamlModeNew() {
+function YamlModeNew({ onDirty }: ModeProps) {
   const router = useRouter();
   const t = useTranslations("templates.editor");
   const [meta, setMeta] = useState<TemplateMeta>({ name: "", tags: [] });
@@ -354,6 +392,7 @@ function YamlModeNew() {
   }, []);
 
   const canSave = meta.name.trim().length > 0 && !saving;
+  const touch = () => onDirty(true);
 
   async function saveDraft() {
     setErr(null);
@@ -373,8 +412,10 @@ function YamlModeNew() {
           ui_spec_yaml: uispecYaml,
         }),
       });
-      if (!res.ok) { setErr(`${res.status}: ${await res.text()}`); return; }
-      router.push("/templates");
+      if (!res.ok) { setErr(await saveErrorMessage(t, res)); return; }
+      onDirty(false);
+      // The detail page is where the new draft gets published.
+      router.push(`/templates/${meta.name}`);
     } finally {
       setSaving(false);
     }
@@ -382,12 +423,12 @@ function YamlModeNew() {
 
   return (
     <div className="space-y-3">
-      <MetaRow meta={meta} onChange={setMeta} hideTeam />
+      <MetaRow meta={meta} onChange={(m) => { setMeta(m); touch(); }} hideTeam />
       <div className="flex items-center gap-2 text-xs">
         <span className="text-muted-foreground">{t("owningTeam")}</span>
         <Select
           value={owningTeamId === "" ? GLOBAL_TEAM : owningTeamId}
-          onValueChange={(v) => setOwningTeamId(!v || v === GLOBAL_TEAM ? "" : v)}
+          onValueChange={(v) => { setOwningTeamId(!v || v === GLOBAL_TEAM ? "" : v); touch(); }}
         >
           <SelectTrigger className="w-64">
             <SelectValue>{(v) => renderTeamLabel(v, teams, t("globalTeamOption"))}</SelectValue>
@@ -403,8 +444,8 @@ function YamlModeNew() {
         </Select>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <YamlEditor label="resources.yaml" value={resourcesYaml} onChange={setResourcesYaml} />
-        <YamlEditor label="ui-spec.yaml" value={uispecYaml} onChange={setUispecYaml} />
+        <YamlEditor label="resources.yaml" value={resourcesYaml} onChange={(v) => { setResourcesYaml(v); touch(); }} />
+        <YamlEditor label="ui-spec.yaml" value={uispecYaml} onChange={(v) => { setUispecYaml(v); touch(); }} />
       </div>
       <details className="rounded border bg-white p-3" open>
         <summary className="cursor-pointer text-sm font-semibold">{t("userFormPreview")}</summary>

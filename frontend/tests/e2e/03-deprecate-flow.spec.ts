@@ -4,6 +4,9 @@ test.describe("deprecate flow", () => {
   test.use({ storageState: async ({}, use) => use(await adminStorage()) });
 
   test("publish → deprecate → hidden from catalog → undeprecate", async ({ page }) => {
+    // Publish/deprecate buttons are wrapped in ConfirmSubmit (window.confirm);
+    // Playwright dismisses dialogs by default, which would cancel the submit.
+    page.on("dialog", (d) => d.accept());
     // Depends on 02-ui-editor having created a fresh e2e-ui-* draft template.
     // Files run in alphabetical order; the e2e-ui-* prefix is set by ui-editor
     // and avoids picking up stale templates from prior sessions (unit-test
@@ -25,23 +28,23 @@ test.describe("deprecate flow", () => {
     await page.waitForLoadState("networkidle");
 
     // If v1 is still draft, publish it first.
-    const publishBtn = page.getByRole("button", { name: /^Publish$/ });
+    const publishBtn = page.getByRole("button", { name: /^(Publish|게시)$/ });
     if (await publishBtn.count() > 0) {
       await publishBtn.first().click();
       await page.waitForLoadState("networkidle");
       await page.reload();
-      await expect(page.getByText("published", { exact: true }).first()).toBeVisible({
+      await expect(page.getByText(/^(published|게시됨)$/).first()).toBeVisible({
         timeout: 15_000,
       });
     }
 
     // Deprecate
-    const deprecateBtn = page.getByRole("button", { name: /^Deprecate$/ });
+    const deprecateBtn = page.getByRole("button", { name: /^(Deprecate|사용 중단)$/ });
     await expect(deprecateBtn.first()).toBeVisible({ timeout: 10_000 });
     await deprecateBtn.first().click();
     await page.waitForLoadState("networkidle");
     await page.reload();
-    await expect(page.getByText("deprecated").first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/^(deprecated|사용 중단)$/).first()).toBeVisible({ timeout: 10_000 });
 
     // Catalog no longer shows it
     await page.goto("/catalog");
@@ -49,12 +52,12 @@ test.describe("deprecate flow", () => {
 
     // Undeprecate restores it
     await page.goto(`/templates/${slug}`);
-    const undeprecateBtn = page.getByRole("button", { name: /^Undeprecate$/ });
+    const undeprecateBtn = page.getByRole("button", { name: /^(Undeprecate|사용 중단 해제)$/ });
     await expect(undeprecateBtn.first()).toBeVisible({ timeout: 10_000 });
     await undeprecateBtn.first().click();
     await page.waitForLoadState("networkidle");
     await page.reload();
-    await expect(page.getByText("published").first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/^(published|게시됨)$/).first()).toBeVisible({ timeout: 10_000 });
     await page.goto("/catalog");
     await expect(page.locator(`a[href^="/catalog/${slug}"]`).first()).toBeVisible();
   });

@@ -38,7 +38,13 @@ export default async function Home() {
               {passwordHint && <><br />{t("demoCreds", { password: passwordHint })}</>}
             </p>
           )}
-          <a href="/api/auth/login" className="text-sm underline">{t("loginPrimary")}</a>
+          {/* Primary CTA when demo is off (it's the only way in); secondary under the demo buttons. */}
+          <a
+            href="/api/auth/login"
+            className={demo ? "text-sm underline" : "rounded-md bg-primary px-4 py-2 text-primary-foreground"}
+          >
+            {t("loginPrimary")}
+          </a>
         </div>
       )}
     </main>

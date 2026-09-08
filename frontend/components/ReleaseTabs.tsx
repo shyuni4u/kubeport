@@ -2,23 +2,25 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
 
 const TABS = [
-  { key: "overview", label: "개요", suffix: "" },
-  { key: "logs", label: "로그", suffix: "/logs" },
+  { key: "overview", suffix: "" },
+  { key: "logs", suffix: "/logs" },
 ] as const;
 
 export function ReleaseTabs({ releaseId }: { releaseId: string }) {
   const pathname = usePathname();
+  const t = useTranslations("releases.tabs");
   const base = `/releases/${releaseId}`;
   return (
     <nav className="flex gap-4 border-b">
-      {TABS.map((t) => {
-        const href = base + t.suffix;
+      {TABS.map((tab) => {
+        const href = base + tab.suffix;
         const active = pathname === href;
         return (
           <Link
-            key={t.key}
+            key={tab.key}
             href={href}
             className={`px-3 py-2 text-sm ${
               active
@@ -26,7 +28,7 @@ export function ReleaseTabs({ releaseId }: { releaseId: string }) {
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {t.label}
+            {t(tab.key)}
           </Link>
         );
       })}
