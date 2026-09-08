@@ -11,6 +11,7 @@ data:
     server {
       listen 8080;
       server_tokens off;
+      charset utf-8;
       location / {
         default_type text/plain;
         return 200 "${WELCOME_MESSAGE}\n";

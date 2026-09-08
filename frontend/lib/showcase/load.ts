@@ -12,9 +12,16 @@ export interface Showcase {
 
 const dir = path.join(process.cwd(), "lib", "showcase");
 
+// The landing page is dynamic (cookie-dependent), so cache the file reads for
+// the process lifetime instead of hitting disk on every request.
+let cached: Showcase | null = null;
+
 export function loadShowcase(): Showcase {
-  return {
-    resourcesYaml: readFileSync(path.join(dir, "web-app.resources.yaml"), "utf8").replaceAll("\r\n", "\n"),
-    uiSpecYaml: readFileSync(path.join(dir, "web-app.ui-spec.yaml"), "utf8").replaceAll("\r\n", "\n"),
-  };
+  if (!cached) {
+    cached = {
+      resourcesYaml: readFileSync(path.join(dir, "web-app.resources.yaml"), "utf8").replaceAll("\r\n", "\n"),
+      uiSpecYaml: readFileSync(path.join(dir, "web-app.ui-spec.yaml"), "utf8").replaceAll("\r\n", "\n"),
+    };
+  }
+  return cached;
 }

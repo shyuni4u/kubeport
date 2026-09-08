@@ -26,8 +26,9 @@ describe("LandingCompare", () => {
     const pre = screen.getByTestId("landing-yaml");
     expect(pre.textContent).toContain("kind: Deployment");
     expect(pre.textContent).toContain("kind: ConfigMap");
-    // 111-line fixture → badge reflects what's actually rendered
-    expect(screen.getByText(/YAML 111줄/)).toBeInTheDocument();
+    // badge reflects the fixture's real line count
+    const lineCount = resourcesYaml.replace(/\n$/, "").split("\n").length;
+    expect(screen.getByText(`YAML ${lineCount}줄`)).toBeInTheDocument();
     expect(screen.getByText(/입력 4개/)).toBeInTheDocument();
     expect(screen.getByText("환영 문구")).toBeInTheDocument();
     expect(screen.getByText("동시에 띄울 개수")).toBeInTheDocument();
@@ -38,8 +39,11 @@ describe("LandingCompare", () => {
   it("renders a (?) help affordance for every field and for each pane heading", () => {
     renderCompare();
     const hints = screen.getAllByRole("button", { name: "도움말" });
-    // 4 field hints + 2 pane titles + 2 badges
-    expect(hints).toHaveLength(8);
+    const fieldCount = (uiSpecYaml.match(/^\s+- path:/gm) ?? []).length;
+    // one per field + 2 pane titles + 2 badges
+    expect(hints).toHaveLength(fieldCount + 4);
+    // the hint must not leak into the input's accessible name
+    expect(screen.getByRole("textbox", { name: "환영 문구" })).toBeInTheDocument();
   });
 
   it("rewrites the YAML and highlights the changed line when a form value changes", async () => {

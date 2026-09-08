@@ -124,19 +124,24 @@ function YamlLines({
   changed: [number, number] | null;
   changedLabel: string;
 }) {
+  const preRef = useRef<HTMLPreElement | null>(null);
   const firstChangedRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    // jsdom has no scrollIntoView; real browsers keep the edited line visible
-    // inside the scrolling pane without moving the page.
-    // `nearest` so only the pane scrolls; `center` would also re-center the
-    // window on every keystroke.
-    firstChangedRef.current?.scrollIntoView?.({ block: "nearest" });
+    // Scroll the pane itself rather than scrollIntoView: that would also
+    // scroll the window, and on narrow screens (panes stacked) every
+    // keystroke would yank the page away from the input being typed into.
+    const pre = preRef.current;
+    const line = firstChangedRef.current;
+    if (!pre || !line) return;
+    const target = line.offsetTop - pre.clientHeight / 2 + line.offsetHeight / 2;
+    pre.scrollTop = Math.max(0, target);
   }, [changed]);
 
   return (
     <pre
+      ref={preRef}
       data-testid="landing-yaml"
-      className="max-h-[32rem] overflow-auto py-2 text-left font-mono text-xs leading-5"
+      className="relative max-h-[32rem] overflow-auto py-2 text-left font-mono text-xs leading-5"
     >
       {lines.map((line, i) => {
         const isChanged = changed !== null && i >= changed[0] && i <= changed[1];

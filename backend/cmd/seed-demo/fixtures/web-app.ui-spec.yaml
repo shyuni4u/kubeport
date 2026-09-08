@@ -14,8 +14,11 @@ fields:
     default: 1
   - path: Deployment[web].spec.template.spec.containers[0].env[0].value
     label: "환영 문구"
-    help: "브라우저로 접속했을 때 화면에 보여줄 문장입니다."
+    help: "브라우저로 접속했을 때 화면에 보여줄 문장입니다. 80자까지, 따옴표·$·;·중괄호는 쓸 수 없습니다."
     type: string
+    # value is substituted verbatim into the nginx config above — keep the
+    # characters that would break the config (or read as an nginx variable) out
+    pattern: '^[^"$\\;{}]{0,80}$'
     default: "Hello from kubeport"
   - path: Deployment[web].spec.template.spec.containers[0].resources.limits.memory
     label: "메모리 상한"
