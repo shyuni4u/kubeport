@@ -1,6 +1,8 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import type { SchemaNode } from "@/lib/openapi";
+import { HelpHint } from "@/components/HelpHint";
 
 // Field types the editor supports. `enum` and `autocomplete` both render a
 // values list editor (admin-supplied options); the difference is enforcement
@@ -27,36 +29,58 @@ export type UIField =
 // `enum` (strict) or `autocomplete` (suggested + free input).
 const STRING_COMPATIBLE: ReadonlyArray<UISpecType> = ["string", "enum", "autocomplete"];
 
+// Builds the ui-spec `path` value (`Kind[metadata.name].json.path`) the
+// admin will see in ui-spec.yaml. Falls back to the bare JSON path when the
+// caller has no resource context.
+export function uiSpecPath(kind: string | undefined, resourceName: string | undefined, path: string): string {
+  return kind && resourceName ? `${kind}[${resourceName}].${path}` : path;
+}
+
 export function FieldInspector({
-  path, node, value, onChange, onClear,
+  path, node, value, onChange, onClear, kind, resourceName,
 }: {
   path: string;
   node: SchemaNode;
   value: UIField | undefined;
   onChange: (v: UIField) => void;
   onClear: () => void;
+  /** Resource kind (e.g. `Deployment`) — used to display the ui-spec path. */
+  kind?: string;
+  /** Resource metadata.name — used to display the ui-spec path. */
+  resourceName?: string;
 }) {
+  const t = useTranslations("templates.editor.field");
   const mode = value?.mode ?? null;
   const schemaType = mapSchemaType(node);
+  const leaf = path.split(".").pop() ?? path;
 
   return (
     <div className="border rounded p-4 text-sm">
-      <div className="font-mono text-xs text-muted-foreground mb-2">{path}</div>
-      <div className="flex gap-2 mb-3">
+      <div
+        className="font-mono text-xs text-muted-foreground mb-2 break-all"
+        title={t("uiSpecPathHelp")}
+      >
+        {uiSpecPath(kind, resourceName, path)}
+      </div>
+      <div className="flex items-center gap-2 mb-3">
         <button
+          type="button"
           className={`px-2 py-1 rounded text-xs ${mode === "fixed" ? "bg-primary text-primary-foreground" : "bg-muted"}`}
           onClick={() => onChange({ mode: "fixed", fixedValue: defaultFor(schemaType) })}
-        >값 고정</button>
+        >{t("fix")}</button>
+        <HelpHint text={t("fixHelp")} />
         <button
+          type="button"
           className={`px-2 py-1 rounded text-xs ${mode === "exposed" ? "bg-primary text-primary-foreground" : "bg-muted"}`}
-          onClick={() => onChange({ mode: "exposed", uiSpec: { label: path, type: schemaType, required: false } })}
-        >사용자 노출</button>
-        {value && <button className="ml-auto text-xs text-red-600" onClick={onClear}>초기화</button>}
+          onClick={() => onChange({ mode: "exposed", uiSpec: { label: "", type: schemaType, required: false } })}
+        >{t("expose")}</button>
+        <HelpHint text={t("exposeHelp")} />
+        {value && <button type="button" className="ml-auto text-xs text-red-600" onClick={onClear}>{t("clear")}</button>}
       </div>
 
       {value?.mode === "fixed" && (
         <div>
-          <label className="block text-xs mb-1">값</label>
+          <label className="block text-xs mb-1">{t("value")}</label>
           <input
             className="border rounded px-2 py-1 w-full"
             value={String(value.fixedValue ?? "")}
@@ -80,14 +104,14 @@ export function FieldInspector({
           */}
           {STRING_COMPATIBLE.includes(schemaType) && (
             <div>
-              <label className="block text-xs mb-1">입력 방식</label>
+              <label className="block text-xs mb-1">{t("inputMode")}</label>
               <div className="flex gap-1">
-                {(["string", "enum", "autocomplete"] as const).map((t) => (
+                {(["string", "enum", "autocomplete"] as const).map((ty) => (
                   <button
-                    key={t}
+                    key={ty}
                     type="button"
                     className={`flex-1 px-2 py-1 rounded text-xs ${
-                      value.uiSpec.type === t
+                      value.uiSpec.type === ty
                         ? "bg-primary text-primary-foreground"
                         : "bg-muted"
                     }`}
@@ -102,26 +126,27 @@ export function FieldInspector({
                         ...value,
                         uiSpec: {
                           ...value.uiSpec,
-                          type: t,
+                          type: ty,
                           values: value.uiSpec.values,
                         },
                       });
                     }}
                   >
-                    {t === "string" ? "자유 텍스트" : t === "enum" ? "선택지" : "추천"}
+                    {ty === "string" ? t("freeText") : ty === "enum" ? t("choices") : t("suggest")}
                   </button>
                 ))}
               </div>
             </div>
           )}
-          <Labeled label="라벨" v={value.uiSpec.label}
+          <Labeled label={t("label")} v={value.uiSpec.label}
+            placeholder={t("labelPlaceholder", { leaf })}
             onChange={x => onChange({ ...value, uiSpec: { ...value.uiSpec, label: x } })}/>
-          <Labeled label="기본값" v={String(value.uiSpec.default ?? "")}
+          <Labeled label={t("default")} v={String(value.uiSpec.default ?? "")}
             onChange={x => onChange({ ...value, uiSpec: { ...value.uiSpec, default: coerce(x, value.uiSpec.type) } })}/>
           {(value.uiSpec.type === "enum" || value.uiSpec.type === "autocomplete") && (
             <div>
               <label className="block text-xs mb-1">
-                {value.uiSpec.type === "enum" ? "선택지 (Values)" : "추천 항목 (Suggestions)"}
+                {value.uiSpec.type === "enum" ? t("values") : t("suggestions")}
               </label>
               <div className="space-y-1">
                 {(value.uiSpec.values ?? []).map((v, i) => (
@@ -142,7 +167,7 @@ export function FieldInspector({
                         const next = (value.uiSpec.values ?? []).filter((_, j) => j !== i);
                         onChange({ ...value, uiSpec: { ...value.uiSpec, values: next } });
                       }}
-                    >삭제</button>
+                    >{t("remove")}</button>
                   </div>
                 ))}
                 <button
@@ -152,7 +177,7 @@ export function FieldInspector({
                     const next = [...(value.uiSpec.values ?? []), ""];
                     onChange({ ...value, uiSpec: { ...value.uiSpec, values: next } });
                   }}
-                >+ 값 추가</button>
+                >{t("addValue")}</button>
               </div>
             </div>
           )}
@@ -167,7 +192,7 @@ export function FieldInspector({
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={!!value.uiSpec.required}
               onChange={e => onChange({ ...value, uiSpec: { ...value.uiSpec, required: e.target.checked } })}/>
-            필수 입력
+            {t("required")}
           </label>
         </div>
       )}
@@ -175,11 +200,11 @@ export function FieldInspector({
   );
 }
 
-function Labeled({ label, v, onChange }: { label: string; v: string; onChange: (v: string) => void }) {
+function Labeled({ label, v, placeholder, onChange }: { label: string; v: string; placeholder?: string; onChange: (v: string) => void }) {
   return (
     <div>
       <label className="block text-xs mb-1">{label}</label>
-      <input className="border rounded px-2 py-1 w-full" value={v} onChange={e => onChange(e.target.value)} />
+      <input className="border rounded px-2 py-1 w-full" value={v} placeholder={placeholder} onChange={e => onChange(e.target.value)} />
     </div>
   );
 }

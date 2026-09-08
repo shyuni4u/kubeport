@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 
@@ -32,26 +33,27 @@ type Props = {
 };
 
 export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Props) {
+  const t = useTranslations("templates.editor.meta");
   const [tagInput, setTagInput] = useState("");
   const lockAll = readOnly === true;
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-4 py-2">
       <label className="flex items-center gap-2 text-xs">
-        <span className="text-muted-foreground">이름</span>
+        <span className="text-muted-foreground">{t("name")}</span>
         <Input
           className="w-48 text-sm"
-          placeholder="템플릿 이름 (slug)"
+          placeholder={t("namePlaceholder")}
           value={meta.name}
           disabled={nameLocked || lockAll}
           onChange={(e) => onChange({ ...meta, name: e.target.value })}
         />
       </label>
       <label className="flex items-center gap-2 text-xs">
-        <span className="text-muted-foreground">표시 이름</span>
+        <span className="text-muted-foreground">{t("displayName")}</span>
         <Input
           className="w-48 text-sm"
-          placeholder="표시 이름"
+          placeholder={t("displayName")}
           value={meta.display_name ?? ""}
           disabled={lockAll}
           onChange={(e) => onChange({ ...meta, display_name: e.target.value })}
@@ -59,7 +61,7 @@ export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Prop
       </label>
       {!hideTeam && (
         <label className="flex items-center gap-2 text-xs">
-          <span className="text-muted-foreground">팀</span>
+          <span className="text-muted-foreground">{t("team")}</span>
           <Input
             className="w-32 text-sm"
             value={meta.team ?? ""}
@@ -69,18 +71,18 @@ export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Prop
         </label>
       )}
       <div className="flex flex-wrap items-center gap-1">
-        {meta.tags.map((t) => (
-          <Badge key={t} variant="secondary" className="text-[10px]">
-            {t}
+        {meta.tags.map((tag) => (
+          <Badge key={tag} variant="secondary" className="text-[10px]">
+            {tag}
             {!lockAll && (
               <button
                 type="button"
-                aria-label={`remove tag ${t}`}
+                aria-label={t("removeTag", { tag })}
                 className="ml-1 opacity-60 hover:opacity-100"
                 onClick={() =>
                   onChange({
                     ...meta,
-                    tags: meta.tags.filter((x) => x !== t),
+                    tags: meta.tags.filter((x) => x !== tag),
                   })
                 }
               >
@@ -91,7 +93,7 @@ export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Prop
         ))}
         {!lockAll && (
           <Input
-            placeholder="태그 추가"
+            placeholder={t("addTag")}
             className="h-7 w-28 text-xs"
             value={tagInput}
             onChange={(e) => setTagInput(e.target.value)}

@@ -199,7 +199,9 @@
       "new": "+ New template",
       "colName": "Name",
       "colVersion": "Current version",
-      "colDescription": "Description"
+      "colDescription": "Description",
+      "empty": "No templates yet.",
+      "emptyCta": "Create your first template →"
     },
     "detail": {
       "errors": {
@@ -237,6 +239,68 @@
       "save": "Save",
       "saving": "Saving…",
       "saveAsNew": "Save as new version",
+      "saveDraft": "Save draft",
+      "publish": "Publish",
+      "publishing": "Publishing…",
+      "publishFromDetail": "Publish from the template detail page after saving.",
+      "switchModeLosesEdits": "You have unsaved edits. Switching mode will discard them. Continue?",
+      "schemaLoading": "Loading schema… (cluster {cluster})",
+      "schemaLoadingNoCluster": "Loading schema… (no cluster selected)",
+      "schemaMissing": "Schema not found: {kind}",
+      "resourceName": "Resource name (metadata.name)",
+      "errors": {
+        "draftExists": "This template already has a draft. Only one draft is allowed per template — edit or delete the existing draft from the detail page, then try again.",
+        "forbidden": "You don't have permission to edit this template.",
+        "invalid": "Validation failed: {detail}",
+        "generic": "Save failed (HTTP {status}). {detail}",
+        "metaSave": "Failed to save template metadata (HTTP {status}). {detail}",
+        "missingLabel": "Exposed field {path} has no label. This label is what users see in the deploy form."
+      },
+      "field": {
+        "fixedBadge": "fixed",
+        "exposedBadge": "exposed",
+        "fix": "Fix value",
+        "fixHelp": "This value is written into resources.yaml as-is; users cannot change it.",
+        "expose": "Expose to users",
+        "exposeHelp": "This path is added to ui-spec fields[] and becomes an input in the user's deploy form. Set its label, type and default here.",
+        "uiSpecPathHelp": "The path value in ui-spec.yaml: Kind[metadata.name].json.path",
+        "clear": "Reset",
+        "value": "Value",
+        "inputMode": "Input mode",
+        "freeText": "Free text",
+        "choices": "Choices",
+        "suggest": "Suggestions",
+        "label": "Label",
+        "labelPlaceholder": "Name shown to users (e.g. {leaf})",
+        "default": "Default",
+        "values": "Choices (Values)",
+        "suggestions": "Suggested items (Suggestions)",
+        "remove": "Remove",
+        "addValue": "+ Add value",
+        "required": "Required"
+      },
+      "kindPicker": {
+        "quickPick": "Quick pick",
+        "allGroupVersions": "All GroupVersions ({count})",
+        "kindPlaceholder": "Kind (e.g. Deployment)",
+        "add": "Add",
+        "indexFetchFailed": "Failed to fetch the OpenAPI index (HTTP {status})."
+      },
+      "meta": {
+        "name": "Name",
+        "namePlaceholder": "Template name (slug)",
+        "displayName": "Display name",
+        "team": "Team",
+        "addTag": "Add tag",
+        "removeTag": "Remove tag {tag}"
+      },
+      "preview": {
+        "loading": "Loading…",
+        "noExposed": "No fields are exposed yet. In UI mode, mark a value in the tree as <strong>exposed</strong> and it shows up here. In YAML mode, add entries to <code>fields[]</code> in <code>ui-spec.yaml</code>.",
+        "previewSubmit": "Deploy (preview — does nothing)",
+        "parseFailed": "Failed to parse ui-spec: {detail}",
+        "previewFailed": "Failed to build the preview (HTTP {status}). {detail}"
+      },
       "convert": {
         "yamlDraftPreview": "This draft was authored in YAML mode, so the UI editor is preview-only. To edit it in the UI, delete this draft from the detail page and start a new version.",
         "willSaveAsNew": "Saving will create a new UI-mode version. Some structures may be lost in conversion — verify them in the tree.",
