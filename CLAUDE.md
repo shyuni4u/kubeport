@@ -17,6 +17,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 >   - **BFF 프록시 PATCH 누락** (#7) — UI 모드 draft 저장·메타 수정이 405 였던 초기 버그.
 >   - **Plan 11 e2e 1차** (#10): `05-user-deploy`·`06-admin-draft-save`·`07-error-pages` + 기존 `02/03` 한국어 라벨·confirm 수락 수정 + CI rolebinding 재시도. **e2e 는 로컬에서 먼저** — `scripts/e2e/*` (#15, [docs/local-e2e.md §0](docs/local-e2e.md)), 이 머신 13/13 28초.
 >   - `kuberport` 잔존은 실제 파일명이라 유지, 스크립트만 새 이름 우선 (#9). `bootstrap.sh` CIDR/OIDC 반영은 #1 로 완료.
+> - **PR 리뷰어 시스템 (2026-09-08)** — `/pr-review` 스킬 + `.claude/agents/*-reviewer.md` 7개 + `gh pr create` 훅(`.claude/hooks/require-pr-review.mjs`, node 테스트 6개). 리포에 커밋되어 모든 PC 공통. 브라우저 대상은 라이브 데모(`--base-url` 로 staging 교체 예정). 첫 dry-run 이 자기 PR 의 P0(커밋된 settings.json 의 프로덕션 SSH 허용 규칙)·P1(helm template 검증 명령 오류)을 잡아 수정함.
 > - **남은 것**: (a) **[issue #20](https://github.com/shyuni4u/kubeport/issues/20)** 다른 PC 에서 `scripts/e2e/up.sh` 생성 경로(인증서·kind) 첫 검증, (b) Plan 11 후속 — 라이브 OCI smoke(프로덕션에 릴리스 생성/삭제 여부 결정 필요)·클러스터 끊김/drift 케이스, (c) 프론트 eslint 기존 오류 6건(`set-state-in-effect`), (d) 라이브 데모에서 관리자/사용자 체험 한 바퀴.
 > - **주의**: 공인 IP `168.107.55.95` 는 ephemeral(stop/start 시 변경), SSH 키는 gpg 번들→`~/.ssh/kuberport-oci/` (`kuberport` 는 초기 오타지만 실제 디렉터리·키 파일명 — 문서에서 고치지 말 것, runbook §1 참조). 재배포·RBAC·롤백은 runbook.
 
@@ -42,6 +43,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 | 13 | [plan13-demo-mode](docs/superpowers/plans/2026-09-07-plan13-demo-mode.md) | ✅ 라이브 (PR #2, 2026-09-08 롤아웃) | **데모 모드.** Dex 데모 IdP + 데모 계정 2개(관리자/사용자) + 시드(템플릿 3·릴리스 2) + 6시간 리셋 CronJob + k3s 구조화 인증(Google+Dex) 전환 스크립트. 스펙: [self-improving-loop-design](docs/superpowers/specs/2026-09-07-self-improving-loop-design.md) §4.1. |
 | 14 | _(미작성)_ | ⏳ planned | **UX 루프.** Sentry + Umami 계측 → role-review v2(브라우저) → 주간 Routine(이슈만) → `agent-go` 라벨 → claude-code-action draft PR → 결과 로그. 스펙 §4.2. |
 | 15 | _(미작성)_ | ⏳ planned | **기록 자동화.** 릴리스 노트 → 블로그, Playwright 데모 영상 자동 녹화, 주간 트래픽 지표 → docs/README. 스펙 §4.3. |
+| 16 | [pr-reviewers](docs/superpowers/plans/2026-09-08-pr-reviewers.md) | ✅ 구현 (PR 예정) | **PR 리뷰어 시스템.** `/pr-review` 로컬 스킬 — 7 페르소나 에이전트 + 매니저 + `gh pr create` 훅. 스펙: [pr-reviewers-design](docs/superpowers/specs/2026-09-08-pr-reviewers-design.md). |
 
 참고 — 초기 디자인: [2026-04-16-initial-design.md](docs/superpowers/specs/2026-04-16-initial-design.md), Plan 2 Admin UX: [2026-04-18-plan2-admin-ux-design.md](docs/superpowers/specs/2026-04-18-plan2-admin-ux-design.md).
 
@@ -149,6 +151,12 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
 
 ## 코드 리뷰
 
+- **PR 은 `/pr-review` 로 올린다**: 7개 페르소나(user/admin/design/master/security/ai + manager)가
+  diff 와 라이브 데모를 리뷰 → `.claude/reviews/<branch>.md` 기록 → `gh pr create`(P0 시 draft) →
+  PR 코멘트 → 기존 문제는 `reviewer:<persona>` 라벨 이슈. 기록 없이 `gh pr create` 는 훅이 막는다
+  (실수 방지용 소프트 가드; 우회 `PR_REVIEW_SKIP=1` 은 긴급 시만). 설치 관련 변경은 `--deep`.
+  새로 만든 `.claude/agents/*` 는 세션 재시작 후에만 `subagent_type` 으로 보이며, 스킬에 파일 본문
+  폴백이 있다. 스펙: [pr-reviewers-design](docs/superpowers/specs/2026-09-08-pr-reviewers-design.md).
 - **푸시 전 셀프 리뷰 필수**: 커밋 전에 변경된 코드를 직접 리뷰한다.
   체크리스트: IDOR/인증 누락, 에러 시 롤백/정리 누락, 입력 검증 누락, 불필요한 메모리 할당, context 취소 미처리.
 - **code-reviewer 에이전트**: 변경 파일 3개 이상인 커밋에서는 푸시 전에
