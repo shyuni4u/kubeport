@@ -187,7 +187,9 @@ demo:
   userPassword: ""                # --set
   cluster: oci-a1
   resetSchedule: "0 */6 * * *"
-  kubectlImage: bitnami/kubectl:1.31
+  # bitnami/kubectl tags were pulled from Docker Hub (2025); alpine/k8s ships
+  # sh + kubectl for amd64/arm64. The init container needs a shell (sh -c).
+  kubectlImage: alpine/k8s:1.31.9
   usernamePrefix: "dex:"          # must match k3s AuthenticationConfiguration
   # Pod Security Admission enforce level for the demo namespace.
   # `baseline` blocks privileged/hostPath/hostNetwork while still allowing

@@ -7,14 +7,14 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 
 **🟢 라이브 배포 완료 — https://kubeport.enzo.kr** (OCI Always Free A1, Phase 2 직행). Plan 0~10 실행 완료: 프론트 재설계(0~7) + drift 회수(8) + Helm chart(9) + **OCI 부트스트랩·helm install·Google OIDC·실제 k8s 배포 인프라(10)**. 운영 지식은 반드시 [docs/oci-prod-runbook.md](docs/oci-prod-runbook.md) 참조.
 
-> **▶ 현재 상태 (2026-09-07)** — 데모 가능 상태. 완료 삭제하며 갱신할 것.
+> **▶ 현재 상태 (2026-09-08)** — 데모 가능 상태. 완료 삭제하며 갱신할 것.
 > - **실제 k8s 배포까지 동작**: k3s 가 Google OIDC 신뢰 + RBAC 바인딩 + 클러스터 `oci-a1` 등록 (runbook §5). backend 가 사용자 Google 토큰을 k8s API 로 포워딩.
 > - **로그인/로그아웃 정상**, admin 부트스트랩(`auth.devAdminEmails`). UX 마감: role-review(admin/user 페르소나) **14건 반영** — raw 에러→사용자 문장, 이중제출 가드, admin 저작 UI i18n, 파괴적 액션 confirm 등.
 > - **운영 하드닝**: idle-reclaim ping(GHA 10분) + 주간 백업 정책.
 > - **남은 것**: (a) **`kuberport` 오타 → `kubeport` 통일** (docs/oci README·runbook·upload-gha-secrets.sh·CLAUDE.md 잔존), (b) `deploy/oci/bootstrap.sh` 에 §7 인프라 수정(iptables pod/service CIDR · OIDC config) 반영해 재현성 확보, (c) Plan 11 e2e 확장(이제 라이브 OCI 대상).
 > - **랜딩 비교 쇼케이스 (2026-09-08)** — `/` 에 "관리자가 쓰는 YAML(약 110줄) vs 사용자 폼(4칸)" 인터랙티브 비교. 폼 값 변경 → 클라이언트에서 YAML 재렌더 + 바뀐 줄 하이라이트(`lib/apply-values-to-yaml.ts`). 소재는 데모 시드 `web-app` 픽스처를 현실적 크기로 키운 것 (`frontend/lib/showcase/` 복사본, 백엔드 원본과 바이트 일치 테스트). 같이 잡은 버그: `DynamicForm` 이 `[...]` 포함 경로에서 사용자 입력을 버리고 기본값을 제출하던 문제 (RHF 가 `[`·`]` 도 경로 구분자로 해석) — 전 데모 템플릿에 영향. 어려운 용어에는 `(?)` 도움말(`HelpHint`).
 > - **role-review v2 (2026-09-08, PR #5)** — 관리자/사용자 페르소나 리뷰 20건 전부 반영. 전역 `error.tsx`/`not-found.tsx`, 서버 액션 인라인 에러(`ActionForm`), zod 검증 메시지 i18n, 에디터 미저장 가드(탭 전환·링크 이동·탭 닫기; 뒤로가기는 App Router 한계), 사용자 릴리스 삭제, RBAC 미매핑 kind 경고, 저작 UI 하드코딩 문자열 전부 i18n(ko/en 키 parity 테스트 가능: 285/285), 데모 픽스처 도움말. e2e `02/03` 스펙은 한국어 라벨·confirm 자동 수락으로 고침.
-> - **데모 모드(Plan 13) 코드 완료** — `/` 에서 관리자/사용자 체험 버튼(Dex 로그인, 비밀번호 화면 표기), `demo` 네임스페이스 격리, 6시간 리셋. **프로덕션 적용은 Task 12 체크리스트(runbook §5 + deploy/oci/README §7.6)를 사람이 실행해야 함 — 인계 체크리스트: [docs/plan13-handoff.md](docs/plan13-handoff.md).**
+> - **데모 모드(Plan 13) 라이브** (2026-09-08, Helm rev 4, 이미지 `sha-6bf1667`) — `/` 에서 관리자/사용자 체험 버튼(Dex 로그인, 비밀번호 화면 표기), `demo` 네임스페이스 격리, 6시간 리셋, k3s 가 Google+Dex 구조화 인증. 운영: runbook §5 "데모 모드 운영". 남은 사람 작업(브라우저 스모크): [docs/plan13-handoff.md](docs/plan13-handoff.md).
 > - **주의**: 공인 IP `168.107.55.95` 는 ephemeral(stop/start 시 변경), SSH 키는 gpg 번들→`~/.ssh/kuberport-oci/`. 재배포·RBAC·롤백은 runbook.
 
 스펙: [docs/superpowers/specs/2026-04-19-frontend-design-spec.md](docs/superpowers/specs/2026-04-19-frontend-design-spec.md) (4 화면: Admin UI 에디터 / 카탈로그 / 배포 폼 / 릴리스 상세)
@@ -36,7 +36,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 | 10 | [plan10-oci-phase2-bootstrap](docs/superpowers/plans/2026-06-24-plan10-oci-phase2-bootstrap.md) | ✅ 실행 완료 (2026-08-20) | **OCI Phase 2 직행 부트스트랩 — 라이브 `kubeport.enzo.kr`.** OCI A1(춘천) + 도메인 + cert-manager/Let's Encrypt + Google OAuth + helm install. **추가로 실제 배포 활성화**: k3s Google OIDC 신뢰 + iptables pod/service CIDR + RBAC + 클러스터 `oci-a1` 등록. 운영·롤백·함정: [oci-prod-runbook](docs/oci-prod-runbook.md) + [deploy/oci/README §7](deploy/oci/README.md). GCP Phase 1 은 OCI capacity 조기 확보로 **건너뜀**. |
 | 11 | _(미작성)_ | ⏳ planned | **e2e 확장.** 라이브 OCI(`kubeport.enzo.kr`)에 대한 smoke + 로컬 playwright 실패 케이스 보강 (권한 거부, 클러스터 끊김, 폼 validation, drift 회수 등). Plan 10 운영 중 발견되는 버그를 픽스하면서 같이 두껍게 깔음. |
 | 12 | _(미작성)_ | ⏳ deferred | **Stage 2 — release reconciler** (구 Plan 9). 백그라운드 루프로 클러스터 헬스 + 리소스 존재 검증, ServiceAccount 토큰 기반 무인 인증, DB 컬럼(`releases.observed_status`, `last_observed_at`) 추가, leader election. 클러스터 수가 늘거나 다중 페일오버 필요 시 우선. 추정 공수 4–5 영업일. |
-| 13 | [plan13-demo-mode](docs/superpowers/plans/2026-09-07-plan13-demo-mode.md) | 🚧 구현 완료, 프로덕션 롤아웃 대기 (Task 12) | **데모 모드.** Dex 데모 IdP + 데모 계정 2개(관리자/사용자) + 시드(템플릿 3·릴리스 2) + 6시간 리셋 CronJob + k3s 구조화 인증(Google+Dex) 전환 스크립트. 스펙: [self-improving-loop-design](docs/superpowers/specs/2026-09-07-self-improving-loop-design.md) §4.1. |
+| 13 | [plan13-demo-mode](docs/superpowers/plans/2026-09-07-plan13-demo-mode.md) | ✅ 라이브 (PR #2, 2026-09-08 롤아웃) | **데모 모드.** Dex 데모 IdP + 데모 계정 2개(관리자/사용자) + 시드(템플릿 3·릴리스 2) + 6시간 리셋 CronJob + k3s 구조화 인증(Google+Dex) 전환 스크립트. 스펙: [self-improving-loop-design](docs/superpowers/specs/2026-09-07-self-improving-loop-design.md) §4.1. |
 | 14 | _(미작성)_ | ⏳ planned | **UX 루프.** Sentry + Umami 계측 → role-review v2(브라우저) → 주간 Routine(이슈만) → `agent-go` 라벨 → claude-code-action draft PR → 결과 로그. 스펙 §4.2. |
 | 15 | _(미작성)_ | ⏳ planned | **기록 자동화.** 릴리스 노트 → 블로그, Playwright 데모 영상 자동 녹화, 주간 트래픽 지표 → docs/README. 스펙 §4.3. |
 
