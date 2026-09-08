@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusChip, statusChipVariantFromRelease } from "./StatusChip";
-import { termLabel } from "@/lib/kube-term-map";
+import { termLabel, type TermKey } from "@/lib/kube-term-map";
 import { useKubeTermsStore } from "@/stores/kube-terms-store";
 
 export type Instance = {
@@ -24,6 +24,8 @@ export function InstancesTable({
   const kube = useKubeTermsStore((s) => s.showKubeTerms);
   const tInstances = useTranslations("releases.instances");
   const tPhase = useTranslations("releases.phase");
+  const tTerms = useTranslations("releases.terms");
+  const L = (key: TermKey) => termLabel(key, kube, tTerms);
   // Map a k8s pod phase / waiting reason to plain language, falling back to
   // the raw phase string when we have no key for it. We whitelist known keys
   // rather than relying on t.has() so an unmapped phase renders verbatim
@@ -48,9 +50,9 @@ export function InstancesTable({
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>{termLabel("instanceId", kube)}</TableHead>
-          <TableHead>{termLabel("status", kube)}</TableHead>
-          <TableHead>{termLabel("restarts", kube)}</TableHead>
+          <TableHead>{L("instanceId")}</TableHead>
+          <TableHead>{L("status")}</TableHead>
+          <TableHead>{L("restarts")}</TableHead>
           <TableHead className="w-20"></TableHead>
         </TableRow>
       </TableHeader>

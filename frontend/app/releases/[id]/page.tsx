@@ -25,6 +25,9 @@ export default async function ReleaseOverviewPage({
 
   return (
     <div className="flex flex-col gap-6">
+      {/* The backend does not report memory usage or a public address yet.
+          `null` hides those cards and shows the "no public address" hint
+          instead of an empty "—" that reads as broken. */}
       <MetricCards
         readyTotal={[d.instances_ready, d.instances_total]}
         restarts={restarts}

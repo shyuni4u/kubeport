@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { StatusChip, statusChipVariantFromRelease } from "@/components/StatusChip";
 import { KubeTermsToggle } from "@/components/KubeTermsToggle";
+import { DeleteReleaseButton } from "@/components/DeleteReleaseButton";
 
 export type ReleaseHeaderData = {
   id: string;
@@ -31,8 +32,9 @@ export async function ReleaseHeader({ data }: { data: ReleaseHeaderData }) {
         <StatusChip variant={statusChipVariantFromRelease(data.status)}>
           {label}
         </StatusChip>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-4">
           <KubeTermsToggle />
+          <DeleteReleaseButton releaseId={data.id} name={data.name} />
         </div>
       </div>
       <div className="text-sm text-muted-foreground">

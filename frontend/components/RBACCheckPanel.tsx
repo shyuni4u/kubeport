@@ -17,6 +17,9 @@ type CheckResult = {
   // When the check itself failed (network / non-2xx), we surface a distinct
   // "check failed" message instead of an RBAC-deny message.
   httpStatus?: number;
+  // Kind has no resource mapping, so no SSAR was sent. Never counted as
+  // "allowed" — the deploy may still be denied for it.
+  skipped?: boolean;
 };
 
 const KIND_TO_RESOURCE: Record<string, { group: string; resource: string }> = {
@@ -51,7 +54,7 @@ export function RBACCheckPanel({ cluster, namespace, kinds }: Props) {
       kinds.map(async (k): Promise<CheckResult> => {
         const map = KIND_TO_RESOURCE[k];
         if (!map) {
-          return { allowed: true, resource: k, reason: "unknown kind — skipped" };
+          return { allowed: false, skipped: true, resource: k, reason: "" };
         }
         try {
           const res = await fetch("/api/v1/selfsubjectaccessreview", {
@@ -95,13 +98,25 @@ export function RBACCheckPanel({ cluster, namespace, kinds }: Props) {
   // stale `results` from a previous valid render — avoids calling setState
   // from inside the effect just to reset on input clear.
   const effectiveResults = hasInputs ? results : [];
-  const allAllowed = effectiveResults.length > 0 && effectiveResults.every((r) => r.allowed);
-  const anyDenied = effectiveResults.some((r) => !r.allowed);
+  const checked = effectiveResults.filter((r) => !r.skipped);
+  const skipped = effectiveResults.filter((r) => r.skipped);
+  // "All allowed" only speaks for kinds we could actually check — skipped
+  // kinds are reported separately so the panel never shows green for a
+  // deploy that may still be denied.
+  const allAllowed = checked.length > 0 && checked.every((r) => r.allowed);
+  const denied = checked.filter((r) => !r.allowed);
   const showPlaceholder = !loading && effectiveResults.length === 0;
 
   return (
     <Card>
-      <CardHeader className="text-sm font-medium">{t("title")}</CardHeader>
+      <CardHeader className="flex flex-row items-baseline justify-between gap-3 text-sm font-medium">
+        <span>{t("title")}</span>
+        {hasInputs && (
+          <span className="font-mono text-xs font-normal text-muted-foreground">
+            create · {namespace}
+          </span>
+        )}
+      </CardHeader>
       <CardContent className="flex flex-col gap-1 text-xs">
         {loading && <span className="text-muted-foreground">{t("checking")}</span>}
         {showPlaceholder && (
@@ -110,25 +125,33 @@ export function RBACCheckPanel({ cluster, namespace, kinds }: Props) {
         {!loading && allAllowed && (
           <span className="text-green-700">{t("allAllowed")}</span>
         )}
-        {!loading && anyDenied && (
-          <ul className="flex flex-col gap-0.5">
-            {effectiveResults
-              .filter((r) => !r.allowed)
-              .map((r) => {
+        {!loading && denied.length > 0 && (
+          <>
+            <ul className="flex flex-col gap-0.5">
+              {denied.map((r) => {
                 // Distinguish a failed check (HTTP / network) from a genuine
                 // RBAC deny. httpStatus === 0 means a network error; any other
                 // number means a non-2xx response from the check endpoint.
+                // The raw k8s reason is admin-only hover text — the visible
+                // sentence is always ours.
                 const isHttpError = r.httpStatus !== undefined;
                 const message = isHttpError
                   ? t("httpError", { status: r.httpStatus ?? 0 })
-                  : r.reason || t("denied");
+                  : t("denied");
                 return (
-                  <li key={r.resource} className="text-red-700">
-                    ❌ {r.resource}: {message}
+                  <li key={r.resource} className="text-red-700" title={r.reason || undefined}>
+                    ❌ {t("deniedRow", { resource: r.resource, message })}
                   </li>
                 );
               })}
-          </ul>
+            </ul>
+            <p className="text-red-700">{t("deniedNext")}</p>
+          </>
+        )}
+        {!loading && skipped.length > 0 && (
+          <p className="text-amber-700">
+            ⚠ {t("skipped", { kinds: skipped.map((r) => r.resource).join(", ") })}
+          </p>
         )}
       </CardContent>
     </Card>
