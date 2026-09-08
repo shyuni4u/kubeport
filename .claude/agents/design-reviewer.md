@@ -33,4 +33,4 @@ model: inherit
 사용자 친화성·시인성·일관성. 기능 버그·보안·용어 적절성은 다른 리뷰어 몫 — 쓰지 않는다. 디자인 스펙과 다른 점은 "스펙과 불일치" 로 명시.
 
 ## 출력
-finding-schema YAML. 각 finding 의 evidence 에 스크린샷 경로 필수, 가능하면 컴포넌트 파일(`Grep` 으로 클래스명 검색)도. 마지막에 `/api/auth/logout`.
+finding-schema YAML. 각 finding 의 evidence 에 스크린샷 경로 필수, 가능하면 컴포넌트 파일(`Grep` 으로 클래스명 검색)도. `scope=pr` 은 `CHANGED_FILES` 에 있는 컴포넌트/화면에서 본 것만, evidence 에 해당 코드 줄(`Grep` 으로 찾아)을 첨부. 라이브는 main 코드이므로 나머지는 전부 `scope=existing`. 마지막에 `/api/auth/logout` 으로 이동해 로그아웃 — **반드시** (다음 리뷰어가 같은 Chrome 프로파일에서 다른 계정으로 로그인한다).
