@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { parseIndex, OpenAPIIndex } from "@/lib/openapi";
 
 export interface KindRef {
@@ -38,6 +39,7 @@ export function KindPicker({
   cluster: string;
   onPick: (k: KindRef) => void;
 }) {
+  const t = useTranslations("templates.editor.kindPicker");
   const [gvs, setGvs] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
   // The full GroupVersion list carries no kind, so selecting a gv reveals an
@@ -51,13 +53,14 @@ export function KindPicker({
     (async () => {
       try {
         const res = await fetch(`/api/v1/clusters/${encodeURIComponent(cluster)}/openapi`);
-        if (!res.ok) throw new Error(`openapi index 조회 실패: ${res.status}`);
+        if (!res.ok) throw new Error(t("indexFetchFailed", { status: res.status }));
         const idx = await res.json() as OpenAPIIndex;
         setGvs(parseIndex(idx));
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
       }
     })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cluster]);
 
   function pickFromGv() {
@@ -72,7 +75,7 @@ export function KindPicker({
 
   return (
     <div>
-      <h3 className="font-semibold mb-2">빠른 선택</h3>
+      <h3 className="font-semibold mb-2">{t("quickPick")}</h3>
       <div className="flex flex-wrap gap-2 mb-4">
         {FEATURED.map(k => (
           <button
@@ -86,7 +89,7 @@ export function KindPicker({
         ))}
       </div>
       <details>
-        <summary className="cursor-pointer text-sm text-foreground">전체 GroupVersion 목록 ({gvs.length})</summary>
+        <summary className="cursor-pointer text-sm text-foreground">{t("allGroupVersions", { count: gvs.length })}</summary>
         <div className="mt-2 max-h-64 overflow-auto text-xs font-mono">
           {err && <div className="text-red-600">{err}</div>}
           {gvs.map(gv => (
@@ -109,7 +112,7 @@ export function KindPicker({
               value={kindInput}
               onChange={(e) => setKindInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); pickFromGv(); } }}
-              placeholder="Kind (예: Deployment)"
+              placeholder={t("kindPlaceholder")}
               aria-label="Kind"
               className="border rounded px-2 py-1 flex-1"
             />
@@ -119,7 +122,7 @@ export function KindPicker({
               disabled={!kindInput.trim()}
               className="px-2 py-1 border rounded hover:bg-muted disabled:opacity-50"
             >
-              추가
+              {t("add")}
             </button>
           </div>
         )}

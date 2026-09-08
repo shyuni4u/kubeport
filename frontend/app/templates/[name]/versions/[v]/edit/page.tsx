@@ -10,6 +10,8 @@ import { UserFormPreview } from "@/components/UserFormPreview";
 import { EditorLayout } from "@/components/editor/EditorLayout";
 import { MetaRow, TemplateMeta } from "@/components/editor/MetaRow";
 import { BottomBar } from "@/components/editor/BottomBar";
+import { saveErrorMessage } from "@/components/editor/saveError";
+import { findUnlabelledExposedField, useBeforeUnloadWhenDirty } from "@/components/editor/useDirtyGuard";
 import { YamlEditor } from "@/components/YamlEditor";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { findKindSchema, OpenAPISchemaDoc, SchemaNode } from "@/lib/openapi";
@@ -35,8 +37,15 @@ function EditUITemplateVersionInner() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const mode = searchParams.get("mode") === "yaml" ? "yaml" : "ui";
+  // Switching mode unmounts the inner editor and discards its state, so ask
+  // first when there are unsaved edits (and warn on tab close / reload).
+  const [dirty, setDirty] = useState(false);
+  useBeforeUnloadWhenDirty(dirty, t("leaveLosesEdits"));
 
   function switchMode(next: string) {
+    if (next === mode) return;
+    if (dirty && !window.confirm(t("switchModeLosesEdits"))) return;
+    setDirty(false);
     const params = new URLSearchParams(searchParams);
     params.set("mode", next);
     router.replace(`${pathname}?${params.toString()}`);
@@ -58,7 +67,7 @@ function EditUITemplateVersionInner() {
           </TabsList>
         </Tabs>
       </div>
-      {mode === "yaml" ? <YamlModeEdit /> : <UIModeEdit />}
+      {mode === "yaml" ? <YamlModeEdit onDirty={setDirty} /> : <UIModeEdit onDirty={setDirty} />}
     </div>
   );
 }
@@ -75,7 +84,9 @@ function tagsEqual(a: string[], b: string[]): boolean {
   return true;
 }
 
-function UIModeEdit() {
+type ModeProps = { onDirty: (dirty: boolean) => void };
+
+function UIModeEdit({ onDirty }: ModeProps) {
   const { name, v } = useParams<{ name: string; v: string }>();
   const router = useRouter();
   const t = useTranslations("templates.editor");
@@ -182,6 +193,7 @@ function UIModeEdit() {
   }, [state, cluster]);
 
   const uiStateSynthetic = useMemo<UIModeTemplate | null>(() => state, [state]);
+  const touch = () => onDirty(true);
 
   function pickCluster(next: string) {
     setCluster(next);
@@ -209,6 +221,11 @@ function UIModeEdit() {
   async function save() {
     setErr(null);
     if (!state) return;
+    // Every exposed field needs a label — it's what the end-user sees.
+    const unlabelled = findUnlabelledExposedField(
+      state.resources.map((r) => ({ kind: r.kind, name: r.name, fields: r.fields as Record<string, unknown> })),
+    );
+    if (unlabelled) { setErr(t("errors.missingLabel", { path: unlabelled })); return; }
     setSaving(true);
     try {
       // 1) PATCH parent-template metadata first (only if the user changed it).
@@ -232,7 +249,7 @@ function UIModeEdit() {
           body: JSON.stringify(patchBody),
         });
         if (!patchRes.ok) {
-          setErr(`메타 저장 실패 ${patchRes.status}: ${await patchRes.text()}`);
+          setErr(t("errors.metaSave", { status: patchRes.status, detail: (await patchRes.text()).trim() }));
           return;
         }
       }
@@ -254,14 +271,15 @@ function UIModeEdit() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(req.body),
       });
-      if (!res.ok) { setErr(`${res.status}: ${await res.text()}`); return; }
+      if (!res.ok) { setErr(await saveErrorMessage(t, res)); return; }
+      onDirty(false);
       router.push(`/templates/${name}`);
     } finally {
       setSaving(false);
     }
   }
 
-  if (err) return <div className="text-red-600 text-sm">{err}</div>;
+  if (err && !state) return <div className="text-red-600 text-sm whitespace-pre">{err}</div>;
   if (!state) return <div>{t("loading")}</div>;
 
   const tree = (
@@ -296,7 +314,7 @@ function UIModeEdit() {
               />
             ) : (
               <div className="text-xs text-muted-foreground">
-                스키마 로딩 중… ({cluster ? `클러스터 ${cluster}` : "클러스터 미선택"})
+                {cluster ? t("schemaLoading", { cluster }) : t("schemaLoadingNoCluster")}
               </div>
             )}
           </div>
@@ -309,22 +327,30 @@ function UIModeEdit() {
     <FieldInspector
       path={active.path}
       node={active.node}
+      kind={state.resources[active.resIdx].kind}
+      resourceName={state.resources[active.resIdx].name}
       value={state.resources[active.resIdx].fields[active.path] as UIField | undefined}
-      onChange={newVal => setState(prev => prev ? ({
-        ...prev,
-        resources: prev.resources.map((r, i) => i === active.resIdx
-          ? { ...r, fields: { ...r.fields, [active.path]: newVal as unknown } }
-          : r
-        ),
-      }) : prev)}
-      onClear={() => setState(prev => prev ? ({
-        ...prev,
-        resources: prev.resources.map((r, i) => {
-          if (i !== active.resIdx) return r;
-          const { [active.path]: _, ...rest } = r.fields;
-          return { ...r, fields: rest };
-        }),
-      }) : prev)}
+      onChange={newVal => {
+        setState(prev => prev ? ({
+          ...prev,
+          resources: prev.resources.map((r, i) => i === active.resIdx
+            ? { ...r, fields: { ...r.fields, [active.path]: newVal as unknown } }
+            : r
+          ),
+        }) : prev);
+        touch();
+      }}
+      onClear={() => {
+        setState(prev => prev ? ({
+          ...prev,
+          resources: prev.resources.map((r, i) => {
+            if (i !== active.resIdx) return r;
+            const { [active.path]: _, ...rest } = r.fields;
+            return { ...r, fields: rest };
+          }),
+        }) : prev);
+        touch();
+      }}
     />
   ) : (
     <div className="text-muted-foreground text-sm">{t("pickFieldHint")}</div>
@@ -349,7 +375,7 @@ function UIModeEdit() {
 
   return (
     <div className="space-y-3">
-      <MetaRow meta={meta} onChange={setMeta} nameLocked hideTeam />
+      <MetaRow meta={meta} onChange={(m) => { setMeta(m); touch(); }} nameLocked hideTeam />
       {sourceAuthoringMode !== "ui" && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 space-y-1">
           <div>
@@ -370,7 +396,7 @@ function UIModeEdit() {
         </div>
       )}
       <EditorLayout tree={tree} inspector={inspector} preview={preview} />
-      {err && <div className="text-red-600 text-sm mt-2">{err}</div>}
+      {err && <div className="text-red-600 text-sm mt-2 whitespace-pre">{err}</div>}
       <BottomBar
         canSave={canSave}
         canPublish={canPublish}
@@ -390,7 +416,7 @@ function UIModeEdit() {
 // This is why "+ 새 버전" on the detail page is just a Link (not a
 // server-action that pre-creates a draft): the draft only gets persisted
 // when the user clicks Save. Going back before saving leaves the DB alone.
-function YamlModeEdit() {
+function YamlModeEdit({ onDirty }: ModeProps) {
   const { name, v } = useParams<{ name: string; v: string }>();
   const router = useRouter();
   const t = useTranslations("templates.editor");
@@ -404,16 +430,23 @@ function YamlModeEdit() {
 
   useEffect(() => {
     (async () => {
-      const res = await fetch(`/api/v1/templates/${name}/versions/${v}`);
-      if (!res.ok) { setErr(await res.text()); return; }
-      const ver = await res.json() as { resources_yaml?: string; ui_spec_yaml?: string; status?: string; authoring_mode?: string };
-      setResourcesYaml(ver.resources_yaml ?? "");
-      setUispecYaml(ver.ui_spec_yaml ?? "");
-      setStatus(ver.status ?? "");
-      setSourceAuthoringMode(ver.authoring_mode ?? "");
-      setLoaded(true);
+      try {
+        const res = await fetch(`/api/v1/templates/${name}/versions/${v}`);
+        if (!res.ok) { setErr(await res.text()); return; }
+        const ver = await res.json() as { resources_yaml?: string; ui_spec_yaml?: string; status?: string; authoring_mode?: string };
+        setResourcesYaml(ver.resources_yaml ?? "");
+        setUispecYaml(ver.ui_spec_yaml ?? "");
+        setStatus(ver.status ?? "");
+        setSourceAuthoringMode(ver.authoring_mode ?? "");
+        setLoaded(true);
+      } catch (e) {
+        // Network failure: surface it instead of sitting on "loading" forever.
+        setErr(e instanceof Error ? e.message : String(e));
+      }
     })();
   }, [name, v]);
+
+  const touch = () => onDirty(true);
 
   const isDraft = status === "draft";
   // UI-authored drafts can't be PATCHed with yaml payloads — the backend
@@ -442,14 +475,15 @@ function YamlModeEdit() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(req.body),
       });
-      if (!res.ok) { setErr(`${res.status}: ${await res.text()}`); return; }
+      if (!res.ok) { setErr(await saveErrorMessage(t, res)); return; }
+      onDirty(false);
       router.push(`/templates/${name}`);
     } finally {
       setSaving(false);
     }
   }
 
-  if (err && !loaded) return <div className="text-red-600 text-sm">{err}</div>;
+  if (err && !loaded) return <div className="text-red-600 text-sm whitespace-pre">{err}</div>;
   if (!loaded) return <div>{t("loading")}</div>;
 
   return (
@@ -465,8 +499,8 @@ function YamlModeEdit() {
         </div>
       )}
       <div className="grid grid-cols-2 gap-3">
-        <YamlEditor label="resources.yaml" value={resourcesYaml} onChange={setResourcesYaml} />
-        <YamlEditor label="ui-spec.yaml" value={uispecYaml} onChange={setUispecYaml} />
+        <YamlEditor label="resources.yaml" value={resourcesYaml} onChange={(x) => { setResourcesYaml(x); touch(); }} />
+        <YamlEditor label="ui-spec.yaml" value={uispecYaml} onChange={(x) => { setUispecYaml(x); touch(); }} />
       </div>
       <details className="rounded border bg-white p-3" open>
         <summary className="cursor-pointer text-sm font-semibold">{t("userFormPreview")}</summary>

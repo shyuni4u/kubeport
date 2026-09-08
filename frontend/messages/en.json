@@ -23,6 +23,27 @@
     "empty": "No data.",
     "help": "Help"
   },
+  "errors": {
+    "notFoundTitle": "Not found, or you don't have access",
+    "notFoundBody": "It may have been deleted or belong to someone else. Ask an admin if you need access.",
+    "backToReleases": "Back to start",
+    "genericTitle": "Something went wrong",
+    "genericBody": "Please try again in a moment. If it keeps happening, contact an admin.",
+    "retry": "Try again"
+  },
+  "form": {
+    "validation": {
+      "required": "This field is required.",
+      "tooSmall": "Must be at least {min}.",
+      "tooBig": "Must be at most {max}.",
+      "tooLong": "Use at most {max} characters.",
+      "tooShort": "Use at least {min} characters.",
+      "pattern": "Not an allowed format. Check the rules in the help (?).",
+      "enum": "Pick one from the list.",
+      "invalid": "Please check this value.",
+      "hasPattern": "This value has a required format."
+    }
+  },
   "demo": {
     "banner": "Demo session. Next reset: {time}",
     "dismiss": "Dismiss",
@@ -37,7 +58,7 @@
     "demoCreds": "Demo password: {password}",
     "goCatalog": "Go to catalog",
     "compare": {
-      "heading": "The admin writes it once. The user fills in four fields.",
+      "heading": "The admin writes it once. The user fills in {count} fields.",
       "subheading": "Change a value on the right — the line it edits on the left lights up.",
       "adminTitle": "What the admin writes",
       "adminHelp": "Running something on Kubernetes normally means writing a config file like this by hand. In kubeport the admin writes it once and registers it as a template.",
@@ -70,7 +91,28 @@
       "emptyCta": "Deploy from the catalog →"
     },
     "overview": {
-      "instancesHeading": "Instances ({count})"
+      "instancesHeading": "Instances ({count})",
+      "noAccessUrlHint": "This template does not expose a public address. Check the 'Logs' tab to see it working."
+    },
+    "tabs": {
+      "overview": "Overview",
+      "logs": "Logs"
+    },
+    "kubeTermsToggle": "Show raw k8s terms",
+    "terms": {
+      "readyInstances": "Ready instances",
+      "restarts": "Restarts",
+      "memory": "Memory",
+      "accessURL": "Access URL",
+      "instances": "Instances",
+      "instanceId": "Instance ID",
+      "status": "Status"
+    },
+    "delete": {
+      "button": "Delete",
+      "confirm": "This takes ''{name}'' down from the cluster and removes it from the list. This cannot be undone. Continue?",
+      "failed": "Could not delete. Try again later or contact an admin.",
+      "forbidden": "You do not have permission to delete this release."
     },
     "instances": {
       "logsLink": "Logs →"
@@ -124,17 +166,31 @@
     "noClusterPlaceholder": "No clusters registered — ask an admin",
     "clusterPlaceholder": "Select a cluster",
     "noClusterWarning": "No clusters are registered, so nothing can be deployed. Ask an admin to register a cluster.",
+    "nameLabel": "Deployment name",
+    "nameHelp": "How this shows up in 'My releases'. Lowercase letters, digits and hyphens only.",
+    "clusterLabel": "Where to run it",
+    "clusterHelp": "Pick one group of servers (a cluster). If there is only one, leave it.",
+    "namespaceLabel": "Area",
+    "namespaceHelp": "The compartment inside the cluster where your things live (a namespace). Leave the default unless an admin told you otherwise.",
     "errors": {
       "forbidden": "You do not have permission to perform this action. Please contact an admin.",
       "conflict": "A release with the same name already exists. Use a different name or check the existing release.",
       "server": "Something went wrong on the server and the deployment failed. Try again shortly or contact an admin.",
       "generic": "The deployment failed. Please review your inputs and try again."
-    }
+    },
+    "preview": {
+      "heading": "What will be created",
+      "rendering": "Preparing preview…",
+      "empty": "Fill in the form and a preview will appear here."
+    },
+    "teamSuffix": "{team} team"
   },
   "logs": {
     "allInstances": "All instances",
     "autoscroll": "Auto-scroll",
     "clear": "Clear",
+    "emptyWaiting": "No output yet. Lines appear here as soon as it runs.",
+    "emptyDisconnected": "Connection lost. Reload the page; if it keeps dropping, contact an admin.",
     "status": {
       "connected": "Connected",
       "connecting": "Connecting",
@@ -147,9 +203,16 @@
       "new": "+ New template",
       "colName": "Name",
       "colVersion": "Current version",
-      "colDescription": "Description"
+      "colDescription": "Description",
+      "empty": "No templates yet.",
+      "emptyCta": "Create your first template →"
     },
     "detail": {
+      "errors": {
+        "forbidden": "You don't have permission for this action. Only the kubeport-admin group can change global templates.",
+        "conflict": "The state changed and the request could not be processed (already published, or another draft exists). Refresh and check again.",
+        "generic": "The request failed (HTTP {status})."
+      },
       "versionsHeading": "Versions",
       "readOnlyGlobal": "Read-only — only admins can edit global templates.",
       "readOnlyNoPerm": "Read-only — you don't have edit permission.",
@@ -180,6 +243,71 @@
       "save": "Save",
       "saving": "Saving…",
       "saveAsNew": "Save as new version",
+      "saveDraft": "Save draft",
+      "publish": "Publish",
+      "publishing": "Publishing…",
+      "publishFromDetail": "Publish from the template detail page after saving.",
+      "switchModeLosesEdits": "You have unsaved edits. Switching mode will discard them. Continue?",
+      "leaveLosesEdits": "You have unsaved edits. Leaving this page will discard them. Continue?",
+      "schemaLoading": "Loading schema… (cluster {cluster})",
+      "schemaLoadingNoCluster": "Loading schema… (no cluster selected)",
+      "schemaMissing": "Schema not found: {kind}",
+      "resourceName": "Resource name (metadata.name)",
+      "errors": {
+        "draftExists": "This template already has a draft. Only one draft is allowed per template — edit or delete the existing draft from the detail page, then try again.",
+        "forbidden": "You don't have permission to edit this template.",
+        "invalid": "Validation failed: {detail}",
+        "generic": "Save failed (HTTP {status}). {detail}",
+        "metaSave": "Failed to save template metadata (HTTP {status}). {detail}",
+        "missingLabel": "Exposed field {path} has no label. This label is what users see in the deploy form."
+      },
+      "field": {
+        "fixedBadge": "fixed",
+        "exposedBadge": "exposed",
+        "fix": "Fix value",
+        "fixHelp": "This value is written into resources.yaml as-is; users cannot change it.",
+        "expose": "Expose to users",
+        "exposeHelp": "This path is added to ui-spec fields[] and becomes an input in the user's deploy form. Set its label, type and default here.",
+        "uiSpecPathHelp": "The path value in ui-spec.yaml: Kind[metadata.name].json.path",
+        "clear": "Reset",
+        "value": "Value",
+        "inputMode": "Input mode",
+        "freeText": "Free text",
+        "choices": "Choices",
+        "suggest": "Suggestions",
+        "label": "Label",
+        "labelPlaceholder": "Name shown to users (e.g. {leaf})",
+        "help": "Help text",
+        "helpPlaceholder": "Shown when a user opens (?). Plain words, with an example.",
+        "default": "Default",
+        "values": "Choices (Values)",
+        "suggestions": "Suggested items (Suggestions)",
+        "remove": "Remove",
+        "addValue": "+ Add value",
+        "required": "Required"
+      },
+      "kindPicker": {
+        "quickPick": "Quick pick",
+        "allGroupVersions": "All GroupVersions ({count})",
+        "kindPlaceholder": "Kind (e.g. Deployment)",
+        "add": "Add",
+        "indexFetchFailed": "Failed to fetch the OpenAPI index (HTTP {status})."
+      },
+      "meta": {
+        "name": "Name",
+        "namePlaceholder": "Template name (slug)",
+        "displayName": "Display name",
+        "team": "Team",
+        "addTag": "Add tag",
+        "removeTag": "Remove tag {tag}"
+      },
+      "preview": {
+        "loading": "Loading…",
+        "noExposed": "No fields are exposed yet. In UI mode, mark a value in the tree as <strong>exposed</strong> and it shows up here. In YAML mode, add entries to <code>fields[]</code> in <code>ui-spec.yaml</code>.",
+        "previewSubmit": "Deploy (preview — does nothing)",
+        "parseFailed": "Failed to parse ui-spec: {detail}",
+        "previewFailed": "Failed to build the preview (HTTP {status}). {detail}"
+      },
       "convert": {
         "yamlDraftPreview": "This draft was authored in YAML mode, so the UI editor is preview-only. To edit it in the UI, delete this draft from the detail page and start a new version.",
         "willSaveAsNew": "Saving will create a new UI-mode version. Some structures may be lost in conversion — verify them in the tree.",
@@ -214,7 +342,10 @@
       "hint": "Enter a cluster and namespace to check permissions.",
       "allAllowed": "All resource create permissions confirmed.",
       "denied": "Permission denied.",
-      "httpError": "Permission check failed (HTTP {status})."
+      "httpError": "Permission check failed (HTTP {status}).",
+      "skipped": "Not checked: {kinds} — these may still be denied at deploy time.",
+      "deniedRow": "{resource}: {message}",
+      "deniedNext": "The deploy will fail like this. Ask an admin for permission to deploy into this cluster and area."
     }
   },
   "admin": {
@@ -234,7 +365,17 @@
       "emailPlaceholder": "Email",
       "roleLabel": "Role",
       "addMemberButton": "Add",
-      "loginHint": "The target user must have logged in at least once."
+      "roleEditor": "editor — author & publish team templates",
+      "roleViewer": "viewer — view & deploy team templates",
+      "roleHelp": "editor can create, publish and deprecate versions of templates owned by this team. viewer can only browse and deploy them. Neither role can edit global templates (kubeport-admin only).",
+      "loginHint": "The target user must have logged in at least once.",
+      "confirmRemoveMember": "Remove {email} from this team? They will lose edit access to the team's templates.",
+      "errors": {
+        "forbidden": "You don't have permission for this action. Only the kubeport-admin group can manage teams.",
+        "conflict": "A team with that name already exists, or the user is already a member. Refresh and check again.",
+        "notFound": "That user could not be found. They must have logged in at least once.",
+        "generic": "The request failed (HTTP {status})."
+      }
     }
   }
 }

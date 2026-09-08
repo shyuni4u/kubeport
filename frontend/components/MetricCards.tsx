@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { termLabel, type TermKey } from "@/lib/kube-term-map";
 import { useKubeTermsStore } from "@/stores/kube-terms-store";
@@ -7,22 +8,31 @@ import { useKubeTermsStore } from "@/stores/kube-terms-store";
 type Props = {
   readyTotal: [number, number];
   restarts: number;
+  // `null` = not available for this release; the card is hidden rather than
+  // rendered as "—" (a dash reads as "broken" to a non-k8s user).
   memory: string | null;
   accessURL: string | null;
 };
 
 export function MetricCards({ readyTotal, restarts, memory, accessURL }: Props) {
   const kube = useKubeTermsStore((s) => s.showKubeTerms);
-  const L = (key: TermKey) => termLabel(key, kube);
+  const tTerms = useTranslations("releases.terms");
+  const tOverview = useTranslations("releases.overview");
+  const L = (key: TermKey) => termLabel(key, kube, tTerms);
   return (
-    <div
-      className="grid gap-3"
-      style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}
-    >
-      <Metric label={L("readyInstances")} value={`${readyTotal[0]} / ${readyTotal[1]}`} />
-      <Metric label={L("restarts")} value={String(restarts)} />
-      <Metric label={L("memory")} value={memory ?? "—"} />
-      <Metric label={L("accessURL")} value={accessURL ?? "—"} />
+    <div className="flex flex-col gap-2">
+      <div
+        className="grid gap-3"
+        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}
+      >
+        <Metric label={L("readyInstances")} value={`${readyTotal[0]} / ${readyTotal[1]}`} />
+        <Metric label={L("restarts")} value={String(restarts)} />
+        {memory !== null && <Metric label={L("memory")} value={memory} />}
+        {accessURL !== null && <Metric label={L("accessURL")} value={accessURL} />}
+      </div>
+      {accessURL === null && (
+        <p className="text-xs text-muted-foreground">{tOverview("noAccessUrlHint")}</p>
+      )}
     </div>
   );
 }

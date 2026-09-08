@@ -1,8 +1,20 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { NextIntlClientProvider } from "next-intl";
 import { DynamicForm } from "./DynamicForm";
 import type { UISpec } from "@/lib/ui-spec-to-zod";
+import ko from "@/messages/ko.json";
+
+// DynamicForm translates zod issues via next-intl, so every render needs a
+// provider. Korean messages are used so assertions can check real sentences.
+function renderWithIntl(ui: React.ReactElement) {
+  return render(
+    <NextIntlClientProvider locale="ko" messages={ko}>
+      {ui}
+    </NextIntlClientProvider>,
+  );
+}
 
 describe("DynamicForm widget mapping", () => {
   it("renders Slider for integer with both min+max", () => {
@@ -19,7 +31,7 @@ describe("DynamicForm widget mapping", () => {
         },
       ],
     };
-    const { container } = render(
+    const { container } = renderWithIntl(
       <DynamicForm spec={spec} onSubmit={() => {}} />,
     );
     // base-ui Slider renders its thumb's hidden <input type="range">
@@ -45,7 +57,7 @@ describe("DynamicForm widget mapping", () => {
         },
       ],
     };
-    const { container } = render(
+    const { container } = renderWithIntl(
       <DynamicForm spec={spec} onSubmit={() => {}} />,
     );
     const input = screen.getByLabelText(/Replicas/) as HTMLInputElement;
@@ -65,7 +77,7 @@ describe("DynamicForm widget mapping", () => {
         },
       ],
     };
-    render(<DynamicForm spec={spec} onSubmit={() => {}} />);
+    renderWithIntl(<DynamicForm spec={spec} onSubmit={() => {}} />);
     expect(screen.getByRole("switch")).toBeInTheDocument();
   });
 
@@ -82,7 +94,7 @@ describe("DynamicForm widget mapping", () => {
         },
       ],
     };
-    render(<DynamicForm spec={spec} onSubmit={() => {}} />);
+    renderWithIntl(<DynamicForm spec={spec} onSubmit={() => {}} />);
     // ToggleGroupItem renders a <button> with aria-pressed. Use getByText.
     expect(screen.getByText("ClusterIP")).toBeInTheDocument();
     expect(screen.getByText("NodePort")).toBeInTheDocument();
@@ -104,7 +116,7 @@ describe("DynamicForm widget mapping", () => {
         },
       ],
     };
-    render(<DynamicForm spec={spec} onSubmit={() => {}} />);
+    renderWithIntl(<DynamicForm spec={spec} onSubmit={() => {}} />);
     expect(screen.getByRole("combobox")).toBeInTheDocument();
   });
 
@@ -120,7 +132,7 @@ describe("DynamicForm widget mapping", () => {
         },
       ],
     };
-    render(<DynamicForm spec={spec} onSubmit={() => {}} />);
+    renderWithIntl(<DynamicForm spec={spec} onSubmit={() => {}} />);
     const input = screen.getByLabelText(/Name/) as HTMLInputElement;
     expect(input).toHaveAttribute("type", "text");
   });
@@ -137,8 +149,10 @@ describe("DynamicForm widget mapping", () => {
         },
       ],
     };
-    render(<DynamicForm spec={spec} onSubmit={() => {}} />);
-    expect(screen.getByText(/pattern:\s*\/\^\[a-z\]\+\$\//)).toBeInTheDocument();
+    renderWithIntl(<DynamicForm spec={spec} onSubmit={() => {}} />);
+    // Plain-language sentence only — the raw regex must never be shown.
+    expect(screen.getByText("정해진 형식이 있는 값입니다.")).toBeInTheDocument();
+    expect(screen.queryByText(/\^\[a-z\]\+\$/)).toBeNull();
   });
 
   it("does not render pattern hint when pattern is not set", () => {
@@ -152,8 +166,8 @@ describe("DynamicForm widget mapping", () => {
         },
       ],
     };
-    render(<DynamicForm spec={spec} onSubmit={() => {}} />);
-    expect(screen.queryByText(/pattern:/)).toBeNull();
+    renderWithIntl(<DynamicForm spec={spec} onSubmit={() => {}} />);
+    expect(screen.queryByText("정해진 형식이 있는 값입니다.")).toBeNull();
   });
 
   it("renders text Input + datalist for autocomplete", () => {
@@ -168,7 +182,7 @@ describe("DynamicForm widget mapping", () => {
         },
       ],
     };
-    const { container } = render(<DynamicForm spec={spec} onSubmit={() => {}} />);
+    const { container } = renderWithIntl(<DynamicForm spec={spec} onSubmit={() => {}} />);
     const input = screen.getByLabelText(/Image/) as HTMLInputElement;
     expect(input).toHaveAttribute("type", "text");
     // The input is wired to a datalist by id; the datalist has one <option>
@@ -203,7 +217,7 @@ describe("DynamicForm submit", () => {
         },
       ],
     };
-    render(<DynamicForm spec={spec} onSubmit={onSubmit} />);
+    renderWithIntl(<DynamicForm spec={spec} onSubmit={onSubmit} />);
     await user.click(screen.getByRole("button", { name: /배포하기/ }));
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ "metadata.name": "nginx" });
@@ -224,15 +238,63 @@ describe("DynamicForm submit", () => {
         },
       ],
     };
-    render(<DynamicForm spec={spec} onSubmit={onSubmit} />);
+    renderWithIntl(<DynamicForm spec={spec} onSubmit={onSubmit} />);
     const input = screen.getByLabelText(/Name/) as HTMLInputElement;
     await user.type(input, "ABC");
     await user.click(screen.getByRole("button", { name: /배포하기/ }));
     expect(onSubmit).not.toHaveBeenCalled();
-    // FormMessage (role=none but data-slot=form-message) — look for message
-    // text. Zod's regex error message typically contains "Invalid".
+    // FormMessage (role=none but data-slot=form-message) — the zod regex
+    // issue is translated to the plain-language pattern sentence, never
+    // zod's raw "Invalid".
     const messages = document.querySelectorAll('[data-slot="form-message"]');
     expect(messages.length).toBeGreaterThan(0);
+    expect(messages[0]).toHaveTextContent("허용되지 않는 형식입니다.");
+    expect(screen.queryByText(/^Invalid$/)).toBeNull();
+  });
+
+  it("shows a localized required message when a required string is left empty", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const spec: UISpec = {
+      fields: [
+        {
+          path: "metadata.name",
+          label: "Name",
+          type: "string",
+          required: true,
+        },
+      ],
+    };
+    renderWithIntl(<DynamicForm spec={spec} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText("필수 항목입니다.")).toBeInTheDocument();
+    expect(screen.queryByText(/^Required$/)).toBeNull();
+  });
+
+  it("shows a localized too-long message for a string over maxLength", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    // maxLength is enforced by zod only (no native attribute), so the issue
+    // reaches the resolver instead of being blocked by HTML validation.
+    const spec: UISpec = {
+      fields: [
+        {
+          path: "metadata.name",
+          label: "Name",
+          type: "string",
+          maxLength: 3,
+          default: "toolong",
+          required: true,
+        },
+      ],
+    };
+    renderWithIntl(<DynamicForm spec={spec} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    // Strings get a character-count sentence, not the numeric bound wording.
+    expect(await screen.findByText("3자 이하로 입력하세요.")).toBeInTheDocument();
+    expect(screen.queryByText(/String must contain/)).toBeNull();
   });
 
   it("respects submitLabel prop override", () => {
@@ -247,7 +309,7 @@ describe("DynamicForm submit", () => {
         },
       ],
     };
-    render(
+    renderWithIntl(
       <DynamicForm spec={spec} submitLabel="업데이트" onSubmit={() => {}} />,
     );
     expect(screen.getByRole("button", { name: /업데이트/ })).toBeInTheDocument();
@@ -266,7 +328,7 @@ describe("DynamicForm submit", () => {
         },
       ],
     };
-    render(<DynamicForm spec={spec} onSubmit={() => {}} />);
+    renderWithIntl(<DynamicForm spec={spec} onSubmit={() => {}} />);
     expect(screen.getByRole("button", { name: /배포하기/ })).toBeInTheDocument();
   });
 });
@@ -286,7 +348,7 @@ describe("DynamicForm onChange callback", () => {
         },
       ],
     };
-    render(
+    renderWithIntl(
       <DynamicForm
         spec={spec}
         onSubmit={() => {}}
@@ -312,7 +374,7 @@ describe("DynamicForm onChange callback", () => {
     const spec: UISpec = {
       fields: [{ path, label: "Msg", type: "string", default: "x" }],
     };
-    render(<DynamicForm spec={spec} onSubmit={onSubmit} onChange={onChange} />);
+    renderWithIntl(<DynamicForm spec={spec} onSubmit={onSubmit} onChange={onChange} />);
     await user.type(screen.getByLabelText(/Msg/), "y");
     const last = onChange.mock.calls.at(-1)?.[0] as Record<string, unknown>;
     expect(last).toEqual({ [path]: "xy" });
@@ -332,7 +394,7 @@ describe("DynamicForm onChange callback", () => {
         },
       ],
     };
-    render(
+    renderWithIntl(
       <DynamicForm
         spec={spec}
         initialValues={{ "metadata.name": "redis" }}

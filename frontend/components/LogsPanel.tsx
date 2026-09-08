@@ -13,14 +13,20 @@ import {
 
 type LogEntry = { id: number; time: number; pod: string; text: string; kind?: "log" | "error" };
 
-type Props = { releaseId: string; instances: { name: string }[] };
+type Props = {
+  releaseId: string;
+  instances: { name: string }[];
+  // Instance pre-selected by the page (from `?instance=`), already validated
+  // against `instances`. Defaults to "all".
+  initialInstance?: string;
+};
 
 type Status = "connecting" | "connected" | "disconnected";
 
 const LINE_CAP = 2000;
 
-export function LogsPanel({ releaseId, instances }: Props) {
-  const [instance, setInstance] = useState("all");
+export function LogsPanel({ releaseId, instances, initialInstance = "all" }: Props) {
+  const [instance, setInstance] = useState(initialInstance);
   const [autoscroll, setAutoscroll] = useState(true);
 
   return (
@@ -168,6 +174,11 @@ function Stream({ releaseId, instance, autoscroll }: StreamProps) {
         ref={boxRef}
         className="h-[60vh] overflow-auto rounded bg-slate-950 p-3 font-mono text-[12px] leading-relaxed text-slate-100"
       >
+        {lines.length === 0 && (
+          <p className="text-slate-400">
+            {status === "disconnected" ? t("emptyDisconnected") : t("emptyWaiting")}
+          </p>
+        )}
         {lines.map((l) => (
           <div
             key={l.id}

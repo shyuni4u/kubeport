@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
+import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { apiFetch } from "@/lib/api-server";
+import { ActionForm, type ActionState } from "@/components/ActionForm";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 
 type TemplateStatus = "draft" | "published" | "deprecated";
@@ -12,6 +14,17 @@ type TemplateVersion = {
   status: string;
   authoring_mode: string;
 };
+
+// Turn a failed backend response into the inline error state rendered by
+// ActionForm. The raw body is logged server-side only — the user sees a
+// localized sentence keyed by status.
+async function actionError(what: string, res: Response): Promise<ActionState> {
+  const te = await getTranslations("templates.detail.errors");
+  console.error(`[templates] ${what} failed: ${res.status} ${await res.text()}`);
+  if (res.status === 403) return { error: te("forbidden") };
+  if (res.status === 409) return { error: te("conflict") };
+  return { error: te("generic", { status: res.status }) };
+}
 
 export default async function TemplateDetail({
   params,
@@ -25,9 +38,14 @@ export default async function TemplateDetail({
     apiFetch(`/v1/templates/${name}/versions`),
     apiFetch(`/v1/me`),
   ]);
-  if (!tRes.ok) throw new Error(`템플릿 조회 실패: ${tRes.status} ${await tRes.text()}`);
+  // 404 covers both "no such template" and "not visible to this caller" —
+  // the global not-found page words it that way. Anything else bubbles to
+  // app/error.tsx; keep the body out of the message (it's shown nowhere in
+  // production anyway, but avoid it leaking into dev overlays/logs twice).
+  if (tRes.status === 404) notFound();
+  if (!tRes.ok) throw new Error(`template fetch failed: HTTP ${tRes.status}`);
   const t = await tRes.json();
-  if (!vsRes.ok) throw new Error(`버전 조회 실패: ${vsRes.status} ${await vsRes.text()}`);
+  if (!vsRes.ok) throw new Error(`template versions fetch failed: HTTP ${vsRes.status}`);
   const vs = await vsRes.json() as { versions?: TemplateVersion[] };
   const versions = vs.versions ?? [];
   const me = meRes.ok ? (await meRes.json() as { groups?: string[] }) : null;
@@ -47,38 +65,45 @@ export default async function TemplateDetail({
     ? versions.reduce((a, b) => (a.version > b.version ? a : b))
     : null;
 
-  async function publish(formData: FormData) {
+  // Each action returns ActionState (rendered inline by ActionForm) instead
+  // of throwing — a thrown server-action error is replaced by a generic
+  // crash screen in production, hiding the actual 403/409 from the admin.
+  async function publish(_prev: ActionState, formData: FormData): Promise<ActionState> {
     "use server";
     const version = formData.get("version") as string;
     const res = await apiFetch(`/v1/templates/${name}/versions/${version}/publish`, { method: "POST" });
-    if (!res.ok) throw new Error(`publish 실패: ${res.status} ${await res.text()}`);
+    if (!res.ok) return actionError("publish", res);
     revalidatePath(`/templates/${name}`);
+    return {};
   }
 
-  async function deprecate(formData: FormData) {
+  async function deprecate(_prev: ActionState, formData: FormData): Promise<ActionState> {
     "use server";
     const version = formData.get("version") as string;
     const res = await apiFetch(`/v1/templates/${name}/versions/${version}/deprecate`, { method: "POST" });
-    if (!res.ok) throw new Error(`deprecate 실패: ${res.status} ${await res.text()}`);
+    if (!res.ok) return actionError("deprecate", res);
     revalidatePath(`/templates/${name}`);
+    return {};
   }
 
-  async function undeprecate(formData: FormData) {
+  async function undeprecate(_prev: ActionState, formData: FormData): Promise<ActionState> {
     "use server";
     const version = formData.get("version") as string;
     const res = await apiFetch(`/v1/templates/${name}/versions/${version}/undeprecate`, { method: "POST" });
-    if (!res.ok) throw new Error(`undeprecate 실패: ${res.status} ${await res.text()}`);
+    if (!res.ok) return actionError("undeprecate", res);
     revalidatePath(`/templates/${name}`);
+    return {};
   }
 
   // Draft-only delete. Backend returns 204 on success, 409 for non-drafts
   // (defense-in-depth — the UI only renders this button for drafts anyway).
-  async function deleteDraft(formData: FormData) {
+  async function deleteDraft(_prev: ActionState, formData: FormData): Promise<ActionState> {
     "use server";
     const version = formData.get("version") as string;
     const res = await apiFetch(`/v1/templates/${name}/versions/${version}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(`draft 삭제 실패: ${res.status} ${await res.text()}`);
+    if (!res.ok) return actionError("delete draft", res);
     revalidatePath(`/templates/${name}`);
+    return {};
   }
 
   // No pre-creation of drafts. "+ 새 버전" is a plain Link to the latest
@@ -119,7 +144,7 @@ export default async function TemplateDetail({
       <h2 className="mt-6 font-semibold">{tr("detail.versionsHeading")}</h2>
       <ul className="space-y-2 mt-2">
         {versions.map((v) => (
-          <li key={v.id} className="flex items-center gap-3">
+          <li key={v.id} className="flex flex-wrap items-center gap-3">
             <span>v{v.version}</span>
             <span
               title={tr(`statusHelp.${v.status as TemplateStatus}`)}
@@ -144,7 +169,7 @@ export default async function TemplateDetail({
                 </Link>
                 {v.status === "draft" && (
                   <>
-                    <form action={publish}>
+                    <ActionForm action={publish}>
                       <input type="hidden" name="version" value={v.version} />
                       <ConfirmSubmit
                         message={tr("detail.confirmPublish", { version: v.version })}
@@ -152,8 +177,8 @@ export default async function TemplateDetail({
                       >
                         {tr("publish")}
                       </ConfirmSubmit>
-                    </form>
-                    <form action={deleteDraft}>
+                    </ActionForm>
+                    <ActionForm action={deleteDraft}>
                       <input type="hidden" name="version" value={v.version} />
                       <ConfirmSubmit
                         message={tr("detail.confirmDeleteDraft", { version: v.version })}
@@ -161,11 +186,11 @@ export default async function TemplateDetail({
                       >
                         {tr("deleteDraft")}
                       </ConfirmSubmit>
-                    </form>
+                    </ActionForm>
                   </>
                 )}
                 {v.status === "published" && (
-                  <form action={deprecate}>
+                  <ActionForm action={deprecate}>
                     <input type="hidden" name="version" value={v.version} />
                     <ConfirmSubmit
                       message={tr("detail.confirmDeprecate", { version: v.version })}
@@ -173,15 +198,15 @@ export default async function TemplateDetail({
                     >
                       {tr("deprecate")}
                     </ConfirmSubmit>
-                  </form>
+                  </ActionForm>
                 )}
                 {v.status === "deprecated" && (
-                  <form action={undeprecate}>
+                  <ActionForm action={undeprecate}>
                     <input type="hidden" name="version" value={v.version} />
                     <button className="text-primary text-sm" title={tr("undeprecateHelp")}>
                       {tr("undeprecate")}
                     </button>
-                  </form>
+                  </ActionForm>
                 )}
               </>
             )}
