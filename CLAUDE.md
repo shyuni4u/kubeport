@@ -169,7 +169,7 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
 **레이어**:
 - **Unit** (외부 의존 없음) — 예: `TestHealthz`
 - **Integration** (로컬 compose: postgres + dex) — 현재 기본. 예: `internal/store/*_test.go`
-- **e2e** — Task 22 에서 도입
+- **e2e** (Playwright, 로컬 kind) — **로컬에서 먼저 돌린다**: `scripts/e2e/doctor.sh` → `up.sh` → `backend.sh`/`frontend.sh` → `seed.sh` → `run.sh` ([docs/local-e2e.md §0](docs/local-e2e.md)). 어느 PC 에서든 같은 순서, 전부 멱등. CI `playwright.yml` 은 백스톱(느리고 가끔 kind 플레이크).
 
 **기본 커맨드** (컴포즈 기동 상태 가정):
 ```bash
