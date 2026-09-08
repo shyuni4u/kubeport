@@ -2,10 +2,23 @@ import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { apiFetch } from "@/lib/api-server";
 
+type TemplateRow = {
+  name: string;
+  display_name?: string;
+  description?: string;
+  current_version?: number | null;
+};
+
 export default async function TemplatesPage() {
   const t = await getTranslations("templates.list");
   const res = await apiFetch("/v1/templates");
-  const data = res.ok ? await res.json() : { templates: [] };
+  // A 403/500 must not masquerade as "no templates" — surface it through the
+  // route error boundary instead of rendering an empty list.
+  if (!res.ok) {
+    throw new Error(`GET /v1/templates failed: HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as { templates?: TemplateRow[] };
+  const templates = data.templates ?? [];
 
   return (
     <div>
@@ -27,18 +40,28 @@ export default async function TemplatesPage() {
           </tr>
         </thead>
         <tbody>
-          {data.templates?.map((t: Record<string, string | number>) => (
-            <tr key={t.name} className="border-t">
-              <td className="p-2">
-                <Link
-                  href={`/templates/${t.name}`}
-                  className="text-primary"
-                >
-                  {t.display_name}
+          {templates.length === 0 && (
+            <tr className="border-t">
+              <td colSpan={3} className="p-6 text-center text-sm text-muted-foreground">
+                <p>{t("empty")}</p>
+                <Link href="/templates/new" className="mt-2 inline-block text-primary">
+                  {t("emptyCta")}
                 </Link>
               </td>
-              <td className="p-2">v{t.current_version ?? "—"}</td>
-              <td className="p-2 text-muted-foreground">{t.description}</td>
+            </tr>
+          )}
+          {templates.map((tpl) => (
+            <tr key={tpl.name} className="border-t">
+              <td className="p-2">
+                <Link
+                  href={`/templates/${tpl.name}`}
+                  className="text-primary"
+                >
+                  {tpl.display_name}
+                </Link>
+              </td>
+              <td className="p-2">v{tpl.current_version ?? "—"}</td>
+              <td className="p-2 text-muted-foreground">{tpl.description}</td>
             </tr>
           ))}
         </tbody>

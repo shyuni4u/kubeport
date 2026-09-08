@@ -147,7 +147,9 @@
       "new": "+ 새 템플릿",
       "colName": "이름",
       "colVersion": "현재 버전",
-      "colDescription": "설명"
+      "colDescription": "설명",
+      "empty": "아직 템플릿이 없습니다.",
+      "emptyCta": "첫 템플릿 만들기 →"
     },
     "detail": {
       "versionsHeading": "버전",
@@ -180,6 +182,68 @@
       "save": "저장",
       "saving": "저장 중…",
       "saveAsNew": "새 버전으로 저장",
+      "saveDraft": "Draft 저장",
+      "publish": "게시",
+      "publishing": "게시 중…",
+      "publishFromDetail": "게시는 저장 후 템플릿 상세 페이지에서 합니다.",
+      "switchModeLosesEdits": "저장하지 않은 편집 내용이 있습니다. 모드를 전환하면 사라집니다. 계속하시겠습니까?",
+      "schemaLoading": "스키마 로딩 중… (클러스터 {cluster})",
+      "schemaLoadingNoCluster": "스키마 로딩 중… (클러스터 미선택)",
+      "schemaMissing": "스키마 없음: {kind}",
+      "resourceName": "리소스 이름 (metadata.name)",
+      "errors": {
+        "draftExists": "이 템플릿에는 이미 draft 가 있습니다. 템플릿당 draft 는 하나만 둘 수 있으니, 상세 페이지에서 기존 draft 를 편집하거나 삭제한 뒤 다시 시도하세요.",
+        "forbidden": "이 템플릿을 편집할 권한이 없습니다.",
+        "invalid": "검증에 실패했습니다: {detail}",
+        "generic": "저장에 실패했습니다 (HTTP {status}). {detail}",
+        "metaSave": "템플릿 메타데이터 저장에 실패했습니다 (HTTP {status}). {detail}",
+        "missingLabel": "노출 필드 {path} 에 라벨이 없습니다. 사용자 폼에는 이 라벨이 표시됩니다."
+      },
+      "field": {
+        "fixedBadge": "고정",
+        "exposedBadge": "노출",
+        "fix": "값 고정",
+        "fixHelp": "이 값은 resources.yaml 에 그대로 들어가고 사용자는 바꿀 수 없습니다.",
+        "expose": "사용자 노출",
+        "exposeHelp": "이 경로가 ui-spec fields[] 에 추가되어 사용자 배포 폼의 입력란이 됩니다. 라벨·타입·기본값을 여기서 정합니다.",
+        "uiSpecPathHelp": "ui-spec.yaml 의 path 값입니다: Kind[metadata.name].json.path",
+        "clear": "초기화",
+        "value": "값",
+        "inputMode": "입력 방식",
+        "freeText": "자유 텍스트",
+        "choices": "선택지",
+        "suggest": "추천",
+        "label": "라벨",
+        "labelPlaceholder": "사용자에게 보일 이름 (예: {leaf})",
+        "default": "기본값",
+        "values": "선택지 (Values)",
+        "suggestions": "추천 항목 (Suggestions)",
+        "remove": "삭제",
+        "addValue": "+ 값 추가",
+        "required": "필수 입력"
+      },
+      "kindPicker": {
+        "quickPick": "빠른 선택",
+        "allGroupVersions": "전체 GroupVersion 목록 ({count})",
+        "kindPlaceholder": "Kind (예: Deployment)",
+        "add": "추가",
+        "indexFetchFailed": "OpenAPI 인덱스 조회에 실패했습니다 (HTTP {status})."
+      },
+      "meta": {
+        "name": "이름",
+        "namePlaceholder": "템플릿 이름 (slug)",
+        "displayName": "표시 이름",
+        "team": "팀",
+        "addTag": "태그 추가",
+        "removeTag": "태그 {tag} 제거"
+      },
+      "preview": {
+        "loading": "로딩 중…",
+        "noExposed": "아직 노출된 필드가 없습니다. UI 모드에서는 트리의 값을 <strong>노출</strong> 로 표시하면 여기 나타납니다. YAML 모드에서는 <code>ui-spec.yaml</code> 의 <code>fields[]</code> 를 추가하세요.",
+        "previewSubmit": "배포 (미리보기 — 실제 동작 X)",
+        "parseFailed": "ui-spec 파싱 실패: {detail}",
+        "previewFailed": "미리보기 생성에 실패했습니다 (HTTP {status}). {detail}"
+      },
       "convert": {
         "yamlDraftPreview": "이 draft 는 YAML 모드로 작성되어 UI 에서는 미리보기만 가능합니다. UI 로 편집하려면 상세 페이지에서 이 draft 를 삭제한 뒤 새 버전을 시작하세요.",
         "willSaveAsNew": "저장 시 새 UI 모드 버전으로 저장됩니다. 일부 구조는 변환 과정에서 누락될 수 있으니 트리에서 확인하세요.",

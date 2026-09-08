@@ -1,30 +1,71 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { NextIntlClientProvider } from "next-intl";
 import type { SchemaNode } from "@/lib/openapi";
+import ko from "@/messages/ko.json";
 
-import { FieldInspector, type UIField } from "./FieldInspector";
+import { FieldInspector, uiSpecPath, type UIField } from "./FieldInspector";
 
 // SchemaNode fakes — only the fields FieldInspector actually reads.
 const stringSchema: SchemaNode = { type: "string" };
 const integerSchema: SchemaNode = { type: "integer" };
 const enumSchema: SchemaNode = { type: "string", enum: ["A", "B"] };
 
-function harness(initial: UIField | undefined, schema: SchemaNode = stringSchema) {
+function harness(
+  initial: UIField | undefined,
+  schema: SchemaNode = stringSchema,
+  extra: { kind?: string; resourceName?: string } = {},
+) {
   const onChange = vi.fn();
   const onClear = vi.fn();
   render(
-    <FieldInspector
-      path="spec.image"
-      node={schema}
-      value={initial}
-      onChange={onChange}
-      onClear={onClear}
-    />,
+    <NextIntlClientProvider locale="ko" messages={ko}>
+      <FieldInspector
+        path="spec.image"
+        node={schema}
+        value={initial}
+        onChange={onChange}
+        onClear={onClear}
+        {...extra}
+      />
+    </NextIntlClientProvider>,
   );
   return { onChange, onClear };
 }
 
 describe("FieldInspector", () => {
+  describe("header + help", () => {
+    it("shows the ui-spec path Kind[name].path when resource context is given", () => {
+      harness(undefined, stringSchema, { kind: "Deployment", resourceName: "web" });
+      const header = screen.getByText("Deployment[web].spec.image");
+      expect(header).toHaveAttribute("title", ko.templates.editor.field.uiSpecPathHelp);
+    });
+
+    it("falls back to the bare path without resource context", () => {
+      harness(undefined);
+      expect(screen.getByText("spec.image")).toBeInTheDocument();
+    });
+
+    it("renders (?) help beside the fix / expose buttons", () => {
+      harness(undefined);
+      expect(screen.getByRole("button", { name: "값 고정" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "사용자 노출" })).toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: "도움말" })).toHaveLength(2);
+    });
+
+    it("exposing a field starts with an EMPTY label and a placeholder suggesting the leaf", () => {
+      const { onChange } = harness(undefined);
+      fireEvent.click(screen.getByRole("button", { name: "사용자 노출" }));
+      const next = onChange.mock.calls[0][0] as Extract<UIField, { mode: "exposed" }>;
+      expect(next.uiSpec.label).toBe("");
+    });
+
+    it("shows the label placeholder with the path leaf", () => {
+      harness({ mode: "exposed", uiSpec: { label: "", type: "string", required: false } });
+      expect(screen.getByPlaceholderText("사용자에게 보일 이름 (예: image)")).toBeInTheDocument();
+    });
+  });
+
   describe("입력 방식 type toggle (string-compatible schema)", () => {
     it("hides the toggle when no field is exposed yet", () => {
       harness(undefined);
@@ -152,6 +193,13 @@ describe("FieldInspector", () => {
       fireEvent.click(screen.getByText("+ 값 추가"));
       const next = onChange.mock.calls[0][0] as Extract<UIField, { mode: "exposed" }>;
       expect(next.uiSpec.values).toEqual(["a", "b", ""]);
+    });
+  });
+
+  describe("uiSpecPath", () => {
+    it("formats Kind[name].path and falls back to path", () => {
+      expect(uiSpecPath("Deployment", "web", "spec.replicas")).toBe("Deployment[web].spec.replicas");
+      expect(uiSpecPath(undefined, undefined, "spec.replicas")).toBe("spec.replicas");
     });
   });
 });
