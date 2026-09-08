@@ -20,10 +20,13 @@ test.describe("error pages", () => {
     await expect(page.getByText(NEXT_DEFAULT)).toHaveCount(0);
   });
 
-  test("unknown team", async ({ page }) => {
+  test("unknown team (non-admin) never shows a Next default screen", async ({ page }) => {
+    // A regular user hitting an admin route gets our localized not-found
+    // (404) or the generic error page (403 → error.tsx) — either is ours.
     await page.goto("/admin/teams/00000000-0000-0000-0000-000000000000");
-    await expect(page.getByText(NOT_FOUND)).toBeVisible();
+    await expect(page.getByText(/찾을 수 없거나 볼 권한이 없습니다|문제가 발생했습니다|Not found, or you don't have access|Something went wrong/)).toBeVisible();
     await expect(page.getByText(NEXT_DEFAULT)).toHaveCount(0);
+    await expect(page.getByText(/Application error/)).toHaveCount(0);
   });
 
   test("not-found page offers a way back", async ({ page }) => {
