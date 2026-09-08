@@ -49,6 +49,16 @@ async function loginAs(
 export const test = base;
 export { expect };
 
+/**
+ * Destructive / irreversible actions are wrapped in window.confirm
+ * (ConfirmSubmit, DeleteReleaseButton, the editor's unsaved-edits guard).
+ * Playwright dismisses dialogs by default, which silently cancels them —
+ * call this at the top of a test that expects to go through one.
+ */
+export function autoAcceptDialogs(page: import("@playwright/test").Page): void {
+  page.on("dialog", (d) => d.accept());
+}
+
 export async function adminStorage(): Promise<string> {
   const p = "tests/e2e/.auth/admin.json";
   await loginAs("admin@example.com", "admin", p);

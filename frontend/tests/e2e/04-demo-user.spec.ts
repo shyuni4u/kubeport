@@ -1,7 +1,7 @@
 import { test, expect, demoUserStorage, demoAdminStorage } from "./fixtures";
 
 test.describe("demo user", () => {
-  test.use({ storageState: async ({}, use) => use(await demoUserStorage()) });
+  test.use({ storageState: async ({}, provide) => provide(await demoUserStorage()) });
 
   test("sees the demo banner and the seeded catalog", async ({ page }) => {
     await page.goto("/catalog");
@@ -17,7 +17,7 @@ test.describe("demo user", () => {
 });
 
 test.describe("demo admin restrictions", () => {
-  test.use({ storageState: async ({}, use) => use(await demoAdminStorage()) });
+  test.use({ storageState: async ({}, provide) => provide(await demoAdminStorage()) });
 
   test("cannot create a team", async ({ page, request }) => {
     const res = await request.post("/api/v1/teams", { data: { name: "should-fail", display_name: "x" } });

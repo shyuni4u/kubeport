@@ -1,7 +1,7 @@
 import { test, expect, adminStorage } from "./fixtures";
 
 test.describe("deprecate flow", () => {
-  test.use({ storageState: async ({}, use) => use(await adminStorage()) });
+  test.use({ storageState: async ({}, provide) => provide(await adminStorage()) });
 
   test("publish → deprecate → hidden from catalog → undeprecate", async ({ page }) => {
     // Publish/deprecate buttons are wrapped in ConfirmSubmit (window.confirm);

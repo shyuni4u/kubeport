@@ -1,7 +1,7 @@
 import { test, expect, adminStorage } from "./fixtures";
 
 test.describe("UI mode editor", () => {
-  test.use({ storageState: async ({}, use) => use(await adminStorage()) });
+  test.use({ storageState: async ({}, provide) => provide(await adminStorage()) });
 
   test("create a Deployment template end-to-end", async ({ page }) => {
     await page.goto("/templates/new");
