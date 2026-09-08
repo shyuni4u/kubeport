@@ -28,7 +28,7 @@ type Template struct {
 
 func All() []Template {
 	return []Template{
-		{Name: "web-app", DisplayName: "웹 앱", Description: "nginx 기반 웹 서버 (Deployment + Service)", Tags: []string{"web", "demo"}, ResourcesYAML: webAppResources, UISpecYAML: webAppUISpec},
+		{Name: "web-app", DisplayName: "웹 앱", Description: "nginx 기반 웹 서버 (ConfigMap + Deployment + Service)", Tags: []string{"web", "demo"}, ResourcesYAML: webAppResources, UISpecYAML: webAppUISpec},
 		{Name: "nightly-job", DisplayName: "야간 배치", Description: "주기적으로 실행되는 CronJob", Tags: []string{"batch", "demo"}, ResourcesYAML: nightlyResources, UISpecYAML: nightlyUISpec},
 		{Name: "app-with-config", DisplayName: "설정 있는 앱", Description: "ConfigMap + Secret 을 주입받는 앱", Tags: []string{"web", "config", "demo"}, ResourcesYAML: appCfgResources, UISpecYAML: appCfgUISpec},
 	}

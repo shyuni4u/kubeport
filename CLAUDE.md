@@ -12,6 +12,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 > - **로그인/로그아웃 정상**, admin 부트스트랩(`auth.devAdminEmails`). UX 마감: role-review(admin/user 페르소나) **14건 반영** — raw 에러→사용자 문장, 이중제출 가드, admin 저작 UI i18n, 파괴적 액션 confirm 등.
 > - **운영 하드닝**: idle-reclaim ping(GHA 10분) + 주간 백업 정책.
 > - **남은 것**: (a) **`kuberport` 오타 → `kubeport` 통일** (docs/oci README·runbook·upload-gha-secrets.sh·CLAUDE.md 잔존), (b) `deploy/oci/bootstrap.sh` 에 §7 인프라 수정(iptables pod/service CIDR · OIDC config) 반영해 재현성 확보, (c) Plan 11 e2e 확장(이제 라이브 OCI 대상).
+> - **랜딩 비교 쇼케이스 (2026-09-08)** — `/` 에 "관리자가 쓰는 YAML(약 110줄) vs 사용자 폼(4칸)" 인터랙티브 비교. 폼 값 변경 → 클라이언트에서 YAML 재렌더 + 바뀐 줄 하이라이트(`lib/apply-values-to-yaml.ts`). 소재는 데모 시드 `web-app` 픽스처를 현실적 크기로 키운 것 (`frontend/lib/showcase/` 복사본, 백엔드 원본과 바이트 일치 테스트). 같이 잡은 버그: `DynamicForm` 이 `[...]` 포함 경로에서 사용자 입력을 버리고 기본값을 제출하던 문제 (RHF 가 `[`·`]` 도 경로 구분자로 해석) — 전 데모 템플릿에 영향. 어려운 용어에는 `(?)` 도움말(`HelpHint`).
 > - **데모 모드(Plan 13) 코드 완료** — `/` 에서 관리자/사용자 체험 버튼(Dex 로그인, 비밀번호 화면 표기), `demo` 네임스페이스 격리, 6시간 리셋. **프로덕션 적용은 Task 12 체크리스트(runbook §5 + deploy/oci/README §7.6)를 사람이 실행해야 함 — 인계 체크리스트: [docs/plan13-handoff.md](docs/plan13-handoff.md).**
 > - **주의**: 공인 IP `168.107.55.95` 는 ephemeral(stop/start 시 변경), SSH 키는 gpg 번들→`~/.ssh/kuberport-oci/`. 재배포·RBAC·롤백은 runbook.
 

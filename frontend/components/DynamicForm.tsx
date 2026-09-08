@@ -9,6 +9,7 @@ import {
   type Resolver,
 } from "react-hook-form";
 
+import { HelpHint } from "@/components/HelpHint";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -58,16 +59,35 @@ type Props = {
 // backend's template.Render looks up `input["spec.replicas"]`, not nested.
 // We keep internal RHF keys dot-free (zero-width placeholder) and translate
 // back to the original dotted paths for defaults / watch / submit.
-const PATH_SEP = "\u2063"; // INVISIBLE SEPARATOR, extremely unlikely in real paths.
+// RHF's stringToPath also splits on `[` and `]`, so `Deployment[web].spec`
+// and `containers[0]` would be nested too. All three get their own invisible
+// placeholder (U+2063 INVISIBLE SEPARATOR, U+2064 INVISIBLE PLUS, U+2062
+// INVISIBLE TIMES) \u2014 extremely unlikely in real paths.
+// Enum values longer than this switch the widget from ToggleGroup to Select.
+const TOGGLE_MAX_LEN = 24;
+
+const PATH_SEP = "\u2063";
+const BRACKET_OPEN = "\u2064";
+const BRACKET_CLOSE = "\u2062";
 
 function encodeKey(path: string): string {
-  return path.replaceAll(".", PATH_SEP);
+  return path
+    .replaceAll(".", PATH_SEP)
+    .replaceAll("[", BRACKET_OPEN)
+    .replaceAll("]", BRACKET_CLOSE);
+}
+
+function decodeKey(key: string): string {
+  return key
+    .replaceAll(PATH_SEP, ".")
+    .replaceAll(BRACKET_OPEN, "[")
+    .replaceAll(BRACKET_CLOSE, "]");
 }
 
 function decodeValues(encoded: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(encoded)) {
-    out[k.replaceAll(PATH_SEP, ".")] = v;
+    out[decodeKey(k)] = v;
   }
   return out;
 }
@@ -182,12 +202,20 @@ function FieldRow({
       name={encodeKey(field.path)}
       render={({ field: rhf }) => (
         <FormItem>
-          <FormLabel>
-            {field.label}
-            {field.required ? (
-              <span className="ml-1 text-destructive">*</span>
-            ) : null}
-          </FormLabel>
+          {/*
+            HelpHint sits beside the label, not inside it: a <button> inside
+            <label for=…> is invalid HTML and its aria-label would leak into
+            the input's accessible name ("환영 문구 도움말").
+          */}
+          <div className="flex items-center gap-1">
+            <FormLabel>
+              {field.label}
+              {field.required ? (
+                <span className="ml-1 text-destructive">*</span>
+              ) : null}
+            </FormLabel>
+            {field.help ? <HelpHint text={field.help} /> : null}
+          </div>
           <FormControl>{renderWidget(field, rhf)}</FormControl>
           {/*
             Autocomplete renders an <Input list="..."> via renderWidget. The
@@ -208,8 +236,10 @@ function FieldRow({
             </datalist>
           )}
           {field.help ? <FormDescription>{field.help}</FormDescription> : null}
+          {/* Raw regex is only shown when the admin gave no plain-language help. */}
           {(field.type === "string" || field.type === "autocomplete") &&
-          field.pattern ? (
+          field.pattern &&
+          !field.help ? (
             <p className="text-xs text-muted-foreground">
               pattern: /{field.pattern}/
             </p>
@@ -287,7 +317,9 @@ function renderWidget(
 
     case "enum": {
       const values = field.values;
-      if (values.length <= 4) {
+      // Toggle buttons only when every option fits on one row; long values
+      // (image refs, URLs) overflow the form, so they get a Select instead.
+      if (values.length <= 4 && values.every((v) => v.length <= TOGGLE_MAX_LEN)) {
         const current =
           typeof rhf.value === "string" && rhf.value !== "" ? [rhf.value] : [];
         return (

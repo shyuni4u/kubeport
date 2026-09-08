@@ -20,7 +20,8 @@
     "delete": "삭제",
     "edit": "편집",
     "loading": "로딩 중…",
-    "empty": "데이터가 없습니다."
+    "empty": "데이터가 없습니다.",
+    "help": "도움말"
   },
   "demo": {
     "banner": "데모 세션입니다. 다음 초기화: {time}",
@@ -34,7 +35,21 @@
     "loginPrimary": "Google 로 로그인",
     "demoNote": "실제 클러스터에 배포됩니다 · 6시간마다 초기화 · 개인 데이터를 남기지 마세요",
     "demoCreds": "데모 비밀번호: {password}",
-    "goCatalog": "카탈로그로 이동"
+    "goCatalog": "카탈로그로 이동",
+    "compare": {
+      "heading": "관리자가 한 번 쓰면, 사용자는 4칸만 채웁니다",
+      "subheading": "오른쪽 값을 바꿔 보세요. 왼쪽 파일에서 바뀌는 줄이 바로 표시됩니다.",
+      "adminTitle": "관리자가 쓰는 것",
+      "adminHelp": "Kubernetes 에 무언가를 띄우려면 원래 이런 설정 파일을 직접 써야 합니다. kubeport 에서는 관리자가 한 번만 작성해 템플릿으로 등록합니다.",
+      "userTitle": "사용자가 보는 것",
+      "userHelp": "같은 템플릿을 일반 사용자는 이 폼으로 씁니다. 설정 파일을 열어 볼 필요가 없습니다.",
+      "yamlLines": "YAML {count}줄",
+      "yamlHelp": "YAML 은 Kubernetes 가 읽는 설정 파일 형식입니다. 들여쓰기 하나만 틀려도 배포가 실패합니다.",
+      "inputs": "입력 {count}개",
+      "inputsHelp": "관리자가 사용자에게 열어 둔 항목만 폼에 나타납니다. 나머지는 관리자가 정한 값으로 고정됩니다.",
+      "changedLine": "방금 바뀐 줄",
+      "previewSubmit": "배포하기 (체험 로그인 후 실제로 됩니다)"
+    }
   },
   "catalog": {
     "title": "카탈로그",
