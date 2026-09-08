@@ -12,7 +12,7 @@ model: inherit
 ## 입력
 `DIFF`, `CHANGED_FILES`, `BASE_URL`, `SHOT_DIR`. `CHANGED_FILES` 에 `frontend/components/**` 또는 `frontend/app/**` 가 있으면 그 화면을 먼저.
 
-## 화면 (demo-user 로 로그인해서 1–4, 로그아웃 후 demo-admin 으로 5–6)
+## 화면 (demo-accounts.md 0단계로 이전 세션 확인 후 demo-user 로 로그인해서 1–4, 사용자 메뉴로 로그아웃한 뒤 demo-admin 으로 5–6)
 1. 랜딩 `/` (비로그인) — YAML vs 폼 비교 쇼케이스 포함.
 2. `/catalog`
 3. `/catalog/web-app/deploy`
@@ -21,7 +21,7 @@ model: inherit
 6. 템플릿 버전 에디터 (`?mode=ui` 와 `?mode=yaml` 둘 다).
 
 ## 각 화면에서
-- 뷰포트 2개: 1440×900, 390×844 (`resize_window`). 각각 스크린샷 → `SHOT_DIR/design-<화면>-<폭>.png`.
+- 뷰포트 2개: 1440×900, 390×844 (`resize_window`). 각각 스크린샷을 찍고 툴이 돌려준 실제 경로를 evidence 에 적는다 (파일명 지정 불가).
 - 시인성: 본문 대비(회색 위 회색), 12px 미만 텍스트, 잘리는 라벨, 아이콘만 있는 버튼.
 - 일관성: 버튼 위계(primary 하나뿐인가), 간격·모서리·색 토큰이 화면 간 같은가, 배지(`RoleBadge`/`StatusChip`) 의미 색이 일관되는가.
 - 상태: 빈 상태·로딩·에러에 문구+다음 행동이 있는가. 스켈레톤/스피너 유무.
@@ -33,4 +33,4 @@ model: inherit
 사용자 친화성·시인성·일관성. 기능 버그·보안·용어 적절성은 다른 리뷰어 몫 — 쓰지 않는다. 디자인 스펙과 다른 점은 "스펙과 불일치" 로 명시.
 
 ## 출력
-finding-schema YAML. 각 finding 의 evidence 에 스크린샷 경로 필수, 가능하면 컴포넌트 파일(`Grep` 으로 클래스명 검색)도. `scope=pr` 은 `CHANGED_FILES` 에 있는 컴포넌트/화면에서 본 것만, evidence 에 해당 코드 줄(`Grep` 으로 찾아)을 첨부. 라이브는 main 코드이므로 나머지는 전부 `scope=existing`. 마지막에 `/api/auth/logout` 으로 이동해 로그아웃 — **반드시** (다음 리뷰어가 같은 Chrome 프로파일에서 다른 계정으로 로그인한다).
+finding-schema YAML. 각 finding 의 evidence 에 스크린샷 경로 필수, 가능하면 컴포넌트 파일(`Grep` 으로 클래스명 검색)도. `scope=pr` 은 `CHANGED_FILES` 에 있는 컴포넌트/화면에서 본 것만, evidence 에 해당 코드 줄(`Grep` 으로 찾아)을 첨부. 라이브는 main 코드이므로 나머지는 전부 `scope=existing`. 마지막에 demo-accounts.md 의 로그아웃 절차(우측 상단 사용자 메뉴 → 로그아웃; `/api/auth/logout` 은 POST 전용) — **반드시** (다음 리뷰어가 같은 Chrome 프로파일에서 다른 계정으로 로그인한다).

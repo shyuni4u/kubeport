@@ -13,7 +13,7 @@ model: inherit
 `DIFF`, `CHANGED_FILES`, `BASE_URL`, `SHOT_DIR`. `CHANGED_FILES` 에 User 소유 화면 파일이 있으면 그 화면을 **먼저·더 깊게** 본다.
 
 ## 태스크 (순서대로, 각 단계에서 막히면 finding + 스크린샷)
-1. `BASE_URL` 접속 → "사용자로 체험" 으로 demo-user 로그인 (demo-accounts.md).
+1. `BASE_URL` 접속 → "사용자로 체험" 으로 demo-user 로그인 (demo-accounts.md, 먼저 demo-accounts.md 0단계로 이전 세션이 남아 있는지 확인).
 2. 카탈로그에서 `web-app` 찾기. 검색/필터가 도움이 되는가. 카드만 보고 "이게 뭘 만드는지" 알 수 있는가.
 3. 배포 폼 열기. 각 필드 라벨을 읽고 **모르는 단어**를 적는다 (`(?)` 도움말이 있으면 열어 보고 그걸로 이해됐는지). 잘못된 값(빈 값, 음수, 너무 긴 이름)을 넣고 검증 메시지가 사람 말인지. 제출 버튼을 빠르게 두 번 누른다.
 4. 정상 값으로 배포. 릴리스 상세로 이동했는가, 지금 무슨 일이 일어나는지 알 수 있는가. 30초 안에 상태가 바뀌는가.
@@ -22,7 +22,7 @@ model: inherit
 7. 내가 만든 릴리스 삭제. confirm 문구가 뭘 지우는지 말해 주는가. (`window.confirm = () => true` 심고 클릭.)
 8. 언어 토글 en 으로 바꿔 3·6 화면만 다시 본다. 번역 안 된 문자열이 있는가.
 9. `read_console_messages` 로 콘솔 에러 수집.
-10. `/api/auth/logout` — **반드시**.
+10. demo-accounts.md 의 로그아웃 절차(우측 상단 사용자 메뉴 → 로그아웃; `/api/auth/logout` 은 POST 전용이라 주소 이동으론 안 됨) — **반드시**, 그리고 `/catalog` 재방문으로 세션이 끊겼는지 확인.
 
 ## 판단 기준 (role-review 의 User 루브릭)
 용어가 평이한가 / 에러가 사용자 문장인가 / 다음 행동이 보이는가 / 빈·로딩 상태에 안내가 있는가 / 이중 제출이 막히는가.
@@ -30,4 +30,4 @@ model: inherit
 
 ## 출력
 finding-schema YAML. 라이브는 main 코드이므로 대부분 `scope=existing`. `CHANGED_FILES` 의 화면에서 본 문제만 `pr` 로 표시하되, 근거 코드 줄(`Grep` 으로 찾아)을 evidence 에 붙인다.
-스크린샷은 `SHOT_DIR/user-NN.png`. 태스크마다 단계 수·잘못 클릭 수를 `verified` 에 한 줄로.
+스크린샷은 브라우저 툴이 돌려준 실제 저장 경로를 evidence 에 그대로 적는다 (`SHOT_DIR` 는 참고용, 직접 쓰지 못함). 태스크마다 단계 수·잘못 클릭 수를 `verified` 에 한 줄로.

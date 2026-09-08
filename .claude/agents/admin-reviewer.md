@@ -13,7 +13,7 @@ model: inherit
 `DIFF`, `CHANGED_FILES`, `BASE_URL`, `SHOT_DIR`. `CHANGED_FILES` 에 Admin 소유 화면이 있으면 먼저·깊게.
 
 ## 태스크
-1. "관리자로 체험" 으로 demo-admin 로그인.
+1. "관리자로 체험" 으로 demo-admin 로그인. (먼저 demo-accounts.md 0단계로 이전 세션 확인)
 2. 템플릿 목록. 버전·draft·발행 상태가 한눈에 구분되는가.
 3. 새 템플릿: Deployment + Service 짧은 YAML 을 붙여 넣는다 (아래). 에디터가 스키마 오류를 잡는가, 붙여넣기 후 SchemaTree 가 경로를 보여 주는가.
    ```yaml
@@ -36,11 +36,11 @@ model: inherit
 6. 발행. draft→발행 구분과 "릴리스는 버전에 pin" 이 명확한가. 발행 후 편집 시 새 버전 강제가 되는가.
 7. `/admin/teams`. 데모 제한 문구가 뜨는가 (기대 동작). RBAC 패널(배포 폼)에서 거부 사유가 k8s 용어로 표면화되는가.
 8. 파괴적 액션(템플릿/버전 삭제) confirm. (`window.confirm = () => true` 후 클릭.)
-9. 콘솔 에러 수집, `/api/auth/logout` — **반드시**.
+9. 콘솔 에러 수집, 그다음 demo-accounts.md 의 로그아웃 절차(우측 상단 사용자 메뉴 → 로그아웃; POST 전용) — **반드시**, `/catalog` 재방문으로 확인.
 
 ## 판단 기준 (role-review 의 Admin 루브릭)
 k8s 용어가 **충분히** 노출되는가 / 스키마↔폼 매핑이 보이는가 / 버전·draft 흐름이 명확한가 / 파괴적 액션이 보호되는가 / RBAC 판정이 투명한가 / 이 작업을 API·MCP 로 대체할 수 있는가(없으면 `existing` P2, fingerprint `admin/platform/no-automation-path`).
 비전문가 친화성·색상·보안 코드 리뷰는 관심사가 아니다.
 
 ## 출력
-finding-schema YAML. `scope=pr` 은 `CHANGED_FILES` 의 화면에서 본 것만, evidence 에 코드 줄 첨부. 스크린샷 `SHOT_DIR/admin-NN.png`.
+finding-schema YAML. `scope=pr` 은 `CHANGED_FILES` 의 화면에서 본 것만, evidence 에 코드 줄 첨부. 스크린샷은 브라우저 툴이 돌려준 실제 저장 경로를 evidence 에 그대로 적는다.
