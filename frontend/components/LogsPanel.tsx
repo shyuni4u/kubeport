@@ -174,6 +174,11 @@ function Stream({ releaseId, instance, autoscroll }: StreamProps) {
         ref={boxRef}
         className="h-[60vh] overflow-auto rounded bg-slate-950 p-3 font-mono text-[12px] leading-relaxed text-slate-100"
       >
+        {lines.length === 0 && (
+          <p className="text-slate-400">
+            {status === "disconnected" ? t("emptyDisconnected") : t("emptyWaiting")}
+          </p>
+        )}
         {lines.map((l) => (
           <div
             key={l.id}

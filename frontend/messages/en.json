@@ -36,6 +36,8 @@
       "required": "This field is required.",
       "tooSmall": "Must be at least {min}.",
       "tooBig": "Must be at most {max}.",
+      "tooLong": "Use at most {max} characters.",
+      "tooShort": "Use at least {min} characters.",
       "pattern": "Not an allowed format. Check the rules in the help (?).",
       "enum": "Pick one from the list.",
       "invalid": "Please check this value.",
@@ -56,7 +58,7 @@
     "demoCreds": "Demo password: {password}",
     "goCatalog": "Go to catalog",
     "compare": {
-      "heading": "The admin writes it once. The user fills in four fields.",
+      "heading": "The admin writes it once. The user fills in {count} fields.",
       "subheading": "Change a value on the right — the line it edits on the left lights up.",
       "adminTitle": "What the admin writes",
       "adminHelp": "Running something on Kubernetes normally means writing a config file like this by hand. In kubeport the admin writes it once and registers it as a template.",
@@ -187,6 +189,8 @@
     "allInstances": "All instances",
     "autoscroll": "Auto-scroll",
     "clear": "Clear",
+    "emptyWaiting": "No output yet. Lines appear here as soon as it runs.",
+    "emptyDisconnected": "Connection lost. Reload the page; if it keeps dropping, contact an admin.",
     "status": {
       "connected": "Connected",
       "connecting": "Connecting",
@@ -359,6 +363,9 @@
       "emailPlaceholder": "Email",
       "roleLabel": "Role",
       "addMemberButton": "Add",
+      "roleEditor": "editor — author & publish team templates",
+      "roleViewer": "viewer — view & deploy team templates",
+      "roleHelp": "editor can create, publish and deprecate versions of templates owned by this team. viewer can only browse and deploy them. Neither role can edit global templates (kubeport-admin only).",
       "loginHint": "The target user must have logged in at least once.",
       "confirmRemoveMember": "Remove {email} from this team? They will lose edit access to the team's templates.",
       "errors": {

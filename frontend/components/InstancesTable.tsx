@@ -3,7 +3,16 @@
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { StatusChip, statusChipVariantFromRelease } from "./StatusChip";
+import { StatusChip, type StatusVariant } from "./StatusChip";
+
+// Pod phases / waiting reasons → chip colour. A broken instance
+// (CrashLoopBackOff, ImagePullBackOff, Error…) must not look like "muted".
+export function instanceVariant(ready: boolean, phase: string): StatusVariant {
+  if (ready) return "success";
+  if (/backoff|err|fail|oom|evicted/i.test(phase)) return "danger";
+  if (/pending|creating|init|terminating|waiting/i.test(phase)) return "warning";
+  return "muted";
+}
 import { termLabel, type TermKey } from "@/lib/kube-term-map";
 import { useKubeTermsStore } from "@/stores/kube-terms-store";
 
@@ -62,9 +71,7 @@ export function InstancesTable({
             <TableCell className="font-mono text-xs">{i.name}</TableCell>
             <TableCell>
               <StatusChip
-                variant={statusChipVariantFromRelease(
-                  i.ready ? "healthy" : i.phase.toLowerCase(),
-                )}
+                variant={instanceVariant(i.ready, i.phase)}
               >
                 <span title={i.phase}>{phaseLabel(i.phase)}</span>
               </StatusChip>

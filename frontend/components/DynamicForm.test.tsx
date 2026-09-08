@@ -292,7 +292,8 @@ describe("DynamicForm submit", () => {
     renderWithIntl(<DynamicForm spec={spec} onSubmit={onSubmit} />);
     await user.click(screen.getByRole("button", { name: /배포하기/ }));
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(await screen.findByText("3 이하여야 합니다.")).toBeInTheDocument();
+    // Strings get a character-count sentence, not the numeric bound wording.
+    expect(await screen.findByText("3자 이하로 입력하세요.")).toBeInTheDocument();
     expect(screen.queryByText(/String must contain/)).toBeNull();
   });
 

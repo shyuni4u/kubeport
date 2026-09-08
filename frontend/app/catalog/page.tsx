@@ -14,11 +14,12 @@ type ApiTemplate = {
 
 export default async function CatalogPage() {
   const res = await apiFetch("/v1/templates");
-  // A failed list must never surface the backend body to the user. Log it
-  // and render the (empty) catalog — the browser shows its own empty state.
+  // A failed list must never surface the backend body to the user, but it
+  // must not masquerade as "no templates" either — throw a body-less error so
+  // app/error.tsx shows the retry screen (same as app/templates/page.tsx).
   if (!res.ok) {
     console.error(`[catalog] templates fetch failed: ${res.status} ${await res.text()}`);
-    return <CatalogBrowser templates={[]} />;
+    throw new Error(`catalog ${res.status}`);
   }
   const data = (await res.json()) as { templates: ApiTemplate[] };
 

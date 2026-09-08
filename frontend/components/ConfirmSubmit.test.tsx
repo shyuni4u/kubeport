@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ConfirmSubmit } from "./ConfirmSubmit";
 
@@ -28,5 +28,26 @@ describe("ConfirmSubmit", () => {
     expect(btn).toHaveAttribute("aria-busy", "false");
     fireEvent.click(btn);
     expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables itself while the form action is pending (double-submit guard)", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    let calls = 0;
+    // A form action that never resolves keeps useFormStatus().pending true.
+    const action = async () => {
+      calls++;
+      await new Promise<void>(() => {});
+    };
+    render(
+      <form action={action}>
+        <ConfirmSubmit message="really?">게시</ConfirmSubmit>
+      </form>,
+    );
+    const btn = screen.getByRole("button", { name: "게시" });
+    fireEvent.click(btn);
+    await waitFor(() => expect(btn).toBeDisabled());
+    expect(btn).toHaveAttribute("aria-busy", "true");
+    fireEvent.click(btn);
+    expect(calls).toBe(1);
   });
 });

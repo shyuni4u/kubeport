@@ -142,8 +142,15 @@ export function DynamicForm({
           if (issue.type === "string" && Number(issue.minimum) <= 1) {
             return tv("required");
           }
+          if (issue.type === "string") {
+            return tv("tooShort", { min: String(issue.minimum) });
+          }
           return tv("tooSmall", { min: String(issue.minimum) });
         case "too_big":
+          // For strings the bound is a character count, not a numeric limit.
+          if (issue.type === "string") {
+            return tv("tooLong", { max: String(issue.maximum) });
+          }
           return tv("tooBig", { max: String(issue.maximum) });
         case "invalid_string":
           return tv("pattern");

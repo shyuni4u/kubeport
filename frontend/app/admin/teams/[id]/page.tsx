@@ -4,6 +4,7 @@ import { getTranslations } from "next-intl/server";
 import { apiFetch } from "@/lib/api-server";
 import { ActionForm, type ActionState } from "@/components/ActionForm";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
+import { HelpHint } from "@/components/HelpHint";
 
 // Localized inline error for a failed member mutation. Raw body goes to the
 // server log only.
@@ -100,9 +101,10 @@ export default async function TeamDetailPage({
         <input id="member-email" name="email" type="email" placeholder={t("emailPlaceholder")} required className="border rounded px-3 py-1.5" />
         <label htmlFor="member-role" className="sr-only">{t("roleLabel")}</label>
         <select id="member-role" name="role" className="border rounded px-3 py-1.5">
-          <option value="editor">editor</option>
-          <option value="viewer">viewer</option>
+          <option value="editor">{t("roleEditor")}</option>
+          <option value="viewer">{t("roleViewer")}</option>
         </select>
+        <HelpHint text={t("roleHelp")} />
         <button className="px-4 py-1.5 bg-primary text-primary-foreground rounded">{t("addMemberButton")}</button>
       </ActionForm>
       <p className="text-xs text-muted-foreground mt-2">{t("loginHint")}</p>
