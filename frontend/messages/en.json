@@ -25,8 +25,8 @@
   },
   "errors": {
     "notFoundTitle": "Not found, or you don't have access",
-    "notFoundBody": "It may have been deleted or belong to another user. Ask an admin if you need access.",
-    "backToReleases": "Back to my releases",
+    "notFoundBody": "It may have been deleted or belong to someone else. Ask an admin if you need access.",
+    "backToReleases": "Back to start",
     "genericTitle": "Something went wrong",
     "genericBody": "Please try again in a moment. If it keeps happening, contact an admin.",
     "retry": "Try again"
@@ -244,6 +244,7 @@
       "publishing": "Publishing…",
       "publishFromDetail": "Publish from the template detail page after saving.",
       "switchModeLosesEdits": "You have unsaved edits. Switching mode will discard them. Continue?",
+      "leaveLosesEdits": "You have unsaved edits. Leaving this page will discard them. Continue?",
       "schemaLoading": "Loading schema… (cluster {cluster})",
       "schemaLoadingNoCluster": "Loading schema… (no cluster selected)",
       "schemaMissing": "Schema not found: {kind}",

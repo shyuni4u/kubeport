@@ -65,7 +65,7 @@ function renderNode(
       const hasKids = (child.type === "object" && !!child.properties) || (child.type === "array" && !!child.items);
       const fieldMode = fields?.[p]?.mode;
       return (
-        <li key={p} style={{ paddingLeft: depth * 12 }}>
+        <li key={p} role="none" style={{ paddingLeft: depth * 12 }}>
           <button
             type="button"
             role="treeitem"
@@ -96,7 +96,7 @@ function renderNode(
     const isExp = expanded.has(p);
     const fieldMode = fields?.[p]?.mode;
     return (
-      <li style={{ paddingLeft: depth * 12 }}>
+      <li role="none" style={{ paddingLeft: depth * 12 }}>
         <button
           type="button"
           role="treeitem"

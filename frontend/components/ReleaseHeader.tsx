@@ -34,7 +34,11 @@ export async function ReleaseHeader({ data }: { data: ReleaseHeaderData }) {
         </StatusChip>
         <div className="ml-auto flex items-center gap-4">
           <KubeTermsToggle />
-          <DeleteReleaseButton releaseId={data.id} name={data.name} />
+          {/* Stale releases (cluster gone / resources missing) can't be deleted the
+              normal way; ReleaseStaleBanner offers the admin force-delete instead. */}
+          {data.status !== "cluster-unreachable" && data.status !== "resources-missing" && (
+            <DeleteReleaseButton releaseId={data.id} name={data.name} />
+          )}
         </div>
       </div>
       <div className="text-sm text-muted-foreground">

@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
+// Fired on window with `detail` = cluster name whenever the sidebar picker
+// changes; `localStorage.kbp_cluster` is already updated by then.
+export const CLUSTER_CHANGED_EVENT = "kbp:cluster-changed";
+
 export function ClusterPicker() {
   const t = useTranslations("shell");
   const router = useRouter();
@@ -25,8 +29,10 @@ export function ClusterPicker() {
   function pick(name: string) {
     setCurrent(name);
     localStorage.setItem("kbp_cluster", name);
-    // Re-render server components for the new cluster without a full page
-    // reload — a reload would wipe any in-progress form/editor state.
+    // Re-render server components without a full page reload — a reload
+    // would wipe any in-progress form/editor state. Mounted client forms
+    // (DeployClient) subscribe to this event to pick up the new choice.
+    window.dispatchEvent(new CustomEvent(CLUSTER_CHANGED_EVENT, { detail: name }));
     router.refresh();
   }
 

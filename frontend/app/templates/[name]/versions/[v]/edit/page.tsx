@@ -40,7 +40,7 @@ function EditUITemplateVersionInner() {
   // Switching mode unmounts the inner editor and discards its state, so ask
   // first when there are unsaved edits (and warn on tab close / reload).
   const [dirty, setDirty] = useState(false);
-  useBeforeUnloadWhenDirty(dirty);
+  useBeforeUnloadWhenDirty(dirty, t("leaveLosesEdits"));
 
   function switchMode(next: string) {
     if (next === mode) return;

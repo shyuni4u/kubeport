@@ -2,20 +2,40 @@
 
 import { useEffect } from "react";
 
-// Warns before the tab/window is closed or hard-navigated while the editor
-// holds unsaved edits. Client-side `router.push` does not fire beforeunload,
-// so mode switches are guarded separately with window.confirm.
-export function useBeforeUnloadWhenDirty(dirty: boolean) {
+// Warns before leaving while the editor holds unsaved edits:
+//  - tab close / reload / hard navigation → native beforeunload prompt
+//  - in-app link clicks (sidebar, breadcrumbs, any <a href>) → window.confirm
+//    with `leaveMessage`, in the capture phase so Next's <Link> never sees the
+//    click when the user cancels
+// Mode switches are guarded separately by the caller. Known gap: browser
+// back/forward (popstate) cannot be cancelled in the App Router, so a history
+// navigation still drops edits.
+export function useBeforeUnloadWhenDirty(dirty: boolean, leaveMessage?: string) {
   useEffect(() => {
     if (!dirty) return;
-    const handler = (e: BeforeUnloadEvent) => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       // Legacy browsers require returnValue to be set to show the prompt.
       e.returnValue = "";
     };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [dirty]);
+    const onClick = (e: MouseEvent) => {
+      if (!leaveMessage) return;
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const anchor = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) return;
+      if (anchor.href === window.location.href) return;
+      if (!window.confirm(leaveMessage)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, [dirty, leaveMessage]);
 }
 
 // Returns the ui-spec path of the first exposed field whose label is blank,

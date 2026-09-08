@@ -12,7 +12,7 @@ export default async function NotFound() {
       <h1 className="text-xl font-bold">{t("notFoundTitle")}</h1>
       <p className="mt-2 text-sm text-muted-foreground">{t("notFoundBody")}</p>
       <Link
-        href="/releases"
+        href="/"
         className="mt-6 inline-block rounded bg-primary px-4 py-2 text-sm text-primary-foreground"
       >
         {t("backToReleases")}

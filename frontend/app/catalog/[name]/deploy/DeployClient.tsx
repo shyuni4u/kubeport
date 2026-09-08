@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import YAML from "yaml";
 import { useDebouncedCallback } from "use-debounce";
 
+import { CLUSTER_CHANGED_EVENT } from "@/components/ClusterPicker";
 import { DynamicForm } from "@/components/DynamicForm";
 import { HelpHint } from "@/components/HelpHint";
 import { RBACCheckPanel } from "@/components/RBACCheckPanel";
@@ -119,6 +120,20 @@ export function DeployClient({
       cancelled = true;
     };
   }, [isUpdate]);
+
+  // The sidebar ClusterPicker no longer reloads the page, so follow its
+  // choice live (only if the cluster is one we can offer).
+  useEffect(() => {
+    if (isUpdate) return;
+    const onChanged = (e: Event) => {
+      const name = (e as CustomEvent<string>).detail;
+      if (typeof name === "string" && clusters.includes(name)) {
+        setMeta((m) => ({ ...m, cluster: name }));
+      }
+    };
+    window.addEventListener(CLUSTER_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(CLUSTER_CHANGED_EVENT, onChanged);
+  }, [isUpdate, clusters]);
 
   // Debounced preview render. 300ms matches the ResourcesPreview ergonomics —
   // fast enough to feel live while a user is typing but not spamming the
@@ -266,7 +281,6 @@ export function DeployClient({
                 }}
               >
                 <SelectTrigger
-                  aria-label={t("clusterLabel")}
                   aria-labelledby="deploy-cluster-label"
                 >
                   <SelectValue
