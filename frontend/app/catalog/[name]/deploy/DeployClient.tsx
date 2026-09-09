@@ -4,12 +4,12 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import YAML from "yaml";
-import { useDebouncedCallback } from "use-debounce";
+import { useDebounce, useDebouncedCallback } from "use-debounce";
 
 import { CLUSTER_CHANGED_EVENT } from "@/components/ClusterPicker";
 import { DynamicForm } from "@/components/DynamicForm";
 import { HelpHint } from "@/components/HelpHint";
-import { RBACCheckPanel } from "@/components/RBACCheckPanel";
+import { RBACCheckPanel, type RbacStatus } from "@/components/RBACCheckPanel";
 import { ResourcesPreview } from "@/components/ResourcesPreview";
 import { Input } from "@/components/ui/input";
 import {
@@ -74,12 +74,31 @@ export function DeployClient({
   const [pending, setPending] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  /**
+   * UX gate only. Authorization is decided by the backend forwarding the
+   * user's own token to the k8s API, and k8s RBAC has the final say — never
+   * send this value to the server or let it stand in for a server-side check.
+   * Its fail-open bias (see RbacStatus) is deliberate for the same reason.
+   *
+   * Stored with the inputs it was computed for: a verdict about
+   * `kube-system` must not gate a submit to `default`.
+   */
+  const [rbac, setRbac] = useState<{
+    cluster: string;
+    namespace: string;
+    status: RbacStatus;
+  }>({ cluster: "", namespace: "", status: "unknown" });
   // Move focus to the error notice when it appears so keyboard / screen
   // reader users land on it instead of hunting below the (long) form.
   const errRef = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
     if (err) errRef.current?.focus();
   }, [err]);
+
+  // A failure notice describes one attempt with one set of values. The moment
+  // the user changes anything it is stale, and leaving it up made a corrected
+  // form still look broken (#42).
+  const clearErr = useCallback(() => setErr(null), []);
 
   // Load cluster list and hydrate meta.cluster on mount. Skipped for update
   // flows: cluster is immutable on PUT (backend ignores it) and the meta
@@ -109,7 +128,6 @@ export function DeployClient({
         // without an extra click.
         const preselect =
           cached && names.includes(cached) ? cached : (names[0] ?? "");
-        // eslint-disable-next-line react-hooks/set-state-in-effect
         if (preselect) setMeta((m) => ({ ...m, cluster: preselect }));
       } catch {
         // Network/parse failure: clusters stays []. The Select below
@@ -169,16 +187,53 @@ export function DeployClient({
   // Kinds extracted from the rendered YAML for RBAC preflight. Deriving from
   // the *rendered* yaml (not the template source) ensures conditionally-
   // included resources are reflected correctly.
+  // Deduplicated: a template with two Deployments needs one SSAR, not two,
+  // and RBACCheckPanel keys its rows by resource name.
   const kinds = useMemo(() => {
     if (!rendered) return [];
     try {
-      return YAML.parseAllDocuments(rendered)
-        .map((d) => (d.toJS() as { kind?: string } | null)?.kind)
-        .filter((k): k is string => !!k);
+      return [
+        ...new Set(
+          YAML.parseAllDocuments(rendered)
+            .map((d) => (d.toJS() as { kind?: string } | null)?.kind)
+            .filter((k): k is string => !!k),
+        ),
+      ];
     } catch {
       return [];
     }
   }, [rendered]);
+
+  // Every keystroke in the form both refreshes the preview and invalidates
+  // any standing failure notice. Stable identity matters: DynamicForm
+  // re-subscribes its RHF watcher whenever onChange changes.
+  const handleValuesChange = useCallback(
+    (values: Record<string, unknown>) => {
+      clearErr();
+      preview(values);
+    },
+    [clearErr, preview],
+  );
+
+  // Debounced, because the preflight now drives the submit button: without
+  // it every keystroke in the namespace field fires one SSAR per kind and
+  // the button + red notice flicker between "unknown" and "denied".
+  const [debouncedNamespace] = useDebounce(meta.namespace, 300);
+
+  const rbacPanelVisible = Boolean(meta.cluster) && Boolean(debouncedNamespace);
+  const handleRbacResult = useCallback(
+    (status: RbacStatus) => {
+      setRbac({ cluster: meta.cluster, namespace: debouncedNamespace, status });
+    },
+    [meta.cluster, debouncedNamespace],
+  );
+  // Blocking requires a denial that was issued for exactly these inputs, so
+  // no reset is needed when the panel is hidden or its target changes.
+  const rbacBlocked =
+    rbacPanelVisible &&
+    rbac.status === "denied" &&
+    rbac.cluster === meta.cluster &&
+    rbac.namespace === debouncedNamespace;
 
   const submit = useCallback(
     async (values: Record<string, unknown>) => {
@@ -220,7 +275,10 @@ export function DeployClient({
         }
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
-      } finally {
+        // Released only on failure. `router.push` returns immediately and the
+        // RSC transition takes hundreds of ms, during which this form is still
+        // mounted — unlocking here would hand the user a second POST and a
+        // 409 "이미 있습니다", which is the very symptom #31 is about.
         setSubmitting(false);
       }
     },
@@ -257,7 +315,10 @@ export function DeployClient({
                 placeholder={t("namePlaceholder")}
                 value={meta.name}
                 required
-                onChange={(e) => setMeta({ ...meta, name: e.target.value })}
+                onChange={(e) => {
+                  clearErr();
+                  setMeta({ ...meta, name: e.target.value });
+                }}
               />
             </div>
             <div className="flex flex-col gap-1">
@@ -271,6 +332,7 @@ export function DeployClient({
                 value={meta.cluster}
                 onValueChange={(v) => {
                   const next = v ?? "";
+                  clearErr();
                   setMeta((m) => ({ ...m, cluster: next }));
                   if (
                     next &&
@@ -311,7 +373,10 @@ export function DeployClient({
                 id="deploy-namespace"
                 placeholder={t("namespacePlaceholder")}
                 value={meta.namespace}
-                onChange={(e) => setMeta({ ...meta, namespace: e.target.value })}
+                onChange={(e) => {
+                  clearErr();
+                  setMeta({ ...meta, namespace: e.target.value });
+                }}
               />
             </div>
           </div>
@@ -335,11 +400,18 @@ export function DeployClient({
                 : t("submit")
           }
           disabled={
-            submitting || (!isUpdate && (!meta.cluster || !meta.name.trim()))
+            submitting ||
+            rbacBlocked ||
+            (!isUpdate && (!meta.cluster || !meta.name.trim()))
           }
-          onChange={preview}
+          onChange={handleValuesChange}
           onSubmit={submit}
         />
+        {rbacBlocked && (
+          <p role="status" className="mt-2 text-sm text-red-700">
+            {t("blockedByRbac")}
+          </p>
+        )}
         {err && (
           <p
             ref={errRef}
@@ -356,11 +428,12 @@ export function DeployClient({
       </div>
       <aside className="flex flex-col gap-3">
         <ResourcesPreview renderedYaml={rendered} pending={pending} />
-        {meta.cluster && meta.namespace && (
+        {rbacPanelVisible && (
           <RBACCheckPanel
             cluster={meta.cluster}
-            namespace={meta.namespace}
+            namespace={debouncedNamespace}
             kinds={kinds}
+            onResult={handleRbacResult}
           />
         )}
       </aside>

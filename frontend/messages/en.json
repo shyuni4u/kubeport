@@ -172,6 +172,7 @@
     "clusterHelp": "Pick one group of servers (a cluster). If there is only one, leave it.",
     "namespaceLabel": "Area",
     "namespaceHelp": "The compartment inside the cluster where your things live (a namespace). Leave the default unless an admin told you otherwise.",
+    "blockedByRbac": "You do not have permission to deploy this right now. Check the 'Permission check' notes, then ask an admin.",
     "errors": {
       "forbidden": "You do not have permission to perform this action. Please contact an admin.",
       "conflict": "A release with the same name already exists. Use a different name or check the existing release.",

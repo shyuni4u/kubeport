@@ -4,10 +4,26 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
+/**
+ * What the preflight can conclude about this deploy.
+ *
+ * `denied` is deliberately narrow: it means k8s answered a SelfSubjectAccess-
+ * Review with `allowed: false`. A check that could not be *made* — HTTP error,
+ * network failure, or a kind with no resource mapping — stays `unknown` so a
+ * broken preflight never strands the user behind a disabled button.
+ */
+export type RbacStatus = "unknown" | "allowed" | "denied";
+
 type Props = {
   cluster: string;
   namespace: string;
   kinds: string[];
+  /**
+   * Reports the panel's verdict upward so the deploy form can block a submit
+   * that k8s has already told us will fail (#30). Must be referentially
+   * stable — wrap it in useCallback.
+   */
+  onResult?: (status: RbacStatus) => void;
 };
 
 type CheckResult = {
@@ -35,7 +51,7 @@ const KIND_TO_RESOURCE: Record<string, { group: string; resource: string }> = {
   PersistentVolumeClaim: { group: "", resource: "persistentvolumeclaims" },
 };
 
-export function RBACCheckPanel({ cluster, namespace, kinds }: Props) {
+export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
   const t = useTranslations("templates.rbac");
   const [results, setResults] = useState<CheckResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -106,6 +122,23 @@ export function RBACCheckPanel({ cluster, namespace, kinds }: Props) {
   const allAllowed = checked.length > 0 && checked.every((r) => r.allowed);
   const denied = checked.filter((r) => !r.allowed);
   const showPlaceholder = !loading && effectiveResults.length === 0;
+
+  // Only a real RBAC "no" is a denial — see RbacStatus. `httpStatus` set means
+  // the check failed rather than the permission being absent.
+  const status: RbacStatus =
+    loading || !hasInputs
+      ? "unknown"
+      : denied.some((r) => r.httpStatus === undefined)
+        ? "denied"
+        : allAllowed
+          ? "allowed"
+          : "unknown";
+
+  // Reported from its own effect (not inside the fetch) so the parent also
+  // hears about resets — cleared cluster, emptied kinds, a re-check starting.
+  useEffect(() => {
+    onResult?.(status);
+  }, [status, onResult]);
 
   return (
     <Card>

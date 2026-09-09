@@ -26,6 +26,7 @@
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
+  --color-slider-track: var(--slider-track);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
@@ -66,6 +67,13 @@
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
+  /*
+    Slider tracks are non-text UI components, so WCAG 1.4.11 asks for 3:1
+    against the adjacent surface. `--border` (0.922) is only ~1.2:1 on this
+    page background and `--muted` is byte-identical to `--background`, so
+    neither can carry a track. Dedicated token, deliberately darker.
+  */
+  --slider-track: oklch(0.66 0 0);
   --ring: oklch(0.55 0.22 275);
   --chart-1: oklch(0.55 0.22 275);
   --chart-2: oklch(0.68 0.16 50);
@@ -101,6 +109,8 @@
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
+  /* Lighter than the dark surface, for the same 3:1 reason as light mode. */
+  --slider-track: oklch(0.48 0 0);
   --ring: oklch(0.65 0.22 275);
   --chart-1: oklch(0.65 0.22 275);
   --chart-2: oklch(0.7 0.16 50);

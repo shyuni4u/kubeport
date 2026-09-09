@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
 import type { ZodIssue } from "zod";
 import {
@@ -52,7 +52,11 @@ type Props = {
   initialValues?: Record<string, unknown>;
   submitLabel?: string;
   disabled?: boolean;
-  onSubmit: (values: Record<string, unknown>) => void;
+  /**
+   * May return a promise. When it does, the form stays locked until it
+   * settles so a second click cannot fire a second request (#31).
+   */
+  onSubmit: (values: Record<string, unknown>) => void | Promise<void>;
   onChange?: (values: Record<string, unknown>) => void;
 };
 
@@ -192,14 +196,29 @@ export function DynamicForm({
 
   useEffect(() => {
     if (!onChange) return;
+    // RHF's watch() only emits on *change*, so a user who accepts every
+    // default never triggered a render preview — and therefore never
+    // triggered the RBAC preflight that gates the submit button (#30).
+    // Emit the initial values once so both are live from first paint.
+    onChange(decodeValues(form.getValues() as Record<string, unknown>));
     const sub = form.watch((values) => {
       onChange(decodeValues(values as Record<string, unknown>));
     });
     return () => sub.unsubscribe();
   }, [form, onChange]);
 
-  const handleSubmit = form.handleSubmit((values) => {
-    onSubmit(decodeValues(values as Record<string, unknown>));
+  // A ref, not state: the second click of a double-click arrives in the same
+  // tick as the first, before any re-render could flip a `disabled` prop. The
+  // parent's own `disabled` is therefore always one render too late (#31).
+  const inFlight = useRef(false);
+  const handleSubmit = form.handleSubmit(async (values) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      await onSubmit(decodeValues(values as Record<string, unknown>));
+    } finally {
+      inFlight.current = false;
+    }
   });
 
   return (
@@ -209,7 +228,12 @@ export function DynamicForm({
           <FieldRow key={field.path} field={field} control={form.control} />
         ))}
         <div className="flex justify-end">
-          <Button type="submit" disabled={disabled}>
+          {/*
+            isSubmitting mirrors the ref guard for the visible state: awaiting
+            onSubmit above keeps it true for the whole request, so the button
+            greys out instead of merely swallowing the click.
+          */}
+          <Button type="submit" disabled={disabled || form.formState.isSubmitting}>
             {submitLabel}
           </Button>
         </div>
@@ -314,8 +338,17 @@ function renderWidget(
             : typeof rhf.value === "string" && rhf.value !== ""
               ? Number(rhf.value)
               : min;
+        // The end labels are not decoration: without them a slider whose
+        // thumb sits at an end is indistinguishable from a disabled control,
+        // and a non-k8s user has no way to know how far the range goes (#43).
         return (
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span
+              data-testid="slider-min"
+              className="text-[11px] tabular-nums text-muted-foreground"
+            >
+              {min}
+            </span>
             <Slider
               min={min}
               max={max}
@@ -326,7 +359,13 @@ function renderWidget(
               }}
               className="flex-1"
             />
-            <span className="min-w-[2.5rem] text-right text-sm tabular-nums">
+            <span
+              data-testid="slider-max"
+              className="text-[11px] tabular-nums text-muted-foreground"
+            >
+              {max}
+            </span>
+            <span className="min-w-[2.5rem] text-right text-sm font-medium tabular-nums">
               {current}
             </span>
           </div>

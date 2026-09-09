@@ -36,6 +36,24 @@ test.describe("demo user deploys and deletes a release", () => {
       timeout: 15_000,
     });
     await expect(page.getByText(/is forbidden: User/)).toHaveCount(0);
+    // #30 — once the denial is definite the button must be unclickable, not
+    // just accompanied by a warning. This is the only frontend suite CI runs,
+    // so without this assertion the regression has no backstop.
+    await expect(submit).toBeDisabled();
+    await expect(
+      page.getByText(
+        "권한이 없어 지금은 배포할 수 없습니다. '권한 확인' 안내를 확인한 뒤 관리자에게 요청하세요.",
+      ),
+    ).toBeVisible();
+
+    // #43 — the slider track must not be the page background colour.
+    const track = page.locator('[data-slot="slider-track"]').first();
+    const [trackBg, pageBg] = await Promise.all([
+      track.evaluate((el) => getComputedStyle(el).backgroundColor),
+      page.evaluate(() => getComputedStyle(document.body).backgroundColor),
+    ]);
+    expect(trackBg).not.toBe(pageBg);
+
     await namespace.fill("default");
     await expect(page.getByText(/관리자에게 '이 클러스터·구역에 배포 권한'/)).toHaveCount(0, { timeout: 15_000 });
 
