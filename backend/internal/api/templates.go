@@ -175,17 +175,19 @@ func (h *Handlers) ListTemplates(c *gin.Context) {
 		return
 	}
 	// A template with no current version has never been published: it is
-	// unreleased authoring state, not catalog content, so only its editors
-	// should know it exists (issue #12). Published rows are visible to every
-	// authenticated user, so the per-row authorization below only runs for the
-	// handful of unpublished ones.
+	// unreleased authoring state, not catalog content, so only the people who
+	// can see its drafts should know it exists (issue #12). Published rows are
+	// visible to every authenticated user, so the per-row authorization below
+	// only runs for the handful of unpublished ones — and the shared reqCache
+	// keeps that O(distinct teams + owners) rather than O(rows).
+	rc := newReqCache()
 	visible := make([]store.ListTemplatesRow, 0, len(rows))
 	for _, row := range rows {
 		if row.CurrentVersionID.Valid {
 			visible = append(visible, row)
 			continue
 		}
-		ok, err := h.canEditTemplate(ctx, ownershipOfListRow(row))
+		ok, err := h.canReadTemplate(ctx, rc, ownershipOfListRow(row))
 		if err != nil {
 			log.Printf("ListTemplates: authorize %q: %v", row.Name, err)
 			writeError(c, http.StatusInternalServerError, "internal", "failed to authorize template list")
@@ -199,10 +201,26 @@ func (h *Handlers) ListTemplates(c *gin.Context) {
 }
 
 func (h *Handlers) GetTemplate(c *gin.Context) {
-	t, err := h.deps.Store.GetTemplateByName(c.Request.Context(), c.Param("name"))
+	ctx := c.Request.Context()
+	t, err := h.deps.Store.GetTemplateByName(ctx, c.Param("name"))
 	if err != nil {
 		writeError(c, http.StatusNotFound, "not-found", "template")
 		return
+	}
+	// Same rule as ListTemplates, and the same answer: a never-published
+	// template does not exist as far as an outsider is concerned. Returning
+	// 403 here would confirm the name we just hid from their catalog.
+	if !t.CurrentVersionID.Valid {
+		ok, err := h.canReadTemplate(ctx, nil, ownershipOf(t))
+		if err != nil {
+			log.Printf("GetTemplate(%q): %v", t.Name, err)
+			writeError(c, http.StatusInternalServerError, "internal", "failed to authorize template read")
+			return
+		}
+		if !ok {
+			writeError(c, http.StatusNotFound, "not-found", "template")
+			return
+		}
 	}
 	c.JSON(http.StatusOK, t)
 }
@@ -229,6 +247,13 @@ func (h *Handlers) ListTemplateVersions(c *gin.Context) {
 				if v.Status != statusDraft {
 					published = append(published, v)
 				}
+			}
+			// Every version was a draft, so the template has never been
+			// published — answer exactly as ListTemplates/GetTemplate do
+			// instead of confirming its existence with an empty list.
+			if len(published) == 0 {
+				writeError(c, http.StatusNotFound, "not-found", "template")
+				return
 			}
 			vs = published
 		}
@@ -279,7 +304,7 @@ func (h *Handlers) templateDraftAccess(c *gin.Context, name string) (denial *acc
 		writeError(c, http.StatusNotFound, "not-found", "template "+name)
 		return nil, false
 	}
-	d, err := h.evaluateTemplateEditor(ctx, ownershipOf(tpl))
+	d, err := h.evaluateTemplateAccess(ctx, nil, ownershipOf(tpl), false)
 	if err != nil {
 		log.Printf("templateDraftAccess(%q): %v", name, err)
 		writeError(c, http.StatusInternalServerError, "internal", "failed to authorize template read")
@@ -291,10 +316,10 @@ func (h *Handlers) templateDraftAccess(c *gin.Context, name string) (denial *acc
 // ensureCanReadVersion gates reads of a single template version. Published and
 // deprecated versions are catalog content that every authenticated user may
 // read. A draft is unreleased authoring state — the full resources.yaml,
-// including whatever the author put in a Secret — so it follows the same rule
-// as mutation: global templates need kubeport-admin, team templates need a
-// team editor, and demo accounts are scoped to demo-owned templates.
-// Issue #12: this path previously had no authorization at all.
+// including whatever the author put in a Secret — so it stays with the people
+// who own the template: kubeport-admin for a global template, any member of
+// the owning team otherwise, and demo accounts only within demo-owned
+// templates. Issue #12: this path previously had no authorization at all.
 func (h *Handlers) ensureCanReadVersion(c *gin.Context, name, status string) bool {
 	if status != statusDraft {
 		return true
@@ -304,8 +329,11 @@ func (h *Handlers) ensureCanReadVersion(c *gin.Context, name, status string) boo
 		return false
 	}
 	if denial != nil {
+		// Carry the rule's own reason through: "team membership required" and
+		// "demo accounts can only access demo-owned templates" call for very
+		// different next steps, and only one of them can be acted on.
 		writeError(c, denial.status, denial.code,
-			"version is an unpublished draft; template editor required")
+			"version is an unpublished draft: "+denial.msg)
 		return false
 	}
 	return true

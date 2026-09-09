@@ -184,6 +184,7 @@ sudo systemctl restart k3s
 | 로그인 후 `/` 로 되돌아오고 "로그인하지 못했습니다" 배너 | 콜백이 `?login_error=` 로 돌려보낸 것. 원인은 화면에 안 나오므로 `kubectl logs -n kubeport deploy/kubeport-frontend \| grep '\[auth/callback\]'` 확인. `cancelled` = 사용자가 동의화면에서 취소, `expired` = 10분 state 쿠키 만료, `failed` = IdP/DB 오류. 로그에 `suspicious=true` 면 state/nonce 불일치 — 콜백 위조·재생 시도일 수 있다 |
 | 로그아웃이 403 `cross-origin request rejected` | 브라우저가 보는 origin 이 허용목록(§4)에 없다. 도메인을 추가했거나 **TLS 를 클러스터 밖에서 종료하면서 `tls.enabled=false`** 로 뒀다면 `frontend.publicOrigins` 에 실제 https origin 을 넣고 `helm upgrade` |
 | 데모 로그인 후 배포 401/403 | k3s `auth.yaml` 에 Dex issuer 있는지, prefix `dex:` 와 RoleBinding subject 일치하는지 |
+| "템플릿이 안 보여요" / 버전 상세 403·404 | 대부분 publish 누락이다. 초안은 소유자에게만 보인다(전역=`kubeport-admin`, 팀=그 팀 멤버). admin 토큰으로 `GET /v1/templates/<name>/versions` 를 호출해 draft 만 있는지 먼저 확인 |
 
 ## 8. 보안 후속 (권장)
 

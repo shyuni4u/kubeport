@@ -96,6 +96,9 @@ Plan 0–5 로 구현된 기능을 **직접 클릭하면서 확인**하기 위�
 - [ ] 필터 조합 (검색 + 태그) 동작
 - [ ] 카드 클릭 → `/catalog/<name>` 로 이동
 - [ ] 버전 목록에서 특정 버전 선택 → `/catalog/<name>/versions/<v>/deploy`
+- [ ] **초안 가시성** — 관리자로 v2 draft 생성 → 그 팀에 속하지 않은 일반 사용자로 로그인 →
+      `/templates/<name>` 버전 목록에 draft 가 없고, 한 번도 publish 안 된 템플릿은 `/catalog`·`/templates`
+      목록에도 안 보인다. 같은 팀의 `viewer` 멤버에게는 보인다 (열람만, 편집·삭제는 403)
 
 ---
 
