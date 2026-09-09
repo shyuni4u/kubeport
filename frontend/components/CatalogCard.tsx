@@ -27,7 +27,22 @@ export function CatalogCard({ template }: Props) {
         <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent text-accent-foreground">
           {createElement(icon, { className: "h-5 w-5" })}
         </span>
-        <h3 className="text-sm font-semibold">{template.display_name}</h3>
+        <div className="min-w-0">
+          <h3 className="truncate text-sm font-semibold">
+            {template.display_name}
+          </h3>
+          {/*
+            The name is what the URL, the deploy header and the release rows
+            all show, but the catalog used to display only display_name — so
+            a user searching "web-app" had nowhere to have learned it (#32).
+            Skipped when it would just repeat the heading.
+          */}
+          {template.name !== template.display_name && (
+            <p className="truncate font-mono text-[11px] text-muted-foreground">
+              {template.name}
+            </p>
+          )}
+        </div>
       </div>
       <p className="min-h-9 text-xs text-muted-foreground line-clamp-2">
         {template.description ?? ""}

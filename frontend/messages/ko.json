@@ -12,7 +12,11 @@
     "currentCluster": "현재 클러스터",
     "noClusters": "등록된 클러스터 없음",
     "openMenu": "메뉴 열기",
-    "localeSwitchLabel": "언어 선택"
+    "localeSwitchLabel": "언어 선택",
+    "role": {
+      "adminDesc": "템플릿 작성",
+      "userDesc": "카탈로그 소비"
+    }
   },
   "common": {
     "save": "저장",
@@ -90,6 +94,9 @@
   },
   "releases": {
     "myTitle": "내 릴리스",
+    "meta": {
+      "deployedAt": "<time></time> 배포"
+    },
     "table": {
       "name": "이름",
       "template": "템플릿",

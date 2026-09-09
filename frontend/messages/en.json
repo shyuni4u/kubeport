@@ -12,7 +12,11 @@
     "currentCluster": "Current cluster",
     "noClusters": "No clusters registered",
     "openMenu": "Open menu",
-    "localeSwitchLabel": "Select language"
+    "localeSwitchLabel": "Select language",
+    "role": {
+      "adminDesc": "authors templates",
+      "userDesc": "consumes the catalog"
+    }
   },
   "common": {
     "save": "Save",
@@ -90,6 +94,9 @@
   },
   "releases": {
     "myTitle": "My releases",
+    "meta": {
+      "deployedAt": "deployed <time></time>"
+    },
     "table": {
       "name": "Name",
       "template": "Template",
