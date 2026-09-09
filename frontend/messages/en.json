@@ -31,6 +31,13 @@
     "genericBody": "Please try again in a moment. If it keeps happening, contact an admin.",
     "retry": "Try again"
   },
+  "auth": {
+    "loginFailedTitle": "Couldn't sign you in",
+    "loginCancelled": "You cancelled the sign-in. Try again when you are ready.",
+    "sessionExpired": "The sign-in took too long. Please start again.",
+    "loginFailed": "Something went wrong while signing you in. Try again in a moment; contact an administrator if it keeps happening.",
+    "retryLogin": "Sign in again"
+  },
   "form": {
     "validation": {
       "required": "This field is required.",
