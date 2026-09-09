@@ -99,6 +99,14 @@ function UIModeEdit({ onDirty }: ModeProps) {
   const [clusters, setClusters] = useState<Array<{ name: string }>>([]);
   const [cluster, setCluster] = useState("");
   const [active, setActive] = useState<{ resIdx: number; path: string; node: SchemaNode } | null>(null);
+  // Counts selections rather than tracking which field is selected: on a narrow
+  // viewport the layout uses it to surface the inspector, and re-picking the
+  // field already open still has to take the reader there.
+  const [selectionEvent, setSelectionEvent] = useState(0);
+  const selectField = (resIdx: number, path: string, node: SchemaNode) => {
+    setActive({ resIdx, path, node });
+    setSelectionEvent((n) => n + 1);
+  };
   const [meta, setMeta] = useState<TemplateMeta>({ name: name ?? "", tags: [] });
   // Snapshot of meta loaded from the server, used to detect what to PATCH on save.
   const [initialMeta, setInitialMeta] = useState<TemplateMeta | null>(null);
@@ -310,7 +318,7 @@ function UIModeEdit({ onDirty }: ModeProps) {
               <SchemaTree
                 schema={s}
                 selectedPath={active?.resIdx === i ? active.path : null}
-                onSelect={(p, n) => setActive({ resIdx: i, path: p, node: n })}
+                onSelect={(p, n) => selectField(i, p, n)}
                 fields={r.fields as Record<string, { mode: "fixed" | "exposed" }>}
               />
             ) : (
@@ -400,7 +408,7 @@ function UIModeEdit({ onDirty }: ModeProps) {
         tree={tree}
         inspector={inspector}
         preview={preview}
-        selection={active ? `${active.resIdx}:${active.path}` : null}
+        selectionEvent={selectionEvent}
       />
       {err && <div className="text-red-600 text-sm mt-2 whitespace-pre">{err}</div>}
       <BottomBar

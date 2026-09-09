@@ -194,11 +194,30 @@ describe("EditorLayout on a narrow viewport", () => {
   it("follows a tree selection into the inspector", () => {
     setViewport(false);
     const { rerender } = renderWithIntl(
-      <EditorLayout {...panels} selection={null} />,
+      <EditorLayout {...panels} selectionEvent={0} />,
     );
-    expect(screen.getByText("T")).toBeVisible();
+    expect(showing("T")).toBe(true);
 
-    rerender(<EditorLayout {...panels} selection="0:spec.replicas" />);
-    expect(screen.getByText("I")).toBeVisible();
+    rerender(<EditorLayout {...panels} selectionEvent={1} />);
+    expect(showing("I")).toBe(true);
+  });
+
+  // Re-picking the field already open is still a request to see it. This is why
+  // the prop counts selections instead of naming the selected field: an
+  // identity compares equal on the second tap and strands the reader on the
+  // tree.
+  it("follows a repeat selection of the same field", async () => {
+    setViewport(false);
+    const user = userEvent.setup();
+    const { rerender } = renderWithIntl(
+      <EditorLayout {...panels} selectionEvent={1} />,
+    );
+
+    await user.click(screen.getAllByRole("tab")[0]);
+    expect(showing("T")).toBe(true);
+
+    // Same field, tapped again.
+    rerender(<EditorLayout {...panels} selectionEvent={2} />);
+    expect(showing("I")).toBe(true);
   });
 });

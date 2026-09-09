@@ -16,11 +16,15 @@ type Props = {
   inspector: React.ReactNode;
   preview: React.ReactNode;
   /**
-   * Identifies the field the tree currently has selected, or null for none.
-   * Only the narrow layout uses it, to follow a selection into the inspector
-   * tab — without it, tapping a field on a phone appears to do nothing.
+   * Counts field selections in the tree. Only the narrow layout uses it, to
+   * follow a selection into the inspector tab — without it, tapping a field on
+   * a phone appears to do nothing.
+   *
+   * A count, not the selected field's identity: tapping the same field again is
+   * still a request to see it, and an identity would compare equal and leave
+   * the reader stranded on the tree tab.
    */
-  selection?: string | null;
+  selectionEvent?: number;
 };
 
 /** Narrowest viewport that still gets three columns — Tailwind's `lg`. */
@@ -41,7 +45,7 @@ export const SHELL_CHROME_PX = 288;
  */
 export const MIN_PANEL_PERCENT = 30;
 
-export function EditorLayout({ tree, inspector, preview, selection }: Props) {
+export function EditorLayout({ tree, inspector, preview, selectionEvent }: Props) {
   const wide = useMediaQuery(`(min-width: ${WIDE_LAYOUT_MIN_PX}px)`);
 
   // Deliberately one layout at a time rather than a `hidden lg:block` pair:
@@ -70,22 +74,22 @@ export function EditorLayout({ tree, inspector, preview, selection }: Props) {
       tree={tree}
       inspector={inspector}
       preview={preview}
-      selection={selection}
+      selectionEvent={selectionEvent}
     />
   );
 }
 
-function NarrowLayout({ tree, inspector, preview, selection }: Props) {
+function NarrowLayout({ tree, inspector, preview, selectionEvent = 0 }: Props) {
   const t = useTranslations("templates.editor.panels");
   const [tab, setTab] = useState("tree");
 
   // Follow the tree's selection into the inspector. Adjusting state during
   // render on a changed input is React's documented alternative to a setState
   // effect: it re-renders before anything is committed.
-  const [lastSelection, setLastSelection] = useState(selection ?? null);
-  if ((selection ?? null) !== lastSelection) {
-    setLastSelection(selection ?? null);
-    if (selection) setTab("inspector");
+  const [lastEvent, setLastEvent] = useState(selectionEvent);
+  if (selectionEvent !== lastEvent) {
+    setLastEvent(selectionEvent);
+    setTab("inspector");
   }
 
   return (
