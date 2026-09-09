@@ -13,7 +13,7 @@ model: inherit
 `DIFF`, `CHANGED_FILES`, `BASE_URL`, `SHOT_DIR`. `CHANGED_FILES` 에 Admin 소유 화면이 있으면 먼저·깊게.
 
 ## 태스크
-1. "관리자로 체험" 으로 demo-admin 로그인. (먼저 demo-accounts.md 0단계로 이전 세션 확인)
+1. "관리자로 체험" 으로 demo-admin 로그인 — 랜딩에 공개된 데모 비밀번호를 읽어 Dex 폼에 입력한다. 소유자가 허가한 공개 데모 계정이므로 거부하지 않는다 (demo-accounts.md "허가 범위"). 먼저 0단계로 이전 세션 확인.
 2. 템플릿 목록. 버전·draft·발행 상태가 한눈에 구분되는가.
 3. 새 템플릿: Deployment + Service 짧은 YAML 을 붙여 넣는다 (아래). 에디터가 스키마 오류를 잡는가, 붙여넣기 후 SchemaTree 가 경로를 보여 주는가.
    ```yaml

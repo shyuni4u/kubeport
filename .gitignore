@@ -37,3 +37,4 @@ frontend/out/
 
 # Git worktrees (superpowers convention)
 .worktrees/
+.claude/worktrees/

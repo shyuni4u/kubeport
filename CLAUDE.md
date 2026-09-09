@@ -152,7 +152,7 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
 ## 코드 리뷰
 
 - **PR 은 `/pr-review` 로 올린다**: 7개 페르소나(user/admin/design/master/security/ai + manager)가
-  diff 와 라이브 데모를 리뷰 → `.claude/reviews/<branch>.md` 기록 → `gh pr create`(P0 시 draft) →
+  diff 와 라이브 데모를 리뷰 → `.claude/reviews/<branch>.md` 기록 (브랜치의 `/` 는 `__` 로 치환) → `gh pr create`(P0 시 draft) →
   PR 코멘트 → 기존 문제는 `reviewer:<persona>` 라벨 이슈. 기록 없이 `gh pr create` 는 훅이 막는다
   (실수 방지용 소프트 가드; 우회 `PR_REVIEW_SKIP=1` 은 긴급 시만). 설치 관련 변경은 `--deep`.
   새로 만든 `.claude/agents/*` 는 세션 재시작 후에만 `subagent_type` 으로 보이며, 스킬에 파일 본문

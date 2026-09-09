@@ -17,7 +17,7 @@ function main() {
   // match `gh pr create` anywhere in a compound command (cd x && gh pr create ...)
   if (!/(^|[\s;&|])gh\s+pr\s+create\b/.test(command)) return 0;
 
-  const cwd = process.env.PR_REVIEW_ROOT || process.cwd();
+  const cwd = process.env.PR_REVIEW_ROOT || process.env.CLAUDE_PROJECT_DIR || process.cwd();
   const git = (args) => execSync(`git ${args}`, { cwd, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
 
   let branch, head, root;
