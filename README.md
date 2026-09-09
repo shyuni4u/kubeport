@@ -168,6 +168,7 @@ kubeport/
 - **I want to understand a decision** → [docs/brainstorming-summary.md](docs/brainstorming-summary.md).
 - **I want the full system picture** → [docs/superpowers/specs/2026-04-16-initial-design.md](docs/superpowers/specs/2026-04-16-initial-design.md).
 - **I want to run things locally** → "Quick start" above.
+- **I want to call the API from a script** → [backend/api/openapi.yaml](backend/api/openapi.yaml) for the contract, [docs/machine-clients.md](docs/machine-clients.md) for how to authenticate.
 
 ## Contributing
 

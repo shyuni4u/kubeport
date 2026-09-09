@@ -168,6 +168,7 @@ kubeport/
 - **특정 결정의 이유가 궁금하다** → [docs/brainstorming-summary.md](docs/brainstorming-summary.md).
 - **시스템 전체 그림을 보고 싶다** → [docs/superpowers/specs/2026-04-16-initial-design.md](docs/superpowers/specs/2026-04-16-initial-design.md).
 - **로컬에서 돌려보고 싶다** → 위의 "빠른 시작".
+- **스크립트로 API 를 호출하고 싶다** → 계약은 [backend/api/openapi.yaml](backend/api/openapi.yaml), 인증 방법은 [docs/machine-clients.md](docs/machine-clients.md).
 
 ## 기여
 
