@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"os"
 	"testing"
 	"time"
 
@@ -47,10 +46,10 @@ func TestParseIssuersJSON(t *testing.T) {
 	require.Error(t, err, "duplicate issuer must be rejected")
 }
 
+// No dex needed: discovery is lazy and the token is rejected on its issuer
+// before any network call. The SKIP_OIDC guard that used to be here only cost
+// coverage — the dex-backed tests below use requireDex instead.
 func TestMultiVerifier_UnknownIssuerRejected(t *testing.T) {
-	if os.Getenv("SKIP_OIDC") != "" {
-		t.Skip("SKIP_OIDC set")
-	}
 	ctx := context.Background()
 	m, err := auth.NewMultiVerifier(ctx, []auth.IssuerConfig{{Issuer: dexIssuer(), ClientID: "kubeport"}})
 	require.NoError(t, err)

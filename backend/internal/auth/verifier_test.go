@@ -50,10 +50,17 @@ func dexHTTPClient(t *testing.T) *http.Client {
 // new machine — which taught people that a red `go test ./...` is normal.
 //
 // CI has dex, so it sets KBP_REQUIRE_DEX=1: there, an unreachable dex is a
-// failure, not a skip. SKIP_OIDC still skips unconditionally.
+// failure, not a skip. That flag outranks SKIP_OIDC — otherwise a stray
+// SKIP_OIDC left in a workflow or repo variable would silently delete the dex
+// coverage from a green run, which is the failure mode the guard exists to
+// prevent.
 func requireDex(t *testing.T) *http.Client {
 	t.Helper()
+	required := os.Getenv("KBP_REQUIRE_DEX") == "1"
 	if os.Getenv("SKIP_OIDC") != "" {
+		if required {
+			t.Fatal("SKIP_OIDC and KBP_REQUIRE_DEX=1 are mutually exclusive; drop one")
+		}
 		t.Skip("SKIP_OIDC set")
 	}
 	client := dexHTTPClient(t)
@@ -65,7 +72,7 @@ func requireDex(t *testing.T) *http.Client {
 		}
 		err = fmt.Errorf("discovery returned %s", resp.Status)
 	}
-	if os.Getenv("KBP_REQUIRE_DEX") == "1" {
+	if required {
 		t.Fatalf("dex at %s is required in this environment but unreachable: %v", dexIssuer(), err)
 	}
 	t.Skipf("dex at %s not reachable (%v) — generate deploy/docker/certs and run "+

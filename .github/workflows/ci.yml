@@ -8,6 +8,13 @@ on:
   push:
     branches: [main]
 
+# Every job here runs code from the PR branch (its eslint config, its tests,
+# its atlas.hcl). `pull_request` already withholds secrets and write access
+# from fork PRs, but same-repo branch PRs — the normal flow here — get the
+# default token, so narrow it. Matches build-images.yml and uptime-ping.yml.
+permissions:
+  contents: read
+
 # A new push supersedes the previous run on the same ref.
 concurrency:
   group: ci-${{ github.ref }}
@@ -58,7 +65,7 @@ jobs:
           docker compose -f deploy/docker/docker-compose.yml logs
           exit 1
 
-      - uses: ariga/setup-atlas@v0
+      - uses: ariga/setup-atlas@2f3c785c89a15e1c0d07bcae3900fb5feb969eea # v0.3
 
       - name: Apply DB schema
         run: cd backend/migrations && atlas schema apply --env local --auto-approve
@@ -75,7 +82,17 @@ jobs:
           # fresh clone isn't red. Here dex IS running, so an unreachable dex is
           # a failure — otherwise CI would go green on a silently skipped suite.
           KBP_REQUIRE_DEX: "1"
-        run: cd backend && go test ./...
+        # The kind-backed suites (backend/e2e, openapi_proxy, internal/k8s) skip
+        # here because this workflow doesn't stand up a cluster — playwright.yml
+        # is their gate. Listing the skips in the step summary keeps that
+        # visible, so nobody reads a green check as "the k8s paths are covered".
+        run: |
+          set -o pipefail
+          cd backend && go test ./... -v 2>&1 | tee /tmp/go-test.log
+          {
+            echo "### Skipped Go tests"
+            grep -E '^\s*--- SKIP' /tmp/go-test.log || echo "none"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Dump compose logs on failure
         if: failure()
@@ -87,7 +104,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with: { version: 10 }
 
       - uses: actions/setup-node@v4
@@ -118,7 +135,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with: { version: 10 }
       - uses: actions/setup-node@v4
         with:
@@ -128,9 +145,18 @@ jobs:
       - run: cd frontend && pnpm install --frozen-lockfile
       - name: Audit production dependencies
         run: cd frontend && pnpm audit --prod --audit-level critical
-      - name: Report everything else (informational)
+      - name: Report everything else in the step summary
+        # `|| true` into the log means nobody reads it. The summary is on the
+        # run page, so a new high shows up next to the green check instead of
+        # 200 lines down.
         if: always()
-        run: cd frontend && pnpm audit || true
+        run: |
+          {
+            echo "### pnpm audit (informational — gate above is --prod critical)"
+            echo '```'
+            (cd frontend && pnpm audit) || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   hooks:
     # The /pr-review guard is repo tooling with its own node:test suite; it is
