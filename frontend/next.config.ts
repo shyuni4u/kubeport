@@ -22,8 +22,15 @@ const nextConfig: NextConfig = {
       {
         source: "/:path*",
         headers: [
-          // Two years, matching the preload-list requirement. Safe here because
-          // every host this chart serves (app + dex) is HTTPS-only.
+          // Two years. Deliberately no `preload` token — submitting to the
+          // preload list is an operator decision, not something a chart should
+          // make on their behalf.
+          //
+          // includeSubDomains is safe for the intended layout (an app host plus
+          // dex on its own subdomain, both HTTPS). It is NOT safe if you install
+          // on an apex domain that has sibling HTTP services: they would be
+          // forced to HTTPS for two years, in the visitor's browser, with no way
+          // for you to undo it. Making this configurable is tracked separately.
           {
             key: "Strict-Transport-Security",
             value: "max-age=63072000; includeSubDomains",

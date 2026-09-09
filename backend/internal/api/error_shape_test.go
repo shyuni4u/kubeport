@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -48,8 +50,41 @@ func TestErrorBodies_UseOneUnauthenticatedKind(t *testing.T) {
 // Guard against the string coming back. grep is the honest test here: the
 // release-logs 401 needs a live release plus a reachable cluster to reach
 // through a request, which this package cannot set up.
-func TestErrorKinds_NoUnauthorizedSpelling(t *testing.T) {
-	found := strings.Contains(readSourceFile(t, "release_logs.go"), `"unauthorized"`)
-	require.False(t, found,
-		`release_logs.go still spells the 401 kind "unauthorized"; use "unauthenticated" so /v1 has one 401 kind (#56)`)
+// The set of error kinds /v1 is allowed to emit. This is an allowlist rather
+// than a blacklist of known-bad spellings: the original bug was one handler
+// inventing "unauthorized" alongside "unauthenticated", and only an allowlist
+// catches the next handler that invents something. When a genuinely new kind
+// is needed, add it here and to the API docs in the same change.
+var allowedErrorKinds = map[string]bool{
+	"unauthenticated":  true,
+	"rbac-denied":      true,
+	"demo-restricted":  true,
+	"validation-error": true,
+	"not-found":        true,
+	"user-not-found":   true,
+	"no-pods":          true,
+	"conflict":         true,
+	"k8s-error":        true,
+	"cluster-config":   true,
+	"internal":         true,
+}
+
+func TestErrorKinds_AllowlistOnly(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	require.NoError(t, err)
+
+	re := regexp.MustCompile(`writeError\([^,]+,\s*[^,]+,\s*"([a-z0-9-]+)"`)
+	var checked int
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		for _, m := range re.FindAllStringSubmatch(readSourceFile(t, f), -1) {
+			checked++
+			require.True(t, allowedErrorKinds[m[1]],
+				"%s: error kind %q is not in allowedErrorKinds — add it here and document it, "+
+					"or reuse an existing kind so clients can keep one branch per kind (#56)", f, m[1])
+		}
+	}
+	require.Greater(t, checked, 50, "regex stopped matching writeError calls; fix the pattern")
 }

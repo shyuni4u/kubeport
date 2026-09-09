@@ -8,7 +8,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"kubeport/internal/auth"
 	"kubeport/internal/store"
 )
 
@@ -23,14 +22,22 @@ type createClusterReq struct {
 	DefaultNamespace string `json:"default_namespace"`
 }
 
-// clusterSummary is what a non-admin caller sees. It deliberately drops
-// api_url, ca_bundle and oidc_issuer_url: those describe how to reach the
-// cluster's apiserver, and every authenticated caller — including a demo
-// account — could read them off the full record. k8s RBAC is still the real
-// authority, so this is defence in depth rather than the only control.
+// clusterSummary is the only shape GET /v1/clusters returns. It deliberately
+// drops api_url, ca_bundle and oidc_issuer_url: those describe how to reach a
+// cluster's apiserver, and the list is readable by every authenticated caller.
 //
-// The deploy form and the template editors only ever read name and
-// default_namespace off this payload, so narrowing it costs the UI nothing.
+// This is not role-dependent on purpose. Gating the full record behind
+// isKubeportAdmin would not have closed the hole the finding was about: when
+// demo mode is on, the chart appends demo.adminEmail to KBP_DEV_ADMIN_EMAILS
+// (templates/_helpers.tpl "kubeport.devAdminEmails"), so the public demo
+// admin *is* in the kubeport-admin group and would still have read the
+// production cluster's endpoint. One shape also means a client never has to
+// guess why a field is absent.
+//
+// Nothing reads the dropped fields off this endpoint — the deploy form and
+// both template editors use name/default_namespace, POST /v1/releases and the
+// SSAR take a cluster name. An admin registering a cluster still gets the full
+// record back from POST /v1/clusters.
 type clusterSummary struct {
 	ID               pgtype.UUID `json:"id"`
 	Name             string      `json:"name"`
@@ -42,17 +49,6 @@ func (h *Handlers) ListClusters(c *gin.Context) {
 	cs, err := h.deps.Store.ListClusters(c.Request.Context())
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "internal", err.Error())
-		return
-	}
-	if cs == nil {
-		cs = []store.Cluster{}
-	}
-
-	// Admins keep the full record — that is how a registration is verified
-	// after the fact, and there is no cluster-registration screen yet.
-	u, _ := auth.UserFrom(c.Request.Context())
-	if isKubeportAdmin(u) {
-		c.JSON(http.StatusOK, gin.H{"clusters": cs})
 		return
 	}
 

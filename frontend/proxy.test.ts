@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { config } from "./proxy";
 
-// Next.js compiles each matcher string to a path regex. Approximating it with
-// RegExp is enough to pin the one property we care about: which paths the
-// redirect-to-login middleware is allowed to intercept.
+// Next.js compiles each matcher string with path-to-regexp, not the RegExp
+// constructor, so this is an approximation — it pins the intent of the pattern,
+// not Next's exact matching. The real behaviour was checked by running the app:
+// GET /api/v1/templates returns a JSON 401 while GET /catalog still 307s to
+// /api/auth/login. Treat a change here as a prompt to re-check that by hand.
 function intercepts(pathname: string): boolean {
   return config.matcher.some((m) => new RegExp(`^${m}$`).test(pathname));
 }
