@@ -44,6 +44,12 @@ helm-snapshot: helm-sync
 
 # Regenerate the golden snapshot. Run this when an intentional template
 # change is made; commit the diff alongside the template change.
+#
+# Check `helm version` first. CI pins helm 3.20.2 (.github/workflows/helm.yml),
+# and helm 4 emits an extra blank line before every document separator — so
+# regenerating with helm 4 rewrites ~18 unrelated lines and CI then fails on a
+# snapshot it cannot reproduce. Either use helm 3, or strip those blank lines
+# and confirm the diff against the committed snapshot shows additions only.
 helm-snapshot-update: helm-sync
 	helm template kp $(HELM_CHART_DIR) \
 		-f $(HELM_CHART_DIR)/ci/test-values.yaml \

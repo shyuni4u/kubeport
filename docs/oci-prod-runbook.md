@@ -123,6 +123,18 @@ ssh -i "$KEY" ubuntu@168.107.55.95 \
 - `--reuse-values` 가 시크릿(enc key, pg pass, oidc)을 유지한다. 특정 값만 `--set` 으로 덮어씀.
   **데모 게이트도 유지된다** — 2026-09-09 rev 10 에서 `demo.allowTemplateCreate=false` 가 그대로
   남는 것을 확인했다. 완화 플래그가 재배포로 조용히 켜지지 않는다는 뜻이다.
+- ⚠️ **`--reuse-values` 는 릴리스에 저장된 값만 이어받는다 — 그 뒤에 차트에 새로 생긴 키는 안 채운다.**
+  `values-oci-phase2.yaml` 에만 있는 새 값은 이 명령으로 배포하면 **차트 기본값이 적용된다.**
+  새 값이 들어간 버전을 올릴 때는 `--set` 으로 명시하거나 `helm get values kubeport -n kubeport`
+  로 실제 머지된 값을 확인할 것. 현재 해당하는 것:
+
+  ```
+  --set demo.publicHealthCatalog=true
+  ```
+
+  이 값이 빠지면 `/healthz?verbose=1` 이 카탈로그 수를 내지 않고,
+  `uptime-ping.yml` 이 10분 안에 "카탈로그 필드 없음" 으로 실패한다 — 데모가 멀쩡해도.
+  그건 오탐이 아니라 설계된 신호다(감시가 꺼진 것을 감시가 알린다). 배포 직후 확인할 것.
 - 롤아웃 직후 잠깐 `502` 가 날 수 있음(구 파드 종료↔신 파드 준비) — 30초 뒤 정상.
 
 ### 3-3. 배포 확인
