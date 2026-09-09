@@ -10,6 +10,13 @@ on:
   push:
     branches: [main]
 
+# A new push supersedes the previous run on the same ref. This one stands up a
+# kind cluster for ~4 minutes, so a superseded run is worth cancelling. Matches
+# ci.yml.
+concurrency:
+  group: playwright-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   playwright:
     runs-on: ubuntu-24.04

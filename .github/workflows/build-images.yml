@@ -4,6 +4,10 @@ name: build-images
 # Pushed to ghcr.io/shyuni4u/kubeport-backend and -frontend.
 # See ADR 0003 §"공통 스택" — multi-arch is required for Phase 1↔2/3 zero-touch
 # (x86 GCP bootstrap → ARM OCI/Hetzner production without rebuild).
+#
+# Both arches on main and tags, which is where images are published. A PR builds
+# amd64 only and pushes nothing — see the comments on `platforms:` and on the
+# `pull_request:` paths below.
 
 on:
   push:
@@ -13,17 +17,48 @@ on:
       - 'backend/**'
       - 'frontend/**'
       - '.github/workflows/build-images.yml'
+  # A PR never pushes an image (see `push:` on the build step), so this run only
+  # answers "does the image still build". That question is decided by the
+  # Dockerfiles and the files they name — not by every source file under
+  # backend/ or frontend/, which is what used to trigger it. A CSS-only PR was
+  # paying 4½ minutes to rebuild an image nobody would pull.
+  #
+  # Ordinary source changes are covered without this job: `go vet ./...` plus
+  # `go test ./...` compile everything the backend image builds, and ci.yml's
+  # frontend job now runs `pnpm build`.
+  #
+  # next.config.ts is here because `pnpm build` does NOT cover it. Dropping
+  # `output: "standalone"` leaves the build green while the frontend Dockerfile
+  # fails at `COPY /app/.next/standalone`; outputFileTracingIncludes decides
+  # what lands in that directory. pnpm-workspace.yaml is copied by name in the
+  # dependency stage.
+  #
+  # The `push:` paths above stay broad on purpose: main really does publish, so
+  # any source change has to produce a new image.
   pull_request:
     branches: [main]
     paths:
-      - 'backend/**'
-      - 'frontend/**'
+      - '**/Dockerfile'
+      - '**/.dockerignore'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+      - 'frontend/package.json'
+      - 'frontend/pnpm-lock.yaml'
+      - 'frontend/pnpm-workspace.yaml'
+      - 'frontend/next.config.ts'
       - '.github/workflows/build-images.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
   packages: write   # ghcr.io push 권한
+
+# A new push supersedes the previous run on the same ref. Without this a burst
+# of review fixes left three multi-arch builds running against commits nobody
+# was waiting on any more. Matches ci.yml.
+concurrency:
+  group: build-images-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
@@ -79,7 +114,15 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
-          platforms: linux/amd64,linux/arm64
+          # arm64 is built under QEMU emulation and accounts for most of this
+          # job's runtime. On a PR the image is thrown away, so pay for it where
+          # the artifact is actually kept: main and tags publish both arches,
+          # which is what ADR 0003 requires for the x86→ARM move.
+          #
+          # The trade: an arm64-only build break surfaces on main instead of on
+          # the PR. Neither Dockerfile branches on architecture today, and main
+          # still gates before anything is deployed.
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
           # PR 은 build only (push 안 함, ghcr 권한 없음)
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
