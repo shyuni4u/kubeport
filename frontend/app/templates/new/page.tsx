@@ -106,6 +106,14 @@ function UIModeNew({ onDirty }: ModeProps) {
   const [owningTeamId, setOwningTeamId] = useState<string>("");
   const [resources, setResources] = useState<EditedResource[]>([]);
   const [active, setActive] = useState<{ resIdx: number; path: string; node: SchemaNode } | null>(null);
+  // Counts selections rather than tracking which field is selected: on a narrow
+  // viewport the layout uses it to surface the inspector, and re-picking the
+  // field already open still has to take the reader there.
+  const [selectionEvent, setSelectionEvent] = useState(0);
+  const selectField = (resIdx: number, path: string, node: SchemaNode) => {
+    setActive({ resIdx, path, node });
+    setSelectionEvent((n) => n + 1);
+  };
   const [meta, setMeta] = useState<TemplateMeta>({ name: "", tags: [] });
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -249,7 +257,7 @@ function UIModeNew({ onDirty }: ModeProps) {
             <SchemaTree
               schema={r.rootSchema}
               selectedPath={active?.resIdx === i ? active.path : null}
-              onSelect={(p, n) => setActive({ resIdx: i, path: p, node: n })}
+              onSelect={(p, n) => selectField(i, p, n)}
               fields={r.fields}
             />
           </div>
@@ -325,7 +333,12 @@ function UIModeNew({ onDirty }: ModeProps) {
           <strong>{t("getStartedLead")}</strong>{t("getStarted")}
         </div>
       )}
-      <EditorLayout tree={tree} inspector={inspector} preview={preview} />
+      <EditorLayout
+        tree={tree}
+        inspector={inspector}
+        preview={preview}
+        selectionEvent={selectionEvent}
+      />
       {err && <div className="text-red-600 text-sm whitespace-pre">{err}</div>}
       <BottomBar
         canSave={canSave}
@@ -447,7 +460,7 @@ function YamlModeNew({ onDirty }: ModeProps) {
         <YamlEditor label="resources.yaml" value={resourcesYaml} onChange={(v) => { setResourcesYaml(v); touch(); }} />
         <YamlEditor label="ui-spec.yaml" value={uispecYaml} onChange={(v) => { setUispecYaml(v); touch(); }} />
       </div>
-      <details className="rounded border bg-white p-3" open>
+      <details className="rounded-md border bg-card p-3" open>
         <summary className="cursor-pointer text-sm font-semibold">{t("userFormPreview")}</summary>
         <div className="mt-3">
           <UserFormPreview uiSpecYaml={uispecYaml} />

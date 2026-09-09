@@ -51,6 +51,12 @@ type Props = {
   spec: UISpec;
   initialValues?: Record<string, unknown>;
   submitLabel?: string;
+  /**
+   * Emphasis of the submit button. The admin's ui-spec preview passes
+   * "outline" so the button that deploys nothing stops outshouting the
+   * editor's real save action (#44).
+   */
+  submitVariant?: "default" | "outline";
   disabled?: boolean;
   /**
    * May return a promise. When it does, the form stays locked until it
@@ -120,6 +126,7 @@ export function DynamicForm({
   spec,
   initialValues,
   submitLabel = "배포하기",
+  submitVariant = "default",
   disabled = false,
   onSubmit,
   onChange,
@@ -233,7 +240,11 @@ export function DynamicForm({
             onSubmit above keeps it true for the whole request, so the button
             greys out instead of merely swallowing the click.
           */}
-          <Button type="submit" disabled={disabled || form.formState.isSubmitting}>
+          <Button
+            type="submit"
+            variant={submitVariant}
+            disabled={disabled || form.formState.isSubmitting}
+          >
             {submitLabel}
           </Button>
         </div>

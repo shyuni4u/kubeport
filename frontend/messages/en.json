@@ -205,7 +205,8 @@
     "autoscroll": "Auto-scroll",
     "clear": "Clear",
     "emptyWaiting": "No output yet. Lines appear here as soon as it runs.",
-    "emptyDisconnected": "Connection lost. Reload the page; if it keeps dropping, contact an admin.",
+    "emptyDisconnected": "Connection lost. Try Reconnect; if it keeps dropping, contact an admin.",
+    "reconnect": "Reconnect",
     "status": {
       "connected": "Connected",
       "connecting": "Connecting",
@@ -331,6 +332,11 @@
         "warningsMore": "…and {count} more",
         "uiDraftPreview": "This draft was authored in UI mode. The YAML tab is preview-only — switch to the UI tab to edit it.",
         "nonDraftYaml": "v{version} is {status}. Saving will create a new draft version."
+      },
+      "panels": {
+        "tree": "Structure",
+        "inspector": "Field",
+        "preview": "Preview"
       }
     },
     "status": {

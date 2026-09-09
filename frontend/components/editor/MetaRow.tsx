@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 
@@ -38,7 +39,7 @@ export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Prop
   const lockAll = readOnly === true;
 
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-4 py-2">
+    <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted px-4 py-2">
       <label className="flex items-center gap-2 text-xs">
         <span className="text-muted-foreground">{t("name")}</span>
         <Input
@@ -72,13 +73,22 @@ export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Prop
       )}
       <div className="flex flex-wrap items-center gap-1">
         {meta.tags.map((tag) => (
-          <Badge key={tag} variant="secondary" className="text-[10px]">
+          <Badge key={tag} variant="secondary" className="gap-1 text-[11px]">
             {tag}
             {!lockAll && (
               <button
                 type="button"
                 aria-label={t("removeTag", { tag })}
-                className="ml-1 opacity-60 hover:opacity-100"
+                // A real icon at a real hit area (#44). "×" was a text glyph
+                // whose size followed the badge's own font size, so it shrank
+                // with it. The icon is 16px to fit the badge, but `after:`
+                // stretches the pointer target to 24px for WCAG 2.2 SC 2.5.8 —
+                // growing the button itself would grow the badge.
+                //
+                // ring, not outline: the parent Badge is `overflow-hidden`, and
+                // an outline on a child flush with its edge gets clipped. A
+                // ring is a box-shadow, which is not.
+                className="relative -mr-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-sm opacity-60 after:absolute after:-inset-1 after:content-[''] hover:bg-secondary-foreground/10 hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() =>
                   onChange({
                     ...meta,
@@ -86,7 +96,7 @@ export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Prop
                   })
                 }
               >
-                ×
+                <X className="size-3" aria-hidden />
               </button>
             )}
           </Badge>
