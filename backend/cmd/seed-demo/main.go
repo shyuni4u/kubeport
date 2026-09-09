@@ -34,6 +34,15 @@ func getenv(k, def string) string {
 
 func main() {
 	reset := flag.Bool("reset", false, "delete demo-owned rows before seeding (DATABASE_URL is required either way)")
+	// The CronJob runs this as an initContainer ahead of wipe-k8s. Inside this
+	// process reset already cannot run before preflight, but the Job deletes
+	// the demo namespace's objects in a container of its own, and that step
+	// knew nothing about whether the re-seed could succeed. Running the same
+	// checks first makes the whole Job fail before anything is destroyed,
+	// rather than only this binary.
+	preflightOnly := flag.Bool("preflight-only", false,
+		"prove Dex, the API, the database and the demo owner are reachable, then exit 0. "+
+			"Deletes nothing; /v1/me upserts the demo users rows, which the seed needs anyway.")
 	flag.Parse()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -61,9 +70,17 @@ func main() {
 	// the API, the database and the demo identity have all answered.
 	pf, err := runPreflight(ctx, hc, dsn, demoDomain)
 	if err != nil {
-		log.Fatalf("preflight: %v — demo data left intact, nothing was deleted", err)
+		// Deliberately narrower than "nothing was deleted": the CronJob's
+		// wipe-k8s container may already have emptied the demo namespace, and
+		// claiming otherwise would send an operator looking in the wrong place.
+		log.Fatalf("preflight: %v — no database rows were deleted", err)
 	}
 	defer pf.st.Close()
+
+	if *preflightOnly {
+		log.Println("seed-demo: preflight ok")
+		return
+	}
 
 	if *reset {
 		if err := pf.reset(ctx, dsn, demoDomain); err != nil {

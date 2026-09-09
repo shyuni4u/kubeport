@@ -75,10 +75,14 @@ jobs:
 
           count=$(printf '%s' "$body" | jq -r '.catalog.templates // empty')
           if [ -z "$count" ]; then
-            # Only reachable when status is ok and no catalog key was sent,
-            # i.e. demo.publicHealthCatalog is off for this deployment.
-            echo "Catalog reporting is off for this deployment — skipping"
-            exit 0
+            # URL is the public demo, the one deployment that opts in. A
+            # missing catalog key here does not mean "this deployment does not
+            # report" — it means reporting disappeared. `helm upgrade
+            # --reuse-values` dropping demo.publicHealthCatalog, or a
+            # ConfigMap that did not roll, both land here, and skipping would
+            # leave the empty-demo alarm silently blind.
+            echo "::error::Health returned no catalog field — demo.publicHealthCatalog is off or the backend ConfigMap did not roll. The empty-demo check is currently blind."
+            exit 1
           fi
           echo "catalog.templates = $count"
           if [ "$count" -eq 0 ]; then

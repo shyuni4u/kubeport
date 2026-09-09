@@ -1433,6 +1433,62 @@ spec:
             runAsNonRoot: true
             runAsUser: 65532
           initContainers:
+            # Runs before wipe-k8s on purpose. The seeder proves its own
+            # dependencies before it deletes database rows, but that only
+            # governs the seed container: wipe-k8s used to empty the demo
+            # namespace with no idea whether the re-seed could succeed, so a
+            # Dex outage still destroyed the workloads and left the releases
+            # pointing at nothing until the next run six hours later (#105).
+            # Failing here fails the Job before anything is destroyed.
+            - name: preflight
+              image: ghcr.io/shyuni4u/kubeport-backend:0.1.0
+              command: ["/seed-demo", "--preflight-only"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: kp-kubeport-auth
+                      key: DATABASE_URL
+                - name: DEMO_OIDC_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: kp-kubeport-auth
+                      key: DEMO_OIDC_CLIENT_SECRET
+                - name: KBP_API_BASE_URL
+                  value: "http://kp-kubeport-backend:8080"
+                - name: DEMO_OIDC_ISSUER
+                  value: "https://dex.example.test"
+                - name: DEMO_OIDC_CLIENT_ID
+                  value: "kubeport-demo"
+                - name: DEMO_ADMIN_EMAIL
+                  value: "demo-admin@demo.kubeport"
+                - name: DEMO_USER_EMAIL
+                  value: "demo-user@demo.kubeport"
+                - name: DEMO_CLUSTER
+                  value: "oci-a1"
+                - name: DEMO_NAMESPACE
+                  value: "demo"
+                - name: KBP_DEMO_EMAIL_DOMAIN
+                  value: "demo.kubeport"
+                - name: DEMO_ADMIN_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: kp-kubeport-demo
+                      key: DEMO_ADMIN_PASSWORD
+                - name: DEMO_USER_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: kp-kubeport-demo
+                      key: DEMO_USER_PASSWORD
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                  - ALL
+                readOnlyRootFilesystem: true
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
             - name: wipe-k8s
               image: "alpine/k8s:1.31.9"
               command: ["sh", "-c"]

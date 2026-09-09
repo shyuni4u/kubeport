@@ -2,8 +2,10 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -38,6 +40,61 @@ func healthCatalogCount(t *testing.T, s *store.Store) float64 {
 	require.Equal(t, "ok", body.Status)
 	require.True(t, body.Catalog.Available, "catalog should be readable: %s", w.Body.String())
 	return body.Catalog.Templates
+}
+
+// Opting the count in without a demo domain leaves nothing to scope it to, so
+// the number would be the size of the operator's own catalog — the exact
+// disclosure the default-off flag exists to prevent. The chart happens to
+// prevent this by nesting the env inside demo.enabled; this is the code
+// keeping its own promise.
+func TestHealthzCatalog_WithoutDemoDomainNothingIsPublished(t *testing.T) {
+	s := testStore(t)
+	r := api.NewRouter(config.Config{}, api.Deps{
+		Verifier:            adminVerifier{},
+		Store:               s,
+		HealthPublicCatalog: true,
+		// DemoEmailDomain deliberately empty.
+	})
+
+	w := do(t, r, http.MethodGet, "/healthz?verbose=1", nil)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, "ok", body["status"], "a misconfigured flag is not an outage")
+	require.NotContains(t, body, "catalog")
+}
+
+// A caller who hangs up must not poison the shared cache: the value belongs to
+// the process, not to the first request that filled it. Filling it from a
+// request context made a cancelled request cache `degraded` for the whole TTL,
+// which would have kept the uptime alarm red and hidden the empty-catalog case
+// the alarm exists for.
+func TestHealthzCatalog_CancelledRequestDoesNotPoisonTheCache(t *testing.T) {
+	s := testStore(t)
+	r := api.NewRouter(config.Config{}, api.Deps{
+		Verifier:            adminVerifier{},
+		Store:               s,
+		DemoEmailDomain:     demoDomain,
+		HealthPublicCatalog: true,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodGet, "/healthz?verbose=1", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	// Whatever that request got, the next one must be answered from a healthy
+	// query rather than a cached cancellation.
+	w2 := do(t, r, http.MethodGet, "/healthz?verbose=1", nil)
+	require.Equal(t, http.StatusOK, w2.Code)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &body))
+	require.Equal(t, "ok", body["status"], "body: %s", w2.Body.String())
+	catalog, ok := body["catalog"].(map[string]any)
+	require.True(t, ok, "body: %s", w2.Body.String())
+	require.Equal(t, true, catalog["available"])
 }
 
 // The signal exists to catch a reset that wiped the demo catalog and failed to
