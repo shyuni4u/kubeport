@@ -17,6 +17,11 @@ on:
       - "Makefile"
   workflow_dispatch:
 
+# A new push supersedes the previous run on the same ref. Matches ci.yml.
+concurrency:
+  group: helm-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint-and-snapshot:
     runs-on: ubuntu-latest

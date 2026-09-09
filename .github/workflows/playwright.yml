@@ -10,6 +10,20 @@ on:
   push:
     branches: [main]
 
+# A new push supersedes the previous run on the same ref. This one stands up a
+# kind cluster for ~4 minutes, so a superseded run is worth cancelling.
+#
+# Pull requests only: on main this is the only end-to-end signal a commit gets,
+# and losing it would let a merge slip through with no e2e result at all rather
+# than a failing one.
+#
+# Non-PR runs get a group of their own (run_id is unique). `cancel-in-progress:
+# false` alone is not enough — GitHub keeps only one *pending* run per group, so
+# a third merge cancels the second while it is still queued.
+concurrency:
+  group: playwright-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   playwright:
     runs-on: ubuntu-24.04

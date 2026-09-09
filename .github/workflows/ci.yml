@@ -114,7 +114,12 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          # Matches frontend/Dockerfile's node:24-alpine. This job now carries
+          # the `next build` gate that the image build used to provide on a PR
+          # (#116), and a gate that runs on a different major than the thing it
+          # stands in for is not the same gate: a Node 24-only failure would
+          # pass here and break the image on main.
+          node-version: 24
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 
@@ -130,6 +135,17 @@ jobs:
       - name: Unit tests
         run: cd frontend && pnpm test
 
+      - name: Build
+        # `next build` is a gate of its own: it rejects App Router mistakes that
+        # tsc and eslint both accept — a server/client boundary crossed, a
+        # missing "use client", an invalid route segment export.
+        #
+        # It used to run on a PR only as a side effect of build-images building
+        # the frontend Dockerfile, which stage 2 does with `pnpm build`. Now that
+        # build-images no longer runs for a source-only PR, the gate has to be
+        # here, where it costs seconds instead of minutes.
+        run: cd frontend && pnpm build
+
   audit:
     # Separate job on purpose: the advisory database changes without anyone
     # touching this repo, so a new finding must not look like a test failure.
@@ -144,7 +160,8 @@ jobs:
         with: { version: 10 }
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          # Same major as the frontend job and the image (node:24-alpine).
+          node-version: 24
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: cd frontend && pnpm install --frozen-lockfile
