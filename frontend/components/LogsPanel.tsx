@@ -264,13 +264,16 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     };
   }, [releaseId, instance]);
 
+  // `status` is in the deps because the refusal notice is appended by a status
+  // change, not by a new line — without it the one row that says why the stream
+  // stopped is the one row autoscroll does not bring into view.
   useEffect(() => {
     if (!autoscroll) return;
     const el = boxRef.current;
     if (el && typeof el.scrollTo === "function") {
       el.scrollTo({ top: el.scrollHeight });
     }
-  }, [lines, autoscroll]);
+  }, [lines, status, autoscroll]);
 
   return (
     <>
@@ -294,13 +297,9 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
         ref={boxRef}
         className="h-[60vh] overflow-auto rounded bg-slate-950 p-3 font-mono text-[12px] leading-relaxed text-slate-100"
       >
-        {lines.length === 0 && (
-          <p className={status === "failed" ? "text-red-300" : "text-slate-400"}>
-            {status === "failed"
-              ? openErrorText(t, failure)
-              : status === "disconnected"
-                ? t("emptyDisconnected")
-                : t("emptyWaiting")}
+        {lines.length === 0 && status !== "failed" && (
+          <p className="text-slate-400">
+            {status === "disconnected" ? t("emptyDisconnected") : t("emptyWaiting")}
           </p>
         )}
         {lines.map((l) => (
@@ -315,6 +314,17 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
             {l.kind === "error" ? streamErrorText(t, l) : l.text}
           </div>
         ))}
+        {/*
+          Last row rather than an empty state: a refusal is not always the first
+          thing that happens. The stream can open, buffer lines, drop, and then
+          be refused on the browser's own reconnect — an expired session, a
+          release someone deleted. Hanging this off "the buffer is empty" hid
+          the reason in exactly that case, leaving stale logs under a bare
+          "Not connected".
+        */}
+        {status === "failed" && (
+          <p className="whitespace-pre-wrap text-red-300">{openErrorText(t, failure)}</p>
+        )}
       </div>
     </>
   );

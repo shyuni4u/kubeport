@@ -218,6 +218,33 @@ describe("LogsPanel pre-stream refusals", () => {
     expect(await screen.findByRole("button", { name: "다시 연결" })).toBeInTheDocument();
   });
 
+  // A refusal is not always the first thing that happens. The stream can open,
+  // buffer lines, drop, and be refused on the browser's own reconnect — the
+  // session expired, the release was deleted. Hanging the message off "the
+  // buffer is empty" hid the reason in exactly that case, leaving stale logs
+  // under a bare "연결 안 됨" and no way to tell what to do.
+  it("shows the reason even when the buffer already holds lines", async () => {
+    fetchMock.mockResolvedValue(problem("unauthenticated", 401, "req-late"));
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+
+    act(() => {
+      const es = sockets.at(-1)!;
+      es.readyState = 1;
+      es.onopen?.();
+      for (const fn of es.listeners.log ?? []) {
+        fn({ data: JSON.stringify({ time: Date.now(), pod: "p1", text: "line one" }) } as MessageEvent);
+      }
+    });
+    expect(screen.getByText(/line one/)).toBeInTheDocument();
+
+    refuse();
+
+    expect(await screen.findByText(/로그인이 만료/)).toBeInTheDocument();
+    expect(screen.getByText(/req-late/)).toBeInTheDocument();
+    // The lines that did arrive stay — they are the last thing the reader saw.
+    expect(screen.getByText(/line one/)).toBeInTheDocument();
+  });
+
   it("closes the refused stream instead of leaving it around", async () => {
     fetchMock.mockResolvedValue(problem("no-pods", 404));
     render(<LogsPanel releaseId="abc" instances={[]} />);
