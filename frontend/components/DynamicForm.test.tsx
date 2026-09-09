@@ -561,3 +561,37 @@ describe("DynamicForm slider affordance", () => {
     );
   });
 });
+
+// #44 — the admin's "user form preview" submits nothing, yet it rendered in the
+// primary colour right beside the editor's real save action. The loudest button
+// on the screen was the one that does nothing.
+describe("DynamicForm submit emphasis", () => {
+  const spec: UISpec = {
+    fields: [
+      { path: "metadata.name", label: "Name", type: "string", required: true },
+    ],
+  };
+
+  it("submits in the primary colour by default", () => {
+    renderWithIntl(
+      <DynamicForm spec={spec} onSubmit={() => {}} submitLabel="Deploy" />,
+    );
+    expect(screen.getByRole("button", { name: "Deploy" }).className).toContain(
+      "bg-primary",
+    );
+  });
+
+  it("can step back to outline for a preview that deploys nothing", () => {
+    renderWithIntl(
+      <DynamicForm
+        spec={spec}
+        onSubmit={() => {}}
+        submitLabel="Deploy"
+        submitVariant="outline"
+      />,
+    );
+    const button = screen.getByRole("button", { name: "Deploy" });
+    expect(button.className).not.toContain("bg-primary");
+    expect(button.className).toContain("border");
+  });
+});

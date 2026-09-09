@@ -205,7 +205,8 @@
     "autoscroll": "Auto-scroll",
     "clear": "Clear",
     "emptyWaiting": "No output yet. Lines appear here as soon as it runs.",
-    "emptyDisconnected": "Connection lost. Reload the page; if it keeps dropping, contact an admin.",
+    "emptyDisconnected": "Connection lost. Try Reconnect; if it keeps dropping, contact an admin.",
+    "reconnect": "Reconnect",
     "error": {
       "k8s-error": "Could not read logs from the cluster. Try again in a moment.",
       "cluster-auth-denied": "The cluster refused the connection. Signing in again will not help — ask an admin.",
@@ -338,6 +339,11 @@
         "warningsMore": "…and {count} more",
         "uiDraftPreview": "This draft was authored in UI mode. The YAML tab is preview-only — switch to the UI tab to edit it.",
         "nonDraftYaml": "v{version} is {status}. Saving will create a new draft version."
+      },
+      "panels": {
+        "tree": "Structure",
+        "inspector": "Field",
+        "preview": "Preview"
       }
     },
     "status": {

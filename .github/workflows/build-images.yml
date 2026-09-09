@@ -4,26 +4,85 @@ name: build-images
 # Pushed to ghcr.io/shyuni4u/kubeport-backend and -frontend.
 # See ADR 0003 §"공통 스택" — multi-arch is required for Phase 1↔2/3 zero-touch
 # (x86 GCP bootstrap → ARM OCI/Hetzner production without rebuild).
+#
+# Both arches on main and tags, which is where images are published. A PR builds
+# amd64 only and pushes nothing — see the comments on `platforms:` and on the
+# `pull_request:` paths below.
 
 on:
+  # No paths filter here, deliberately. docs/oci-prod-runbook.md deploys with
+  # `NEWSHA=$(git rev-parse --short=7 HEAD)` and pins `sha-$NEWSHA`, so every
+  # main commit has to have an image — a docs-only commit at HEAD used to leave
+  # the operator pinning a tag that was never published. The same filter applied
+  # to tags, so a release tagged on a docs commit published nothing at all.
+  #
+  # The cost is a build on commits that could not have changed the image. That
+  # is the right side to be wrong on: the alternative fails at deploy time, on
+  # someone else's terminal.
   push:
     branches: [main]
     tags: ['v*.*.*']
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - '.github/workflows/build-images.yml'
+  # A PR never pushes an image (see `push:` on the build step), so this run only
+  # answers "does the image still build". That question is decided by the
+  # Dockerfiles and the files they name — not by every source file under
+  # backend/ or frontend/, which is what used to trigger it. A CSS-only PR was
+  # paying 4½ minutes to rebuild an image nobody would pull.
+  #
+  # Ordinary source changes are covered without this job: `go vet ./...` plus
+  # `go test ./...` compile everything the backend image builds, and ci.yml's
+  # frontend job now runs `pnpm build`.
+  #
+  # next.config.ts is here because `pnpm build` does NOT cover it. Dropping
+  # `output: "standalone"` leaves the build green while the frontend Dockerfile
+  # fails at `COPY /app/.next/standalone`; outputFileTracingIncludes decides
+  # what lands in that directory. pnpm-workspace.yaml is copied by name in the
+  # dependency stage.
+  #
+  # The `push:` paths above stay broad on purpose: main really does publish, so
+  # any source change has to produce a new image.
   pull_request:
     branches: [main]
     paths:
-      - 'backend/**'
-      - 'frontend/**'
+      # Named rather than '**/Dockerfile': there are exactly two build contexts,
+      # and a glob would also wake this job for a Dockerfile added somewhere
+      # that has nothing to do with either image. Being exact is the point of
+      # this filter.
+      - 'backend/Dockerfile'
+      - 'backend/.dockerignore'
+      - 'frontend/Dockerfile'
+      - 'frontend/.dockerignore'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+      - 'frontend/package.json'
+      - 'frontend/pnpm-lock.yaml'
+      - 'frontend/pnpm-workspace.yaml'
+      - 'frontend/next.config.ts'
       - '.github/workflows/build-images.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
   packages: write   # ghcr.io push 권한
+
+# A new push supersedes the previous run on the same ref. Without this a burst
+# of review fixes left three multi-arch builds running against commits nobody
+# was waiting on any more.
+#
+# Pull requests only. This job publishes on main and on tags, and
+# docs/oci-prod-runbook.md deploys by pinning `sha-<shortsha>` — losing a main
+# run leaves that sha with no image in ghcr, so an operator pinning it (or
+# rolling back to it) meets ImagePullBackOff. A superseded PR build produces
+# nothing anyone can pin, so there it is free.
+#
+# Non-PR runs get a group of their own (run_id is unique) rather than sharing
+# one with cancel-in-progress off. `cancel-in-progress: false` only protects the
+# run that is already executing: GitHub keeps a single *pending* run per group,
+# so with three merges in quick succession the third cancels the second while it
+# waits, and that commit is never built. A per-run group means main and tag
+# builds never queue against each other at all.
+concurrency:
+  group: build-images-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   REGISTRY: ghcr.io
@@ -45,18 +104,18 @@ jobs:
             context: ./frontend
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up QEMU (for arm64 emulation when needed)
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
         # PR from forks 는 GITHUB_TOKEN 으로 push 권한 없음 — push 단계 자체를 건너뜀
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -64,7 +123,7 @@ jobs:
 
       - name: Extract metadata (tags, labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/kubeport-${{ matrix.component }}
           tags: |
@@ -76,10 +135,18 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
-          platforms: linux/amd64,linux/arm64
+          # arm64 is built under QEMU emulation and accounts for most of this
+          # job's runtime. On a PR the image is thrown away, so pay for it where
+          # the artifact is actually kept: main and tags publish both arches,
+          # which is what ADR 0003 requires for the x86→ARM move.
+          #
+          # The trade: an arm64-only build break surfaces on main instead of on
+          # the PR. Neither Dockerfile branches on architecture today, and main
+          # still gates before anything is deployed.
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
           # PR 은 build only (push 안 함, ghcr 권한 없음)
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}

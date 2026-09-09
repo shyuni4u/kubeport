@@ -58,10 +58,27 @@
   --popover-foreground: oklch(0.145 0 0);
   --primary: oklch(0.55 0.22 275);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
+  /*
+    Darker than --background on purpose (#71). shadcn's light default pairs a
+    white page with muted at 0.97; this theme lowered the page to 0.97 for the
+    "grey page, white cards" look but left muted behind, so the two became the
+    same colour and every bg-muted surface on a page background vanished.
+    Recessed rather than raised, mirroring how dark mode lifts muted above its
+    own background. Held just above --border (0.922): on a `border bg-muted`
+    panel the border earns its keep against the card it sits on, not against
+    the fill, and this keeps that relationship the way shadcn ships it.
+  */
+  --secondary: oklch(0.93 0 0);
   --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --muted: oklch(0.93 0 0);
+  /*
+    Darkened with --muted. shadcn's 0.556 was 4.34:1 on the old 0.97 surface —
+    already under WCAG 1.4.3 AA — and would have fallen to 3.85:1 once --muted
+    moved, on exactly the surfaces this change makes solid (the release table
+    header, the editor meta row). 0.50 clears 4.5:1 on --muted, --background
+    and --card alike.
+  */
+  --muted-foreground: oklch(0.5 0 0);
   --accent: oklch(0.95 0.03 275);
   --accent-foreground: oklch(0.35 0.2 275);
   --destructive: oklch(0.577 0.245 27.325);
@@ -69,11 +86,23 @@
   --input: oklch(0.922 0 0);
   /*
     Slider tracks are non-text UI components, so WCAG 1.4.11 asks for 3:1
-    against the adjacent surface. `--border` (0.922) is only ~1.2:1 on this
-    page background and `--muted` is byte-identical to `--background`, so
-    neither can carry a track. Dedicated token, deliberately darker.
+    against the adjacent surface. Still needed after #71 separated --muted from
+    --background: a muted-weight fill tops out near 1.2:1 on a light page, an
+    order of magnitude short of 3:1. --border (0.922) is no better.
+
+    Not the original 0.66: the only slider in the app is in the deploy form,
+    which sits on --background rather than on a card, and 0.66 was 2.85:1
+    there — the requirement was being missed on the one surface it had to hold.
+
+    0.62 rather than the 0.64 that first replaced it. 0.64 is 3.08:1, which
+    passes on paper by 2.7%; oklch is resolved to 8-bit channels and then
+    through the display's colour management, and a requirement should not
+    depend on where those round. 0.62 is 3.34:1.
+
+    globals.test.ts checks every surface in both themes, and asks for 3.3 so
+    this margin cannot be spent by a later edit that still "passes".
   */
-  --slider-track: oklch(0.66 0 0);
+  --slider-track: oklch(0.62 0 0);
   --ring: oklch(0.55 0.22 275);
   --chart-1: oklch(0.55 0.22 275);
   --chart-2: oklch(0.68 0.16 50);
@@ -109,8 +138,14 @@
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  /* Lighter than the dark surface, for the same 3:1 reason as light mode. */
-  --slider-track: oklch(0.48 0 0);
+  /*
+    Lighter than the dark surface, for the same 3:1 reason as light mode.
+    Not 0.48: that cleared --background (3.03:1) but only reached 2.74:1 against
+    --card, so a slider inside a card would have missed. And not 0.51 either —
+    3.12:1 on --card is the same 4%-of-headroom the light track was corrected
+    for, so it gets the same treatment. 0.53 is 3.39:1 there.
+  */
+  --slider-track: oklch(0.53 0 0);
   --ring: oklch(0.65 0.22 275);
   --chart-1: oklch(0.65 0.22 275);
   --chart-2: oklch(0.7 0.16 50);

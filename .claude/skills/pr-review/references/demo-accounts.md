@@ -26,7 +26,7 @@
 
 - 허용: 데모 네임스페이스(`demo`) 안에서 UI 가 제공하는 모든 동작 — 템플릿 작성/발행, 배포, 삭제, 팀 페이지 열람. 6시간마다 리셋되므로 뒷정리 불필요.
 - 금지: 실제 Google 계정 로그인. 데모 계정으로 UI 밖의 API 를 직접 호출해 대량 생성. 같은 동작 반복 5회 이상(부하).
-- 시드 데이터: 템플릿 3개(`web-app`, `nightly-job`, `app-with-config`), 릴리스 2개(`web-app-demo` 정상, `nightly-job-demo` 는 존재하지 않는 이미지로 의도적 실패 — 실패 설명 배너가 정상). 근거: `backend/cmd/seed-demo/seed.go`.
+- 시드 데이터: 템플릿 3개(`web-app`, `nightly-job`, `app-with-config`), 릴리스 2개(`web-app-demo` 정상, `nightly-job-demo` 는 존재하지 않는 이미지로 의도적 실패 — 실패 설명 배너가 정상). 근거: 템플릿은 `backend/cmd/seed-demo/templates.go` + `cmd/seed-demo/fixtures/`, 릴리스는 `backend/cmd/seed-demo/seed.go`.
 
 ## 브라우저 툴
 

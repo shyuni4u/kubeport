@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
   Select,
@@ -45,6 +46,16 @@ const LINE_CAP = 2000;
 export function LogsPanel({ releaseId, instances, initialInstance = "all" }: Props) {
   const [instance, setInstance] = useState(initialInstance);
   const [autoscroll, setAutoscroll] = useState(true);
+  // Bumped by the reconnect action and folded into Stream's key, so the remount
+  // closes the dead EventSource, empties the buffer and puts the status dot
+  // back to "connecting" — all by construction, with no setState in an effect.
+  //
+  // Emptying it is the point, not a side effect (#46). The backend opens each
+  // stream with PodLogOptions{Follow: true} and no SinceTime, so a reconnect
+  // replays the container log from the beginning: keeping the old lines would
+  // show every one of them twice, and dropping them loses nothing, because the
+  // replay brings them straight back.
+  const [attempt, setAttempt] = useState(0);
 
   return (
     <div className="flex flex-col gap-2">
@@ -54,13 +65,13 @@ export function LogsPanel({ releaseId, instances, initialInstance = "all" }: Pro
         instances={instances}
         autoscroll={autoscroll}
         onAutoscrollChange={setAutoscroll}
-        streamKey={`${releaseId}:${instance}`}
       >
         <Stream
-          key={`${releaseId}:${instance}`}
+          key={`${releaseId}:${instance}:${attempt}`}
           releaseId={releaseId}
           instance={instance}
           autoscroll={autoscroll}
+          onReconnect={() => setAttempt((n) => n + 1)}
         />
       </Toolbar>
     </div>
@@ -73,7 +84,6 @@ type ToolbarProps = {
   instances: { name: string }[];
   autoscroll: boolean;
   onAutoscrollChange: (v: boolean) => void;
-  streamKey: string;
   children: React.ReactNode;
 };
 
@@ -94,7 +104,16 @@ function Toolbar({
       <div className="flex items-center gap-3 text-xs">
         <Select value={instance} onValueChange={(v) => onInstanceChange(v ?? "all")}>
           <SelectTrigger className="w-52">
-            <SelectValue />
+            {/*
+              The label is passed in rather than left to Base UI to infer from
+              the matching SelectItem: it cannot resolve one before the popup
+              content mounts, so the closed trigger rendered the raw value "all"
+              (#46). A pod name happened to survive because the value *is* the
+              label.
+            */}
+            <SelectValue>
+              {instance === "all" ? t("allInstances") : instance}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{t("allInstances")}</SelectItem>
@@ -119,9 +138,10 @@ type StreamProps = {
   releaseId: string;
   instance: string;
   autoscroll: boolean;
+  onReconnect: () => void;
 };
 
-function Stream({ releaseId, instance, autoscroll }: StreamProps) {
+function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
   const t = useTranslations("logs");
   const [lines, setLines] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<Status>("connecting");
@@ -196,13 +216,19 @@ function Stream({ releaseId, instance, autoscroll }: StreamProps) {
     <>
       <div className="flex items-center gap-3 text-xs">
         <ConnectionDot status={status} />
-        <button
-          type="button"
+        {status === "disconnected" && (
+          <Button size="sm" variant="outline" onClick={onReconnect}>
+            {t("reconnect")}
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          className="ml-auto"
           onClick={() => setLines([])}
-          className="ml-auto rounded border px-2 py-0.5 hover:bg-slate-50"
         >
           {t("clear")}
-        </button>
+        </Button>
       </div>
       <div
         ref={boxRef}

@@ -17,14 +17,19 @@ on:
       - "Makefile"
   workflow_dispatch:
 
+# A new push supersedes the previous run on the same ref. Matches ci.yml.
+concurrency:
+  group: helm-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint-and-snapshot:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
         with:
           version: v3.20.2
 
@@ -47,10 +52,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint-and-snapshot
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
         with:
           version: v3.20.2
 

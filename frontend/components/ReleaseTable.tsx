@@ -29,7 +29,7 @@ export function ReleaseTable({ rows }: { rows: ReleaseRow[] }) {
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       <table className="w-full text-sm">
-        <thead className="bg-muted/40 text-xs text-muted-foreground">
+        <thead className="bg-muted text-xs text-muted-foreground">
           <tr>
             <th className="px-4 py-3 text-left font-medium">{t("name")}</th>
             <th className="px-4 py-3 text-left font-medium">{t("template")}</th>
@@ -38,7 +38,7 @@ export function ReleaseTable({ rows }: { rows: ReleaseRow[] }) {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.id} className="border-t border-border transition hover:bg-muted/30">
+            <tr key={r.id} className="border-t border-border transition hover:bg-muted">
               <td className="px-4 py-3">
                 <Link
                   href={`/releases/${r.id}`}

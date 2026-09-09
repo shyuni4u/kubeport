@@ -94,6 +94,7 @@ export function UserFormPreview(props: Props) {
       spec={uiSpec}
       onSubmit={() => { /* preview only — no submit */ }}
       submitLabel={t("previewSubmit")}
+      submitVariant="outline"
       disabled
     />
   );

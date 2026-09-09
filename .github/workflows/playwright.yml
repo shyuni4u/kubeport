@@ -10,22 +10,36 @@ on:
   push:
     branches: [main]
 
+# A new push supersedes the previous run on the same ref. This one stands up a
+# kind cluster for ~4 minutes, so a superseded run is worth cancelling.
+#
+# Pull requests only: on main this is the only end-to-end signal a commit gets,
+# and losing it would let a merge slip through with no e2e result at all rather
+# than a failing one.
+#
+# Non-PR runs get a group of their own (run_id is unique). `cancel-in-progress:
+# false` alone is not enough — GitHub keeps only one *pending* run per group, so
+# a third merge cancels the second while it is still queued.
+concurrency:
+  group: playwright-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   playwright:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with: { version: 10 }
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: pnpm
@@ -168,9 +182,6 @@ jobs:
           APP_ENCRYPTION_KEY_B64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
           KBP_DEV_ADMIN_EMAILS: "admin@example.com,demo-admin@demo.kubeport"
           KBP_DEMO_EMAIL_DOMAIN: "demo.kubeport"
-          # The e2e stack seeds the catalog and drives admin authoring through demo
-          # accounts, so it opts into the authoring gate that production leaves off.
-          KBP_DEMO_ALLOW_TEMPLATE_CREATE: "true"
         run: |
           nohup ./bin/kubeport-server > /tmp/backend.log 2>&1 &
           echo $! > /tmp/backend.pid
@@ -232,6 +243,10 @@ jobs:
 
       - name: Seed demo data
         env:
+          # The seeder writes templates straight to the database, so this is
+          # required whether or not --reset is passed. Step env is not shared
+          # with the backend step above.
+          DATABASE_URL: "postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable"
           DEMO_OIDC_ISSUER: "https://host.docker.internal:5556"
           DEMO_OIDC_CLIENT_ID: "kubeport"
           DEMO_OIDC_CLIENT_SECRET: "local-dev-secret"
@@ -297,7 +312,7 @@ jobs:
 
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: frontend/playwright-report/
@@ -305,7 +320,7 @@ jobs:
 
       - name: Upload server logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: server-logs
           path: |

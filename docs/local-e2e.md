@@ -204,7 +204,6 @@ LISTEN_ADDR=:8080 \
   APP_ENCRYPTION_KEY_B64="$(openssl rand -base64 32)" \
   KBP_DEV_ADMIN_EMAILS=admin@example.com,demo-admin@demo.kubeport \
   KBP_DEMO_EMAIL_DOMAIN=demo.kubeport \
-  KBP_DEMO_ALLOW_TEMPLATE_CREATE=true \
   go run ./cmd/server
 ```
 
@@ -218,9 +217,12 @@ seeded demo scope (`demo-restricted`, see `internal/api/middleware.go`).
 Leave unset to disable demo restrictions entirely.
 
 `KBP_DEMO_ALLOW_TEMPLATE_CREATE=true` re-opens template authoring for demo
-accounts. The seed and the admin specs create templates as `demo-admin`, so the
-local stack and CI set it; production leaves it off (see
-[oci-prod-runbook §5](oci-prod-runbook.md)).
+accounts. Nothing in this stack needs it: `seed-demo` writes the catalog straight
+to the database (`cmd/seed-demo/templates.go`), and the gate covers
+`POST /v1/templates` alone (`api/routes.go`) — the demo-admin specs (04, 06) only
+edit versions of an already-seeded template, which is not gated. Set it only if a
+spec needs a demo account to create a *new* template, or to demo authoring itself
+(see [oci-prod-runbook §5](oci-prod-runbook.md)).
 
 ### 8. Frontend
 
@@ -301,11 +303,13 @@ curl -s -H "Authorization: Bearer $ADM" -X POST \
 Populates the demo catalog (3 templates, incl. the "웹 앱" / "야간 배치" ones
 the e2e demo spec asserts on) and a couple of releases, owned by the two demo
 dex users from Step 1 above. Requires the demo RBAC bindings from §6 and the
-backend running with `KBP_DEMO_EMAIL_DOMAIN` set (§7).
+backend running with `KBP_DEMO_EMAIL_DOMAIN` set (§7), plus direct access to the
+compose Postgres — the catalog is written straight to the database.
 
 ```bash
 cd backend
-DEMO_OIDC_ISSUER=https://host.docker.internal:5556 \
+DATABASE_URL='postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable' \
+  DEMO_OIDC_ISSUER=https://host.docker.internal:5556 \
   DEMO_OIDC_CLIENT_ID=kubeport \
   DEMO_OIDC_CLIENT_SECRET=local-dev-secret \
   OIDC_CA_FILE="$(pwd)/../deploy/docker/certs/dex.crt" \
@@ -320,8 +324,10 @@ DEMO_OIDC_ISSUER=https://host.docker.internal:5556 \
   go run ./cmd/seed-demo
 ```
 
-Pass `-reset` to delete demo-owned rows first (requires `DATABASE_URL`) before
-reseeding — useful after schema changes or a dirty local DB.
+`seed-demo` always needs `DATABASE_URL`: templates go straight into the database
+(`cmd/seed-demo/templates.go`), not through the API — the demo accounts it runs as
+are barred from authoring. Add `-reset` to delete demo-owned rows before
+reseeding — useful after fixture or schema changes, or a dirty local DB.
 
 ### 9c. Playwright specs (what `pnpm test:e2e` runs, in order)
 

@@ -25,9 +25,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
@@ -107,14 +107,19 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with: { version: 10 }
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          # Matches frontend/Dockerfile's node:24-alpine. This job now carries
+          # the `next build` gate that the image build used to provide on a PR
+          # (#116), and a gate that runs on a different major than the thing it
+          # stands in for is not the same gate: a Node 24-only failure would
+          # pass here and break the image on main.
+          node-version: 24
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 
@@ -130,6 +135,17 @@ jobs:
       - name: Unit tests
         run: cd frontend && pnpm test
 
+      - name: Build
+        # `next build` is a gate of its own: it rejects App Router mistakes that
+        # tsc and eslint both accept — a server/client boundary crossed, a
+        # missing "use client", an invalid route segment export.
+        #
+        # It used to run on a PR only as a side effect of build-images building
+        # the frontend Dockerfile, which stage 2 does with `pnpm build`. Now that
+        # build-images no longer runs for a source-only PR, the gate has to be
+        # here, where it costs seconds instead of minutes.
+        run: cd frontend && pnpm build
+
   audit:
     # Separate job on purpose: the advisory database changes without anyone
     # touching this repo, so a new finding must not look like a test failure.
@@ -139,12 +155,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with: { version: 10 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          # Same major as the frontend job and the image (node:24-alpine).
+          node-version: 24
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: cd frontend && pnpm install --frozen-lockfile
@@ -169,8 +186,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with: { node-version: 20 }
       # A directory argument is treated as a module by node's runner; pass the
       # test files themselves.
