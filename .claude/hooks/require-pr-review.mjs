@@ -9,13 +9,27 @@ function readStdin() {
   try { return readFileSync(0, "utf8"); } catch { return ""; }
 }
 
+function stripLiterals(cmd) {
+  // heredocs: <<EOF / <<'EOF' / <<-"EOF" ... up to a line that is exactly EOF
+  let out = cmd.replace(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1[^\n]*\n[\s\S]*?\n\2[ \t]*(?=\n|$)/g, " ");
+  // quoted strings (keep the shell structure around them)
+  out = out.replace(/'[^']*'/g, " ").replace(/"(?:[^"\\]|\\.)*"/g, " ");
+  return out;
+}
+
 function main() {
   if (process.env.PR_REVIEW_SKIP === "1") return 0;
 
   let command = "";
   try { command = JSON.parse(readStdin())?.tool_input?.command ?? ""; } catch { return 0; }
+  // Only look at command positions: drop heredoc bodies and quoted strings so a
+  // PR body written via `cat <<EOF` that merely mentions the command is ignored.
+  const code = stripLiterals(command);
   // match `gh pr create` anywhere in a compound command (cd x && gh pr create ...)
-  if (!/(^|[\s;&|])gh\s+pr\s+create\b/.test(command)) return 0;
+  if (!/(^|[\s;&|(])gh\s+pr\s+create\b/.test(code)) return 0;
+  // Inline bypass `PR_REVIEW_SKIP=1 gh pr create ...`: the hook runs in its own
+  // process, so a prefix assignment never reaches process.env — read it here.
+  if (/(^|[\s;&|(])PR_REVIEW_SKIP=1(\s|$)/.test(code)) return 0;
 
   const cwd = process.env.PR_REVIEW_ROOT || process.env.CLAUDE_PROJECT_DIR || process.cwd();
   const git = (args) => execSync(`git ${args}`, { cwd, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
