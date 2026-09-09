@@ -30,7 +30,7 @@ func (h *Handlers) GetMe(c *gin.Context) {
 			Email:       store.PgText(u.Email),
 			DisplayName: store.PgText(u.Name),
 		}); err != nil {
-			writeError(c, http.StatusInternalServerError, "internal", err.Error())
+			internalError(c, "GetMe", err)
 			return
 		}
 	}

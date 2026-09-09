@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -132,7 +133,7 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 	}
 	up, err := url.Parse(cluster.ApiUrl)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "internal", err.Error())
+		internalError(c, "proxyOpenAPI: parse cluster api_url", err)
 		return
 	}
 	// JoinPath preserves any base prefix in the cluster URL (e.g. a reverse
@@ -147,7 +148,7 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 	}
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, up.String(), nil)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "internal", err.Error())
+		internalError(c, "proxyOpenAPI: build upstream request", err)
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+u.IDToken)
@@ -155,7 +156,11 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 
 	tr, err := h.openapi.transportFor(cluster.CaBundle.String)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "cluster-config", err.Error())
+		// The reason ("ca_bundle is not valid PEM", "no ca_bundle") is for the
+		// operator, not the caller — it goes to the log with the cluster name.
+		log.Printf("proxyOpenAPI: transport for cluster %s: %v", name, err)
+		writeError(c, http.StatusInternalServerError, "cluster-config",
+			"the cluster's TLS configuration is not usable; check its ca_bundle")
 		return
 	}
 	client := &http.Client{

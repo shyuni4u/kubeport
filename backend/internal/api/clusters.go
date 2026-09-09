@@ -48,7 +48,7 @@ type clusterSummary struct {
 func (h *Handlers) ListClusters(c *gin.Context) {
 	cs, err := h.deps.Store.ListClusters(c.Request.Context())
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "internal", err.Error())
+		internalError(c, "ListClusters", err)
 		return
 	}
 
@@ -84,7 +84,7 @@ func (h *Handlers) CreateCluster(c *gin.Context) {
 			writeError(c, http.StatusConflict, "conflict", "cluster name already exists")
 			return
 		}
-		writeError(c, http.StatusInternalServerError, "internal", err.Error())
+		internalError(c, "CreateCluster", err)
 		return
 	}
 	c.JSON(http.StatusCreated, cl)

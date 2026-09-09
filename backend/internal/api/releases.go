@@ -43,7 +43,7 @@ func (h *Handlers) resolveUser(c *gin.Context) (store.User, bool) {
 		DisplayName: store.PgText(u.Name),
 	})
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "internal", err.Error())
+		internalError(c, "resolveUser", err)
 		return store.User{}, false
 	}
 	return user, true
@@ -206,7 +206,7 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		if delErr := h.deps.Store.DeleteRelease(rollbackCtx, rel.ID); delErr != nil {
 			log.Printf("rollback: failed to delete release %s from DB: %v", rel.Name, delErr)
 		}
-		writeError(c, http.StatusInternalServerError, "k8s-error", err.Error())
+		internalError(c, "CreateRelease: k8s client", err)
 		return
 	}
 	if err := cli.ApplyAll(ctx, r.Namespace, rendered); err != nil {
@@ -256,7 +256,7 @@ func (h *Handlers) ListReleases(c *gin.Context) {
 			Domain: h.deps.DemoEmailDomain, Lim: limit, Off: offset,
 		})
 		if err != nil {
-			writeError(c, http.StatusInternalServerError, "internal", err.Error())
+			internalError(c, "ListReleases (demo scope)", err)
 			return
 		}
 		if rows == nil {
@@ -271,7 +271,7 @@ func (h *Handlers) ListReleases(c *gin.Context) {
 			Limit: limit, Offset: offset,
 		})
 		if err != nil {
-			writeError(c, http.StatusInternalServerError, "internal", err.Error())
+			internalError(c, "ListReleases (admin)", err)
 			return
 		}
 		if rows == nil {
@@ -289,7 +289,7 @@ func (h *Handlers) ListReleases(c *gin.Context) {
 		CreatedByUserID: user.ID, Limit: limit, Offset: offset,
 	})
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "internal", err.Error())
+		internalError(c, "ListReleases", err)
 		return
 	}
 	if rows == nil {
@@ -439,7 +439,7 @@ func (h *Handlers) DeleteRelease(c *gin.Context) {
 	if !force {
 		cli, err := h.deps.K8sFactory.NewWithToken(rel.ClusterApiUrl, rel.ClusterCaBundle.String, u.IDToken)
 		if err != nil {
-			writeError(c, http.StatusInternalServerError, "k8s-error", err.Error())
+			internalError(c, "DeleteRelease: k8s client", err)
 			return
 		}
 		if err := cli.DeleteByRelease(ctx, rel.Namespace, rel.Name); err != nil {
@@ -458,7 +458,7 @@ func (h *Handlers) DeleteRelease(c *gin.Context) {
 	}
 
 	if err := h.deps.Store.DeleteRelease(ctx, id); err != nil {
-		writeError(c, http.StatusInternalServerError, "internal", err.Error())
+		internalError(c, "DeleteRelease", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"deleted": true, "force": force})

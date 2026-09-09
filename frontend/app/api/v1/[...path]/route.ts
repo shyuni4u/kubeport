@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { upstreamUrl } from "@/lib/bff-path";
 import { getSession, getValidToken } from "@/lib/session";
 
 const STRIPPED_RESPONSE_HEADERS = new Set([
@@ -41,7 +42,18 @@ async function proxy(
   }
 
   const { path } = await params;
-  const url = `${process.env.GO_API_BASE_URL}/v1/${path.join("/")}${req.nextUrl.search}`;
+  const url = upstreamUrl(process.env.GO_API_BASE_URL ?? "", path, req.nextUrl.search);
+  if (!url) {
+    return NextResponse.json(
+      {
+        type: "https://kubeport.io/errors/validation-error",
+        title: "validation-error",
+        status: 400,
+        detail: "malformed request path",
+      },
+      { status: 400 },
+    );
+  }
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
   };

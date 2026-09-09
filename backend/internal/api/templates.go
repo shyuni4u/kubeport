@@ -171,7 +171,7 @@ func (h *Handlers) ListTemplates(c *gin.Context) {
 	ctx := c.Request.Context()
 	rows, err := h.deps.Store.ListTemplates(ctx)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "internal", err.Error())
+		internalError(c, "ListTemplates", err)
 		return
 	}
 	// A template with no current version has never been published: it is
@@ -269,7 +269,7 @@ func (h *Handlers) ListTemplateVersions(c *gin.Context) {
 	name := c.Param("name")
 	vs, err := h.deps.Store.ListTemplateVersions(ctx, name)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "internal", err.Error())
+		internalError(c, "ListTemplateVersions", err)
 		return
 	}
 	if vs == nil {
@@ -416,7 +416,7 @@ func (h *Handlers) PublishVersion(c *gin.Context) {
 			writeError(c, http.StatusConflict, "conflict", "version not in draft state")
 			return
 		}
-		writeError(c, http.StatusInternalServerError, "internal", err.Error())
+		internalError(c, "PublishVersion", err)
 		return
 	}
 	c.JSON(http.StatusOK, published)
@@ -614,7 +614,7 @@ func (h *Handlers) UpdateTemplateVersion(c *gin.Context) {
 			params.UiSpecYaml = pgtype.Text{String: spec, Valid: true}
 			raw, err := json.Marshal(r.UIState)
 			if err != nil {
-				writeError(c, http.StatusInternalServerError, "internal", "serialize ui_state: "+err.Error())
+				internalError(c, "UpdateTemplateVersion: serialize ui_state", err)
 				return
 			}
 			params.UiStateJson = raw

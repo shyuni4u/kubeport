@@ -150,8 +150,11 @@ func TestSSAR_K8sFactoryError(t *testing.T) {
 	w := do(t, r, http.MethodPost, "/v1/selfsubjectaccessreview",
 		bytes.NewReader(body))
 	require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
-	require.Contains(t, w.Body.String(), "k8s-error")
-	require.Contains(t, w.Body.String(), "caBundle parse failure")
+	// The client construction error names the cluster's api_url (see #96), so
+	// it goes to the log, not the response — #49. The caller still learns which
+	// operation failed.
+	require.Contains(t, w.Body.String(), "CheckSelfSubjectAccess")
+	require.NotContains(t, w.Body.String(), "caBundle parse failure")
 }
 
 func TestSSAR_K8sCheckError(t *testing.T) {

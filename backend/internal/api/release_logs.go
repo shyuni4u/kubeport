@@ -39,7 +39,7 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	}
 	cli, err := h.deps.K8sFactory.NewWithToken(rel.ClusterApiUrl, rel.ClusterCaBundle.String, u.IDToken)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "k8s-error", err.Error())
+		internalError(c, "StreamReleaseLogs: k8s client", err)
 		return
 	}
 	instances, err := cli.ListInstances(ctx, rel.Namespace, rel.Name)

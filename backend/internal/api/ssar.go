@@ -64,7 +64,7 @@ func (h *Handlers) CheckSelfSubjectAccess(c *gin.Context) {
 	if err != nil {
 		// Matches releases.go:188 — surface raw err.Error() for debugging
 		// (e.g. "caBundle is required"). Does not leak DB internals.
-		writeError(c, http.StatusInternalServerError, "k8s-error", err.Error())
+		internalError(c, "CheckSelfSubjectAccess: k8s client", err)
 		return
 	}
 

@@ -58,7 +58,10 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	v.POST("/clusters", requireAdmin(), noDemo, h.CreateCluster)
 	v.GET("/clusters/:name/openapi", h.GetOpenAPIIndex)
 	v.GET("/clusters/:name/openapi/*gv", h.GetOpenAPIGroupVersion)
-	v.POST("/clusters/:name/openapi/refresh", h.RefreshOpenAPI)
+	// Evicting the cache makes the next read re-fetch the schema from the
+	// target apiserver, so this is a load amplifier on the control plane, not
+	// a read. Gate it like the other management routes (issue #97).
+	v.POST("/clusters/:name/openapi/refresh", requireAdmin(), noDemo, h.RefreshOpenAPI)
 	v.POST("/selfsubjectaccessreview", h.CheckSelfSubjectAccess)
 	v.GET("/templates", h.ListTemplates)
 	// Authoring is gated for demo accounts unless the deployment opted in;
