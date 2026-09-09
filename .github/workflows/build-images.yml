@@ -10,13 +10,18 @@ name: build-images
 # `pull_request:` paths below.
 
 on:
+  # No paths filter here, deliberately. docs/oci-prod-runbook.md deploys with
+  # `NEWSHA=$(git rev-parse --short=7 HEAD)` and pins `sha-$NEWSHA`, so every
+  # main commit has to have an image — a docs-only commit at HEAD used to leave
+  # the operator pinning a tag that was never published. The same filter applied
+  # to tags, so a release tagged on a docs commit published nothing at all.
+  #
+  # The cost is a build on commits that could not have changed the image. That
+  # is the right side to be wrong on: the alternative fails at deploy time, on
+  # someone else's terminal.
   push:
     branches: [main]
     tags: ['v*.*.*']
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - '.github/workflows/build-images.yml'
   # A PR never pushes an image (see `push:` on the build step), so this run only
   # answers "does the image still build". That question is decided by the
   # Dockerfiles and the files they name — not by every source file under
@@ -38,8 +43,14 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - '**/Dockerfile'
-      - '**/.dockerignore'
+      # Named rather than '**/Dockerfile': there are exactly two build contexts,
+      # and a glob would also wake this job for a Dockerfile added somewhere
+      # that has nothing to do with either image. Being exact is the point of
+      # this filter.
+      - 'backend/Dockerfile'
+      - 'backend/.dockerignore'
+      - 'frontend/Dockerfile'
+      - 'frontend/.dockerignore'
       - 'backend/go.mod'
       - 'backend/go.sum'
       - 'frontend/package.json'
@@ -55,10 +66,16 @@ permissions:
 
 # A new push supersedes the previous run on the same ref. Without this a burst
 # of review fixes left three multi-arch builds running against commits nobody
-# was waiting on any more. Matches ci.yml.
+# was waiting on any more.
+#
+# Pull requests only. This job publishes on main and on tags, and
+# docs/oci-prod-runbook.md deploys by pinning `sha-<shortsha>` — cancelling a
+# main run mid-push would leave that sha with no image in ghcr, so an operator
+# pinning it (or rolling back to it) meets ImagePullBackOff. A superseded PR
+# build produces nothing anyone can pin, so there it is free.
 concurrency:
   group: build-images-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   REGISTRY: ghcr.io

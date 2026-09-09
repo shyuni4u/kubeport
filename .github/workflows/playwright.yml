@@ -11,11 +11,14 @@ on:
     branches: [main]
 
 # A new push supersedes the previous run on the same ref. This one stands up a
-# kind cluster for ~4 minutes, so a superseded run is worth cancelling. Matches
-# ci.yml.
+# kind cluster for ~4 minutes, so a superseded run is worth cancelling.
+#
+# Pull requests only: on main this is the only end-to-end signal a commit gets,
+# and cancelling it would let a merge slip through with no e2e result at all
+# rather than a failing one.
 concurrency:
   group: playwright-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   playwright:

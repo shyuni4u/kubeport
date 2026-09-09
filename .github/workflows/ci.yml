@@ -114,7 +114,12 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          # Matches frontend/Dockerfile's node:24-alpine. This job now carries
+          # the `next build` gate that the image build used to provide on a PR
+          # (#116), and a gate that runs on a different major than the thing it
+          # stands in for is not the same gate: a Node 24-only failure would
+          # pass here and break the image on main.
+          node-version: 24
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 
@@ -155,7 +160,8 @@ jobs:
         with: { version: 10 }
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          # Same major as the frontend job and the image (node:24-alpine).
+          node-version: 24
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: cd frontend && pnpm install --frozen-lockfile
