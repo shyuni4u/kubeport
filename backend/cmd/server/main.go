@@ -30,15 +30,16 @@ func (k8sFactory) NewWithToken(apiURL, caBundle, bearer string) (api.K8sApplier,
 
 func main() {
 	cfg := config.Config{
-		ListenAddr:          getenv("LISTEN_ADDR", ":8080"),
-		DatabaseURL:         os.Getenv("DATABASE_URL"),
-		OIDCIssuer:          os.Getenv("OIDC_ISSUER"),
-		OIDCAudience:        os.Getenv("OIDC_AUDIENCE"),
-		OIDCIssuersJSON:     os.Getenv("KBP_OIDC_ISSUERS"),
-		DemoEmailDomain:     os.Getenv("KBP_DEMO_EMAIL_DOMAIN"),
-		AppEncryptionKeyB64: os.Getenv("APP_ENCRYPTION_KEY_B64"),
-		OpenAPICacheMax:     getenvInt("KBP_OPENAPI_CACHE_MAX", 64),
-		SessionReapInterval: getenvDuration("KBP_SESSION_REAP_INTERVAL", session.DefaultInterval),
+		ListenAddr:              getenv("LISTEN_ADDR", ":8080"),
+		DatabaseURL:             os.Getenv("DATABASE_URL"),
+		OIDCIssuer:              os.Getenv("OIDC_ISSUER"),
+		OIDCAudience:            os.Getenv("OIDC_AUDIENCE"),
+		OIDCIssuersJSON:         os.Getenv("KBP_OIDC_ISSUERS"),
+		DemoEmailDomain:         os.Getenv("KBP_DEMO_EMAIL_DOMAIN"),
+		DemoAllowTemplateCreate: os.Getenv("KBP_DEMO_ALLOW_TEMPLATE_CREATE") == "true",
+		AppEncryptionKeyB64:     os.Getenv("APP_ENCRYPTION_KEY_B64"),
+		OpenAPICacheMax:         getenvInt("KBP_OPENAPI_CACHE_MAX", 64),
+		SessionReapInterval:     getenvDuration("KBP_SESSION_REAP_INTERVAL", session.DefaultInterval),
 	}
 
 	issuers, err := resolveIssuers(cfg)
@@ -50,6 +51,11 @@ func main() {
 	}
 	if cfg.DemoEmailDomain != "" {
 		log.Printf("demo restrictions enabled for *@%s", cfg.DemoEmailDomain)
+		if cfg.DemoAllowTemplateCreate {
+			log.Printf("WARN: KBP_DEMO_ALLOW_TEMPLATE_CREATE=true — demo accounts may author templates. " +
+				"Their templates stay out of real users' catalogs, but they persist past a demo reset " +
+				"once someone deploys from them.")
+		}
 	}
 
 	if emails := os.Getenv("KBP_DEV_ADMIN_EMAILS"); emails != "" {
@@ -74,7 +80,13 @@ func main() {
 	// deleted, so the table grew forever with encrypted id/refresh tokens in it.
 	session.StartReaper(ctx, st, cfg.SessionReapInterval, session.DefaultBatchSize)
 
-	r := api.NewRouter(cfg, api.Deps{Verifier: verifier, Store: st, K8sFactory: k8sFactory{}, DemoEmailDomain: cfg.DemoEmailDomain})
+	r := api.NewRouter(cfg, api.Deps{
+		Verifier:                verifier,
+		Store:                   st,
+		K8sFactory:              k8sFactory{},
+		DemoEmailDomain:         cfg.DemoEmailDomain,
+		DemoAllowTemplateCreate: cfg.DemoAllowTemplateCreate,
+	})
 	log.Printf("listening on %s", cfg.ListenAddr)
 	if err := r.Run(cfg.ListenAddr); err != nil {
 		log.Fatal(err)

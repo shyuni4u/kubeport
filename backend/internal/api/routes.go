@@ -32,6 +32,12 @@ type Deps struct {
 	Store           *store.Store
 	K8sFactory      K8sClientFactory
 	DemoEmailDomain string // "" = no demo restrictions
+	// DemoAllowTemplateCreate lets demo accounts author new templates. Off by
+	// default: demo accounts carry kubeport-admin so they can show the admin
+	// UX, and template creation is the one admin power whose output outlives
+	// the visit and reaches other people. Turn it on only where showing
+	// authoring is the point (docs/brainstorming-summary.md §14).
+	DemoAllowTemplateCreate bool
 }
 
 type Handlers struct {
@@ -55,7 +61,13 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	v.POST("/clusters/:name/openapi/refresh", h.RefreshOpenAPI)
 	v.POST("/selfsubjectaccessreview", h.CheckSelfSubjectAccess)
 	v.GET("/templates", h.ListTemplates)
-	v.POST("/templates", h.CreateTemplate)
+	// Authoring is gated for demo accounts unless the deployment opted in;
+	// everything else about the admin UX stays available to them.
+	noDemoAuthoring := noDemo
+	if deps.DemoAllowTemplateCreate {
+		noDemoAuthoring = func(c *gin.Context) { c.Next() }
+	}
+	v.POST("/templates", noDemoAuthoring, h.CreateTemplate)
 	v.POST("/templates/preview", h.PreviewTemplate)
 	v.POST("/templates/:name/render", h.PreviewRender)
 	v.GET("/templates/:name", h.GetTemplate)

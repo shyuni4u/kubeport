@@ -17,6 +17,13 @@ data:
   {{- end }}
   {{- if .Values.demo.enabled }}
   KBP_DEMO_EMAIL_DOMAIN: {{ .Values.demo.emailDomain | quote }}
+  {{- if .Values.demo.allowTemplateCreate }}
+  # Lets demo accounts author templates. Off by default — demo accounts carry
+  # kubeport-admin, and authoring is the one admin power whose output outlives
+  # the visit. Their templates stay out of real users' catalogs either way, but
+  # they survive a demo reset once someone deploys from them.
+  KBP_DEMO_ALLOW_TEMPLATE_CREATE: "true"
+  {{- end }}
   {{- end }}
   {{- with include "kubeport.devAdminEmails" . }}
   # Bootstrap admin(s): matching login emails are granted the kubeport-admin

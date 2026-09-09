@@ -14,4 +14,7 @@ type Config struct {
 	// SessionReapInterval — KBP_SESSION_REAP_INTERVAL. How often expired
 	// sessions are deleted. Zero uses session.DefaultInterval.
 	SessionReapInterval time.Duration
+	// DemoAllowTemplateCreate — KBP_DEMO_ALLOW_TEMPLATE_CREATE. Lets demo
+	// accounts author templates. Off by default; see api.Deps for why.
+	DemoAllowTemplateCreate bool
 }

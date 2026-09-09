@@ -197,7 +197,46 @@ func (h *Handlers) ListTemplates(c *gin.Context) {
 			visible = append(visible, row)
 		}
 	}
+
+	visible, err = h.scopeTemplatesToDemo(c, rc, visible)
+	if err != nil {
+		log.Printf("ListTemplates: demo scoping: %v", err)
+		writeError(c, http.StatusInternalServerError, "internal", "failed to authorize template list")
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"templates": visible})
+}
+
+// scopeTemplatesToDemo keeps demo content in the demo: a demo visitor sees the
+// templates demo accounts authored, a real end-user sees the operator's. The
+// real operator (admin, non-demo) keeps full visibility — they need to see
+// what is on their instance. This mirrors ListReleases.
+//
+// It matters because demo accounts carry kubeport-admin; without it, anything
+// a demo visitor publishes shows up in every real user's catalog, and
+// seed-demo's reset skips a template a real user has already deployed, so it
+// would stay there. See docs/brainstorming-summary.md §14.
+func (h *Handlers) scopeTemplatesToDemo(c *gin.Context, rc *reqCache, rows []store.ListTemplatesRow) ([]store.ListTemplatesRow, error) {
+	domain := h.deps.DemoEmailDomain
+	if domain == "" {
+		return rows, nil
+	}
+	demoCaller := h.isDemoCaller(c)
+	if !demoCaller && isAdmin(c) {
+		return rows, nil
+	}
+	ctx := c.Request.Context()
+	scoped := make([]store.ListTemplatesRow, 0, len(rows))
+	for _, row := range rows {
+		email, err := h.ownerEmail(ctx, rc, row.OwnerUserID)
+		if err != nil {
+			return nil, err
+		}
+		if auth.IsDemoEmail(email, domain) == demoCaller {
+			scoped = append(scoped, row)
+		}
+	}
+	return scoped, nil
 }
 
 func (h *Handlers) GetTemplate(c *gin.Context) {

@@ -139,6 +139,12 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
 - **오너 RBAC**: 오너 Google 이메일의 cluster-admin 바인딩 이름은 `kubeport-owner-admin`
   (예전 이름 `kubeport-demo-admin` 은 이름과 달리 오너 바인딩이었음 — 삭제 전 subject 확인).
   데모 계정은 chart 의 `demo` ns RoleBinding 만 갖는다. 검증: `kubectl auth can-i create deployments --as=dex:demo-user@demo.kubeport -n default` → **no**.
+- **데모 계정의 템플릿 저작**: 기본은 **막혀 있다**(`POST /v1/templates` → 403 `demo-restricted`).
+  데모 계정은 `kubeport-admin` 을 갖지만, 저작은 결과물이 방문자의 세션보다 오래 남고 남에게 보이는
+  유일한 관리자 권한이라서다. 저작 체험까지 보여주려면 `--set demo.allowTemplateCreate=true`
+  (backend `KBP_DEMO_ALLOW_TEMPLATE_CREATE`). 켜도 데모가 만든 템플릿은 실제 사용자 카탈로그에
+  안 보이지만, 누군가 그걸로 배포하면 6시간 리셋이 그 템플릿을 건너뛴다(`tolerateFK`).
+  결정 근거: [brainstorming-summary §14](brainstorming-summary.md).
 - **Dex 호스트도 ephemeral IP 를 본다**: VM stop/start 후 `dex.kubeport.enzo.kr` A 레코드까지 갱신하지 않으면
   인증서 갱신·데모 로그인이 깨진다.
 
