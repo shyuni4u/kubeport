@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -41,6 +42,36 @@ func dexHTTPClient(t *testing.T) *http.Client {
 	}
 	require.True(t, pool.AppendCertsFromPEM(pem), "OIDC_CA_FILE: no certs parsed")
 	return &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
+}
+
+// requireDex returns an HTTP client for the local dex, skipping the test when
+// dex isn't running. A fresh clone has no `deploy/docker/certs`, so dex won't
+// even start (see docs/local-e2e.md §2) and these tests used to fail on every
+// new machine — which taught people that a red `go test ./...` is normal.
+//
+// CI has dex, so it sets KBP_REQUIRE_DEX=1: there, an unreachable dex is a
+// failure, not a skip. SKIP_OIDC still skips unconditionally.
+func requireDex(t *testing.T) *http.Client {
+	t.Helper()
+	if os.Getenv("SKIP_OIDC") != "" {
+		t.Skip("SKIP_OIDC set")
+	}
+	client := dexHTTPClient(t)
+	resp, err := client.Get(dexIssuer() + "/.well-known/openid-configuration")
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			return client
+		}
+		err = fmt.Errorf("discovery returned %s", resp.Status)
+	}
+	if os.Getenv("KBP_REQUIRE_DEX") == "1" {
+		t.Fatalf("dex at %s is required in this environment but unreachable: %v", dexIssuer(), err)
+	}
+	t.Skipf("dex at %s not reachable (%v) — generate deploy/docker/certs and run "+
+		"`docker compose -f deploy/docker/docker-compose.yml up -d` (docs/local-e2e.md §2). "+
+		"Set KBP_REQUIRE_DEX=1 to fail instead of skipping.", dexIssuer(), err)
+	return nil
 }
 
 // getDexToken fetches an id_token from the local dex using the password grant.
@@ -95,14 +126,12 @@ func TestHTTPClientFromCAFile_ValidPEMReturnsClient(t *testing.T) {
 }
 
 func TestVerifier_Verify(t *testing.T) {
-	if os.Getenv("SKIP_OIDC") != "" {
-		t.Skip("SKIP_OIDC set")
-	}
+	client := requireDex(t)
 	ctx := context.Background()
 	v, err := auth.NewVerifier(ctx, dexIssuer(), "kubeport")
 	require.NoError(t, err)
 
-	token := getDexToken(t, dexHTTPClient(t))
+	token := getDexToken(t, client)
 	require.False(t, strings.HasPrefix(token, "<"))
 
 	claims, err := v.Verify(ctx, token)

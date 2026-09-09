@@ -1,0 +1,122 @@
+name: CI
+
+# Unit + integration tests and static checks. The heavy end-to-end run lives in
+# playwright.yml; this is the gate that should catch a regression in a minute
+# or two rather than in twenty.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A new push supersedes the previous run on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Add host.docker.internal to hosts
+        # Dex's issuer claim is https://host.docker.internal:5556; tokens only
+        # validate when the name resolves the same way it does locally.
+        run: echo "127.0.0.1 host.docker.internal" | sudo tee -a /etc/hosts
+
+      - name: Generate self-signed dex cert
+        # Same cert the Playwright job and docs/local-e2e.md §2 use. Without it
+        # dex refuses to start and internal/auth has nothing to talk to.
+        run: |
+          mkdir -p deploy/docker/certs
+          openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+            -keyout deploy/docker/certs/dex.key \
+            -out deploy/docker/certs/dex.crt \
+            -subj "/CN=host.docker.internal" \
+            -addext "subjectAltName=DNS:host.docker.internal,DNS:localhost,IP:127.0.0.1"
+          chmod 644 deploy/docker/certs/dex.key
+
+      - name: Start compose (postgres + dex)
+        run: docker compose -f deploy/docker/docker-compose.yml up -d
+
+      - name: Wait for postgres and dex
+        run: |
+          for i in $(seq 1 30); do
+            if docker compose -f deploy/docker/docker-compose.yml exec -T postgres pg_isready -U kubeport -d kubeport >/dev/null 2>&1 \
+               && curl -sk https://localhost:5556/.well-known/openid-configuration >/dev/null; then
+              echo "postgres + dex ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "compose services failed to start"
+          docker compose -f deploy/docker/docker-compose.yml logs
+          exit 1
+
+      - uses: ariga/setup-atlas@v0
+
+      - name: Apply DB schema
+        run: cd backend/migrations && atlas schema apply --env local --auto-approve
+
+      - name: go vet
+        run: cd backend && go vet ./...
+
+      - name: go test
+        env:
+          TEST_DATABASE_URL: "postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable"
+          OIDC_ISSUER: "https://host.docker.internal:5556"
+          OIDC_CA_FILE: "${{ github.workspace }}/deploy/docker/certs/dex.crt"
+          # internal/auth skips its dex-backed tests when dex is unreachable so a
+          # fresh clone isn't red. Here dex IS running, so an unreachable dex is
+          # a failure — otherwise CI would go green on a silently skipped suite.
+          KBP_REQUIRE_DEX: "1"
+        run: cd backend && go test ./...
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: docker compose -f deploy/docker/docker-compose.yml logs
+
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install deps
+        run: cd frontend && pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: cd frontend && pnpm typecheck
+
+      - name: Lint
+        run: cd frontend && pnpm lint
+
+      - name: Unit tests
+        run: cd frontend && pnpm test
+
+  hooks:
+    # The /pr-review guard is repo tooling with its own node:test suite; it is
+    # cheap enough to keep honest.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      # A directory argument is treated as a module by node's runner; pass the
+      # test files themselves.
+      - run: node --test .claude/hooks/*.test.mjs

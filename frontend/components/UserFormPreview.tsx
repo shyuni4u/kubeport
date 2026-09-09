@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { parse } from "yaml";
 import { useDebouncedCallback } from "use-debounce";
@@ -25,8 +25,24 @@ function isUIStateProps(p: Props): p is { uiState: UIModeTemplate } {
 
 export function UserFormPreview(props: Props) {
   const t = useTranslations("templates.editor.preview");
-  const [uiSpec, setUISpec] = useState<UISpec | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const remote = isUIStateProps(props);
+
+  // YAML mode is a pure function of the text — derive it instead of mirroring
+  // it into state from an effect, which cost an extra render and showed the
+  // "loading" placeholder for a frame on every keystroke.
+  const yamlText = remote ? null : props.uiSpecYaml;
+  const local = useMemo(() => {
+    if (yamlText === null) return null;
+    try {
+      return { spec: parseOrEmpty(yamlText), parseError: null as string | null };
+    } catch (e) {
+      return { spec: null, parseError: e instanceof Error ? e.message : String(e) };
+    }
+  }, [yamlText]);
+
+  // UI mode round-trips through the backend, so it genuinely needs state.
+  const [fetched, setFetched] = useState<UISpec | null>(null);
+  const [fetchErr, setFetchErr] = useState<string | null>(null);
 
   const fetchPreview = useDebouncedCallback(async (state: UIModeTemplate) => {
     try {
@@ -36,30 +52,30 @@ export function UserFormPreview(props: Props) {
         body: JSON.stringify({ ui_state: state }),
       });
       if (!res.ok) {
-        setErr(t("previewFailed", { status: res.status, detail: (await res.text()).trim() }));
+        setFetchErr(t("previewFailed", { status: res.status, detail: (await res.text()).trim() }));
         return;
       }
       const d = await res.json() as { ui_spec_yaml: string };
-      setUISpec(parseOrEmpty(d.ui_spec_yaml));
-      setErr(null);
+      setFetched(parseOrEmpty(d.ui_spec_yaml));
+      setFetchErr(null);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setFetchErr(e instanceof Error ? e.message : String(e));
     }
   }, 300);
 
+  const uiState = remote ? props.uiState : null;
+  // Serialized so the effect re-runs on content change, not on identity change.
+  const uiStateKey = uiState ? JSON.stringify(uiState) : null;
   useEffect(() => {
-    if (isUIStateProps(props)) {
-      fetchPreview(props.uiState);
-    } else {
-      try {
-        setUISpec(parseOrEmpty(props.uiSpecYaml));
-        setErr(null);
-      } catch (e) {
-        setErr(t("parseFailed", { detail: e instanceof Error ? e.message : String(e) }));
-      }
-    }
+    if (!uiState) return;
+    fetchPreview(uiState);
+    // uiState is covered by uiStateKey; depending on the object itself would
+    // refire on every parent render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isUIStateProps(props) ? JSON.stringify(props.uiState) : (props as { uiSpecYaml: string }).uiSpecYaml]);
+  }, [uiStateKey, fetchPreview]);
+
+  const err = local ? (local.parseError && t("parseFailed", { detail: local.parseError })) : fetchErr;
+  const uiSpec = local ? local.spec : fetched;
 
   if (err) return <div className="text-sm text-red-600 whitespace-pre">{err}</div>;
   if (!uiSpec) return <div className="text-sm text-muted-foreground">{t("loading")}</div>;
