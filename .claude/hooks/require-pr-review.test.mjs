@@ -61,6 +61,25 @@ test("PR_REVIEW_SKIP=1 bypasses", () => {
   assert.equal(r.status, 0);
 });
 
+test("inline PR_REVIEW_SKIP=1 prefix in the command bypasses", () => {
+  const { dir } = makeRepo();
+  const r = runHook("git push && PR_REVIEW_SKIP=1 gh pr create --title x", { root: dir });
+  assert.equal(r.status, 0);
+});
+
+test("mention inside a heredoc body or quoted string is not a gh pr create", () => {
+  const { dir } = makeRepo();
+  const heredoc = "cat > body.md <<'EOF'\nrun: gh pr create --title x\nEOF\necho done";
+  assert.equal(runHook(heredoc, { root: dir }).status, 0);
+  assert.equal(runHook('echo "next step: gh pr create"', { root: dir }).status, 0);
+});
+
+test("real gh pr create after a heredoc is still blocked", () => {
+  const { dir } = makeRepo();
+  const cmd = "cat > body.md <<'EOF'\nsummary\nEOF\ngh pr create --body-file body.md";
+  assert.equal(runHook(cmd, { root: dir }).status, 2);
+});
+
 test("malformed stdin passes through (never break unrelated tools)", () => {
   const r = spawnSync("node", [HOOK], { input: "not json", encoding: "utf8" });
   assert.equal(r.status, 0);
