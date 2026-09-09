@@ -218,3 +218,108 @@ describe("RBACCheckPanel", () => {
     expect(screen.queryByText(/stale denial/)).not.toBeInTheDocument();
   });
 });
+
+// #30 — the deploy form disables its submit button when k8s definitively
+// denies a create. The panel is the only place that knows, so it reports
+// upwards. "denied" must mean *k8s said no*, never "we could not ask".
+describe("RBACCheckPanel onResult", () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("reports 'unknown' while inputs are missing", () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const onResult = vi.fn();
+    render(
+      <RBACCheckPanel
+        cluster=""
+        namespace="default"
+        kinds={["Deployment"]}
+        onResult={onResult}
+      />,
+    );
+    expect(onResult).toHaveBeenLastCalledWith("unknown");
+  });
+
+  it("reports 'allowed' when every checked kind is allowed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(okResponse({ allowed: true })),
+    );
+    const onResult = vi.fn();
+    render(
+      <RBACCheckPanel
+        cluster="dev"
+        namespace="default"
+        kinds={["Deployment", "Service"]}
+        onResult={onResult}
+      />,
+    );
+    await waitFor(() => {
+      expect(onResult).toHaveBeenLastCalledWith("allowed");
+    });
+  });
+
+  it("reports 'denied' when k8s denies a kind", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(okResponse({ allowed: false, reason: "nope" })),
+    );
+    const onResult = vi.fn();
+    render(
+      <RBACCheckPanel
+        cluster="dev"
+        namespace="default"
+        kinds={["Deployment"]}
+        onResult={onResult}
+      />,
+    );
+    await waitFor(() => {
+      expect(onResult).toHaveBeenLastCalledWith("denied");
+    });
+  });
+
+  // A failed check is not a denial. Blocking on it would strand users behind
+  // an unrelated outage; the panel already shows its own "check failed" line.
+  it("reports 'unknown' when the check itself fails (HTTP error)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(httpResponse(500)));
+    const onResult = vi.fn();
+    render(
+      <RBACCheckPanel
+        cluster="dev"
+        namespace="default"
+        kinds={["Deployment"]}
+        onResult={onResult}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/HTTP 500/)).toBeInTheDocument();
+    });
+    expect(onResult).toHaveBeenLastCalledWith("unknown");
+  });
+
+  // Unmapped kinds already surface as an amber warning. They are not a
+  // denial, so they must not block the button either.
+  it("reports 'unknown' when the only kind is unmapped", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const onResult = vi.fn();
+    render(
+      <RBACCheckPanel
+        cluster="dev"
+        namespace="default"
+        kinds={["WeirdCRD"]}
+        onResult={onResult}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/WeirdCRD/)).toBeInTheDocument();
+    });
+    expect(onResult).toHaveBeenLastCalledWith("unknown");
+  });
+});

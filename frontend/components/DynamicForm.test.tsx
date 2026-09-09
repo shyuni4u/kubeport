@@ -405,3 +405,133 @@ describe("DynamicForm onChange callback", () => {
     expect(input.value).toBe("redis");
   });
 });
+
+// #31 — a second click before the parent re-renders used to fire a second
+// POST /v1/releases. The parent's `disabled` prop lands a render too late,
+// so the guard has to live inside the form.
+describe("DynamicForm double submit", () => {
+  const nameSpec: UISpec = {
+    fields: [
+      {
+        path: "metadata.name",
+        label: "Name",
+        type: "string",
+        default: "nginx",
+        required: true,
+      },
+    ],
+  };
+
+  it("does not call onSubmit twice while the first submit is in flight", async () => {
+    const user = userEvent.setup();
+    let release!: () => void;
+    const inFlight = new Promise<void>((r) => {
+      release = r;
+    });
+    const onSubmit = vi.fn().mockReturnValue(inFlight);
+
+    renderWithIntl(<DynamicForm spec={nameSpec} onSubmit={onSubmit} />);
+    const button = screen.getByRole("button", { name: /배포하기/ });
+
+    await user.click(button);
+    await user.click(button);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+
+    release();
+  });
+
+  it("re-enables submission after the first submit settles", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    renderWithIntl(<DynamicForm spec={nameSpec} onSubmit={onSubmit} />);
+    const button = screen.getByRole("button", { name: /배포하기/ });
+
+    await user.click(button);
+    await user.click(button);
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+  });
+
+  // A synchronous (void-returning) onSubmit is still a valid consumer —
+  // UserFormPreview and LandingCompare use one.
+  it("still submits when onSubmit returns void", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    renderWithIntl(<DynamicForm spec={nameSpec} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Part of #30: the deploy form's preview → kinds → RBAC preflight chain hangs
+// off onChange. Emitting only on change meant an all-defaults deploy got no
+// preflight at all, and the submit button had nothing to be gated by.
+describe("DynamicForm onChange", () => {
+  const spec: UISpec = {
+    fields: [
+      {
+        path: "metadata.name",
+        label: "Name",
+        type: "string",
+        default: "nginx",
+        required: true,
+      },
+    ],
+  };
+
+  it("emits the initial values once on mount", () => {
+    const onChange = vi.fn();
+    renderWithIntl(
+      <DynamicForm spec={spec} onSubmit={() => {}} onChange={onChange} />,
+    );
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith({ "metadata.name": "nginx" });
+  });
+
+  it("keeps emitting on subsequent edits", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderWithIntl(
+      <DynamicForm spec={spec} onSubmit={() => {}} onChange={onChange} />,
+    );
+    onChange.mockClear();
+    await user.type(screen.getByLabelText(/Name/), "x");
+    expect(onChange).toHaveBeenLastCalledWith({ "metadata.name": "nginxx" });
+  });
+});
+
+// #43 — the track was `bg-muted`, which is byte-identical to `--background`,
+// so the slider read as a bare thumb floating on nothing. End labels give the
+// control a visible extent even before the track contrast lands.
+describe("DynamicForm slider affordance", () => {
+  const rangeSpec: UISpec = {
+    fields: [
+      {
+        path: "spec.replicas",
+        label: "Replicas",
+        type: "integer",
+        min: 1,
+        max: 10,
+        default: 3,
+        required: true,
+      },
+    ],
+  };
+
+  it("labels the slider's min and max ends", () => {
+    renderWithIntl(<DynamicForm spec={rangeSpec} onSubmit={() => {}} />);
+    expect(screen.getByTestId("slider-min")).toHaveTextContent("1");
+    expect(screen.getByTestId("slider-max")).toHaveTextContent("10");
+  });
+
+  it("gives the track a fill that is distinct from the page background", () => {
+    const { container } = renderWithIntl(
+      <DynamicForm spec={rangeSpec} onSubmit={() => {}} />,
+    );
+    const track = container.querySelector('[data-slot="slider-track"]');
+    expect(track).not.toBeNull();
+    // `bg-muted` === `--background` in globals.css, so it is invisible.
+    expect(track!.className).not.toMatch(/\bbg-muted\b/);
+  });
+});
