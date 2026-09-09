@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "next-intl";
 
 const KEY = "kbp_demo_banner_dismissed";
 
@@ -39,10 +39,16 @@ function dismiss() {
 
 export function DemoBanner({ resetAtIso }: { resetAtIso: string }) {
   const t = useTranslations("demo");
+  const format = useFormatter();
   // Server snapshot is "dismissed" so the markup matches the pre-hydration DOM.
   const hidden = useSyncExternalStore(subscribe, isDismissed, () => true);
   if (hidden) return null;
-  const time = new Date(resetAtIso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  // Formatted through next-intl, not `toLocaleTimeString([])`: the latter
+  // follows the *browser's* locale, so an English UI showed "오후 03:00" (#40).
+  const time = format.dateTime(new Date(resetAtIso), {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
   return (
     <div role="status" className="flex items-center gap-3 border-b border-amber-300 bg-amber-50 px-6 py-2 text-sm text-amber-900">
       <span className="flex-1">{t("banner", { time })}</span>

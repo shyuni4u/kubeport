@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
-import { getLocale, getMessages } from "next-intl/server";
+import { getLocale, getMessages, getNow, getTimeZone } from "next-intl/server";
 import "./globals.css";
 import { AppShell } from "@/components/AppShell";
 import { Providers } from "./providers";
@@ -28,6 +28,11 @@ export default async function RootLayout({
 }>) {
   const locale = await getLocale();
   const messages = await getMessages();
+  // Forwarded explicitly: the client provider does not inherit the request
+  // config, and without them client components fall back to the browser's
+  // zone and clock — see the comments on TIME_ZONE.
+  const timeZone = await getTimeZone();
+  const now = await getNow();
 
   return (
     <html
@@ -35,7 +40,12 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full bg-background text-foreground">
-        <NextIntlClientProvider locale={locale} messages={messages}>
+        <NextIntlClientProvider
+          locale={locale}
+          messages={messages}
+          timeZone={timeZone}
+          now={now}
+        >
           <Providers>
             <AppShell>{children}</AppShell>
           </Providers>

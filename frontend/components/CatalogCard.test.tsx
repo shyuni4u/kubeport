@@ -37,4 +37,18 @@ describe("CatalogCard", () => {
     render(<CatalogCard template={{ ...base, description: null }} />);
     expect(screen.getByText("Web Service")).toBeInTheDocument();
   });
+
+  // #32 — the card is the only place a user can learn the template's `name`,
+  // which is what the URL, the deploy header and the release rows all show.
+  it("shows the template name alongside the display name", () => {
+    render(<CatalogCard template={base} />);
+    expect(screen.getByText("web-service")).toBeInTheDocument();
+  });
+
+  it("omits the name when it would just repeat the display name", () => {
+    render(
+      <CatalogCard template={{ ...base, display_name: "web-service" }} />,
+    );
+    expect(screen.getAllByText("web-service")).toHaveLength(1);
+  });
 });

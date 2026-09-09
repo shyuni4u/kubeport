@@ -23,7 +23,13 @@ export function CatalogBrowser({ templates }: Props) {
     return templates.filter((t) => {
       if (tag && !t.tags.includes(tag)) return false;
       if (ql) {
-        const hay = (t.display_name + " " + (t.description ?? "")).toLowerCase();
+        // `name` first: it is the identifier the user meets everywhere else —
+        // the URL, the deploy header, their release rows — so it is the first
+        // thing they type. Tags are searched too, since the tag chips only
+        // offer one at a time (#32).
+        const hay = [t.name, t.display_name, t.description ?? "", ...t.tags]
+          .join(" ")
+          .toLowerCase();
         if (!hay.includes(ql)) return false;
       }
       return true;

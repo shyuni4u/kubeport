@@ -51,4 +51,26 @@ describe("CatalogBrowser", () => {
     render(<CatalogBrowser templates={[]} />);
     expect(screen.getByText(/관리자가 아직 템플릿을 만들지 않았습니다/)).toBeInTheDocument();
   });
+
+  // #32 — `name` is the identifier users see everywhere else (URLs, release
+  // rows, the deploy form header), so it is the first thing they type.
+  it("filters by search (matches name)", async () => {
+    render(<CatalogBrowser templates={sample} />);
+    await userEvent.type(screen.getByPlaceholderText(/검색/), "db");
+    expect(screen.getByText("Database")).toBeInTheDocument();
+    expect(screen.queryByText("Web Service")).not.toBeInTheDocument();
+  });
+
+  it("filters by search (matches a tag)", async () => {
+    render(<CatalogBrowser templates={sample} />);
+    await userEvent.type(screen.getByPlaceholderText(/검색/), "backend");
+    expect(screen.getByText("API Gateway")).toBeInTheDocument();
+    expect(screen.queryByText("Database")).not.toBeInTheDocument();
+  });
+
+  it("search is case-insensitive across every searched field", async () => {
+    render(<CatalogBrowser templates={sample} />);
+    await userEvent.type(screen.getByPlaceholderText(/검색/), "DB");
+    expect(screen.getByText("Database")).toBeInTheDocument();
+  });
 });
