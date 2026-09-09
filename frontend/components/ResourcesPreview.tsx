@@ -30,7 +30,7 @@ export function ResourcesPreview({ renderedYaml, pending }: Props) {
   }, [renderedYaml]);
 
   return (
-    <aside className="flex flex-col gap-3 rounded-md bg-muted/40 p-4">
+    <aside className="flex flex-col gap-3 rounded-md bg-muted p-4">
       <h2 className="text-sm font-medium">{t("heading")}</h2>
       {pending && <p className="text-xs text-muted-foreground">{t("rendering")}</p>}
       {!pending && resources.length === 0 && (

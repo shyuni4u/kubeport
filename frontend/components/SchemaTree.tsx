@@ -27,13 +27,13 @@ function FieldBadge({ mode }: { mode: "fixed" | "exposed" }) {
   const t = useTranslations("templates.editor.field");
   if (mode === "fixed") {
     return (
-      <Badge variant="muted" className="ml-1 h-4 px-1 text-[9px]">
+      <Badge variant="muted" className="ml-1 h-5 px-1.5 text-[11px]">
         {t("fixedBadge")}
       </Badge>
     );
   }
   return (
-    <span className="ml-1 rounded-sm bg-accent px-1 text-[9px] text-primary">
+    <span className="ml-1 rounded-sm bg-accent px-1 text-[11px] text-primary">
       ● {t("exposedBadge")}
     </span>
   );

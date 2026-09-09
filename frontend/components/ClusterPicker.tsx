@@ -48,7 +48,7 @@ export function ClusterPicker() {
     <div>
       <label
         htmlFor="kbp-cluster"
-        className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+        className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
       >
         {t("currentCluster")}
       </label>

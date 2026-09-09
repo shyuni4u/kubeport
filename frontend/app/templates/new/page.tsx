@@ -447,7 +447,7 @@ function YamlModeNew({ onDirty }: ModeProps) {
         <YamlEditor label="resources.yaml" value={resourcesYaml} onChange={(v) => { setResourcesYaml(v); touch(); }} />
         <YamlEditor label="ui-spec.yaml" value={uispecYaml} onChange={(v) => { setUispecYaml(v); touch(); }} />
       </div>
-      <details className="rounded border bg-white p-3" open>
+      <details className="rounded-md border bg-card p-3" open>
         <summary className="cursor-pointer text-sm font-semibold">{t("userFormPreview")}</summary>
         <div className="mt-3">
           <UserFormPreview uiSpecYaml={uispecYaml} />

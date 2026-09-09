@@ -58,9 +58,19 @@
   --popover-foreground: oklch(0.145 0 0);
   --primary: oklch(0.55 0.22 275);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
+  /*
+    Darker than --background on purpose (#71). shadcn's light default pairs a
+    white page with muted at 0.97; this theme lowered the page to 0.97 for the
+    "grey page, white cards" look but left muted behind, so the two became the
+    same colour and every bg-muted surface on a page background vanished.
+    Recessed rather than raised, mirroring how dark mode lifts muted above its
+    own background. Held just above --border (0.922): on a `border bg-muted`
+    panel the border earns its keep against the card it sits on, not against
+    the fill, and this keeps that relationship the way shadcn ships it.
+  */
+  --secondary: oklch(0.93 0 0);
   --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
+  --muted: oklch(0.93 0 0);
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.95 0.03 275);
   --accent-foreground: oklch(0.35 0.2 275);
@@ -69,9 +79,10 @@
   --input: oklch(0.922 0 0);
   /*
     Slider tracks are non-text UI components, so WCAG 1.4.11 asks for 3:1
-    against the adjacent surface. `--border` (0.922) is only ~1.2:1 on this
-    page background and `--muted` is byte-identical to `--background`, so
-    neither can carry a track. Dedicated token, deliberately darker.
+    against the adjacent surface. Still needed after #71 separated --muted from
+    --background: a muted-weight fill tops out near 1.2:1 on a light page, an
+    order of magnitude short of 3:1. --border (0.922) is no better. Dedicated
+    token, deliberately darker. globals.test.ts asserts both halves of this.
   */
   --slider-track: oklch(0.66 0 0);
   --ring: oklch(0.55 0.22 275);

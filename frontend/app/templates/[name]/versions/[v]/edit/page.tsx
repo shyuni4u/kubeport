@@ -13,6 +13,7 @@ import { BottomBar } from "@/components/editor/BottomBar";
 import { saveErrorMessage } from "@/components/editor/saveError";
 import { findUnlabelledExposedField, useBeforeUnloadWhenDirty } from "@/components/editor/useDirtyGuard";
 import { YamlEditor } from "@/components/YamlEditor";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { findKindSchema, OpenAPISchemaDoc, SchemaNode } from "@/lib/openapi";
 import { yamlToUIState } from "@/lib/yaml-to-ui-state";
@@ -502,21 +503,24 @@ function YamlModeEdit({ onDirty }: ModeProps) {
         <YamlEditor label="resources.yaml" value={resourcesYaml} onChange={(x) => { setResourcesYaml(x); touch(); }} />
         <YamlEditor label="ui-spec.yaml" value={uispecYaml} onChange={(x) => { setUispecYaml(x); touch(); }} />
       </div>
-      <details className="rounded border bg-white p-3" open>
+      <details className="rounded-md border bg-card p-3" open>
         <summary className="cursor-pointer text-sm font-semibold">{t("userFormPreview")}</summary>
         <div className="mt-3">
           <UserFormPreview uiSpecYaml={uispecYaml} />
         </div>
       </details>
       {err && <div className="text-red-600 text-sm whitespace-pre">{err}</div>}
+      {/*
+        Was a hand-rolled bg-green-600 button sitting next to the preview form's
+        primary-coloured submit, so the fake action read louder than the real
+        one (#44). Same shadcn Button as everywhere else; the preview's submit
+        is now outline. Labels stay — "save as new version" is the whole point
+        of editing a published version and BottomBar cannot say it.
+      */}
       <div className="flex justify-end">
-        <button
-          onClick={save}
-          disabled={!canSave}
-          className="px-3 py-1.5 bg-green-600 text-white rounded text-sm disabled:opacity-50"
-        >
+        <Button onClick={save} disabled={!canSave}>
           {saving ? t("saving") : isDraft ? t("save") : t("saveAsNew")}
-        </button>
+        </Button>
       </div>
     </div>
   );

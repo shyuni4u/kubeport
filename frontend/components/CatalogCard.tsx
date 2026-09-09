@@ -49,7 +49,7 @@ export function CatalogCard({ template }: Props) {
       </p>
       <div className="flex flex-wrap gap-1">
         {template.tags.map((t) => (
-          <Badge key={t} variant="secondary" className="text-[10px]">
+          <Badge key={t} variant="secondary" className="text-[11px]">
             {t}
           </Badge>
         ))}
