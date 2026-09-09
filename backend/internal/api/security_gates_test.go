@@ -86,6 +86,68 @@ func TestSSAR_RejectsResourcesKubeportDoesNotManage(t *testing.T) {
 	}
 }
 
+// Release deletion goes through DeleteCollection, which the k8s authorizer
+// checks under its own verb. Refusing to ask about it would make preflight
+// answer a question nobody asks: allowed on `delete`, refused on the real
+// delete.
+func TestSSAR_AcceptsDeleteCollection(t *testing.T) {
+	r, _, _ := newSSARRouter(t)
+	body, _ := json.Marshal(map[string]any{
+		"cluster":  "no-such-cluster-" + randSuffix(),
+		"verb":     "deletecollection",
+		"group":    "apps",
+		"resource": "deployments",
+	})
+	w := do(t, r, http.MethodPost, "/v1/selfsubjectaccessreview", bytes.NewReader(body))
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+}
+
+// A rejected request has to name the allowed set — a client that can only
+// learn the rule by trial and error keeps making the calls the limit exists to
+// prevent.
+func TestSSAR_RejectionNamesTheAllowedSets(t *testing.T) {
+	r, _, _ := newSSARRouter(t)
+
+	body, _ := json.Marshal(map[string]any{
+		"cluster": "any", "verb": "escalate", "group": "apps", "resource": "deployments",
+	})
+	w := do(t, r, http.MethodPost, "/v1/selfsubjectaccessreview", bytes.NewReader(body))
+	require.Contains(t, w.Body.String(), "create")
+	require.Contains(t, w.Body.String(), "deletecollection")
+
+	body, _ = json.Marshal(map[string]any{
+		"cluster": "any", "verb": "create", "group": "", "resource": "nodes",
+	})
+	w = do(t, r, http.MethodPost, "/v1/selfsubjectaccessreview", bytes.NewReader(body))
+	require.Contains(t, w.Body.String(), "apps/deployments")
+	require.Contains(t, w.Body.String(), "configmaps")
+}
+
+// A 429 must say how long to wait; without it a program either retries at once
+// or sleeps an arbitrary constant.
+func TestSSAR_RateLimitedCarriesRetryAfter(t *testing.T) {
+	r, _, _ := newSSARRouter(t)
+	body := func() *bytes.Reader {
+		b, _ := json.Marshal(map[string]any{
+			"cluster": "no-such-cluster", "verb": "create", "group": "apps", "resource": "deployments",
+		})
+		return bytes.NewReader(b)
+	}
+
+	var limited bool
+	for i := 0; i < 70; i++ {
+		w := do(t, r, http.MethodPost, "/v1/selfsubjectaccessreview", body())
+		if w.Code == http.StatusTooManyRequests {
+			require.Contains(t, w.Body.String(), "rate-limited")
+			require.NotEmpty(t, w.Header().Get("Retry-After"))
+			require.Equal(t, "60", w.Header().Get("X-RateLimit-Limit"))
+			limited = true
+			break
+		}
+	}
+	require.True(t, limited, "70 requests should have exhausted a 60/min budget")
+}
+
 // The validation must not reject what the deploy form actually sends — every
 // pair in the client's KIND_TO_RESOURCE map.
 func TestSSAR_AcceptsEveryKindTheDeployFormChecks(t *testing.T) {

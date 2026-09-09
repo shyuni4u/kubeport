@@ -44,7 +44,7 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	}
 	instances, err := cli.ListInstances(ctx, rel.Namespace, rel.Name)
 	if err != nil {
-		writeError(c, http.StatusBadGateway, "k8s-error", err.Error())
+		upstreamError(c, "StreamReleaseLogs: list instances", err)
 		return
 	}
 

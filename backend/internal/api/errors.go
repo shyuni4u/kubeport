@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 type Problem struct {
@@ -42,4 +43,33 @@ func writeError(c *gin.Context, status int, kind, detail string) {
 func internalError(c *gin.Context, op string, err error) {
 	log.Printf("%s: %v", op, err)
 	writeError(c, http.StatusInternalServerError, "internal", op+" failed")
+}
+
+// upstreamError answers 502 for a failed call to a cluster, keeping the
+// apiserver's own words only when they are addressed to the user.
+//
+// The k8s authorizer's `... is forbidden: User "x" cannot create deployments`
+// is the whole reason a deploy failed and belongs on screen. A transport
+// failure is not: client-go wraps it as *url.Error, so the text is
+// `Post "https://10.0.x.x:6443/apis/...": dial tcp ...` — the cluster's
+// address, which ListClusters deliberately stopped returning (#52). Fixing
+// only the 500s (#49) would have left that leak one status code over.
+func upstreamError(c *gin.Context, op string, err error) {
+	log.Printf("%s: %v", op, err)
+	if fromCluster(err) {
+		writeError(c, http.StatusBadGateway, "k8s-error", err.Error())
+		return
+	}
+	writeError(c, http.StatusBadGateway, "k8s-error", op+" failed")
+}
+
+// fromCluster reports whether the apiserver answered with a verdict, as
+// opposed to the call never getting there.
+func fromCluster(err error) bool {
+	return apierrors.IsForbidden(err) ||
+		apierrors.IsInvalid(err) ||
+		apierrors.IsNotFound(err) ||
+		apierrors.IsAlreadyExists(err) ||
+		apierrors.IsConflict(err) ||
+		apierrors.IsUnauthorized(err)
 }

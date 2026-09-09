@@ -1,8 +1,11 @@
 package api
 
 import (
+	"crypto/x509"
 	"errors"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -64,9 +67,40 @@ func (h *Handlers) ListClusters(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"clusters": out})
 }
 
+// validateCABundle rejects a cluster registration that would be unusable.
+//
+// The same rule the k8s factory applies at connect time, applied where the
+// operator can still act on it. `KBP_DEV_ALLOW_INSECURE_CLUSTERS=true` skips
+// the requirement for local kind clusters, exactly as it does there.
+func validateCABundle(pem string) error {
+	if strings.TrimSpace(pem) == "" {
+		if os.Getenv("KBP_DEV_ALLOW_INSECURE_CLUSTERS") == "true" {
+			return nil
+		}
+		return errors.New("ca_bundle is required: without it kubeport would send the user's token " +
+			"over an unverified connection, so deploys to this cluster would be refused. " +
+			"Set KBP_DEV_ALLOW_INSECURE_CLUSTERS=true for local dev only")
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM([]byte(pem)) {
+		return errors.New("ca_bundle is not valid PEM")
+	}
+	return nil
+}
+
 func (h *Handlers) CreateCluster(c *gin.Context) {
 	var r createClusterReq
 	if err := c.ShouldBindJSON(&r); err != nil {
+		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+		return
+	}
+	// Refuse here rather than at deploy time. Without a CA the k8s factory now
+	// declines to build a client (#96), so a cluster registered without one
+	// accepts 201 and then fails every deploy with a generic 500 whose reason
+	// is only in the pod log — and GetRelease reports it as "cluster
+	// unreachable", which points the operator at the network instead of the
+	// missing field.
+	if err := validateCABundle(r.CABundle); err != nil {
 		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
 		return
 	}

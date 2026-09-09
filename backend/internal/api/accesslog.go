@@ -1,8 +1,8 @@
 package api
 
 import (
-	"fmt"
 	"log"
+	"regexp"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,13 +18,21 @@ const requestIDKey = "kbp_request_id"
 // requestIDHeader lets an ingress or a client correlate its own logs with ours.
 const requestIDHeader = "X-Request-Id"
 
+// reqIDPattern is what an inbound id has to look like to be adopted.
+//
+// A length cap is not enough: header values may contain spaces and `=`, so a
+// 64-character id like `z status=200 user=admin@example.com` forges fields
+// inside the log line, and a parser or grep reading left to right sees a
+// refused request as a successful one under someone else's name. The demo
+// password is on the landing page, so that is reachable by anyone.
+var reqIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
 // requestID assigns each request an id, honouring an inbound X-Request-Id so a
 // trace survives the BFF hop, and echoes it on the response.
 func requestID() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.GetHeader(requestIDHeader)
-		// Don't trust an arbitrary-length client value into every log line.
-		if id == "" || len(id) > 64 {
+		if !reqIDPattern.MatchString(id) {
 			id = uuid.NewString()
 		}
 		c.Set(requestIDKey, id)
@@ -54,29 +62,45 @@ func requestIDFrom(c *gin.Context) string {
 // is the OIDC subject plus email, which is what an audit question is about.
 func accessLog() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		start := time.Now()
-		c.Next()
+		// Liveness and readiness hit /healthz every 10 and 20 seconds — roughly
+		// 13k lines a day, which would bury the handful of lines this exists to
+		// make findable.
+		if c.Request.URL.Path == "/healthz" {
+			c.Next()
+			return
+		}
 
-		u, _ := auth.UserFrom(c.Request.Context())
-		subject := u.Subject
-		if subject == "" {
-			subject = "-"
-		}
-		email := u.Email
-		if email == "" {
-			email = "-"
-		}
-		// FullPath is the route pattern ("/v1/templates/:name"), which keeps
-		// user-supplied path values out of the log. It is empty when nothing
-		// matched, and then the raw path is the interesting part — quoted,
-		// because an unmatched path is attacker-controlled and a newline in it
-		// would forge a log line.
-		path := c.FullPath()
-		if path == "" {
-			path = fmt.Sprintf("%q", c.Request.URL.EscapedPath())
-		}
-		log.Printf("access id=%s method=%s path=%s status=%d dur=%s user=%s subject=%s",
-			requestIDFrom(c), c.Request.Method, path, c.Writer.Status(),
-			time.Since(start).Round(time.Millisecond), email, subject)
+		start := time.Now()
+		// Deferred so a panicking handler is still recorded. Without it the
+		// stack unwinds past this point straight to gin.Recovery(), and the
+		// requests most worth having a record of — the ones whose input broke
+		// something — are the only ones with no line at all.
+		defer func() {
+			u, _ := auth.UserFrom(c.Request.Context())
+			subject := u.Subject
+			if subject == "" {
+				subject = "-"
+			}
+			email := u.Email
+			if email == "" {
+				email = "-"
+			}
+			// FullPath is the route pattern ("/v1/templates/:name"), which keeps
+			// user-supplied path values out of the log. It is empty when nothing
+			// matched, and then the raw path is the interesting part — quoted,
+			// because an unmatched path is attacker-controlled and a newline in it
+			// would forge a log line.
+			path := c.FullPath()
+			if path == "" {
+				path = c.Request.URL.EscapedPath()
+			}
+			// Quoted: the path can be unmatched and attacker-controlled, and
+			// the identity fields come from an IdP we do not control.
+			log.Printf("access id=%s method=%s path=%q status=%d dur=%s user=%q subject=%q",
+				requestIDFrom(c), c.Request.Method, path, c.Writer.Status(),
+				time.Since(start).Round(time.Millisecond), email, subject)
+		}()
+
+		c.Next()
 	}
 }

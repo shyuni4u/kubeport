@@ -47,26 +47,32 @@ type Handlers struct {
 
 func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Recovery(), requestID(), accessLog())
+	// requestID and accessLog sit outside Recovery so a panicking request still
+	// gets an id and a log line — Recovery converts the panic to a 500 within
+	// their scope rather than unwinding past them.
+	r.Use(requestID(), accessLog(), gin.Recovery(), limitBodySize(maxRequestBody))
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 
 	h := &Handlers{deps: deps, openapi: newOpenAPIProxy(cfg.OpenAPICacheMax)}
 	noDemo := denyDemo(deps.DemoEmailDomain)
+
+	// One budget shared by every route that makes kubeport call the target
+	// apiserver on the caller's behalf. Gating only the refresh (#97) would
+	// have left the reads that actually do the fetching unmetered: a cache
+	// miss pulls up to 10MiB, and a caller can manufacture misses at will by
+	// varying the group/version.
+	upstream := newRateLimiter(60, 4096)
 	v := r.Group("/v1", requireAuth(deps.Verifier))
 	v.GET("/me", h.GetMe)
 	v.GET("/clusters", h.ListClusters)
 	v.POST("/clusters", requireAdmin(), noDemo, h.CreateCluster)
-	v.GET("/clusters/:name/openapi", h.GetOpenAPIIndex)
-	v.GET("/clusters/:name/openapi/*gv", h.GetOpenAPIGroupVersion)
+	v.GET("/clusters/:name/openapi", rateLimit(upstream), h.GetOpenAPIIndex)
+	v.GET("/clusters/:name/openapi/*gv", rateLimit(upstream), h.GetOpenAPIGroupVersion)
 	// Evicting the cache makes the next read re-fetch the schema from the
 	// target apiserver, so this is a load amplifier on the control plane, not
 	// a read. Gate it like the other management routes (issue #97).
 	v.POST("/clusters/:name/openapi/refresh", requireAdmin(), noDemo, h.RefreshOpenAPI)
-	// One deploy-form page view fans out to several SSARs against the real
-	// apiserver, and nothing else bounds how often a caller can make kubeport
-	// talk to the control plane. The burst is sized so a single page load is
-	// never refused (issue #73).
-	v.POST("/selfsubjectaccessreview", rateLimit(newRateLimiter(60, 4096)), h.CheckSelfSubjectAccess)
+	v.POST("/selfsubjectaccessreview", rateLimit(upstream), h.CheckSelfSubjectAccess)
 	v.GET("/templates", h.ListTemplates)
 	// Authoring is gated for demo accounts unless the deployment opted in;
 	// everything else about the admin UX stays available to them.

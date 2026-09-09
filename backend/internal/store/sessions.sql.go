@@ -48,14 +48,14 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 }
 
 const deleteExpiredSessions = `-- name: DeleteExpiredSessions :execrows
-DELETE FROM sessions
- WHERE id IN (
-   SELECT id FROM sessions
-    WHERE expires_at < now()
-    ORDER BY expires_at
-      FOR UPDATE SKIP LOCKED
-    LIMIT $1
- )
+WITH doomed AS (
+  SELECT id FROM sessions
+   WHERE expires_at < now()
+   ORDER BY expires_at
+   LIMIT $1
+   FOR UPDATE SKIP LOCKED
+)
+DELETE FROM sessions WHERE id IN (SELECT id FROM doomed)
 `
 
 // Retention: an expired session is already unusable (GetSession filters on
@@ -69,6 +69,12 @@ DELETE FROM sessions
 // same order instead of racing for the same rows, so neither deadlocks and
 // neither comes back short while work remains (which the caller reads as
 // "nothing left" and would otherwise end the pass early).
+// The batch must be a CTE, not an IN (SELECT ... LIMIT). Postgres plans the
+// latter as a semi-join and re-executes the subquery per outer row; with
+// SKIP LOCKED each re-execution returns a *different* row, so the DELETE
+// removes more than batch_size (EXPLAIN shows Nested Loop Semi Join over the
+// Limit node). A CTE carrying a locking clause is never inlined, so it is
+// evaluated exactly once.
 func (q *Queries) DeleteExpiredSessions(ctx context.Context, batchSize int32) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteExpiredSessions, batchSize)
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -130,6 +131,22 @@ func IsMVPResource(group, resource string) bool {
 		}
 	}
 	return false
+}
+
+// MVPResourceNames lists the same set as "group/resource", core group first as
+// a bare name. A rejected request quotes it, so a client learns the allowed set
+// from the error instead of guessing at it.
+func MVPResourceNames() []string {
+	out := make([]string, 0, len(mvpResources))
+	for _, gvr := range mvpResources {
+		if gvr.Group == "" {
+			out = append(out, gvr.Resource)
+			continue
+		}
+		out = append(out, gvr.Group+"/"+gvr.Resource)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // DeleteByRelease deletes all MVP resources matching the kubeport.io/release label.

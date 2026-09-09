@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { upstreamUrl } from "./bff-path";
+import { requestIdFor, upstreamUrl } from "./bff-path";
 
 const BASE = "http://kubeport-backend:8080";
 
@@ -53,5 +53,48 @@ describe("upstreamUrl", () => {
 
   it("returns null for an unparseable base instead of throwing", () => {
     expect(upstreamUrl("not a url", ["templates"], "")).toBeNull();
+  });
+});
+
+describe("requestIdFor", () => {
+  // The backend's requestID middleware says it honours an inbound id "so a
+  // trace survives the BFF hop" — which it could not, because the proxy
+  // forwarded only Authorization and Content-Type.
+  it("keeps an inbound id", () => {
+    const h = new Headers({ "x-request-id": "from-the-client" });
+    expect(requestIdFor(h)).toBe("from-the-client");
+  });
+
+  it("mints one when there is none", () => {
+    const id = requestIdFor(new Headers());
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  // Same 64-char cap the backend applies, so an oversized header cannot ride
+  // into every log line on either side.
+  it("replaces an oversized inbound id", () => {
+    const h = new Headers({ "x-request-id": "a".repeat(200) });
+    const id = requestIdFor(h);
+    expect(id).not.toBe("a".repeat(200));
+    expect(id.length).toBeLessThanOrEqual(64);
+  });
+
+  it("replaces an empty inbound id", () => {
+    expect(requestIdFor(new Headers({ "x-request-id": "" }))).not.toBe("");
+  });
+
+  // Header values may contain spaces and `=`, so a short id can still forge
+  // fields inside the backend's access-log line — and this proxy forwards the
+  // header, so whatever it accepts lands there.
+  it.each([
+    "z status=200 user=admin@example.com",
+    "a b",
+    "id=forged",
+    "trailing\ttab",
+    "sem;colon",
+  ])("rejects %j, which would forge log fields", (value) => {
+    const id = requestIdFor(new Headers({ "x-request-id": value }));
+    expect(id).not.toBe(value);
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
   });
 });

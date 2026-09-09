@@ -169,7 +169,7 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		writeError(c, http.StatusBadGateway, "k8s-error", err.Error())
+		upstreamError(c, "proxyOpenAPI: upstream request", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -178,7 +178,7 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 	// "overflowed the limit" — io.LimitReader silently truncates otherwise.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(openapiMaxBytes)+1))
 	if err != nil {
-		writeError(c, http.StatusBadGateway, "k8s-error", err.Error())
+		upstreamError(c, "proxyOpenAPI: read upstream response", err)
 		return
 	}
 	if len(body) > openapiMaxBytes {
@@ -186,7 +186,15 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 		return
 	}
 	if resp.StatusCode >= 400 {
-		writeError(c, resp.StatusCode, "k8s-error", string(body))
+		// A 4xx from the apiserver is addressed to the caller ("no such group",
+		// "forbidden"), so it is passed through. A 5xx is the cluster's own
+		// trouble and its body can name internals; log it, don't echo it.
+		if resp.StatusCode >= 500 {
+			log.Printf("proxyOpenAPI: cluster %s returned %d: %s", name, resp.StatusCode, string(body))
+			writeError(c, http.StatusBadGateway, "k8s-error", "the cluster's OpenAPI endpoint returned an error")
+			return
+		}
+		writeError(c, resp.StatusCode, "k8s-error", string(body)) // raw-ok: 4xx body is the apiserver answering the caller
 		return
 	}
 

@@ -16,6 +16,31 @@
  */
 const REJECTED_SEGMENTS = new Set(["", ".", ".."]);
 
+/**
+ * What an inbound request id has to look like to be adopted. Matches the
+ * backend's rule exactly.
+ *
+ * A length cap alone is not enough: header values may contain spaces and `=`,
+ * so `z status=200 user=admin@example.com` fits in 64 characters and forges
+ * fields inside the access-log line. Since this proxy forwards the header on,
+ * anything it accepts reaches the backend's log too.
+ */
+const REQUEST_ID = /^[A-Za-z0-9._-]{1,64}$/;
+
+/**
+ * The id that ties a request to the backend's access log and to the
+ * `request_id` in any Problem the user is looking at.
+ *
+ * An inbound value is kept so a caller's own trace survives this hop — the
+ * backend's requestID middleware says it honours one, and it never saw it
+ * while the proxy forwarded only Authorization and Content-Type.
+ */
+export function requestIdFor(headers: Headers): string {
+  const inbound = headers.get("x-request-id");
+  if (inbound && REQUEST_ID.test(inbound)) return inbound;
+  return crypto.randomUUID();
+}
+
 export function upstreamUrl(base: string, path: string[], search: string): string | null {
   if (path.some((s) => REJECTED_SEGMENTS.has(s) || s.includes("/") || s.includes("\\"))) {
     return null;

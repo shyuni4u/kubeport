@@ -175,5 +175,10 @@ func TestSSAR_K8sCheckError(t *testing.T) {
 		bytes.NewReader(body))
 	require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "k8s-error")
-	require.Contains(t, w.Body.String(), "connection refused")
+	// "connection refused" is a transport failure, and client-go wraps those as
+	// *url.Error with the apiserver address in the text — the same address
+	// ListClusters stopped returning (#52). Only an authorizer verdict is
+	// passed through; this goes to the log.
+	require.NotContains(t, w.Body.String(), "connection refused")
+	require.Contains(t, w.Body.String(), "CheckSelfSubjectAccess")
 }

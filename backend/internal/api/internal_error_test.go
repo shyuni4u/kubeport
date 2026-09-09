@@ -46,8 +46,14 @@ func TestNoRawErrorsIn500Responses(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	require.NoError(t, err)
 
-	// writeError(c, http.StatusInternalServerError, "...", <anything with err>)
-	raw := regexp.MustCompile(`writeError\([^,]+,\s*http\.StatusInternalServerError\s*,[^,]+,[^)]*\berr\b[^)]*\)`)
+	// writeError(c, <500 or 502 or an upstream status>, "...", <anything with err>)
+	//
+	// 502 is in scope because #49 originally stopped at 500 and the same
+	// apiserver address went straight out the next status code over;
+	// resp.StatusCode is in scope because it can be a 5xx echoed from upstream
+	// along with its body.
+	raw := regexp.MustCompile(
+		`writeError\([^,]+,\s*(http\.StatusInternalServerError|http\.StatusBadGateway|resp\.StatusCode)\s*,[^,]+,[^)]*\b(err|body)\b[^)]*\)`)
 
 	var offenders []string
 	for _, e := range entries {
@@ -55,16 +61,24 @@ func TestNoRawErrorsIn500Responses(t *testing.T) {
 		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
+		// errors.go is where internalError and upstreamError live; they are the
+		// sanctioned way to write these responses.
+		if name == "errors.go" {
+			continue
+		}
 		src, err := os.ReadFile(filepath.Join(".", name))
 		require.NoError(t, err)
 		for i, line := range strings.Split(string(src), "\n") {
-			if raw.MatchString(line) {
+			// A deliberate pass-through carries `raw-ok:` and a reason, so the
+			// exception is visible in review rather than hidden in this regex.
+			if raw.MatchString(line) && !strings.Contains(line, "raw-ok:") {
 				offenders = append(offenders, name+":"+itoa(i+1)+" "+strings.TrimSpace(line))
 			}
 		}
 	}
 	require.Empty(t, offenders,
-		"500 responses must not carry the error text — use internalError(c, op, err), which logs it instead")
+		"5xx responses must not carry the error text — use internalError/upstreamError, which log it instead; "+
+			"a deliberate pass-through needs a `// raw-ok: <reason>` comment on the line")
 }
 
 func itoa(n int) string {

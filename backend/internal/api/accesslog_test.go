@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
 	"kubeport/internal/api"
@@ -40,9 +42,9 @@ func TestAccessLog_RecordsWhoAndWhat(t *testing.T) {
 	line := buf.String()
 	require.Contains(t, line, "access ")
 	require.Contains(t, line, "method=GET")
-	require.Contains(t, line, "path=/v1/templates")
+	require.Contains(t, line, `path="/v1/templates"`)
 	require.Contains(t, line, "status=200")
-	require.Contains(t, line, "user=admin@example.com")
+	require.Contains(t, line, `user="admin@example.com"`)
 }
 
 // The point of the whole thing: a denial is recorded, with the identity.
@@ -60,7 +62,7 @@ func TestAccessLog_RecordsADenial(t *testing.T) {
 
 	line := buf.String()
 	require.Contains(t, line, "status=403")
-	require.Contains(t, line, "user=demo-admin@"+demoDomain)
+	require.Contains(t, line, `user="demo-admin@`+demoDomain+`"`)
 }
 
 // Never log the credential.
@@ -117,4 +119,48 @@ func TestRequestID_HonoursInboundHeaderWithinReason(t *testing.T) {
 	w = serve(r, req)
 	require.NotEqual(t, strings.Repeat("a", 200), w.Header().Get("X-Request-Id"))
 	require.NotEmpty(t, w.Header().Get("X-Request-Id"))
+}
+
+// A length cap alone lets a short id forge fields: header values may contain
+// spaces and `=`, so `z status=200 user=admin@…` fits in 64 characters and a
+// left-to-right parser reads a refusal as a success under someone else's name.
+// The BFF forwards this header, so it is reachable from the public demo.
+func TestRequestID_RejectsAnIdThatWouldForgeLogFields(t *testing.T) {
+	buf := captureLog(t)
+	r := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: testStore(t)})
+
+	forged := "z status=200 user=admin@wonderers.co.kr"
+	require.LessOrEqual(t, len(forged), 64, "the point is that it is short enough to pass a length check")
+
+	req := newAuthedRequest(http.MethodGet, "/v1/templates")
+	req.Header.Set("X-Request-Id", forged)
+	w := serve(r, req)
+
+	require.NotEqual(t, forged, w.Header().Get("X-Request-Id"))
+	require.NotContains(t, buf.String(), forged)
+	require.NotContains(t, buf.String(), "user=admin@wonderers.co.kr")
+}
+
+// The requests most worth having a record of are the ones whose input broke
+// something. Logging after c.Next() without a defer skipped exactly those.
+func TestAccessLog_RecordsAPanickingRequest(t *testing.T) {
+	buf := captureLog(t)
+	r := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: testStore(t)})
+	r.GET("/v1/boom", func(c *gin.Context) { panic("boom") })
+
+	w := serve(r, newAuthedRequest(http.MethodGet, "/v1/boom"))
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Contains(t, buf.String(), "access ")
+	require.Contains(t, buf.String(), `path="/v1/boom"`)
+}
+
+// Liveness and readiness probes would otherwise be ~13k lines a day, burying
+// the handful this log exists for.
+func TestAccessLog_SkipsHealthz(t *testing.T) {
+	buf := captureLog(t)
+	r := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: testStore(t)})
+
+	w := serve(r, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NotContains(t, buf.String(), "access ")
 }

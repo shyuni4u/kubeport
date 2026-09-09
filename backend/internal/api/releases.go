@@ -227,7 +227,7 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		// has the target.
 		log.Printf("release apply failed id=%s user=%s cluster=%s ns=%s release=%s: %v",
 			requestIDFrom(c), u.Email, cluster.Name, r.Namespace, r.Name, err)
-		writeError(c, http.StatusBadGateway, "k8s-error", err.Error())
+		upstreamError(c, "CreateRelease: apply", err)
 		return
 	}
 	c.JSON(http.StatusCreated, rel)
@@ -450,7 +450,7 @@ func (h *Handlers) DeleteRelease(c *gin.Context) {
 			return
 		}
 		if err := cli.DeleteByRelease(ctx, rel.Namespace, rel.Name); err != nil {
-			writeError(c, http.StatusBadGateway, "k8s-error", err.Error())
+			upstreamError(c, "DeleteRelease: delete resources", err)
 			return
 		}
 	} else {

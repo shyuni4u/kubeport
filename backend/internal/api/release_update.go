@@ -132,7 +132,7 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 		return
 	}
 	if err := cli.ApplyAll(ctx, rel.Namespace, rendered); err != nil {
-		writeError(c, http.StatusBadGateway, "k8s-error", err.Error())
+		upstreamError(c, "UpdateRelease: apply", err)
 		return
 	}
 
