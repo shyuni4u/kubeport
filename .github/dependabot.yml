@@ -1,0 +1,66 @@
+version: 2
+
+# Division of labour: dependabot watches version drift, the weekly audit
+# routine reviews code. Grouping plus the per-ecosystem limits below cap a
+# Monday at 10 PRs — the point is to notice a security advisory, not to spend
+# the week reviewing patch bumps one at a time.
+#
+# Deliberately no blanket `ignore` on patch updates: patch releases are exactly
+# how a security fix usually arrives (next 16.3.3 for GHSA-2xp9-vwfh-vxw4 was
+# one), and ignore rules apply to security updates too.
+updates:
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      # next + eslint-config-next must move together; they are pinned to the
+      # same exact version on purpose.
+      next:
+        patterns: ["next", "eslint-config-next", "@next/*"]
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+      dev-minor-patch:
+        dependency-type: development
+        update-types: ["minor", "patch"]
+      prod-minor-patch:
+        dependency-type: production
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: gomod
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      k8s:
+        patterns: ["k8s.io/*", "sigs.k8s.io/*"]
+      minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Base images for the backend/frontend containers and the compose stack.
+  - package-ecosystem: docker
+    directories:
+      - /backend
+      - /frontend
+      - /deploy/docker
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    groups:
+      images:
+        patterns: ["*"]

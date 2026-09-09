@@ -9,8 +9,11 @@ node_modules/
 out/
 dist/
 
-# Tests / fixtures (not needed in production image)
-tests/
+# Tests / fixtures (not needed in production image). tests/ itself stays in the
+# build context: component *.test.tsx files import @/tests/intl-test-utils and
+# `next build` type-checks them. Nothing here ships — the runner stage copies
+# only .next/standalone, .next/static and public/.
+tests/e2e/
 playwright-report/
 test-results/
 

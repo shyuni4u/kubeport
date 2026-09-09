@@ -142,8 +142,9 @@ OCI Always Free 정책상 7일간 CPU 95p < 20% AND network < 20% AND memory < 2
 - New monitor → HTTP(s) → URL: `https://<host>` (또는 backend `/healthz` 노출되면 그쪽)
 - Interval: 5분 (무료 한도 안)
 
-**옵션 B: GitHub Actions schedule**
-이 리포 안에 `.github/workflows/uptime-ping.yml` 추가 (별도 PR — 본 가이드 범위 밖).
+**옵션 B: GitHub Actions schedule (이 리포에 이미 있음)**
+`.github/workflows/uptime-ping.yml` 이 10분마다 `https://<host>` 를 ping 한다. 다른 도메인으로
+포크했다면 그 파일의 URL 만 바꾸면 된다.
 
 ### 6.2. Boot Volume backup policy
 

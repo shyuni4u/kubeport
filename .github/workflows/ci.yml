@@ -1,0 +1,177 @@
+name: CI
+
+# Unit + integration tests and static checks. The heavy end-to-end run lives in
+# playwright.yml; this is the gate that should catch a regression in a minute
+# or two rather than in twenty.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Every job here runs code from the PR branch (its eslint config, its tests,
+# its atlas.hcl). `pull_request` already withholds secrets and write access
+# from fork PRs, but same-repo branch PRs — the normal flow here — get the
+# default token, so narrow it. Matches build-images.yml and uptime-ping.yml.
+permissions:
+  contents: read
+
+# A new push supersedes the previous run on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Add host.docker.internal to hosts
+        # Dex's issuer claim is https://host.docker.internal:5556; tokens only
+        # validate when the name resolves the same way it does locally.
+        run: echo "127.0.0.1 host.docker.internal" | sudo tee -a /etc/hosts
+
+      - name: Generate self-signed dex cert
+        # Same cert the Playwright job and docs/local-e2e.md §2 use. Without it
+        # dex refuses to start and internal/auth has nothing to talk to.
+        run: |
+          mkdir -p deploy/docker/certs
+          openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+            -keyout deploy/docker/certs/dex.key \
+            -out deploy/docker/certs/dex.crt \
+            -subj "/CN=host.docker.internal" \
+            -addext "subjectAltName=DNS:host.docker.internal,DNS:localhost,IP:127.0.0.1"
+          chmod 644 deploy/docker/certs/dex.key
+
+      - name: Start compose (postgres + dex)
+        run: docker compose -f deploy/docker/docker-compose.yml up -d
+
+      - name: Wait for postgres and dex
+        run: |
+          for i in $(seq 1 30); do
+            if docker compose -f deploy/docker/docker-compose.yml exec -T postgres pg_isready -U kubeport -d kubeport >/dev/null 2>&1 \
+               && curl -sk https://localhost:5556/.well-known/openid-configuration >/dev/null; then
+              echo "postgres + dex ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "compose services failed to start"
+          docker compose -f deploy/docker/docker-compose.yml logs
+          exit 1
+
+      - uses: ariga/setup-atlas@2f3c785c89a15e1c0d07bcae3900fb5feb969eea # v0.3
+
+      - name: Apply DB schema
+        run: cd backend/migrations && atlas schema apply --env local --auto-approve
+
+      - name: go vet
+        run: cd backend && go vet ./...
+
+      - name: go test
+        env:
+          TEST_DATABASE_URL: "postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable"
+          OIDC_ISSUER: "https://host.docker.internal:5556"
+          OIDC_CA_FILE: "${{ github.workspace }}/deploy/docker/certs/dex.crt"
+          # internal/auth skips its dex-backed tests when dex is unreachable so a
+          # fresh clone isn't red. Here dex IS running, so an unreachable dex is
+          # a failure — otherwise CI would go green on a silently skipped suite.
+          KBP_REQUIRE_DEX: "1"
+        # The kind-backed suites (backend/e2e, openapi_proxy, internal/k8s) skip
+        # here because this workflow doesn't stand up a cluster — playwright.yml
+        # is their gate. Listing the skips in the step summary keeps that
+        # visible, so nobody reads a green check as "the k8s paths are covered".
+        # -p 1: internal/api's TestMain deletes rows from the shared DB by name
+        # pattern, and internal/store builds fixtures with the same timestamp
+        # suffix — run in parallel they delete each other's rows. Locally store
+        # happens to finish first; under runner load that order flips, and a new
+        # gate that flakes is worse than no gate.
+        run: |
+          set -o pipefail
+          cd backend && go test -p 1 ./... -v 2>&1 | tee /tmp/go-test.log
+          {
+            echo "### Skipped Go tests"
+            grep -E '^\s*--- SKIP' /tmp/go-test.log || echo "none"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: docker compose -f deploy/docker/docker-compose.yml logs
+
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with: { version: 10 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install deps
+        run: cd frontend && pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: cd frontend && pnpm typecheck
+
+      - name: Lint
+        run: cd frontend && pnpm lint
+
+      - name: Unit tests
+        run: cd frontend && pnpm test
+
+  audit:
+    # Separate job on purpose: the advisory database changes without anyone
+    # touching this repo, so a new finding must not look like a test failure.
+    # Gated at critical and --prod only — high is currently 2 (browserslist and
+    # dompurify, both transitive and both waiting on upstream), so gating there
+    # would mean a permanently red job nobody reads.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: cd frontend && pnpm install --frozen-lockfile
+      - name: Audit production dependencies
+        run: cd frontend && pnpm audit --prod --audit-level critical
+      - name: Report everything else in the step summary
+        # `|| true` into the log means nobody reads it. The summary is on the
+        # run page, so a new high shows up next to the green check instead of
+        # 200 lines down.
+        if: always()
+        run: |
+          {
+            echo "### pnpm audit (informational — gate above is --prod critical)"
+            echo '```'
+            (cd frontend && pnpm audit) || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  hooks:
+    # The /pr-review guard is repo tooling with its own node:test suite; it is
+    # cheap enough to keep honest.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      # A directory argument is treated as a module by node's runner; pass the
+      # test files themselves.
+      - run: node --test .claude/hooks/*.test.mjs

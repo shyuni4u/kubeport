@@ -2197,7 +2197,7 @@ kubectl -n kubeport exec deploy/kubeport-backend -- \
 **Files:**
 - Modify: `CLAUDE.md` (현재 상태 블록, plan table), `docs/superpowers/specs/2026-09-07-self-improving-loop-design.md` §9
 
-- [ ] **Step 1:** In `CLAUDE.md` plan table add row `13 | plan13-demo-mode | 🚧 in progress → ✅ | Dex 데모 IdP + 데모 계정 2개 + 시드/리셋 + k3s 구조화 인증`. In 현재 상태 remove "(c) 데모용 첫 템플릿 시드" and add "데모 모드 라이브: `/` 에서 관리자/사용자 체험, 6시간 리셋". Note the separate follow-up: "`kuberport` 오타 → `kubeport` 통일 (docs/oci README·runbook·upload-gha-secrets.sh·CLAUDE.md)".
+- [ ] **Step 1:** In `CLAUDE.md` plan table add row `13 | plan13-demo-mode | 🚧 in progress → ✅ | Dex 데모 IdP + 데모 계정 2개 + 시드/리셋 + k3s 구조화 인증`. In 현재 상태 remove "(c) 데모용 첫 템플릿 시드" and add "데모 모드 라이브: `/` 에서 관리자/사용자 체험, 6시간 리셋". Note: the `kuberport` → `kubeport` rename that used to be listed here as a follow-up was **rejected** — see the `kuberport` 표기 row in CLAUDE.md "확정된 결정" (it is the real SSH key and directory name; renaming it breaks the documented path to production).
 - [ ] **Step 2:** In the spec §9 mark "데모 비밀번호: 표기+입력 — 구현됨(`DEMO_PASSWORD_HINT`)". In spec §4.1 record two deviations: (a) no `demo` team — templates are global, because demo-admin is blocked from team management; (b) the banner's Sentry feedback button is deferred to Plan 14 (Sentry SDK lands there).
 - [ ] **Step 3:** Commit: `git commit -am "docs: Plan 13 demo mode status in CLAUDE.md and spec"`.
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"os"
 	"testing"
 	"time"
 
@@ -47,10 +46,10 @@ func TestParseIssuersJSON(t *testing.T) {
 	require.Error(t, err, "duplicate issuer must be rejected")
 }
 
+// No dex needed: discovery is lazy and the token is rejected on its issuer
+// before any network call. The SKIP_OIDC guard that used to be here only cost
+// coverage — the dex-backed tests below use requireDex instead.
 func TestMultiVerifier_UnknownIssuerRejected(t *testing.T) {
-	if os.Getenv("SKIP_OIDC") != "" {
-		t.Skip("SKIP_OIDC set")
-	}
 	ctx := context.Background()
 	m, err := auth.NewMultiVerifier(ctx, []auth.IssuerConfig{{Issuer: dexIssuer(), ClientID: "kubeport"}})
 	require.NoError(t, err)
@@ -80,15 +79,13 @@ func TestMultiVerifier_UnreachableIssuerIsLazy(t *testing.T) {
 }
 
 func TestMultiVerifier_RoutesToDex(t *testing.T) {
-	if os.Getenv("SKIP_OIDC") != "" {
-		t.Skip("SKIP_OIDC set")
-	}
+	client := requireDex(t)
 	ctx := context.Background()
 	m, err := auth.NewMultiVerifier(ctx, []auth.IssuerConfig{
 		{Issuer: dexIssuer(), ClientID: "kubeport"},
 	})
 	require.NoError(t, err)
-	token := getDexToken(t, dexHTTPClient(t))
+	token := getDexToken(t, client)
 	claims, err := m.Verify(ctx, token)
 	require.NoError(t, err)
 	require.Equal(t, "alice@example.com", claims.Email)
@@ -129,9 +126,7 @@ func TestMultiVerifier_DiscoveryTimeoutAndNegativeCache(t *testing.T) {
 // blocked/slow issuer's discovery must not serialize behind a single mutex
 // and prevent verification of tokens from a different, healthy issuer.
 func TestMultiVerifier_PerIssuerLockIsolation(t *testing.T) {
-	if os.Getenv("SKIP_OIDC") != "" {
-		t.Skip("SKIP_OIDC set")
-	}
+	client := requireDex(t)
 	ctx := context.Background()
 	m, err := auth.NewMultiVerifier(ctx, []auth.IssuerConfig{
 		{Issuer: badIssuer, ClientID: "kubeport"},
@@ -139,7 +134,7 @@ func TestMultiVerifier_PerIssuerLockIsolation(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	token := getDexToken(t, dexHTTPClient(t))
+	token := getDexToken(t, client)
 	claims, err := m.Verify(ctx, token)
 	require.NoError(t, err, "a healthy issuer must verify fine even though another configured issuer is unreachable")
 	require.Equal(t, "alice@example.com", claims.Email)

@@ -1,20 +1,46 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { useTranslations } from "next-intl";
 
 const KEY = "kbp_demo_banner_dismissed";
 
+// sessionStorage is an external store: it doesn't exist during SSR, and reading
+// it into state from an effect meant an extra render on every mount. Reading it
+// through useSyncExternalStore keeps the server render (banner hidden, so it
+// never flashes and disappears) and lets the dismiss button notify subscribers
+// directly.
+const listeners = new Set<() => void>();
+
+function subscribe(onChange: () => void) {
+  listeners.add(onChange);
+  return () => {
+    listeners.delete(onChange);
+  };
+}
+
+function isDismissed() {
+  try {
+    return sessionStorage.getItem(KEY) === "1";
+  } catch {
+    // Private mode or storage disabled — show the banner rather than hide it.
+    return false;
+  }
+}
+
+function dismiss() {
+  try {
+    sessionStorage.setItem(KEY, "1");
+  } catch {
+    // Can't persist; the banner still hides for this render pass below.
+  }
+  for (const onChange of listeners) onChange();
+}
+
 export function DemoBanner({ resetAtIso }: { resetAtIso: string }) {
   const t = useTranslations("demo");
-  const [hidden, setHidden] = useState(true);
-  useEffect(() => {
-    try {
-      setHidden(sessionStorage.getItem(KEY) === "1");
-    } catch {
-      setHidden(false);
-    }
-  }, []);
+  // Server snapshot is "dismissed" so the markup matches the pre-hydration DOM.
+  const hidden = useSyncExternalStore(subscribe, isDismissed, () => true);
   if (hidden) return null;
   const time = new Date(resetAtIso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return (
@@ -23,10 +49,7 @@ export function DemoBanner({ resetAtIso }: { resetAtIso: string }) {
       <button
         type="button"
         className="rounded px-2 py-0.5 hover:bg-amber-100"
-        onClick={() => {
-          try { sessionStorage.setItem(KEY, "1"); } catch {}
-          setHidden(true);
-        }}
+        onClick={dismiss}
       >
         {t("dismiss")}
       </button>

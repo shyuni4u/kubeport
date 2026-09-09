@@ -3,7 +3,7 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { MenuIcon } from "lucide-react";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 export function MobileSidebarShell({
@@ -16,9 +16,15 @@ export function MobileSidebarShell({
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
-  useEffect(() => {
+  // Close the drawer when navigation happens. Adjusting state during render on
+  // a changed input is React's documented alternative to a setState effect: it
+  // re-renders before anything is committed, so the open drawer is never
+  // painted on the new route.
+  const [lastPathname, setLastPathname] = useState(pathname);
+  if (pathname !== lastPathname) {
+    setLastPathname(pathname);
     setOpen(false);
-  }, [pathname]);
+  }
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
