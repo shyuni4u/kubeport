@@ -13,6 +13,38 @@ const nextConfig: NextConfig = {
   // route entirely, so the next advisory against it doesn't reach us at all.
   // Revisit if a page ever starts using next/image.
   images: { unoptimized: true },
+  // Don't advertise the framework.
+  poweredByHeader: false,
+  // The BFF terminates every external request, so this is the one place that
+  // covers pages, /api/auth/* and /api/v1/* alike (#50).
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          // Two years. Deliberately no `preload` token — submitting to the
+          // preload list is an operator decision, not something a chart should
+          // make on their behalf.
+          //
+          // includeSubDomains is safe for the intended layout (an app host plus
+          // dex on its own subdomain, both HTTPS). It is NOT safe if you install
+          // on an apex domain that has sibling HTTP services: they would be
+          // forced to HTTPS for two years, in the visitor's browser, with no way
+          // for you to undo it. Making this configurable is tracked separately.
+          {
+            key: "Strict-Transport-Security",
+            value: "max-age=63072000; includeSubDomains",
+          },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // frame-ancestors rather than X-Frame-Options: it is the CSP-era
+          // spelling and lets a future policy extend the same header. Keeps the
+          // login screen and the demo-start buttons out of foreign iframes.
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+        ],
+      },
+    ];
+  },
   // The landing page reads lib/showcase/*.yaml with fs at request time; make
   // sure the standalone build ships them (see lib/showcase/load.ts).
   outputFileTracingIncludes: {

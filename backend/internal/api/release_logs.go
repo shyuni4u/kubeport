@@ -34,7 +34,7 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 
 	u, ok := auth.UserFrom(ctx)
 	if !ok {
-		writeError(c, http.StatusUnauthorized, "unauthorized", "missing token")
+		writeError(c, http.StatusUnauthorized, "unauthenticated", "missing token")
 		return
 	}
 	cli, err := h.deps.K8sFactory.NewWithToken(rel.ClusterApiUrl, rel.ClusterCaBundle.String, u.IDToken)
