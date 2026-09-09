@@ -204,6 +204,7 @@ LISTEN_ADDR=:8080 \
   APP_ENCRYPTION_KEY_B64="$(openssl rand -base64 32)" \
   KBP_DEV_ADMIN_EMAILS=admin@example.com,demo-admin@demo.kubeport \
   KBP_DEMO_EMAIL_DOMAIN=demo.kubeport \
+  KBP_DEMO_ALLOW_TEMPLATE_CREATE=true \
   go run ./cmd/server
 ```
 
@@ -213,7 +214,13 @@ see **Known limits**. Never set in prod.
 `KBP_DEMO_EMAIL_DOMAIN` marks any user whose email ends in that domain as a
 demo account — the backend then rejects mutating requests outside the
 seeded demo scope (`demo-restricted`, see `internal/api/middleware.go`).
+
 Leave unset to disable demo restrictions entirely.
+
+`KBP_DEMO_ALLOW_TEMPLATE_CREATE=true` re-opens template authoring for demo
+accounts. The seed and the admin specs create templates as `demo-admin`, so the
+local stack and CI set it; production leaves it off (see
+[oci-prod-runbook §5](oci-prod-runbook.md)).
 
 ### 8. Frontend
 
