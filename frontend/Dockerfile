@@ -13,7 +13,7 @@
 # === Stage 1: deps ===
 # Install pnpm via corepack, then install all dependencies (cached separately
 # from source so pure source edits don't reinstall).
-FROM node:22-alpine AS deps
+FROM node:26-alpine AS deps
 RUN corepack enable
 WORKDIR /app
 
@@ -22,7 +22,7 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 
 # === Stage 2: builder ===
-FROM node:22-alpine AS builder
+FROM node:26-alpine AS builder
 RUN corepack enable
 WORKDIR /app
 
@@ -40,7 +40,7 @@ RUN pnpm build
 
 # === Stage 3: runner ===
 # Tiny final image — only standalone output + static + public assets.
-FROM node:22-alpine AS runner
+FROM node:26-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \

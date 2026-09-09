@@ -8,7 +8,7 @@
 # Builder pinned to BUILDPLATFORM (native) and Go cross-compiles to TARGETARCH.
 # This avoids QEMU during compilation — same speed regardless of target arch.
 
-FROM --platform=$BUILDPLATFORM golang:1.26.2-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine AS builder
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
