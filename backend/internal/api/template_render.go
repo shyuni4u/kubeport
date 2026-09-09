@@ -25,7 +25,9 @@ type previewRenderReq struct {
 // Does NOT apply to k8s and does NOT persist anything.
 //
 // Version selection:
-//   - ?version=N           → render that specific version (any status).
+//   - ?version=N           → render that specific version. Drafts are visible
+//     to the template's editors only (issue #12); published and deprecated
+//     versions to any authenticated user.
 //   - no ?version          → render the template's current published version.
 //     If the template has no current_version_id set (never published), → 404.
 //
@@ -107,6 +109,12 @@ func (h *Handlers) resolveTemplateVersion(c *gin.Context, name, versionQuery str
 			// outage will look like "template not found" — improving the
 			// overall pattern is outside Task 1's scope.
 			writeError(c, http.StatusNotFound, "not-found", "template version")
+			return store.TemplateVersion{}, false
+		}
+		// ?version=N can address a draft, so it needs the same read gate as
+		// GET /v1/templates/:name/versions/:v — rendering returns the
+		// substance of the draft's resources.yaml (issue #12).
+		if !h.ensureCanReadVersion(c, name, tv.Status) {
 			return store.TemplateVersion{}, false
 		}
 		return tv, true
