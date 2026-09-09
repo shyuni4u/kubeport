@@ -208,6 +208,10 @@ demo:
   # templates are kept out of real users' catalogs either way, but they survive a
   # demo reset once someone deploys from them. Turn on only where demonstrating
   # authoring is the point. See docs/brainstorming-summary.md §14.
+  #
+  # The reset CronJob does NOT need this: it seeds the catalog through the
+  # database, not the API. It did once, and leaving that coupling in place meant
+  # a closed gate emptied the live demo every six hours (#104).
   allowTemplateCreate: false
   adminPassword: ""               # --set; used by the reset job only
   userPassword: ""                # --set

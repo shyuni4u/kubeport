@@ -11,8 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-
-	"kubeport/cmd/seed-demo/fixtures"
 )
 
 type releaseSpec struct {
@@ -97,43 +95,12 @@ type Seeder struct {
 	cluster, ns string
 }
 
+// Run creates the demo releases. Templates are seeded separately and
+// straight to the database (templates.go) because the demo accounts this
+// runs as are barred from authoring into the shared catalog; releases stay
+// here because creating one applies manifests to the demo cluster.
 func (s *Seeder) Run(ctx context.Context) error {
-	// 1. templates (as demo-admin). POST returns 201 or 409 (exists) — both fine.
-	for _, f := range fixtures.All() {
-		code, b, err := s.admin.do(ctx, http.MethodPost, "/v1/templates", map[string]any{
-			"name": f.Name, "display_name": f.DisplayName, "description": f.Description, "tags": f.Tags,
-			"authoring_mode": "yaml", "resources_yaml": f.ResourcesYAML, "ui_spec_yaml": f.UISpecYAML,
-		})
-		if err != nil {
-			return err
-		}
-		switch code {
-		case http.StatusCreated:
-			log.Printf("template %s created", f.Name)
-			if code, b, err := s.admin.do(ctx, http.MethodPost, "/v1/templates/"+f.Name+"/versions/1/publish", nil); err != nil || code >= 300 {
-				return fmt.Errorf("publish %s: %d %s %v", f.Name, code, b, err)
-			}
-			// Spec §4.1: each template also ships a draft v2 so demo-admin has
-			// something to edit/publish. Same YAML, draft status.
-			if code, b, err := s.admin.do(ctx, http.MethodPost, "/v1/templates/"+f.Name+"/versions", map[string]any{
-				"authoring_mode": "yaml", "resources_yaml": f.ResourcesYAML, "ui_spec_yaml": f.UISpecYAML,
-				"notes": "데모용 초안 — 자유롭게 수정해 보세요",
-			}); err != nil || code >= 300 {
-				return fmt.Errorf("draft v2 %s: %d %s %v", f.Name, code, b, err)
-			}
-		case http.StatusConflict:
-			log.Printf("template %s exists, skipping", f.Name)
-			// A partially-seeded template (created but never published, or its
-			// draft deleted by a demo visitor) must still end up in the shape
-			// the demo expects: v1 published + a v2 draft to edit.
-			if err := s.repairVersions(ctx, f.Name, f.ResourcesYAML, f.UISpecYAML); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("create template %s: %d %s", f.Name, code, b)
-		}
-	}
-	// 2. releases (as demo-user). 201 or 409 → ok.
+	// 201 or 409 (already seeded) are both fine.
 	for _, r := range releaseSpecs() {
 		code, b, err := s.user.do(ctx, http.MethodPost, "/v1/releases", map[string]any{
 			"template": r.Template, "version": 1, "cluster": s.cluster, "namespace": s.ns, "name": r.Name, "values": r.Values,
@@ -155,60 +122,5 @@ func (s *Seeder) Run(ctx context.Context) error {
 			return fmt.Errorf("create release %s: %d %s", r.Name, code, b)
 		}
 	}
-	return nil
-}
-
-// repairVersions brings an already-existing template back to the seeded shape:
-// v1 published, and at least one draft version to edit. Idempotent — a fully
-// seeded template produces no writes.
-func (s *Seeder) repairVersions(ctx context.Context, name, resourcesYAML, uiSpecYAML string) error {
-	code, b, err := s.admin.do(ctx, http.MethodGet, "/v1/templates/"+name+"/versions", nil)
-	if err != nil {
-		return err
-	}
-	if code != http.StatusOK {
-		return fmt.Errorf("list versions %s: %d %s", name, code, b)
-	}
-	var listed struct {
-		Versions []struct {
-			Version int    `json:"version"`
-			Status  string `json:"status"`
-		} `json:"versions"`
-	}
-	if err := json.Unmarshal(b, &listed); err != nil {
-		return fmt.Errorf("list versions %s: %w", name, err)
-	}
-
-	var v1Draft, otherDraft bool
-	for _, v := range listed.Versions {
-		if v.Status != "draft" {
-			continue
-		}
-		if v.Version == 1 {
-			v1Draft = true
-		} else {
-			otherDraft = true
-		}
-	}
-	// v1 must be published (it is what the catalog deploys).
-	if v1Draft {
-		if code, b, err := s.admin.do(ctx, http.MethodPost, "/v1/templates/"+name+"/versions/1/publish", nil); err != nil || code >= 300 {
-			return fmt.Errorf("publish %s v1: %d %s %v", name, code, b, err)
-		}
-		log.Printf("template %s v1 published", name)
-	}
-	// Publishing v1 does not leave an editable draft, so only a draft at some
-	// other version counts.
-	if otherDraft {
-		log.Printf("template %s already has a draft, skipping", name)
-		return nil
-	}
-	if code, b, err := s.admin.do(ctx, http.MethodPost, "/v1/templates/"+name+"/versions", map[string]any{
-		"authoring_mode": "yaml", "resources_yaml": resourcesYAML, "ui_spec_yaml": uiSpecYAML,
-		"notes": "데모용 초안 — 자유롭게 수정해 보세요",
-	}); err != nil || code >= 300 {
-		return fmt.Errorf("draft %s: %d %s %v", name, code, b, err)
-	}
-	log.Printf("template %s draft created", name)
 	return nil
 }

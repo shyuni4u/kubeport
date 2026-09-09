@@ -145,6 +145,11 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
   (backend `KBP_DEMO_ALLOW_TEMPLATE_CREATE`). 켜도 데모가 만든 템플릿은 실제 사용자 카탈로그에
   안 보이지만, 누군가 그걸로 배포하면 6시간 리셋이 그 템플릿을 건너뛴다(`tolerateFK`).
   결정 근거: [brainstorming-summary §14](brainstorming-summary.md).
+  **리셋 CronJob 은 이 플래그와 무관하다** — 시드는 API 가 아니라 DB 로 직접 쓴다
+  (`cmd/seed-demo/templates.go`). 한때 API 를 타서, 게이트가 닫힌 상태로 배포하자 6시간마다
+  데모가 비워졌다([#104](https://github.com/shyuni4u/kubeport/issues/104)). 시드가 실패하면
+  잡이 Failed 로 남고 카탈로그가 빈 채로 방치되니, 배포 후 한 번은
+  `kubectl -n kubeport get job` 으로 확인할 것.
 - **Dex 호스트도 ephemeral IP 를 본다**: VM stop/start 후 `dex.kubeport.enzo.kr` A 레코드까지 갱신하지 않으면
   인증서 갱신·데모 로그인이 깨진다.
 

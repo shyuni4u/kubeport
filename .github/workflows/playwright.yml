@@ -168,9 +168,6 @@ jobs:
           APP_ENCRYPTION_KEY_B64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
           KBP_DEV_ADMIN_EMAILS: "admin@example.com,demo-admin@demo.kubeport"
           KBP_DEMO_EMAIL_DOMAIN: "demo.kubeport"
-          # The e2e stack seeds the catalog and drives admin authoring through demo
-          # accounts, so it opts into the authoring gate that production leaves off.
-          KBP_DEMO_ALLOW_TEMPLATE_CREATE: "true"
         run: |
           nohup ./bin/kubeport-server > /tmp/backend.log 2>&1 &
           echo $! > /tmp/backend.pid

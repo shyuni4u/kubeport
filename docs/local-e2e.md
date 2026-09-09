@@ -204,7 +204,6 @@ LISTEN_ADDR=:8080 \
   APP_ENCRYPTION_KEY_B64="$(openssl rand -base64 32)" \
   KBP_DEV_ADMIN_EMAILS=admin@example.com,demo-admin@demo.kubeport \
   KBP_DEMO_EMAIL_DOMAIN=demo.kubeport \
-  KBP_DEMO_ALLOW_TEMPLATE_CREATE=true \
   go run ./cmd/server
 ```
 
@@ -218,9 +217,10 @@ seeded demo scope (`demo-restricted`, see `internal/api/middleware.go`).
 Leave unset to disable demo restrictions entirely.
 
 `KBP_DEMO_ALLOW_TEMPLATE_CREATE=true` re-opens template authoring for demo
-accounts. The seed and the admin specs create templates as `demo-admin`, so the
-local stack and CI set it; production leaves it off (see
-[oci-prod-runbook §5](oci-prod-runbook.md)).
+accounts through the API. Nothing in this stack needs it: `seed-demo` writes
+the catalog straight to the database (`cmd/seed-demo/templates.go`) and the
+editor specs author as `admin@example.com`, which is not a demo account. Set
+it only to demo authoring itself (see [oci-prod-runbook §5](oci-prod-runbook.md)).
 
 ### 8. Frontend
 
