@@ -44,20 +44,25 @@ function useReleaseStatuses(ids: string[]): Record<string, string> {
 
   useEffect(() => {
     if (ids.length === 0) return;
-    let active = true;
+    // Aborted on unmount so navigating away mid-probe doesn't leave a column
+    // of requests running against the cluster for a page nobody is looking at.
+    const controller = new AbortController();
     const queue = [...ids];
 
     async function worker() {
       for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
         try {
-          const res = await fetch(`/api/v1/releases/${id}`);
-          if (!active || !res.ok) continue;
+          const res = await fetch(`/api/v1/releases/${id}`, {
+            signal: controller.signal,
+          });
+          if (!res.ok) continue;
           const body = (await res.json()) as { status?: string };
-          if (!active || !body.status) continue;
+          if (controller.signal.aborted || !body.status) continue;
           const status = body.status;
           setStatuses((prev) => ({ ...prev, [id as string]: status }));
         } catch {
           // Offline, aborted, or a non-JSON body: leave the row unmarked.
+          if (controller.signal.aborted) return;
         }
       }
     }
@@ -70,7 +75,7 @@ function useReleaseStatuses(ids: string[]): Record<string, string> {
     );
 
     return () => {
-      active = false;
+      controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);

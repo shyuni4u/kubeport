@@ -114,6 +114,24 @@ describe("ReleaseTable", () => {
     expect(screen.getByRole("link", { name: /web-staging/ })).toBeInTheDocument();
   });
 
+  // Navigating away mid-probe must not leave requests running against the
+  // cluster for a page nobody is looking at.
+  it("aborts in-flight probes on unmount", async () => {
+    const signals: AbortSignal[] = [];
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.signal) signals.push(init.signal);
+      return new Promise<Response>(() => {}); // never settles
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { unmount } = render(<ReleaseTable rows={rows} />);
+    await waitFor(() => expect(signals.length).toBeGreaterThan(0));
+    expect(signals.every((s) => !s.aborted)).toBe(true);
+
+    unmount();
+    expect(signals.every((s) => s.aborted)).toBe(true);
+  });
+
   it("probes each release exactly once", async () => {
     const fetchMock = statusFetch({ r1: "healthy", r2: "error" });
     vi.stubGlobal("fetch", fetchMock);
