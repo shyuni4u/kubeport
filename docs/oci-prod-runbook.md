@@ -66,6 +66,11 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
 - **프록시 뒤 origin**: frontend 는 traefik 뒤라 `req.nextUrl.origin` 이 내부 주소
   (`https://0.0.0.0:3000`)로 잡힌다. auth 라우트는 `lib/request-origin.ts`(x-forwarded-host)로
   외부 origin 을 유도한다 — 로그인/로그아웃 리다이렉트가 깨지면 여길 본다.
+  단, 유도한 값은 **허용 목록과 대조**한 뒤에만 쓴다. 목록은 `PUBLIC_ORIGIN`(콤마구분, 선택)이
+  있으면 그것, 없으면 `OIDC_REDIRECT_URI` 의 origin 이다. 즉 차트가 이미 `OIDC_REDIRECT_URI` 를
+  넣어 주므로 **운영에서 추가 설정은 필요 없다.** 목록 밖 호스트로 위조된 `X-Forwarded-Host` 는
+  무시되고 첫 번째 허용 origin 으로 고정된다. 도메인을 여러 개 붙일 때만 `PUBLIC_ORIGIN` 에
+  전부 나열한다 (둘 다 비면 헤더 값을 그대로 쓴다 — 로컬 개발용).
 
 ## 5. 실제 배포 활성화 (k3s ↔ Google OIDC ↔ RBAC ↔ 클러스터 등록)
 
@@ -154,6 +159,11 @@ sudo systemctl restart k3s
 - **백업**: 커스텀 정책 `kubeport-weekly-4w`(주간 증분, 28일 보존 = 최대 4개, 무료 5개 한도 내)가
   boot volume 에 연결됨. Postgres 데이터(local-path PVC)도 boot volume 안이라 함께 보존.
   ⚠️ Oracle 기본 **Bronze 는 월간/연간 장기보존이라 무료 한도 초과 → 쓰지 말 것.**
+- **세션 보관 정책**: 만료 즉시 삭제, 유예 없음. backend 가 기동 직후 한 번 + 이후 1시간마다
+  `expires_at < now()` 인 `sessions` 행을 1000개씩 지운다(`internal/session` reaper). 만료된 세션은
+  이미 사용 불가이고 행에는 암호화된 id/refresh token 만 남으므로 보관할 이유가 없다 — PVC 용량과
+  주간 백업 크기를 함께 줄인다. 주기는 `KBP_SESSION_REAP_INTERVAL`(Go duration, 예 `30m`)로 조정.
+  삭제량은 backend 로그에 `session reaper: removed N expired sessions` 로 남는다.
 - **로그**: `kubectl logs -n kubeport deploy/kubeport-{frontend,backend}`. k3s: `journalctl -u k3s`.
 - **인증서**: `letsencrypt-prod` 자동 갱신(만료 30일 전). `kubectl get certificate -n kubeport`.
 

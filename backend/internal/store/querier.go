@@ -19,6 +19,12 @@ type Querier interface {
 	// shape: returns zero rows when the version is not draft so the handler can
 	// return 409 instead of a generic DB error.
 	DeleteDraftTemplateVersion(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
+	// Retention: an expired session is already unusable (GetSession filters on
+	// expires_at), so the row is nothing but an encrypted id_token and refresh
+	// token we no longer need. Sweep them instead of keeping them forever — the
+	// s_expires_at index makes this cheap. Deletes in bounded batches so one call
+	// can never hold a long lock on a table that logins are writing to.
+	DeleteExpiredSessions(ctx context.Context, batchSize int32) (int64, error)
 	DeleteRelease(ctx context.Context, id pgtype.UUID) error
 	DeleteSession(ctx context.Context, id pgtype.UUID) error
 	DeleteTeam(ctx context.Context, id pgtype.UUID) error

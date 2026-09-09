@@ -6,11 +6,13 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"time"
 
 	"kubeport/internal/api"
 	"kubeport/internal/auth"
 	"kubeport/internal/config"
 	"kubeport/internal/k8s"
+	"kubeport/internal/session"
 	"kubeport/internal/store"
 )
 
@@ -36,6 +38,7 @@ func main() {
 		DemoEmailDomain:     os.Getenv("KBP_DEMO_EMAIL_DOMAIN"),
 		AppEncryptionKeyB64: os.Getenv("APP_ENCRYPTION_KEY_B64"),
 		OpenAPICacheMax:     getenvInt("KBP_OPENAPI_CACHE_MAX", 64),
+		SessionReapInterval: getenvDuration("KBP_SESSION_REAP_INTERVAL", session.DefaultInterval),
 	}
 
 	issuers, err := resolveIssuers(cfg)
@@ -67,6 +70,10 @@ func main() {
 	}
 	defer st.Close()
 
+	// Expired sessions are unusable the moment they expire but were never
+	// deleted, so the table grew forever with encrypted id/refresh tokens in it.
+	session.StartReaper(ctx, st, cfg.SessionReapInterval, session.DefaultBatchSize)
+
 	r := api.NewRouter(cfg, api.Deps{Verifier: verifier, Store: st, K8sFactory: k8sFactory{}, DemoEmailDomain: cfg.DemoEmailDomain})
 	log.Printf("listening on %s", cfg.ListenAddr)
 	if err := r.Run(cfg.ListenAddr); err != nil {
@@ -89,6 +96,22 @@ func getenvInt(k string, def int) int {
 		}
 	}
 	return def
+}
+
+// getenvDuration parses a Go duration ("30m", "2h"). An unparseable value falls
+// back to the default with a warning rather than failing startup — a typo in an
+// operational knob shouldn't take the app down.
+func getenvDuration(k string, def time.Duration) time.Duration {
+	v := os.Getenv(k)
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		log.Printf("WARN: %s=%q is not a duration (%v); using %s", k, v, err, def)
+		return def
+	}
+	return d
 }
 
 // resolveIssuers prefers KBP_OIDC_ISSUERS; falls back to the legacy
