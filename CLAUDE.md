@@ -7,19 +7,20 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 
 **🟢 라이브 배포 완료 — https://kubeport.enzo.kr** (OCI Always Free A1, Phase 2 직행). Plan 0~10 실행 완료: 프론트 재설계(0~7) + drift 회수(8) + Helm chart(9) + **OCI 부트스트랩·helm install·Google OIDC·실제 k8s 배포 인프라(10)**. 운영 지식은 반드시 [docs/oci-prod-runbook.md](docs/oci-prod-runbook.md) 참조.
 
-> **▶ 현재 상태 (2026-09-08)** — 데모 가능 상태. 완료 삭제하며 갱신할 것.
+> **▶ 현재 상태 (2026-09-09)** — 데모 가능 상태. 완료 삭제하며 갱신할 것.
+> - **라이브 = `sha-269a198`, Helm rev 10** (2026-09-09 08:19 UTC **기준 — 재배포마다 썩는 값이다**. 지금 라이브가 뭔지는 [runbook §3-3](docs/oci-prod-runbook.md#3-3-배포-확인) 의 `helm history` 로 직접 본다). 재배포 절차·함정은 [runbook §3](docs/oci-prod-runbook.md#3-재배포-이미지-갱신).
 > - **실제 k8s 배포까지 동작**: k3s 가 Google OIDC 신뢰 + RBAC 바인딩 + 클러스터 `oci-a1` 등록 (runbook §5). backend 가 사용자 Google 토큰을 k8s API 로 포워딩.
-> - **로그인/로그아웃 정상**, admin 부트스트랩(`auth.devAdminEmails`). **운영 하드닝**: idle-reclaim ping(GHA 10분) + 주간 백업 정책.
-> - **데모 모드(Plan 13) 라이브** (Helm rev 4, 이미지 `sha-6bf1667`) — `/` 에서 관리자/사용자 체험 버튼(Dex 로그인, 비밀번호 화면 표기), `demo` 네임스페이스 격리, 6시간 리셋, k3s 가 Google+Dex 구조화 인증. 운영: runbook §5. 남은 사람 작업(브라우저 스모크): [docs/plan13-handoff.md](docs/plan13-handoff.md).
-> - **2026-09-08 머지분 (PR #3·#4·#5·#7·#9·#10·#15)** —
->   - **랜딩 비교 쇼케이스** (#3): `/` 에 "관리자 YAML(약 110줄) vs 사용자 폼(4칸)" 인터랙티브 비교, 값 바꾸면 바뀐 줄 하이라이트(`lib/apply-values-to-yaml.ts`). 데모 시드 `web-app` 을 현실적 크기로 확장(`frontend/lib/showcase/` 복사본은 백엔드 원본과 바이트 일치 테스트). 같이 잡은 버그: `DynamicForm` 이 `[...]` 포함 경로에서 사용자 입력을 버리고 기본값 제출(RHF 가 `[`·`]` 도 경로 구분자로 해석).
->   - **role-review v2** (#5): 관리자/사용자 페르소나 리뷰 20건 전부 반영 — 전역 `error.tsx`/`not-found.tsx`, 서버 액션 인라인 에러(`ActionForm`), zod 검증 메시지 i18n, 에디터 미저장 가드(뒤로가기는 App Router 한계), 사용자 릴리스 삭제, RBAC 미매핑 kind 경고, 저작 UI 문자열 전부 i18n(ko/en parity 285/285), `(?)` 도움말(`HelpHint`)과 인스펙터 도움말 입력칸. **원칙: 어려운 용어엔 `(?)`, 사용자 편의 최우선.**
->   - **BFF 프록시 PATCH 누락** (#7) — UI 모드 draft 저장·메타 수정이 405 였던 초기 버그.
->   - **Plan 11 e2e 1차** (#10): `05-user-deploy`·`06-admin-draft-save`·`07-error-pages` + 기존 `02/03` 한국어 라벨·confirm 수락 수정 + CI rolebinding 재시도. **e2e 는 로컬에서 먼저** — `scripts/e2e/*` (#15, [docs/local-e2e.md §0](docs/local-e2e.md)), 이 머신 13/13 28초.
->   - `kuberport` 잔존은 실제 파일명이라 유지, 스크립트만 새 이름 우선 (#9). `bootstrap.sh` CIDR/OIDC 반영은 #1 로 완료.
-> - **PR 리뷰어 시스템 (2026-09-08)** — `/pr-review` 스킬 + `.claude/agents/*-reviewer.md` 7개 + `gh pr create` 훅(`.claude/hooks/require-pr-review.mjs`, node 테스트 6개). 리포에 커밋되어 모든 PC 공통. 브라우저 대상은 라이브 데모(`--base-url` 로 staging 교체 예정). 첫 dry-run 이 자기 PR 의 P0(커밋된 settings.json 의 프로덕션 SSH 허용 규칙)·P1(helm template 검증 명령 오류)을 잡아 수정함.
-> - **남은 것**: (a) **[issue #20](https://github.com/shyuni4u/kubeport/issues/20)** 다른 PC 에서 `scripts/e2e/up.sh` 생성 경로(인증서·kind) 첫 검증, (b) Plan 11 후속 — 라이브 OCI smoke(프로덕션에 릴리스 생성/삭제 여부 결정 필요)·클러스터 끊김/drift 케이스, (c) 프론트 eslint 기존 오류 6건(`set-state-in-effect`), (d) 라이브 데모에서 관리자/사용자 체험 한 바퀴.
-> - **주의**: 공인 IP `168.107.55.95` 는 ephemeral(stop/start 시 변경), SSH 키는 gpg 번들→`~/.ssh/kuberport-oci/` (`kuberport` 표기는 아래 "확정된 결정" 표 참조 — 고치지 말 것). 재배포·RBAC·롤백은 runbook.
+> - **로그인/로그아웃 정상**, admin 부트스트랩(`auth.devAdminEmails`). **운영 하드닝**: idle-reclaim ping(GHA 10분) + 주간 백업 정책 + 만료 세션 자동 정리.
+> - **데모 모드(Plan 13) 라이브** — `/` 에서 관리자/사용자 체험 버튼(Dex 로그인, 비밀번호 화면 표기), `demo` 네임스페이스 격리, 6시간 리셋, k3s 가 Google+Dex 구조화 인증. 운영: runbook §5.
+> - **2026-09-09 머지분 (PR 23건)** — 페르소나 리뷰어가 연 이슈를 하루에 50건 닫은 날. 주제별로:
+>   - **보안 하드닝** (#47 #79 #101): OpenAPI 프록시 path traversal, 템플릿 읽기 인가 부재, BFF catch-all 경로 검증(#51), 빈 `ca_bundle` 이 배포 경로에서만 TLS 검증을 끄던 것, `openapi/refresh` admin·demo 게이트, 500 응답의 DB·업스트림 원문 노출, `/v1/clusters` 접속정보 노출, SSAR 화이트리스트·레이트리밋, 거부된 배포의 액세스 로그. 보안 헤더(HSTS·nosniff·`frame-ancestors 'none'`)는 라이브에서 확인됨.
+>   - **에러 계약 완성** (#79 #98 #123): `/v1` 전체가 `Problem{type,title,status,detail,request_id}` 하나로 통일. 라우터에 없는 경로·메서드도 Problem 404/405, SSE 인스트림 에러도 같은 스키마의 `error` 프레임. **`title` 이 분기 키**이고 닫힌 목록은 `openapi.yaml` 의 `ErrorKind` enum — 새 kind 는 `error_shape_test.go`·`openapi_spec_test.go` 가 빌드로 막는다. 기계 클라이언트 가이드: [docs/machine-clients.md](docs/machine-clients.md).
+>   - **데모 카탈로그 회귀 복구** (#117): 시더가 `POST /v1/templates` 를 쓰다 자기 데모 게이트(`denyDemo`)에 걸려 **6시간마다 데모가 비워지고 있었다.** DB 직접 시드로 전환 — 게이트는 닫힌 채로 둔다. `repair()` 는 버전 모양이 아니라 "카탈로그가 배포 가능한가" 라는 post-condition 을 본다.
+>   - **UI/UX** (#69 #87 #106 #109): 배포 폼(RBAC 거부 시 제출 차단·중복 제출·잔존 에러·슬라이더 트랙), 카탈로그 이름 검색 + 날짜·시각 로케일, **라이트 모드 `--muted`/`--secondary` 를 `--background` 에서 분리**(둘이 같은 값이라 `bg-muted` 표면이 전부 안 보이던 근본 원인), 릴리스 목록에서 비정상만 칩으로 표시.
+>   - **CI** (#67 #122): CI 가 `go test`·vitest·eslint 를 실제로 돌리게 됨, next RCE 패치, dependabot. `build-images` 는 **PR 에서 이미지를 push 하지 않고**(빌드만), main 쪽 `paths:` 필터가 없어져 **모든 main 커밋에 `sha-<7>` 태그가 생긴다** — 배포할 태그가 없는 상황이 사라졌다.
+>   - **PR 리뷰어 시스템** (#22 #59 #65): `/pr-review` 스킬 + `.claude/agents/*-reviewer.md` 7개 + `gh pr create` 훅. 훅은 **세션 cwd 기준**으로 판정하므로 워크트리에서 작업하면 기록도 그 워크트리에 쓰인다.
+> - **남은 것**: (a) **[issue #20](https://github.com/shyuni4u/kubeport/issues/20)** 다른 PC 에서 `scripts/e2e/up.sh` 생성 경로(인증서·kind) 첫 검증, (b) Plan 11 후속 — 라이브 OCI smoke(프로덕션에 릴리스 생성/삭제 여부 결정 필요)·클러스터 끊김/drift 케이스, (c) **리뷰어 이슈 백로그 ~50건** — 특히 디자인 대비 미달군(#110~#115, #130)과 데모 리셋 실패 감시(#105 #119), (d) **인스트림 에러 3종(`rbac-denied`·`cluster-auth-denied`·`k8s-error`)은 백엔드 테스트가 유일한 근거** — 라이브에서 열린 스트림의 RBAC 을 뺏을 수단이 없어 브라우저 검증 불가. kind e2e 로 넓힐 때 들어갈 자리.
+> - **주의**: 공인 IP `168.107.55.95` 는 ephemeral(stop/start 시 변경). **SSH 키 경로는 머신마다 다르다** — 키를 만든 머신은 `~/.ssh/oci_kuberport`, gpg 번들로 복원한 머신은 `~/.ssh/kuberport-oci/oci_kuberport`. 둘 다 정상이니 통일하지 말고 [runbook §1 "SSH 키 위치"](docs/oci-prod-runbook.md#ssh-키-위치--두-곳-다-정상이다-68) 로 확인할 것 (`kuberport` 표기 자체는 아래 "확정된 결정" 표 — 고치지 말 것). 재배포·RBAC·롤백은 runbook.
 
 스펙: [docs/superpowers/specs/2026-04-19-frontend-design-spec.md](docs/superpowers/specs/2026-04-19-frontend-design-spec.md) (4 화면: Admin UI 에디터 / 카탈로그 / 배포 폼 / 릴리스 상세)
 
@@ -43,7 +44,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 | 13 | [plan13-demo-mode](docs/superpowers/plans/2026-09-07-plan13-demo-mode.md) | ✅ 라이브 (PR #2, 2026-09-08 롤아웃) | **데모 모드.** Dex 데모 IdP + 데모 계정 2개(관리자/사용자) + 시드(템플릿 3·릴리스 2) + 6시간 리셋 CronJob + k3s 구조화 인증(Google+Dex) 전환 스크립트. 스펙: [self-improving-loop-design](docs/superpowers/specs/2026-09-07-self-improving-loop-design.md) §4.1. |
 | 14 | _(미작성)_ | ⏳ planned | **UX 루프.** Sentry + Umami 계측 → role-review v2(브라우저) → 주간 Routine(이슈만) → `agent-go` 라벨 → claude-code-action draft PR → 결과 로그. 스펙 §4.2. |
 | 15 | _(미작성)_ | ⏳ planned | **기록 자동화.** 릴리스 노트 → 블로그, Playwright 데모 영상 자동 녹화, 주간 트래픽 지표 → docs/README. 스펙 §4.3. |
-| 16 | [pr-reviewers](docs/superpowers/plans/2026-09-08-pr-reviewers.md) | ✅ 구현 (PR 예정) | **PR 리뷰어 시스템.** `/pr-review` 로컬 스킬 — 7 페르소나 에이전트 + 매니저 + `gh pr create` 훅. 스펙: [pr-reviewers-design](docs/superpowers/specs/2026-09-08-pr-reviewers-design.md). |
+| 16 | [pr-reviewers](docs/superpowers/plans/2026-09-08-pr-reviewers.md) | ✅ merged (PR #22·#59·#65) | **PR 리뷰어 시스템.** `/pr-review` 로컬 스킬 — 7 페르소나 에이전트 + 매니저 + `gh pr create` 훅. 스펙: [pr-reviewers-design](docs/superpowers/specs/2026-09-08-pr-reviewers-design.md). |
 
 참고 — 초기 디자인: [2026-04-16-initial-design.md](docs/superpowers/specs/2026-04-16-initial-design.md), Plan 2 Admin UX: [2026-04-18-plan2-admin-ux-design.md](docs/superpowers/specs/2026-04-18-plan2-admin-ux-design.md).
 
@@ -65,7 +66,8 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 | Lifecycle | B안 — Versioned 템플릿, 릴리스는 버전에 pin (Helm/ArgoCD 방식) |
 | 템플릿 저장소 | 앱 DB (MVP), Git 연동은 v2 |
 | 데모용 완화 | **기본값은 안전한 쪽, 데모 완화는 설치 시 환경변수로 opt-in** (§14). 공개 데모를 위해 느슨해지는 동작이 자가호스팅 설치본의 기본값이 되면 안 된다. 데모와 무관한 취약점은 플래그로 미루지 말고 고친다 |
-| `kuberport` 표기 | **고치지 말 것.** SSH 키·디렉터리의 실제 이름이다 (`~/.ssh/kuberport-oci/oci_kuberport`, gpg 번들, `upload-gha-secrets.sh` 폴백). 초기 오타에서 왔지만 이름을 바꾸면 프로덕션 접속 절차가 문서상 깨진다 — 커밋 `106825c` 에서 "실제 파일명은 유지, 스크립트만 새 이름 우선" 으로 결정. runbook §1 참조 |
+| `kuberport` 표기 | **고치지 말 것.** SSH 키·디렉터리의 실제 이름이다 (gpg 번들, `upload-gha-secrets.sh` 폴백). 초기 오타에서 왔지만 이름을 바꾸면 프로덕션 접속 절차가 문서상 깨진다 — 커밋 `106825c` 에서 "실제 파일명은 유지, 스크립트만 새 이름 우선" 으로 결정 |
+| SSH 키 **경로** | **머신마다 다르고, 통일하지 않는다** (#68). 키를 만든 머신은 `~/.ssh/oci_kuberport`(평평), gpg 번들로 복원한 머신은 `~/.ssh/kuberport-oci/oci_kuberport`. 한쪽으로 통일하면 반대쪽 머신이 반드시 깨진다 — 접속 전에 `ls` 로 확인. runbook §1 "SSH 키 위치" |
 
 ## 기술 스택
 
@@ -161,6 +163,16 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
   cwd 기준으로 찾으므로, PR 을 만들기 전에 워크트리를 지우면 기록도 같이 사라진다.
   새로 만든 `.claude/agents/*` 는 세션 재시작 후에만 `subagent_type` 으로 보이며, 스킬에 파일 본문
   폴백이 있다. 스펙: [pr-reviewers-design](docs/superpowers/specs/2026-09-08-pr-reviewers-design.md).
+- **리뷰 결과의 트리아지 규칙 (2026-09-09 도입)** — 리뷰어를 많이 돌릴수록 이슈가 줄지 않고 늘던 문제의 대응.
+  하루에 PR 23건을 머지하면 페르소나 7명 × 23회가 돌아 이슈 83건이 생기는데, 해소는 PR 단위 직렬이라
+  **생산이 소비보다 구조적으로 빠르다.** 그래서 세 가지를 건다:
+  - **`sev:*` 라벨** (`blocks-visitor` / `normal` / `polish`) — 심각도가 아니라 **"누가 실제로 겪는가"**.
+    기준과 예시는 [finding-schema.md](.claude/skills/pr-review/references/finding-schema.md) "영향도".
+    한 실행에서 `blocks-visitor` 가 3건을 넘으면 기준을 잘못 잡은 것이다.
+  - **신규 API 표면 요구는 이슈가 아니라 [docs/api-agent-backlog.md](docs/api-agent-backlog.md)** — 실제 호출자가
+    없는 상태의 `ai-reviewer` 제안은 문서로 접는다. 단 **이미 문서화된 계약 위반은 이슈**다(그건 버그).
+  - **기본은 diff 범위**. 전면 감사(전 화면 전수 실측)는 `/pr-review --full` 로 따로. `scope: existing` 은
+    페르소나당 최대 3건, 같은 근본 원인의 측정값 N개는 finding 1건으로 묶는다.
 - **푸시 전 셀프 리뷰 필수**: 커밋 전에 변경된 코드를 직접 리뷰한다.
   체크리스트: IDOR/인증 누락, 에러 시 롤백/정리 누락, 입력 검증 누락, 불필요한 메모리 할당, context 취소 미처리.
 - **code-reviewer 에이전트**: 변경 파일 3개 이상인 커밋에서는 푸시 전에

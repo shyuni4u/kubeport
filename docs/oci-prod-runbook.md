@@ -14,7 +14,7 @@
 | 라이브 URL | **https://kubeport.enzo.kr** |
 | 공인 IP | `168.107.55.95` (⚠️ **ephemeral** — 인스턴스 stop/start 시 바뀜, 재부팅은 유지) |
 | OCI 인스턴스 | `kubeport`, `VM.Standard.A1.Flex` 4 OCPU/24GB, Ubuntu 24.04 ARM, 리전 `ap-chuncheon-1` |
-| SSH | `ssh -i ~/.ssh/kuberport-oci/oci_kuberport ubuntu@168.107.55.95` — `kuberport` 는 초기 오타지만 **실제 키 파일·디렉터리 이름**이라 그대로 쓴다 (이름을 바꾸면 gpg 번들·GHA 시크릿 스크립트도 같이 바꿔야 함; `upload-gha-secrets.sh` 는 `oci_kubeport.pub` 이 있으면 그것을 우선 쓴다) |
+| SSH | `ssh -i "$KEY" ubuntu@168.107.55.95` — **`$KEY` 는 머신마다 다르다. 아래 "SSH 키 위치" 를 먼저 읽을 것.** `kuberport` 는 초기 오타지만 **실제 키 파일·디렉터리 이름**이라 그대로 쓴다 (이름을 바꾸면 gpg 번들·GHA 시크릿 스크립트도 같이 바꿔야 함; `upload-gha-secrets.sh` 는 `oci_kubeport.pub` 이 있으면 그것을 우선 쓴다) |
 | SSH 키 출처 | gpg 번들 `kubeport-ssh.tar.gz.gpg`(대칭 암호화 — 별도 터미널에서 `gpg --pinentry-mode loopback -d ... \| tar -xz -C ~/.ssh/kuberport-oci`). 번들엔 키·config 만 있고 prod 시크릿 파일은 없음 — 시크릿은 Helm values 에서 조회 |
 | 데모 시크릿 | Helm 릴리스 values 가 원본: `sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm -n kubeport get values kubeport -o json \| jq '{pw:.demo.passwordHint, dex:.dex.clientSecret}'`. `DEMO_PW` 는 랜딩에 공개되는 값, `DEX_SECRET` 은 비밀번호 관리자에도 보관 |
 | DNS | **GoDaddy** (`enzo.kr`, ns `domaincontrol.com`). A 레코드 2개: `kubeport` · `dex.kubeport` → 공인 IP. IP 변경 시 둘 다 갱신 |
@@ -23,6 +23,39 @@
 | Helm 릴리스 | `kubeport` (ns `kubeport`), 차트 VM 사본 `~/kubeport-chart/kubeport` |
 | 이미지 | `ghcr.io/shyuni4u/kubeport-{backend,frontend}` 멀티아치(amd64+arm64), 태그 `sha-<shortsha>` |
 | OCI 자격증명 (로컬) | `~/.oci/config`, `~/oci-capacity-retry/config.env` (compartment/AD/subnet OCID) |
+
+### SSH 키 위치 — 두 곳 다 정상이다 (#68)
+
+키 경로가 문서마다 갈려 보이는 것은 오타가 아니라 **키를 어떻게 손에 넣었느냐가 두 가지**이기
+때문이다. 접속 전에 어느 쪽인지부터 확인한다:
+
+```bash
+ls -l ~/.ssh/oci_kuberport ~/.ssh/kuberport-oci/oci_kuberport 2>/dev/null
+```
+
+| 어떻게 얻었나 | 경로 |
+|---|---|
+| **키를 만든 머신** (부트스트랩을 직접 돌린 곳) | `~/.ssh/oci_kuberport` — 홈 바로 아래, 디렉터리 없음 |
+| **gpg 번들로 복원한 머신** | `~/.ssh/kuberport-oci/oci_kuberport` — `tar -xz -C ~/.ssh/kuberport-oci` 가 만드는 디렉터리 |
+
+`deploy/oci/README.md` 는 앞쪽을, 이 런북은 뒤쪽을 적고 있었고 **둘 다 맞다.** 한쪽으로
+"통일" 하면 반대쪽 머신에서 반드시 깨지므로 통일하지 않는다.
+
+2026-09-09 재배포 때 이 문서의 경로를 그대로 복사했다가
+`Identity file ~/.ssh/kuberport-oci/oci_kuberport not accessible` → `Permission denied (publickey)`
+로 막혔다. 그 머신은 키를 만든 쪽이라 `~/.ssh/` 아래가 평평했다. 아래 명령들이 경로를
+하드코딩하지 않고 `$KEY` 를 쓰는 이유다 — 세션 시작할 때 한 번 잡아 두면 된다:
+
+```bash
+KEY=~/.ssh/oci_kuberport
+[ -f "$KEY" ] || KEY=~/.ssh/kuberport-oci/oci_kuberport
+# 폴백은 파일이 없어도 조용히 통과한다 — 둘 다 없으면 여기서 잡는다
+[ -f "$KEY" ] || echo "두 경로 어디에도 키가 없다: 이 머신은 아직 gpg 번들을 안 풀었다"
+echo "KEY=$KEY"
+```
+
+`prod 시크릿`(`kuberport-prod-secrets.env`)도 gpg 번들을 푼 머신에만 있다. 키를 만든 머신에는
+없으므로, 시크릿이 필요하면 Helm values 에서 조회한다(§1 "데모 시크릿" 행과 같은 방법).
 
 ## 2. 스택 구성
 
@@ -36,21 +69,72 @@
 
 새 이미지는 `main` push 시 `build-images` 워크플로가 빌드·푸시(`sha-<sha>` + `latest`).
 브랜치에서 미리 빌드하려면 `gh workflow run build-images.yml --ref <branch>` (dispatch 는 push
-취급이라 이미지가 실제로 올라감). 그 뒤 VM 에서:
+취급이라 이미지가 실제로 올라감).
+
+**PR 에서는 이미지가 만들어지지 않는다** — `build-images` 는 PR 에서도 돈다. #122 가 트리거를
+없앤 게 아니라 `paths:` 필터를 붙였고(Dockerfile·lockfile·`next.config.ts` 등 11개 경로), 빌드
+스텝이 `push: ${{ github.event_name != 'pull_request' }}` 라 **"아직 빌드되나" 만 답하고 ghcr 에는
+아무것도 올리지 않는다.** 이미지는 **main 에 들어간 뒤에야** 존재한다. 대신 #122 가 `push:` 쪽 `paths:` 필터를 없앴으므로
+이제 **모든 main 커밋에 `sha-<7>` 태그가 생긴다** — 예전에는 docs 만 바뀐 커밋이 HEAD 면 태그가
+없어서 배포할 sha 가 없었다.
+
+### 3-1. 태그가 실제로 있는지 먼저 확인
+
+없는 태그로 `helm upgrade` 하면 `ImagePullBackOff` 로 끝나고 롤아웃이 타임아웃까지 매달린다.
 
 ```bash
-NEWSHA=<shortsha>   # 예: git rev-parse --short=7 HEAD
-ssh -i ~/.ssh/kuberport-oci/oci_kuberport ubuntu@168.107.55.95 \
+git fetch origin main          # origin/main 은 로컬 캐시다 — fetch 없이는 옛 sha 가 나온다
+NEWSHA=$(git rev-parse --short=7 origin/main)
+gh run list --workflow build-images.yml --branch main --limit 30 \
+  --json headSha,conclusion,databaseId \
+  -q ".[] | select(.headSha[0:7]==\"$NEWSHA\")"
+```
+
+⚠️ **`git fetch` 를 빠뜨리면 이 명령은 에러 없이 예전 sha 를 돌려준다.** 그 sha 에도 이미지가
+있으니 아래 태그 확인도, §3-3 배포 확인도 전부 초록으로 통과한다 — 실패가 아니라 **조용한 롤백**
+으로 끝난다.
+
+⚠️ `gh run list --commit <sha>` 는 **행이 있어도 조용히 0건을 돌려준다.** 위처럼 `--branch main`
+으로 받아 클라이언트에서 거르는 편이 확실하다. 0 건이면 태그가 없는 게 아니라 `--limit` 이 모자란
+것일 수 있다 — 이제 모든 main 커밋에 런이 생기므로 조금만 뒤처진 sha 는 금방 창 밖으로 밀린다. `conclusion` 이 `success` 인지까지 본다 — 워크플로가
+성공해도 `frontend`/`backend` 잡 중 하나만 실패했을 수 있으므로 확실히 하려면
+`gh run view <databaseId> --json jobs -q '.jobs[] | "\(.name) \(.conclusion)"'`.
+
+(`gh api user/packages/container/.../versions` 로 ghcr 를 직접 보는 길은 `read:packages` 스코프가
+없으면 403 이다. 워크플로 잡 결과가 스코프 없이 확인 가능한 근거다.)
+
+### 3-2. 업그레이드
+
+```bash
+# $KEY 는 §1 "SSH 키 위치" 참조
+ssh -i "$KEY" ubuntu@168.107.55.95 \
   "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; \
    helm upgrade kubeport ~/kubeport-chart/kubeport --namespace kubeport --reuse-values \
      --set images.frontend.tag=sha-$NEWSHA --set images.backend.tag=sha-$NEWSHA; \
-   kubectl rollout status deploy/kubeport-frontend -n kubeport"
+   kubectl rollout status deploy/kubeport-frontend -n kubeport; \
+   kubectl rollout status deploy/kubeport-backend -n kubeport"
 ```
 
+- ⚠️ **`export KUBECONFIG=...` 를 ssh 명령마다 넣어야 한다.** 빠뜨리면 `helm`·`kubectl` 이
+  `Kubernetes cluster unreachable: Get "http://localhost:8080/version"` 로 죽는다. 로그인 셸이
+  아니라 `ssh <host> "<command>"` 형태라 프로필이 안 읽힌다.
 - 차트 **템플릿 자체**를 바꿨으면 먼저 `scp -r deploy/helm/kubeport ubuntu@...:~/kubeport-chart/`
   로 VM 사본을 갱신한 뒤 upgrade.
 - `--reuse-values` 가 시크릿(enc key, pg pass, oidc)을 유지한다. 특정 값만 `--set` 으로 덮어씀.
+  **데모 게이트도 유지된다** — 2026-09-09 rev 10 에서 `demo.allowTemplateCreate=false` 가 그대로
+  남는 것을 확인했다. 완화 플래그가 재배포로 조용히 켜지지 않는다는 뜻이다.
 - 롤아웃 직후 잠깐 `502` 가 날 수 있음(구 파드 종료↔신 파드 준비) — 30초 뒤 정상.
+
+### 3-3. 배포 확인
+
+```bash
+ssh -i "$KEY" ubuntu@168.107.55.95 \
+  "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; \
+   helm history kubeport -n kubeport | tail -3; \
+   kubectl get deploy -n kubeport -o jsonpath='{range .items[*]}{.metadata.name}{\"\t\"}{.spec.template.spec.containers[0].image}{\"\n\"}{end}'"
+```
+
+`helm history` 의 최신 리비전이 `deployed` 이고 두 deployment 의 이미지 태그가 `$NEWSHA` 면 끝.
 
 ## 4. 인증 / RBAC (핵심 함정 모음)
 
@@ -193,10 +277,41 @@ sudo systemctl restart k3s
 - **로그**: `kubectl logs -n kubeport deploy/kubeport-{frontend,backend}`. k3s: `journalctl -u k3s`.
 - **인증서**: `letsencrypt-prod` 자동 갱신(만료 30일 전). `kubectl get certificate -n kubeport`.
 
+### Go API 를 직접 찔러 보기 (BFF 우회)
+
+밖에서 보이는 것은 BFF(`/api/v1/...`) 뿐이고, BFF 는 세션 쿠키가 없으면 **401 을 먼저** 낸다.
+그래서 Go API 의 404·405 같은 라우팅 동작은 밖에서는 확인할 수 없다 — 이건 결함이 아니라
+설계다([docs/machine-clients.md §5](machine-clients.md#5-호출할-때-알아두면-좋은-것)).
+예외는 `/api/v1` **루트**로, 세션 검사 없이 404 를 준다(#81). 그 아래 경로의 404·405 를
+확인하려면 클러스터 안에서 서비스를 직접 잡는다:
+
+```bash
+ssh -i "$KEY" ubuntu@168.107.55.95 \
+  "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; \
+   kubectl port-forward -n kubeport svc/kubeport-backend 18080:8080 >/tmp/pf.log 2>&1 & \
+   sleep 2; \
+   curl -sS -i http://127.0.0.1:18080/v1/no-such-thing | head -5 || cat /tmp/pf.log; \
+   kill %1"
+```
+
+출력이 통째로 비어 있으면 Go API 가 조용한 게 아니라 **터널이 안 선 것이다** — 이유는 `/tmp/pf.log`
+에 있다(파드 미Ready, 포트 점유 등). `sleep` 을 늘리거나 파드 상태부터 본다.
+
+⚠️ **`kubectl exec` 로 backend 파드에 들어가는 방법은 안 된다.** 이미지에 셸도 `wget` 도 없어서
+`failed to exec in container` 로 끝난다. 파드 내부에서 뭔가 실행하려 하지 말고 위처럼
+port-forward 로 밖에서 잡는다.
+
 ## 7. 자주 겪는 증상 → 원인
 
 | 증상 | 확인 |
 |---|---|
+| `Identity file ... not accessible` → `Permission denied (publickey)` | 키 경로가 이 머신 것이 아니거나, **이 머신엔 아직 키 자체가 없다.** §1 "SSH 키 위치" 의 `ls` 로 둘 다 없으면 먼저 gpg 번들을 풀어야 한다 — 만든 머신은 `~/.ssh/oci_kuberport`, 번들로 복원한 머신은 `~/.ssh/kuberport-oci/oci_kuberport` |
+| `helm`/`kubectl` 이 `Kubernetes cluster unreachable: ... localhost:8080` | ssh 명령에 `export KUBECONFIG=/etc/rancher/k3s/k3s.yaml` 을 안 넣었다 (§3-2). `ssh <host> "<cmd>"` 는 프로필을 안 읽는다 |
+| 배포할 `sha-<7>` 태그가 없다 | #122 이전 커밋이면 `push:` 쪽 `paths:` 필터에 걸려 이미지가 아예 안 만들어졌을 수 있다. `gh run list --workflow build-images.yml --branch main` 으로 확인 (§3-1). `--commit <sha>` 는 조용히 0건을 주고, `--limit` 이 작아도 0건이 된다 |
+| 배포했는데 고친 게 라이브에 없다 (오류는 없음) | §3-1 에서 `git fetch` 를 빠뜨려 `origin/main` 이 옛 sha 였다. 그 sha 에도 이미지가 있어 전 단계가 다 초록으로 통과한다. `helm history` 의 태그와 `git rev-parse --short=7 origin/main` 을 fetch 후 대조 (§3-3) |
+| 새 파드가 `ImagePullBackOff` | 존재하지 않는 태그로 upgrade 했다. §3-1 로 태그부터 확인하고 `helm rollback kubeport <이전rev> -n kubeport` |
+| backend 파드에 `kubectl exec` 이 `failed to exec in container` | 이미지에 셸이 없다. 정상이다 — port-forward 로 밖에서 잡는다 (§6 "Go API 를 직접 찔러 보기") |
+| `/api/v1/<경로>` 가 404·405 대신 401 | 설계된 동작이다. BFF 세션 게이트가 라우팅보다 먼저다 ([machine-clients.md §5](machine-clients.md#5-호출할-때-알아두면-좋은-것)). `/api/v1` 루트만 예외로 세션 검사 없이 404 |
 | 로그인 후 `redirect_uri_mismatch` | Google 콘솔 Authorized redirect URI 가 정확히 `https://kubeport.enzo.kr/api/auth/callback` 인지(`kubeport`↔`kuberport` 오타 주의 — 단 SSH 키 경로 `~/.ssh/kuberport-oci/` 는 실제 이름이라 그대로 둔다). authorize 는 되고 token 만 실패하면 콜백이 내부 host 로 redirect_uri 를 보낸 것 → `callback/route.ts` 가 `OIDC_REDIRECT_URI` 를 쓰는지 |
 | 로그인 시 `invalid_scope` | `groups` scope. `oidc.scopes` 기본(`openid email profile`)이면 안 나야 함 |
 | 배포가 조용히 실패 | pod→apiserver 차단(§5-2 iptables) 또는 사용자에 RBAC 바인딩 없음(§5-3) |

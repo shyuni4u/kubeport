@@ -7,6 +7,9 @@ ADR 0003 §"Phase 2 — Target (OCI Always Free A1.Flex)" 실행 가이드. Plan
 - [ ] OCI VM 확보: `VM.Standard.A1.Flex`, 4 OCPU / 24 GB, Ubuntu 24.04 ARM, Public IP 안정 (reserved 권장)
 - [ ] OCI Security List inbound: 80, 443, 22 허용 (SSH 는 본인 IP 만 권장)
 - [ ] SSH 키 (`~/.ssh/oci_kuberport` — 초기 오타지만 실제 파일명이라 그대로 사용) 로 `ubuntu@<public-ip>` 접속 가능
+      · 이 문서는 **키를 만드는 머신** 기준이라 홈 바로 아래다. 나중에 gpg 번들로 **복원한** 머신에서는
+      `~/.ssh/kuberport-oci/oci_kuberport` 가 된다 — 둘 다 정상이며 통일하지 않는다
+      ([runbook §1 "SSH 키 위치"](../../docs/oci-prod-runbook.md#ssh-키-위치--두-곳-다-정상이다-68))
 - [ ] 도메인 보유 (예: Godaddy `<host>.example`)
 - [ ] Google Cloud Console 접근 (OAuth client 발급용)
 
@@ -301,9 +304,13 @@ admin UI 에 클러스터 등록 화면이 아직 없으므로, admin 토큰으�
   Dex 가 안 뜨면 부팅이 죽지는 않지만 데모 로그인이 401 로 떨어진다:
 
   ```bash
-  kubectl -n kubeport exec deploy/kubeport-backend -- \
-    wget -qO- https://dex.kubeport.enzo.kr/.well-known/openid-configuration | head -c 200
+  kubectl -n kubeport run dex-probe --rm -i --restart=Never --image=curlimages/curl:8.10.1 -- \
+    curl -s https://dex.kubeport.enzo.kr/.well-known/openid-configuration | head -c 200
   ```
+
+  backend 파드에 `kubectl exec` 으로 확인하지 말 것 — 이미지가 distroless 라 셸도 `wget` 도 없어
+  **항상** `failed to exec in container` 로 끝난다. 배경은
+  [runbook §6](../../docs/oci-prod-runbook.md#6-운영--관측) "Go API 를 직접 찔러 보기".
 
 **실행**:
 

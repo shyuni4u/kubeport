@@ -38,3 +38,6 @@ frontend/out/
 # Git worktrees (superpowers convention)
 .worktrees/
 .claude/worktrees/
+
+# Playwright MCP session artifacts (console logs, page snapshots)
+.playwright-mcp/
