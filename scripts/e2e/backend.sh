@@ -20,8 +20,8 @@ export APP_ENCRYPTION_KEY_B64="$KEY"
 # Local stand-in for the kubeport-admin group (dex static users carry no groups).
 export KBP_DEV_ADMIN_EMAILS=admin@example.com,demo-admin@demo.kubeport
 export KBP_DEMO_EMAIL_DOMAIN=demo.kubeport
-# Seeding and the admin specs author templates as demo-admin; production leaves
-# this off so demo accounts cannot write into the shared catalog.
-export KBP_DEMO_ALLOW_TEMPLATE_CREATE=true
+# No KBP_DEMO_ALLOW_TEMPLATE_CREATE here: the seeder writes templates to the DB,
+# and the gate only covers POST /v1/templates — the demo-admin specs edit existing
+# versions. Set it only if a spec needs a demo account to create a new template.
 log "backend on $API_URL"
 exec go run ./cmd/server

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"kubeport/internal/auth"
+	"kubeport/internal/store"
 )
 
 func must(k string) string {
@@ -31,7 +32,7 @@ func getenv(k, def string) string {
 }
 
 func main() {
-	reset := flag.Bool("reset", false, "delete demo-owned rows before seeding (requires DATABASE_URL)")
+	reset := flag.Bool("reset", false, "delete demo-owned rows before seeding (DATABASE_URL is required either way)")
 	flag.Parse()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -45,15 +46,23 @@ func main() {
 		hc = c
 	}
 
+	// Required for the template half of the seed, not just for -reset:
+	// templates are written straight to the database (see templates.go).
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		log.Fatal("DATABASE_URL is required — the catalog is seeded straight into the database " +
+			"(local dev: postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable)")
+	}
 	demoDomain := getenv("KBP_DEMO_EMAIL_DOMAIN", "demo.kubeport")
 	if *reset {
-		if err := resetDB(ctx, must("DATABASE_URL"), demoDomain); err != nil {
+		if err := resetDB(ctx, dsn, demoDomain); err != nil {
 			log.Fatalf("reset: %v", err)
 		}
 	}
 
 	issuer, cid, csec := must("DEMO_OIDC_ISSUER"), must("DEMO_OIDC_CLIENT_ID"), must("DEMO_OIDC_CLIENT_SECRET")
-	adminTok, err := passwordGrant(ctx, hc, issuer, cid, csec, must("DEMO_ADMIN_EMAIL"), must("DEMO_ADMIN_PASSWORD"))
+	adminEmail := must("DEMO_ADMIN_EMAIL")
+	adminTok, err := passwordGrant(ctx, hc, issuer, cid, csec, adminEmail, must("DEMO_ADMIN_PASSWORD"))
 	if err != nil {
 		log.Fatalf("admin token: %v", err)
 	}
@@ -69,13 +78,35 @@ func main() {
 		ns:      getenv("DEMO_NAMESPACE", "demo"),
 	}
 	// Warm up users rows (GET /v1/me upserts on first sight) so team/ownership lookups work.
+	// The template seeder below also depends on this: it owns the catalog it
+	// writes by the demo-admin users row this call creates.
 	for _, c := range []*apiClient{s.admin, s.user} {
 		if code, b, err := c.do(ctx, http.MethodGet, "/v1/me", nil); err != nil || code != http.StatusOK {
 			log.Fatalf("/v1/me: %d %s %v", code, b, err)
 		}
 	}
+
+	st, err := store.NewStore(ctx, dsn)
+	if err != nil {
+		log.Fatalf("store: %v", err)
+	}
+	defer st.Close()
+	// The catalog is global (no owning team); what keeps it out of real users'
+	// view and inside resetDB's reach is the demo domain on its owner. Seeding
+	// as anyone else would write a permanent global catalog no reset collects.
+	if !auth.IsDemoEmail(adminEmail, demoDomain) {
+		log.Fatalf("DEMO_ADMIN_EMAIL %s is outside KBP_DEMO_EMAIL_DOMAIN %s — "+
+			"the seeded catalog would not be demo-owned", adminEmail, demoDomain)
+	}
+	owner, err := st.GetUserByEmail(ctx, store.PgText(adminEmail))
+	if err != nil {
+		log.Fatalf("demo admin %s not in users: %v", adminEmail, err)
+	}
+	if err := (&templateSeeder{st: st, owner: owner}).Run(ctx); err != nil {
+		log.Fatalf("seed templates: %v", err)
+	}
 	if err := s.Run(ctx); err != nil {
-		log.Fatalf("seed: %v", err)
+		log.Fatalf("seed releases: %v", err)
 	}
 	log.Println("seed-demo: done")
 }
