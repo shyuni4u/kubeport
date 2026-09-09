@@ -211,13 +211,20 @@
       "k8s-error": "Could not read logs from the cluster. Try again in a moment.",
       "cluster-auth-denied": "The cluster refused the connection. Signing in again will not help — ask an admin.",
       "rbac-denied": "You do not have permission to view this release's logs.",
+      "no-pods": "This release has no running instances. Logs appear here once a pod starts.",
+      "not-found": "That release no longer exists — it may have been deleted.",
+      "unauthenticated": "Your session has expired. Sign in again and retry.",
+      "demo-restricted": "Demo accounts can only read logs from releases created in the demo.",
+      "validation-error": "The address this log request used is not valid.",
+      "internal": "kubeport could not handle the log request. Try again in a moment.",
       "unknown": "Something went wrong with the log stream.",
       "withId": "{message} (request ID for support: {requestId})"
     },
     "status": {
       "connected": "Connected",
       "connecting": "Connecting",
-      "disconnected": "Disconnected"
+      "disconnected": "Disconnected",
+      "failed": "Not connected"
     }
   },
   "templates": {
