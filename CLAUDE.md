@@ -155,6 +155,8 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
   diff 와 라이브 데모를 리뷰 → `.claude/reviews/<branch>.md` 기록 (브랜치의 `/` 는 `__` 로 치환) → `gh pr create`(P0 시 draft) →
   PR 코멘트 → 기존 문제는 `reviewer:<persona>` 라벨 이슈. 기록 없이 `gh pr create` 는 훅이 막는다
   (실수 방지용 소프트 가드; 우회 `PR_REVIEW_SKIP=1` 은 긴급 시만). 설치 관련 변경은 `--deep`.
+  기록 파일은 **작업 중인 워크트리의** `.claude/reviews/` 에 쓰인다(`.gitignore` 대상) — 훅도 세션
+  cwd 기준으로 찾으므로, PR 을 만들기 전에 워크트리를 지우면 기록도 같이 사라진다.
   새로 만든 `.claude/agents/*` 는 세션 재시작 후에만 `subagent_type` 으로 보이며, 스킬에 파일 본문
   폴백이 있다. 스펙: [pr-reviewers-design](docs/superpowers/specs/2026-09-08-pr-reviewers-design.md).
 - **푸시 전 셀프 리뷰 필수**: 커밋 전에 변경된 코드를 직접 리뷰한다.

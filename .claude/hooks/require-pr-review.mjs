@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 // PreToolUse hook: block `gh pr create` unless .claude/reviews/<branch>.md
 // records the current HEAD. Bypass: PR_REVIEW_SKIP=1. Test root: PR_REVIEW_ROOT.
+//
+// NOTE: settings.json loads this file from CLAUDE_PROJECT_DIR, so the copy that
+// actually runs is always the original checkout's working tree — while the
+// repository it *inspects* is the session cwd (see below). Editing this file in
+// a worktree therefore changes nothing until the original checkout has the
+// commit. If that checkout is on a branch without this file, node exits 1 and
+// the guard fails open silently.
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -20,8 +27,9 @@ function stripLiterals(cmd) {
 function main() {
   if (process.env.PR_REVIEW_SKIP === "1") return 0;
 
-  let command = "";
-  try { command = JSON.parse(readStdin())?.tool_input?.command ?? ""; } catch { return 0; }
+  let payload;
+  try { payload = JSON.parse(readStdin()); } catch { return 0; }
+  const command = payload?.tool_input?.command ?? "";
   // Only look at command positions: drop heredoc bodies and quoted strings so a
   // PR body written via `cat <<EOF` that merely mentions the command is ignored.
   const code = stripLiterals(command);
@@ -31,7 +39,16 @@ function main() {
   // process, so a prefix assignment never reaches process.env — read it here.
   if (/(^|[\s;&|(])PR_REVIEW_SKIP=1(\s|$)/.test(code)) return 0;
 
-  const cwd = process.env.PR_REVIEW_ROOT || process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  // Resolve against the session's working directory before CLAUDE_PROJECT_DIR:
+  // that env var points at the directory Claude Code was launched in, so in a
+  // git worktree — which CLAUDE.md recommends for plan work — the hook would
+  // read the branch and HEAD of the *original* checkout and demand a review
+  // record for whatever branch happens to be checked out there.
+  const cwd =
+    process.env.PR_REVIEW_ROOT ||
+    payload?.cwd ||
+    process.env.CLAUDE_PROJECT_DIR ||
+    process.cwd();
   const git = (args) => execSync(`git ${args}`, { cwd, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
 
   let branch, head, root;

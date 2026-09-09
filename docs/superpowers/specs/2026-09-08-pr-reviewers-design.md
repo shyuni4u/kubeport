@@ -131,12 +131,24 @@ PR 을 올릴 때마다 서로 다른 7개 페르소나가 변경 사항과 라�
 ```
 
 동작:
-1. stdin JSON 의 `tool_input.command` 가 `gh pr create` 로 시작하지 않으면 exit 0.
-2. `PR_REVIEW_SKIP=1` 이면 exit 0 (유일한 우회).
-3. `git rev-parse --abbrev-ref HEAD` 로 브랜치, `git rev-parse HEAD` 로 sha.
-4. `.claude/reviews/<branch>.md` 가 없거나 `HEAD:` 줄이 현재 sha 와 다르면 stderr 에
-   "`/pr-review` 를 먼저 실행하세요 (리뷰 후 커밋이 추가되면 다시)" 출력 후 exit 2.
-5. 그 외 exit 0.
+1. stdin JSON 의 `tool_input.command` 에서 heredoc 본문과 따옴표 문자열을 제거한 뒤,
+   `gh pr create` 가 **명령 위치**(줄머리 또는 `;` `&&` `|` `(` 뒤)에 있는지 본다. 없으면 exit 0.
+   (PR 본문을 `cat <<EOF` 로 쓰면서 그 명령을 언급만 하는 경우를 오탐하지 않기 위해.)
+2. `PR_REVIEW_SKIP=1` 이면 exit 0 — 환경변수든 명령 앞 인라인 접두어든 인정한다.
+3. git 을 돌릴 디렉터리를 `PR_REVIEW_ROOT`(테스트 전용) → PreToolUse payload 의 `cwd`
+   → `CLAUDE_PROJECT_DIR` → `process.cwd()` 순으로 정한다. payload `cwd` 를 env 보다 앞에
+   두는 이유: CLAUDE.md 가 권장하는 워크트리 작업에서 `CLAUDE_PROJECT_DIR` 은 원본
+   체크아웃(대개 `main`)을 가리켜 엉뚱한 브랜치·HEAD 를 검사하기 때문. 명령 안의 `cd` 는
+   따라가지 않는다.
+4. 그 디렉터리에서 `git rev-parse --abbrev-ref HEAD` / `HEAD` / `--show-toplevel`.
+   git 리포가 아니면 exit 0 (fail-open).
+5. `<toplevel>/.claude/reviews/<branch, "/"→"__">.md` 가 없거나 `HEAD:` 줄이 현재 sha 와
+   다르면 stderr 에 "`/pr-review` 를 먼저 실행하세요 (리뷰 후 커밋이 추가되면 다시)" 출력 후 exit 2.
+6. 그 외 exit 0.
+
+우회 수단이 둘(`PR_REVIEW_SKIP`, `PR_REVIEW_ROOT`)인 것은 의도적이다 — 보안 통제가 아니라
+실수 방지용 소프트 가드다. 또한 `settings.json` 은 훅 파일을 `CLAUDE_PROJECT_DIR` 기준으로
+로드하므로, **실행되는 사본은 항상 원본 체크아웃의 작업트리**다(검사 대상 리포만 3번으로 정해진다).
 
 node 를 쓰는 이유: Windows/WSL/macOS 모두에서 같은 스크립트. frontend 때문에 node 는 필수 툴.
 

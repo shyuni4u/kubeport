@@ -1,28 +1,66 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), "require-pr-review.mjs");
 
-function makeRepo() {
-  const dir = mkdtempSync(join(tmpdir(), "prreview-"));
-  const run = (cmd) => execSync(cmd, { cwd: dir, stdio: "pipe" }).toString().trim();
-  run("git init -q -b feat/x");
-  run('git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init');
-  return { dir, sha: run("git rev-parse HEAD") };
+// Each makeRepo() leaves a git repo behind; on a dev machine that runs the
+// suite repeatedly they pile up in tmp.
+const CLEANUP = [];
+process.on("exit", () => {
+  for (const dir of CLEANUP) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Best effort — a leftover temp dir is not worth failing the run over.
+    }
+  }
+});
+
+// Neutralize the developer's global/system git config. This project is worked
+// on across home and work machines, and a global `commit.gpgsign=true` or
+// `core.hooksPath` would make the empty commit below fail — taking every test
+// in this file with it, for reasons that have nothing to do with the hook.
+const ISOLATED_GIT = {
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_SYSTEM: "/dev/null",
+};
+
+function git(cwd, cmd) {
+  return execSync(cmd, {
+    cwd,
+    stdio: "pipe",
+    env: { ...process.env, ...ISOLATED_GIT },
+  })
+    .toString()
+    .trim();
 }
 
-function runHook(command, { root, env = {} } = {}) {
-  const input = JSON.stringify({ tool_name: "Bash", tool_input: { command } });
+function makeRepo() {
+  const dir = mkdtempSync(join(tmpdir(), "prreview-"));
+  CLEANUP.push(dir);
+  git(dir, "git init -q -b feat/x");
+  git(dir, 'git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init');
+  return { dir, sha: git(dir, "git rev-parse HEAD") };
+}
+
+function runHook(command, { root, cwd, env = {} } = {}) {
+  const payload = { tool_name: "Bash", tool_input: { command } };
+  if (cwd) payload.cwd = cwd;
   return spawnSync("node", [HOOK], {
-    input,
+    input: JSON.stringify(payload),
     env: { ...process.env, PR_REVIEW_SKIP: "", PR_REVIEW_ROOT: root ?? "", ...env },
     encoding: "utf8",
   });
+}
+
+function writeReview(dir, branchFile, sha) {
+  mkdirSync(join(dir, ".claude/reviews"), { recursive: true });
+  writeFileSync(join(dir, ".claude/reviews", branchFile), `# review\n\nHEAD: ${sha}\n`);
 }
 
 test("non gh-pr-create commands pass through", () => {
@@ -78,6 +116,53 @@ test("real gh pr create after a heredoc is still blocked", () => {
   const { dir } = makeRepo();
   const cmd = "cat > body.md <<'EOF'\nsummary\nEOF\ngh pr create --body-file body.md";
   assert.equal(runHook(cmd, { root: dir }).status, 2);
+});
+
+// CLAUDE.md tells you to run plan work in a git worktree. The session's cwd is
+// then the worktree, while CLAUDE_PROJECT_DIR still points at the checkout
+// Claude Code was launched in — so resolving against the env var alone reads
+// the wrong branch and HEAD entirely.
+test("resolves against the payload cwd, not CLAUDE_PROJECT_DIR", () => {
+  const launched = makeRepo(); // still on feat/x, no review record
+  const { dir: work, sha } = makeRepo();
+  execSync("git branch -m feat/other", { cwd: work, stdio: "pipe" });
+  writeReview(work, "feat__other.md", sha);
+
+  const r = runHook("gh pr create --title x", {
+    cwd: work,
+    env: { CLAUDE_PROJECT_DIR: launched.dir },
+  });
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test("a real worktree is checked against its own branch", () => {
+  const { dir } = makeRepo();
+  // Inside its own temp dir, not next to it, so cleanup takes the worktree too.
+  const wtParent = mkdtempSync(join(tmpdir(), "prreview-wt-"));
+  CLEANUP.push(wtParent);
+  const wt = join(wtParent, "wt");
+  git(dir, `git worktree add -q -b feat/wt "${wt}"`);
+  const wtSha = git(wt, "git rev-parse HEAD");
+
+  // The main checkout's record must not satisfy the worktree's branch.
+  writeReview(dir, "feat__x.md", wtSha);
+  const missing = runHook("gh pr create", { cwd: wt, env: { CLAUDE_PROJECT_DIR: dir } });
+  assert.equal(missing.status, 2);
+  assert.match(missing.stderr, /feat\/wt/);
+
+  // The worktree's own record does. `--show-toplevel` resolves to the worktree,
+  // so the file is expected next to the work, not in the main checkout.
+  writeReview(wt, "feat__wt.md", wtSha);
+  const ok = runHook("gh pr create", { cwd: wt, env: { CLAUDE_PROJECT_DIR: dir } });
+  assert.equal(ok.status, 0, ok.stderr);
+});
+
+test("PR_REVIEW_ROOT still overrides the payload cwd", () => {
+  const { dir, sha } = makeRepo();
+  writeReview(dir, "feat__x.md", sha);
+  const elsewhere = makeRepo();
+  const r = runHook("gh pr create", { root: dir, cwd: elsewhere.dir });
+  assert.equal(r.status, 0, r.stderr);
 });
 
 test("malformed stdin passes through (never break unrelated tools)", () => {
