@@ -55,11 +55,28 @@ jobs:
           body=$(curl -sS --max-time 30 --retry 2 "$URL" || echo '')
           echo "GET $URL -> ${body:-<no body>}"
           if [ -z "$body" ]; then
-            echo "::warning::No body from $URL; the liveness step above is authoritative"
-            exit 0
+            echo "::error::No body from $URL — the health endpoint itself is down"
+            exit 1
           fi
+
+          # Order matters. "degraded" and "available: false" both omit
+          # catalog.templates, so testing for the field first would read an
+          # outage as "reporting is switched off" and pass. An empty demo and a
+          # database we cannot ask about are both things someone must look at.
+          status=$(printf '%s' "$body" | jq -r '.status // "unknown"')
+          if [ "$status" != "ok" ]; then
+            echo "::error::Health reports status=$status — the API or its database is unhealthy."
+            exit 1
+          fi
+          if [ "$(printf '%s' "$body" | jq -r '.catalog.available // "absent"')" = "false" ]; then
+            echo "::error::Catalog count unavailable — the API could not query its database."
+            exit 1
+          fi
+
           count=$(printf '%s' "$body" | jq -r '.catalog.templates // empty')
           if [ -z "$count" ]; then
+            # Only reachable when status is ok and no catalog key was sent,
+            # i.e. demo.publicHealthCatalog is off for this deployment.
             echo "Catalog reporting is off for this deployment — skipping"
             exit 0
           fi

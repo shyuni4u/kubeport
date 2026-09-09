@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"kubeport/internal/auth"
 	"kubeport/internal/store"
 )
 
@@ -25,15 +26,60 @@ type catalogGauge struct {
 	err       error
 }
 
-func (g *catalogGauge) count(ctx context.Context, st *store.Store) (int, error) {
+func (g *catalogGauge) count(ctx context.Context, st *store.Store, demoDomain string) (int, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if !g.at.IsZero() && time.Since(g.at) < healthCacheTTL {
 		return g.templates, g.err
 	}
-	rows, err := st.ListTemplates(ctx)
-	g.at, g.templates, g.err = time.Now(), len(rows), err
+	n, err := demoVisibleTemplates(ctx, st, demoDomain)
+	g.at, g.templates, g.err = time.Now(), n, err
 	return g.templates, err
+}
+
+// demoVisibleTemplates counts what a demo visitor can actually deploy, which
+// is narrower than "rows in the templates table" in two ways that both matter
+// here.
+//
+// Published: a template whose current version is a draft or deprecated shows
+// nothing in the catalog, and the seeder's repair() exists precisely because
+// that state has happened.
+//
+// Demo-owned: scopeTemplatesToDemo hides non-demo templates from demo
+// visitors, so counting every row would let an operator's own templates mask a
+// reset that wiped the demo catalog and failed to re-seed — the monitor would
+// report healthy while visitors saw an empty catalog. That is the exact
+// failure this signal exists to catch.
+func demoVisibleTemplates(ctx context.Context, st *store.Store, demoDomain string) (int, error) {
+	rows, err := st.ListTemplates(ctx)
+	if err != nil {
+		return 0, err
+	}
+	isDemoOwner := map[[16]byte]bool{}
+	n := 0
+	for _, row := range rows {
+		if !row.CurrentVersionID.Valid || row.CurrentStatus.String != "published" {
+			continue
+		}
+		if demoDomain == "" {
+			n++
+			continue
+		}
+		key := row.OwnerUserID.Bytes
+		demo, seen := isDemoOwner[key]
+		if !seen {
+			owner, err := st.GetUserByID(ctx, row.OwnerUserID)
+			if err != nil {
+				return 0, err
+			}
+			demo = auth.IsDemoEmail(owner.Email.String, demoDomain)
+			isDemoOwner[key] = demo
+		}
+		if demo {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // healthz answers the kubelet probes on the bare path with a constant — they
@@ -62,7 +108,7 @@ func healthz(deps Deps, gauge *catalogGauge) gin.HandlerFunc {
 		}
 		body := gin.H{"status": "ok"}
 		if deps.HealthPublicCatalog && deps.Store != nil {
-			n, err := gauge.count(c.Request.Context(), deps.Store)
+			n, err := gauge.count(c.Request.Context(), deps.Store, deps.DemoEmailDomain)
 			if err != nil {
 				// Withheld for the same reason every other 5xx detail is: this
 				// endpoint is unauthenticated, and the error carries the DSN's
