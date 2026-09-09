@@ -158,7 +158,7 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 	if err != nil {
 		// The reason ("ca_bundle is not valid PEM", "no ca_bundle") is for the
 		// operator, not the caller — it goes to the log with the cluster name.
-		log.Printf("proxyOpenAPI: transport for cluster %s: %v", name, err)
+		logWithheld(c, "proxyOpenAPI: transport for cluster "+name, err)
 		writeError(c, http.StatusInternalServerError, "cluster-config",
 			"the cluster's TLS configuration is not usable; check its ca_bundle")
 		return
@@ -185,7 +185,11 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 		writeError(c, http.StatusBadGateway, "k8s-error", "OpenAPI response exceeds 10MiB limit")
 		return
 	}
-	if resp.StatusCode >= 400 {
+	// Anything but 200 is folded, not just 4xx/5xx. A 3xx with no Location
+	// survives http.Client's redirect following, and the old `>= 400` guard let
+	// it fall through to the success path below — where the upstream body and
+	// content type were cached under a 200 for an hour.
+	if resp.StatusCode != http.StatusOK {
 		h.writeUpstreamOpenAPIError(c, name, resp.StatusCode, body)
 		return
 	}
@@ -222,29 +226,45 @@ const upstreamDetailMax = 512
 func (h *Handlers) writeUpstreamOpenAPIError(c *gin.Context, cluster string, status int, body []byte) {
 	switch {
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
-		log.Printf("proxyOpenAPI: cluster %s refused the caller's token: %d", cluster, status)
+		log.Printf("id=%s proxyOpenAPI: cluster %s refused the caller's token: %d", requestIDFrom(c), cluster, status)
 		writeError(c, http.StatusBadGateway, "cluster-auth-denied",
 			"the cluster rejected the credentials kubeport forwarded; this is the cluster's decision, not a kubeport session problem")
 	case status == http.StatusNotFound:
-		// raw-ok: a 404 body is the apiserver naming the group/version the
-		// caller asked for, bounded so it stays an error message.
-		writeError(c, http.StatusNotFound, "k8s-error", truncate(string(body), upstreamDetailMax))
+		// The apiserver's words go only to the caller this PR decided may read
+		// the cluster's words at all — the same predicate the SSAR reason uses
+		// (#102). These two routes carry no requireAdmin and no demo gate, and
+		// proxyOpenAPI does not check cluster ownership, so "any authenticated
+		// caller" here includes a demo visitor pointing at the production
+		// cluster. Everyone else gets our sentence, which is all the editor's
+		// kind autocomplete needs: it branches on status and title.
+		detail := "this cluster has no such group/version"
+		if isAdmin(c) && !h.isDemoCaller(c) {
+			detail = truncate(string(body), upstreamDetailMax)
+		}
+		writeError(c, http.StatusNotFound, "k8s-error", detail)
 	case status >= 500:
 		// The cluster's own trouble, and its body can name internals.
-		log.Printf("proxyOpenAPI: cluster %s returned %d: %s", cluster, status, truncate(string(body), upstreamDetailMax))
+		log.Printf("id=%s proxyOpenAPI: cluster %s returned %d: %s", requestIDFrom(c), cluster, status, truncate(string(body), upstreamDetailMax))
 		writeError(c, http.StatusBadGateway, "k8s-error", "the cluster's OpenAPI endpoint returned an error")
 	default:
-		log.Printf("proxyOpenAPI: cluster %s returned %d: %s", cluster, status, truncate(string(body), upstreamDetailMax))
+		log.Printf("id=%s proxyOpenAPI: cluster %s returned %d: %s", requestIDFrom(c), cluster, status, truncate(string(body), upstreamDetailMax))
 		writeError(c, http.StatusBadGateway, "k8s-error",
 			"the cluster's OpenAPI endpoint refused the request")
 	}
 }
 
+// truncate cuts on a rune boundary. Slicing bytes splits a multi-byte
+// character and the JSON encoder replaces the half with U+FFFD, so a truncated
+// apiserver message came back visibly corrupted rather than merely short.
 func truncate(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	return s[:max] + "…"
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
 }
 
 // buildTransport returns an http.RoundTripper that trusts the cluster's

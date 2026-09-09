@@ -69,8 +69,22 @@ func sseError(c *gin.Context, status int, kind, detail string) {
 // the response, and the k8s authorizer's "Forbidden: ..." text is what tells a
 // user why their deploy was refused.
 func internalError(c *gin.Context, op string, err error) {
-	log.Printf("%s: %v", op, err)
+	logWithheld(c, op, err)
 	writeError(c, http.StatusInternalServerError, "internal", op+" failed")
+}
+
+// logWithheld writes the reason we did not put in the response, keyed by the
+// id the caller was given.
+//
+// Without the id this is a promise the logs cannot keep. The access log does
+// carry it, but it is written when the request *ends* and it records
+// `c.FullPath()` — the route pattern, not the path — so `/v1/releases/:id/logs`
+// says nothing about which release. For an ordinary request the two lines land
+// next to each other and a human can bridge the gap; for a log stream that
+// stays open for minutes while others start and finish, there is nothing to
+// join on. Put the id on the line that has the reason.
+func logWithheld(c *gin.Context, op string, err error) {
+	log.Printf("id=%s %s: %v", requestIDFrom(c), op, err)
 }
 
 // upstreamError answers 502 for a failed call to a cluster, keeping the
@@ -83,7 +97,7 @@ func internalError(c *gin.Context, op string, err error) {
 // address, which ListClusters deliberately stopped returning (#52). Fixing
 // only the 500s (#49) would have left that leak one status code over.
 func upstreamError(c *gin.Context, op string, err error) {
-	log.Printf("%s: %v", op, err)
+	logWithheld(c, op, err)
 	if fromCluster(err) {
 		writeError(c, http.StatusBadGateway, "k8s-error", err.Error())
 		return

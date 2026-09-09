@@ -79,10 +79,13 @@ info:
     - errors inside an open SSE stream carry the same `Problem` schema as
       errors before it opened (#82).
 
-    Neither fallback echoes the request path back. A 405 also means the path
-    exists, which is a small disclosure by itself; it is the same answer gin
-    gives for a known route and not one that survives the auth gate with
-    anything sensitive in it.
+    No fallback echoes the request path back. A 405 does tell an
+    **unauthenticated** caller that the path exists — the fallbacks run on the
+    router's global middleware, which is outside the `/v1` group's auth gate,
+    and gin's default folds this case into a 404 where this API deliberately
+    does not. The trade is accepted: the route list is public in this file
+    anyway, a 405 says only that some verb is registered there, and the `Allow`
+    header it carries is the point of answering 405 at all.
 
     What a `detail` may say is bounded by who sent the words. kubeport's own
     are always safe to show. The cluster's are shown only where they answer the
@@ -261,7 +264,14 @@ paths:
             application/json:
               schema: { type: object, additionalProperties: true }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "404": { $ref: "#/components/responses/NotFound" }
+        "404":
+          description: |
+            Either kubeport has no such cluster (`not-found`) or the cluster's
+            OpenAPI root answered 404 (`k8s-error`). Branch on `title` — the
+            two routes share one handler, so both 404s occur here too.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "502": { $ref: "#/components/responses/ClusterOpenAPIUpstream" }
         "500": { $ref: "#/components/responses/InternalError" }
@@ -313,8 +323,15 @@ paths:
         "404":
           description: |
             Either kubeport has no such cluster (`not-found`) or the cluster
-            has no such group/version (`k8s-error`, `detail` carries the
-            apiserver's words, truncated). Branch on `title`.
+            has no such group/version (`k8s-error`). Branch on `title`.
+
+            The apiserver's own words appear in `detail` only for a kubeport
+            admin on a non-demo account — the same rule the SSAR `reason`
+            follows, and for the same reason: these two routes carry no admin
+            gate and no ownership check, so any authenticated caller can point
+            them at any registered cluster (#102). Everyone else gets a fixed
+            sentence. The status and the title, which is what a client branches
+            on, are identical either way.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -384,7 +401,20 @@ paths:
                   denied: { type: boolean }
                   reason:
                     type: string
-                    description: Free text from the cluster; may be empty.
+                    description: |
+                      **Do not branch on this.** It is populated only for
+                      kubeport admins on non-demo accounts, and is the empty
+                      string for everyone else — including demo accounts, which
+                      hold `kubeport-admin` for UX reasons (issue #102).
+
+                      When present it is the cluster authorizer's own sentence,
+                      which names the ClusterRoleBinding, ClusterRole and User
+                      involved. SSAR is open to any authenticated caller and
+                      reports only that caller's own access, so nothing is
+                      escalated by it; what leaked was the cluster's binding
+                      layout, one namespace at a time.
+
+                      Act on `allowed` / `denied` instead.
         "400":
           description: |
             Body malformed, a required field missing, or `verb` /
@@ -1001,7 +1031,7 @@ paths:
         |---|---|
         | `log`   | `{"time": <unix ms>, "pod": "<name>", "text": "<line>"}` |
         | `ping`  | unix seconds, every 15s to keep the connection open |
-        | `error` | a `Problem`, same schema and same `ErrorKind` vocabulary as any other error |
+        | `error` | a `Problem`, same schema and same `ErrorKind` vocabulary as any other error. `title` is `rbac-denied` (403, the caller may read the release but not its pods' logs — permanent), `cluster-auth-denied` (502, the cluster refused the forwarded token — permanent), or `k8s-error` (502, transport or anything else — retryable) |
 
         Authentication failures before the stream opens are ordinary JSON
         Problems; once it is open, failures arrive as `error` events — and
@@ -1306,6 +1336,28 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Problem" }
+    MethodNotAllowed:
+      description: |
+        The path exists but does not accept this method (`method-not-allowed`).
+
+        **`Allow` is the actionable part** — it lists the verbs this path does
+        accept, so a client can correct itself rather than concluding the
+        resource is gone. That conclusion is exactly what the old behaviour
+        produced: gin folds a wrong verb into its 404 unless
+        `HandleMethodNotAllowed` is set, and it was not (issue #81).
+
+        Every path in this document can answer 405; it is written by the
+        router's fallback rather than by any operation, so it is not repeated
+        under each one. It is also answered before the auth gate — see
+        "Every error is a Problem".
+      headers:
+        Allow:
+          description: "Comma-separated verbs this path accepts, e.g. `GET, POST`."
+          schema: { type: string }
+        X-Request-Id: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Problem" }
     ClusterOpenAPIUpstream:
       description: |
         The cluster's OpenAPI endpoint failed or refused the request. Branch on
@@ -1360,9 +1412,12 @@ components:
         - It is served as `application/json`, not `application/problem+json`
           (`errors.go` uses gin's `AbortWithStatusJSON`). A strict RFC 7807
           client that content-negotiates on the media type will not match.
-        - A request to a path the router does not know never reaches this at
-          all: gin's default 404 is `text/plain`. So handle a non-JSON body on
-          4xx rather than assuming this schema. Tracked in issue #81.
+        - There is no non-JSON error left to handle. A path matching no route
+          is `404 not-found`, a wrong verb is `405 method-not-allowed`, and a
+          panic is `500 internal` — all in this schema. Until #81 the first two
+          were gin's `text/plain` defaults and the third had no body at all, so
+          a parser written before that needed a content-type fallback. It does
+          not any more. See "Every error is a Problem" above.
       required: [type, title, status]
       properties:
         type:

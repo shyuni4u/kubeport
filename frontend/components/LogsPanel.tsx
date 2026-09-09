@@ -24,9 +24,11 @@ type LogEntry = {
   requestId?: string;
 };
 
-// Error kinds the log stream can produce and we have a sentence for. Anything
-// else falls back rather than rendering a raw kind at the user.
-const KNOWN_STREAM_ERRORS = new Set(["k8s-error", "unauthenticated", "rbac-denied"]);
+// The kinds streamErrorKind() in backend/internal/api/release_logs.go can
+// actually produce. Keep the two in step: a kind missing here renders the
+// fallback sentence, and a kind listed here that the backend never sends is a
+// dead branch and a translation nobody reads.
+const KNOWN_STREAM_ERRORS = new Set(["k8s-error", "cluster-auth-denied", "rbac-denied"]);
 
 type Props = {
   releaseId: string;

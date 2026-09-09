@@ -236,16 +236,25 @@ helm upgrade kubeport deploy/helm/kubeport --reuse-values \
 `backend/internal/api/error_shape_test.go` 와 `openapi_spec_test.go` 가 빌드를 깬다. `detail` 은 사람이
 읽는 문장이라 바뀔 수 있다.
 
-여기엔 **핸들러가 만들지 않는 응답도 포함된다**([#81](https://github.com/shyuni4u/kubeport/issues/81)):
+여기엔 **kubeport 의 두 진입점 어디에도 핸들러가 없는 응답까지 포함된다**
+([#81](https://github.com/shyuni4u/kubeport/issues/81)):
 
 - 라우트가 없는 경로 → `404 not-found`. 예전엔 gin 기본값인 `text/plain` `404 page not found` 였고,
   BFF 가 업스트림 content-type 을 그대로 넘기므로 클라이언트까지 그대로 갔다.
 - 경로는 맞는데 메서드가 틀림 → `405 method-not-allowed`. 예전엔 이것도 404 라서 **에이전트가
   "리소스가 없다"로 결론내고 재시도를 포기**했다.
 - `/api/v1` (세그먼트 0개) → `404 not-found`. Next 의 `[...path]` 가 안 잡아서 HTML 404 였다.
+- 핸들러가 패닉 → `500 internal`. `gin.Recovery()` 는 본문도 content-type 도 없는 빈 500 을 냈다.
+  핸들러 버그가 만드는 응답이라 에이전트가 실제로 가장 자주 만나는 5xx 인데, 그게 유일하게
+  JSON 이 아니었다.
 
-둘 다 **요청 경로를 본문에 되돌려주지 않는다.** 호출자는 자기가 뭘 보냈는지 이미 알고, 호출자가
+넷 다 **요청 경로를 본문에 되돌려주지 않는다.** 호출자는 자기가 뭘 보냈는지 이미 알고, 호출자가
 정한 문자열을 응답에 반사하는 건 #72 가 액세스 로그에서 막은 것과 같은 종류의 실수다.
+
+405 는 **인증 게이트보다 먼저** 나온다(라우터 전역 미들웨어라 `/v1` 그룹의 `requireAuth` 밖).
+따라서 비인증 호출자도 경로 존재 여부와 `Allow` 를 알 수 있다. 감수한 트레이드오프다 — 라우트
+목록은 어차피 `openapi.yaml` 로 공개돼 있고, 405 가 말하는 건 "여기 뭔가 등록돼 있다" 뿐이다.
+재시도할 때는 `Allow` 헤더(예: `GET, POST`)를 보고 메서드를 고르면 된다.
 
 **실패를 신고할 땐 `request_id` 를 같이 적는다.** 모든 응답에 `X-Request-Id` 헤더가 붙고, 에러 본문의
 `request_id` 가 같은 값이다. 인바운드 `X-Request-Id` 는 `^[A-Za-z0-9._-]{1,64}$` 에 맞으면 그대로
@@ -259,6 +268,10 @@ apiserver 주소가 그대로 나갔다. 이유는 서버 로그에 있고, `req
 AlreadyExists/Conflict/Unauthorized). "User x cannot create deployments" 는 배포가 거부된 이유이므로
 화면에 있어야 한다. 전송 자체가 실패한 경우는 클러스터 내부 주소가 들어가므로 로그로만 간다.
 
+단 **클러스터 openapi 읽기 두 라우트는 이 일반 규칙의 예외**다. 아래 표대로 apiserver 의 401/403
+도 kubeport 자신의 문장을 단 502 로 접히고, apiserver 원문이 `detail` 에 남는 건 404 하나뿐이며
+그것마저 관리자에게만 보인다.
+
 **클러스터 openapi 읽기 두 라우트는 업스트림 상태를 그대로 흘리지 않는다**
 ([#83](https://github.com/shyuni4u/kubeport/issues/83)). 통과하는 건 404 뿐이고 — "이 클러스터엔
 `apps/v99` 가 없다"는 내가 던진 질문에 apiserver 가 답한 것이라 — 나머지는 kubeport 자신의 502 로
@@ -267,7 +280,7 @@ AlreadyExists/Conflict/Unauthorized). "User x cannot create deployments" 는 배
 | 업스트림 | 나오는 응답 | 재시도 |
 |---|---|---|
 | 401 · 403 | `502 cluster-auth-denied` | ✗ 그 클러스터에 대한 내 권한이 바뀌어야 한다 |
-| 404 | `404 k8s-error` (`detail` 은 apiserver 원문, 잘림) | ✗ 없는 group/version |
+| 404 | `404 k8s-error` (`detail` 원문은 관리자만, 그 외엔 고정 문장) | ✗ 없는 group/version |
 | 그 외 4xx (429 포함) | `502 k8s-error` | 상황에 따라 |
 | 5xx | `502 k8s-error` | ○ 대개 일시적 |
 
@@ -286,8 +299,17 @@ data:{"type":"...","title":"k8s-error","status":502,"detail":"...","request_id":
 
 `detail` 은 **일부러 두루뭉술하다** — client-go 원문에 apiserver 주소·네임스페이스·파드 이름이 들어
 있고 이 프레임은 로그 창에 그대로 렌더된다([#108](https://github.com/shyuni4u/kubeport/issues/108)).
-진짜 이유는 서버 로그에 있고 `request_id` 로 찾는다. `error` 프레임이 왔다고 스트림이 끝난 건 아니다;
-끝은 서버가 연결을 닫는 것으로 알린다.
+진짜 이유는 서버 로그에 있고 `request_id` 로 찾는다. 대신 **분기는 `title` 로 한다**:
+
+| `title` | 상태 | 뜻 | 재시도 |
+|---|---|---|---|
+| `rbac-denied` | 403 | 릴리스는 볼 수 있지만 그 파드의 로그 권한이 없다 | ✗ 클러스터 RBAC 이 바뀌어야 한다 |
+| `cluster-auth-denied` | 502 | 클러스터가 전달된 토큰을 거부 | ✗ 재로그인으로 안 풀린다 |
+| `k8s-error` | 502 | 전송 실패 등 그 외 | ○ |
+
+`error` 프레임이 왔다고 스트림이 끝난 건 아니다; 끝은 서버가 연결을 닫는 것으로 알린다. 표준
+`EventSource` 는 연결이 닫히면 **자동 재연결**하므로, 위 표에서 재시도 ✗ 인 kind 를 받으면
+클라이언트가 직접 `close()` 해야 무한 재연결을 피한다.
 
 **429 를 만나면 `Retry-After` 를 지킨다.** `POST /v1/selfsubjectaccessreview` 와 클러스터 openapi 읽기
 두 라우트가 호출자(OIDC subject)별 토큰버킷 하나를 공유한다 — 분당 60회, 버스트 동일
@@ -335,12 +357,14 @@ k8s authorizer 는 `RBAC: allowed by ClusterRoleBinding "..." of ClusterRole "..
 **목록은 페이지네이션 메타가 없다.** `total` 도 `next` 도 없어서 "다음 페이지가 있나"는 한 페이지가 꽉
 찼는지로 추측해야 한다. 템플릿 목록은 아예 페이지네이션이 없다(#58).
 
-**BFF 가 직접 답하는 응답 4가지.** `/api/v1/*` 로 붙는 경우(§1 의 B 경로), 아래는 Go API 까지 가지 않고
-Next.js Route Handler 가 만든다. 499 를 뺀 셋은 같은 `Problem` 스키마다.
+**BFF 가 직접 답하는 응답 6가지.** `/api/v1/*` 로 붙는 경우(§1 의 B 경로), 아래는 Go API 까지 가지 않고
+Next.js Route Handler 가 만든다. 499 를 뺀 다섯은 같은 `Problem` 스키마다.
 
 | 상태 | `title` | 언제 |
 |---|---|---|
 | 401 | `unauthenticated` | 세션 쿠키가 없거나 만료 — 토큰 갱신도 실패 |
+| 500 | `internal` | 세션 테이블(Postgres)을 못 읽음 |
+| 502 | `internal` | Go API 가 안 뜸 — 연결 거부·DNS·타임아웃. 예전엔 Next 기본 500(HTML, `X-Request-Id` 없음)이었다 |
 | 400 | `validation-error` | 경로가 이상함(`detail: malformed request path`). 세그먼트에 `/`·`..`·제어문자가 있거나, 조립된 URL 이 `/<base>/v1/` 밖으로 나가면 업스트림에 보내지 않는다 ([#51](https://github.com/shyuni4u/kubeport/issues/51)) |
 | 404 | `not-found` | `/api/v1` 자체를 찌른 경우. 세션 검사도 안 한다 — 누가 묻든 여긴 아무 데도 안 이어지고, 401 을 먼저 주면 "뭔가 있긴 하다"는 뜻이 된다 (#81) |
 | 499 | — | 클라이언트가 먼저 끊음(nginx 관례). **본문이 없으므로** id 는 `X-Request-Id` 헤더로만 온다 |

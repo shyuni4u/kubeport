@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -134,18 +135,34 @@ func TestStreamReleaseLogs_ErrorEventWithholdsClusterInternals(t *testing.T) {
 	}
 }
 
-// #82 also claims the stream stays open after an error. It does not: errCh is
-// closed once every pod goroutine has returned, and the next select reads the
-// closed channel and ends the stream. This pins that, so the claim is settled
-// by the code rather than re-argued.
-func TestStreamReleaseLogs_StreamEndsAfterTerminalError(t *testing.T) {
+// #82 also claims the stream stays open after an error. It does not: errCh
+// closes once every pod goroutine has returned and the loop ends. What was
+// actually broken is the ordering — StreamPodLogs buffers the error and only
+// then closes both channels, so select saw two ready cases and picked
+// uniformly, dropping the error frame about half the time.
+//
+// So the assertion is that the error is flushed *before* the close, not merely
+// that the handler returns. "It returned" passes with the bug still in, and a
+// genuine hang would show up as a package-wide 10-minute timeout with no
+// message rather than as this test failing.
+func TestStreamReleaseLogs_FlushesTheErrorBeforeClosing(t *testing.T) {
 	applier := &fakeK8sApplier{
 		instances:    []k8s.Instance{{Name: "web-7d9f8-x2k4l"}},
 		logStreamErr: streamErr,
 	}
 
-	// The handler returning at all is the assertion: c.Stream loops until a
-	// callback returns false, so a stream left open would hang here.
-	events := sseEvents(t, streamingRelease(t, applier))
-	require.NotEmpty(t, events)
+	done := make(chan string, 1)
+	go func() { done <- streamingRelease(t, applier) }()
+
+	var body string
+	select {
+	case body = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("stream never closed: the callback kept returning true after both channels closed")
+	}
+
+	events := sseEvents(t, body)
+	require.NotEmpty(t, events, "the stream closed without emitting anything")
+	require.Equal(t, "error", events[len(events)-1][0],
+		"the buffered error must be flushed before the close, not raced by it")
 }

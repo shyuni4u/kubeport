@@ -50,7 +50,7 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	// requestID and accessLog sit outside Recovery so a panicking request still
 	// gets an id and a log line — Recovery converts the panic to a 500 within
 	// their scope rather than unwinding past them.
-	r.Use(requestID(), accessLog(), gin.Recovery(), limitBodySize(maxRequestBody))
+	r.Use(requestID(), accessLog(), gin.CustomRecovery(recoveredPanic), limitBodySize(maxRequestBody))
 	// Without this, gin answers a wrong verb with its 404, and a caller reading
 	// "not found" concludes the resource is gone rather than that it used the
 	// wrong method (issue #81).
@@ -113,21 +113,45 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	return r
 }
 
-// routeNotFound and methodNotAllowed are the only two responses in the service
-// that no handler produces. Gin's defaults for them are text/plain bodies
-// ("404 page not found"), so the single Problem shape #79 established for /v1
-// had two holes in it: a typo'd path and a wrong verb both came back in a
-// shape no client parses, and the BFF forwards the upstream content type
-// unchanged (issue #81).
+// Three responses in the service are produced by no handler at all, and gin's
+// defaults for all three sat outside the one Problem shape #79 established for
+// /v1 (issue #81). The BFF forwards the upstream content type unchanged, so
+// each one reached the client in a shape no client parses.
 //
-// Neither echoes the request path. The caller already knows what it asked for,
-// and reflecting a caller-controlled string into a response is the same
-// mistake #72 closed in the access log.
+//   - a path matching no route: text/plain "404 page not found"
+//   - a wrong verb: folded into that same 404 unless HandleMethodNotAllowed is
+//     on, which made an agent conclude the resource was gone
+//   - a panic: gin.Recovery() answers AbortWithStatus, an empty body with no
+//     content type — and this is the 5xx a client meets most often, because it
+//     is the one a handler bug produces
+//
+// gin still normalises a trailing slash with a 3xx of its own
+// (RedirectTrailingSlash, on by default). That one is left alone: it is a
+// redirect rather than an error, and turning it into a 404 would break links
+// that work today.
+//
+// None of the three echoes the request path. The caller already knows what it
+// asked for, and reflecting a caller-controlled string into a response is the
+// same mistake #72 closed in the access log.
 func routeNotFound(c *gin.Context) {
 	writeError(c, http.StatusNotFound, "not-found", "no route matches this path")
 }
 
 func methodNotAllowed(c *gin.Context) {
+	// gin has already set Allow from the routes registered on this path, which
+	// is the only machine-actionable part of a 405 — it says which verb to
+	// retry with.
 	writeError(c, http.StatusMethodNotAllowed, "method-not-allowed",
-		"this path exists but does not accept this method")
+		"this path exists but does not accept this method; see the Allow header")
+}
+
+// recoveredPanic answers a panic in the same shape as every other error.
+//
+// gin.Recovery() calls AbortWithStatus, which writes a bare 500 with no body
+// and no content type. A client that had been told "every error is a Problem"
+// would parse that as JSON and throw — on the one 5xx it is most likely to
+// meet, since a handler bug is what produces it. The stack trace is already on
+// its way to the log via CustomRecovery; the id ties the two together.
+func recoveredPanic(c *gin.Context, _ any) {
+	writeError(c, http.StatusInternalServerError, "internal", "request failed")
 }
