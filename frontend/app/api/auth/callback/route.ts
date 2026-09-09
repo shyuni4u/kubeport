@@ -24,7 +24,9 @@ export async function GET(req: NextRequest) {
   // The IdP reports refusals in the query string, not by failing the redirect.
   const idpError = req.nextUrl.searchParams.get("error");
   if (idpError) {
-    console.warn(`[auth/callback] idp returned error=${idpError}`);
+    // Attacker-controlled and pre-authentication: quote and truncate it so a
+    // newline can't forge a log line or a long value flood the log.
+    console.warn("[auth/callback] idp returned error=%s", JSON.stringify(idpError.slice(0, 64)));
     return backToLanding(req, loginErrorFromIdp(idpError));
   }
 
@@ -88,8 +90,16 @@ export async function GET(req: NextRequest) {
     await createSession(userId, tokens.id_token, tokens.refresh_token, expiresAt, provider);
   } catch (err) {
     // Expired/replayed code, state or nonce mismatch, IdP or Postgres
-    // unreachable. The detail is for the server log only.
-    console.error("[auth/callback] login failed:", err);
+    // unreachable. The detail is for the server log only — but a state or
+    // nonce mismatch means someone replayed or forged a callback, which is
+    // worth alerting on, and it must not read the same as an outage.
+    const message = String((err as Error)?.message ?? "");
+    console.error(
+      "[auth/callback] login failed kind=%s suspicious=%s",
+      (err as Error)?.constructor?.name ?? "Error",
+      /state|nonce/i.test(message),
+      err,
+    );
     return backToLanding(req, "failed");
   }
 

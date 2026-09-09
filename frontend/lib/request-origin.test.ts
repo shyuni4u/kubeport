@@ -90,6 +90,21 @@ describe("externalOrigin", () => {
     process.env.OIDC_REDIRECT_URI = "not a url";
     expect(externalOrigin(req({ host: "localhost:3000" }))).toBe("http://localhost:3000");
   });
+
+  // A PUBLIC_ORIGIN that parses to nothing must not read as "configured with an
+  // empty allowlist" — that would silently reopen the header trust this
+  // function exists to close.
+  it.each([" ", ",", " , ", ""])(
+    "falls through to OIDC_REDIRECT_URI when PUBLIC_ORIGIN is %j",
+    (value) => {
+      process.env.PUBLIC_ORIGIN = value;
+      process.env.OIDC_REDIRECT_URI = "https://kubeport.enzo.kr/api/auth/callback";
+      expect(allowedOrigins()).toEqual(["https://kubeport.enzo.kr"]);
+      expect(externalOrigin(req({ "x-forwarded-host": "evil.example" }))).toBe(
+        "https://kubeport.enzo.kr",
+      );
+    },
+  );
 });
 
 describe("allowedOrigins / isAllowedOrigin", () => {

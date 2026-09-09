@@ -12,24 +12,42 @@ import type { NextRequest } from "next/server";
  * neither variable, and there is no proxy in front to lie about the host.
  */
 export function allowedOrigins(): string[] {
-  const configured = process.env.PUBLIC_ORIGIN;
-  if (configured) {
-    return configured
-      .split(",")
-      .map((o) => o.trim().replace(/\/$/, ""))
-      .filter(Boolean);
-  }
+  // A PUBLIC_ORIGIN of " " or "," is truthy but parses to nothing. Treating
+  // that as "configured" would silently drop us back to trusting the headers,
+  // so an empty parse falls through to the redirect URI like an unset value.
+  const fromPublic = (process.env.PUBLIC_ORIGIN ?? "")
+    .split(",")
+    .map((o) => o.trim().replace(/\/$/, ""))
+    .filter(Boolean);
+  if (fromPublic.length > 0) return fromPublic;
+
   const redirect = process.env.OIDC_REDIRECT_URI;
   if (redirect) {
     try {
       return [new URL(redirect).origin];
     } catch {
       // Misconfigured env shouldn't take the app down; fall through to "not
-      // configured" and let the header-derived value stand.
+      // configured" and let the header-derived value stand — loudly.
+      warnUnconfigured(`OIDC_REDIRECT_URI is not a URL: ${JSON.stringify(redirect)}`);
       return [];
     }
   }
   return [];
+}
+
+let warned = false;
+
+/**
+ * Say something the first time we fall back to trusting forwarded headers in
+ * production. Locally this is the normal, correct path, so it stays quiet.
+ */
+function warnUnconfigured(reason: string) {
+  if (warned || process.env.NODE_ENV !== "production") return;
+  warned = true;
+  console.error(
+    `[request-origin] no public origin configured (${reason}); trusting X-Forwarded-Host. ` +
+      "Set PUBLIC_ORIGIN or a valid OIDC_REDIRECT_URI.",
+  );
 }
 
 /** Whether `origin` is one of this deployment's public origins. */
@@ -63,6 +81,9 @@ export function externalOrigin(req: NextRequest): string {
   const derived = `${proto}://${host}`;
 
   const allowed = allowedOrigins();
-  if (allowed.length === 0) return derived;
+  if (allowed.length === 0) {
+    warnUnconfigured("PUBLIC_ORIGIN and OIDC_REDIRECT_URI are both unset");
+    return derived;
+  }
   return allowed.includes(derived) ? derived : allowed[0];
 }

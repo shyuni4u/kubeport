@@ -72,6 +72,20 @@ func TestReap_ReportsPartialProgressOnError(t *testing.T) {
 	require.Zero(t, n)
 }
 
+// A typo like KBP_SESSION_REAP_INTERVAL=100ms must not turn housekeeping into
+// a self-inflicted DoS on a single-node Postgres.
+func TestStartReaper_ClampsAnAbsurdInterval(t *testing.T) {
+	s := &fakeSweeper{remaining: 0}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	StartReaper(ctx, s, time.Millisecond, 100)
+
+	require.Eventually(t, func() bool { return s.callCount() >= 1 }, time.Second, 5*time.Millisecond)
+	// At 1ms an unclamped ticker would have fired hundreds of times by now.
+	time.Sleep(100 * time.Millisecond)
+	require.Equal(t, 1, s.callCount(), "interval should have been clamped to the floor")
+}
+
 func TestStartReaper_SweepsImmediatelyAndStopsOnCancel(t *testing.T) {
 	s := &fakeSweeper{remaining: 5}
 	ctx, cancel := context.WithCancel(context.Background())

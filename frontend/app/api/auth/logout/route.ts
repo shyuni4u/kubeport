@@ -7,10 +7,13 @@ export async function POST(req: NextRequest) {
   // the browser-set Origin against the origins we actually serve — comparing
   // it to a value derived from the request's own forwarded headers let a
   // caller that controls both headers satisfy the check trivially.
+  // A missing Origin is rejected too: browsers always send it on a non-GET
+  // fetch, and the only caller is TopBarUserMenu's POST, so requiring it costs
+  // nothing and closes the "no header, no check" hole.
   const origin = req.headers.get("origin");
   const allowed = allowedOrigins();
   const acceptable = allowed.length > 0 ? allowed : [externalOrigin(req)];
-  if (origin && !acceptable.includes(origin)) {
+  if (!origin || !acceptable.includes(origin)) {
     return new NextResponse("cross-origin request rejected", { status: 403 });
   }
   await destroySession();

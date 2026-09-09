@@ -8,6 +8,13 @@ data:
   OIDC_ISSUER: {{ required "oidc.issuer is required" .Values.oidc.issuer | quote }}
   OIDC_CLIENT_ID: {{ required "oidc.clientId is required" .Values.oidc.clientId | quote }}
   OIDC_REDIRECT_URI: {{ include "kubeport.oidc.redirectUri" . | quote }}
+  {{- with .Values.frontend.publicOrigins }}
+  # Origins the app is served on. Login/logout redirects and the logout
+  # same-origin check are pinned to this list, so a forged X-Forwarded-Host
+  # cannot steer them. Only needed for multi-domain installs — with this unset
+  # the origin of OIDC_REDIRECT_URI above is used.
+  PUBLIC_ORIGIN: {{ join "," . | quote }}
+  {{- end }}
   {{- with .Values.oidc.scopes }}
   OIDC_SCOPES: {{ . | quote }}
   {{- end }}

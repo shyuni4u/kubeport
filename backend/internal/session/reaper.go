@@ -31,6 +31,9 @@ const (
 	// maxPassesPerTick stops a single tick from looping on a huge backlog; the
 	// remainder is picked up next tick.
 	maxPassesPerTick = 20
+	// MinInterval guards against a typo in KBP_SESSION_REAP_INTERVAL turning a
+	// housekeeping job into a self-inflicted DoS on a single-node Postgres.
+	MinInterval = time.Minute
 )
 
 // Reap deletes expired sessions in bounded batches until a pass comes back
@@ -54,14 +57,21 @@ func Reap(ctx context.Context, s Sweeper, batchSize int32) (int64, error) {
 // StartReaper runs Reap on a ticker until ctx is cancelled. It sweeps once at
 // startup so a long-stopped deployment doesn't wait an hour to catch up.
 //
-// Safe to run on several replicas: the DELETE is idempotent and each pass only
-// claims rows that are already expired, so the worst case is one replica
-// finding nothing to do. Leader election would only save the wasted query, and
-// is better introduced with the release reconciler (Plan 12) that actually
-// needs it.
+// Safe to run on several replicas: the batch selects rows FOR UPDATE SKIP
+// LOCKED in a stable order, so concurrent sweepers take disjoint batches
+// instead of racing for the same rows. Leader election would only save the odd
+// empty query, and is better introduced with the release reconciler (Plan 12)
+// that actually needs it.
+//
+// Each pass gets its own deadline: without one, a wedged connection would park
+// the goroutine forever and no later tick would ever run.
 func StartReaper(ctx context.Context, s Sweeper, interval time.Duration, batchSize int32) {
 	if interval <= 0 {
 		interval = DefaultInterval
+	}
+	if interval < MinInterval {
+		log.Printf("session reaper: interval %s is below the %s floor; using the floor", interval, MinInterval)
+		interval = MinInterval
 	}
 	if batchSize <= 0 {
 		batchSize = DefaultBatchSize
@@ -70,7 +80,10 @@ func StartReaper(ctx context.Context, s Sweeper, interval time.Duration, batchSi
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {
-			if n, err := Reap(ctx, s, batchSize); err != nil {
+			passCtx, cancel := context.WithTimeout(ctx, interval/2)
+			n, err := Reap(passCtx, s, batchSize)
+			cancel()
+			if err != nil {
 				log.Printf("session reaper: %v (removed %d before failing)", err, n)
 			} else if n > 0 {
 				log.Printf("session reaper: removed %d expired sessions", n)
