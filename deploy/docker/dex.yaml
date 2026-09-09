@@ -5,6 +5,11 @@ web:
   https: 0.0.0.0:5556
   tlsCert: /config/certs/dex.crt
   tlsKey: /config/certs/dex.key
+# Plaintext /healthz + /metrics for the compose healthcheck (see
+# docker-compose.yml). Bound to loopback inside the container, so it stays
+# unreachable even if someone later publishes the port.
+telemetry:
+  http: 127.0.0.1:5558
 oauth2:
   passwordConnector: local
 enablePasswordDB: true

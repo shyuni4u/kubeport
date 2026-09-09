@@ -10,6 +10,7 @@ Plan 0–5 로 구현된 기능을 **직접 클릭하면서 확인**하기 위�
 ## 0. 사전 확인
 
 - [ ] `docker compose -f deploy/docker/docker-compose.yml ps` → postgres + dex 가 `Up (healthy)`
+      (dex 가 안 뜨면 `deploy/docker/certs/dex.{crt,key}` 가 없는 것 — 생성은 [docs/dev-setup.md §4](dev-setup.md))
 - [ ] `kubectl --context kind-kubeport get nodes` → `control-plane` 이 `Ready`
 - [ ] `curl -s http://localhost:8080/healthz` → `ok`
 - [ ] `http://localhost:3000` 접속 → 로그인 화면 표시 (dex 로 리다이렉트)

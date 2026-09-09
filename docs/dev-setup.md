@@ -74,7 +74,7 @@ npm install -g pnpm
 
 # Go (go.mod 가 요구하는 버전 이상)
 # https://go.dev/dl/ 에서 최신 stable 확인 후
-GO_VERSION=1.22.5
+GO_VERSION=1.26.2
 wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
 sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
 echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
@@ -138,28 +138,38 @@ pnpm -v
 atlas version
 kubectl version --client
 
-# 2. 백엔드 테스트 한 번 (Plan 1 Task 2 이후 의미 있음)
+# 2. 로컬 의존 서비스 기동 (postgres + dex — 이 둘뿐이다)
+#    ⚠️ dex 는 deploy/docker/certs/dex.{crt,key} 가 없으면 뜨지 않는다
+#    ("open /config/certs/dex.crt: no such file or directory").
+#    최소 경로 — openssl 한 줄이면 된다 (kind 불필요):
+#      cd deploy/docker/certs && openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+#        -keyout dex.key -out dex.crt -subj "/CN=host.docker.internal" \
+#        -addext "subjectAltName=DNS:host.docker.internal,DNS:localhost,IP:127.0.0.1"
+#    kind 까지 포함한 e2e 스택 전체가 필요하면 scripts/e2e/up.sh 를 쓴다.
+docker compose -f deploy/docker/docker-compose.yml up -d
+docker compose -f deploy/docker/docker-compose.yml ps   # postgres, dex 가 Up (healthy)
+
+# 3. 백엔드 테스트 (위 compose 가 떠 있어야 internal/store·internal/auth 가 통과)
 cd backend
 go test ./...
-
-# 3. docker compose 가 Plan 1 Task 4 에서 추가되면
-#   docker compose -f deploy/docker/docker-compose.yml up -d
-#   docker compose ps   # postgres, dex, adminer 전부 healthy
 ```
 
 모두 통과하면 개발 환경 OK.
+
+dex 가 안 뜬 상태로 `go test ./...` 를 돌리면 `internal/auth` 3건이 항상 실패한다 —
+환경이 깨진 게 아니라 인증서 선행 조건을 건너뛴 것이다.
 
 ---
 
 ## 5. Devcontainer (향후)
 
-Plan 1 Task 4 (`deploy/docker/docker-compose.yml`) 를 구현할 때 함께 `.devcontainer/devcontainer.json` 도 추가하는 것을 검토. 목표:
+`.devcontainer/devcontainer.json` 추가를 검토 중(아직 없음). 목표:
 
 - VS Code에서 "Reopen in Container" 한 번으로 Go + Node + pnpm + atlas + kubectl 버전 고정 환경이 뜸.
 - 신규 기기에서 클론 직후 툴 수동 설치 0.
 - CI 와 동일한 이미지 기반 → "내 머신에선 되던데" 제거.
 
-현재는 docker-compose 조차 없는 상태라 **먼저 Task 4 를 끝내고 그 위에 devcontainer 를 얹는다** 순서가 자연스럽다.
+`deploy/docker/docker-compose.yml` 은 이미 있으므로(postgres + dex), devcontainer 는 그 위에 얹으면 된다.
 
 ---
 

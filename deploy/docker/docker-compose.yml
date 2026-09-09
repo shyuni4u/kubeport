@@ -7,6 +7,11 @@ services:
       POSTGRES_DB: kubeport
     ports: ["127.0.0.1:5432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kubeport -d kubeport"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   dex:
     image: dexidp/dex:v2.39.0
@@ -16,6 +21,17 @@ services:
     volumes:
       - ./dex.yaml:/config/dex.yaml:ro
       - ./certs:/config/certs:ro
+    # Probes the plaintext telemetry listener (dex.yaml `telemetry.http`), not the
+    # HTTPS port: the image ships BusyBox wget, which has no --no-check-certificate,
+    # so it cannot talk to dex's self-signed cert on 5556.
+    healthcheck:
+      # 127.0.0.1, not localhost: BusyBox wget resolves localhost to ::1 first and
+      # dex's telemetry listener is IPv4-only, which fails with "Connection refused".
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5558/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
 volumes:
   pgdata:

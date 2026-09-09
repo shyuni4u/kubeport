@@ -10,6 +10,8 @@
 #     -f deploy/helm/kubeport/values-gcp-phase1.yaml \
 #     --set host=demo.kubeport.example \
 #     --set oidc.clientId=$GOOGLE_OAUTH_CLIENT_ID \
+#     --set oidc.audience=$GOOGLE_OAUTH_CLIENT_ID \
+#     --set-string auth.devAdminEmails=$YOUR_EMAIL \
 #     --set auth.appEncryptionKeyB64=$(openssl rand -base64 32) \
 #     --set auth.oidcClientSecret=$GOOGLE_OAUTH_CLIENT_SECRET \
 #     --set postgres.password=$(openssl rand -hex 24)
@@ -21,7 +23,10 @@ oidc:
   # Set up at https://console.cloud.google.com/apis/credentials.
   # Add `<host>/api/auth/callback` to Authorized redirect URIs.
   issuer: https://accounts.google.com
-  audience: kubeport
+  # Google's id_token carries aud = client_id, so audience MUST be set to the
+  # same value as clientId. Leaving a literal like `kubeport` here makes every
+  # login fail token validation with 401.
+  audience: <set-via-flag>
   clientId: <set-via-flag>
   # redirectUri auto-derived from host
 
