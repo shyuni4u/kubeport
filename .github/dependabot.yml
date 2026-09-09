@@ -64,3 +64,11 @@ updates:
     groups:
       images:
         patterns: ["*"]
+    # Node majors are taken by hand, not on dependabot's schedule. The runtime
+    # should sit on an Active LTS (24 as of 2026-09; 26 is Current and does not
+    # reach LTS until 2026-10-28), and crossing into 25+ also drops bundled
+    # corepack, which the frontend image uses to pin pnpm — that needs a
+    # Dockerfile change in the same commit, not a version bump on its own.
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
