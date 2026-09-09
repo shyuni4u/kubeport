@@ -1,5 +1,7 @@
 import { parseAllDocuments, parse } from "yaml";
 
+import { joinPath } from "./template-path";
+
 // Mirrors backend UIModeTemplate / UIResource / UIField exactly so the state
 // we build here round-trips through POST /v1/templates/:name/versions.
 export interface UISpecEntry {
@@ -43,6 +45,11 @@ export interface YamlToUIResult {
 // through SerializeUIMode reproduces the original document byte-for-byte
 // (modulo YAML formatting). UI-spec fields get their `fixed` entries later
 // overwritten to `exposed`.
+//
+// Keys go through joinPath rather than string concatenation. A key holding
+// `.`, `-` or `/` — `app.kubernetes.io/name`, an annotation, a ConfigMap
+// filename — has to be quoted, or this generates a path the backend cannot
+// read back and opening the template in UI mode is a 400 (issue #129).
 function walkScalars(
   value: unknown,
   path: string,
@@ -72,7 +79,7 @@ function walkScalars(
   if (t === "object") {
     const obj = value as Record<string, unknown>;
     for (const [k, v] of Object.entries(obj)) {
-      walkScalars(v, path ? `${path}.${k}` : k, fields, warnings);
+      walkScalars(v, joinPath(path, k), fields, warnings);
     }
     return;
   }
@@ -117,7 +124,7 @@ export function yamlToUIState(resourcesYaml: string, uiSpecYaml: string): YamlTo
         }
         for (const [mk, mv] of Object.entries(v as Record<string, unknown>)) {
           if (mk === "name") continue;
-          walkScalars(mv, `metadata.${mk}`, fields, warnings);
+          walkScalars(mv, joinPath("metadata", mk), fields, warnings);
         }
         continue;
       }
@@ -133,7 +140,11 @@ export function yamlToUIState(resourcesYaml: string, uiSpecYaml: string): YamlTo
     const spec = parse(uiSpecYaml) as { fields?: UISpecEntry[] } | null;
     const entries = spec?.fields ?? [];
     for (const entry of entries) {
-      const m = /^(\w+)\[([^\]]+)\]\.(.+)$/.exec(entry.path);
+      // The selector cannot open with a quote — same rule as template-path's
+      // headRE, so `Kind["a.b"]` is a quoted first segment, not a resource
+      // named `"a.b"`. The remainder is kept as text: UIField keys are
+      // resource-relative path strings, not parsed segments.
+      const m = /^(\w+)\[([^"'\]][^\]]*)\]\.(.+)$/.exec(entry.path);
       if (!m) {
         warnings.push(`ui-spec path unparseable: ${entry.path}`);
         continue;

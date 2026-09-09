@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 
+import { parsePathSegments } from "./template-path";
 import { yamlToUIState } from "./yaml-to-ui-state";
 
 const sampleResources = `
@@ -157,5 +158,79 @@ spec:
 `, "fields: []");
     expect(uiState.resources).toHaveLength(0);
     expect(warnings.some((w) => w.includes("missing apiVersion"))).toBe(true);
+  });
+});
+
+// Issue #129. Opening the seeded `web-app` template in UI mode returned 400:
+// the generator emitted `metadata.labels.app.kubernetes.io/name`, which the
+// backend parser rejected at `/name`. Both halves are fixed by quoting, so the
+// assertions here are about the generated path, not just the absence of a
+// throw — a path that parses but addresses the wrong key would be worse.
+describe("keys that the bare segment grammar cannot express", () => {
+  const withAwkwardKeys = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app.kubernetes.io/name: web-app
+    app-tier: frontend
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  replicas: 1
+`;
+
+  it("quotes label and annotation keys instead of splitting them on dots", () => {
+    const { uiState, warnings } = yamlToUIState(withAwkwardKeys, "fields: []");
+    expect(warnings).toEqual([]);
+    const fields = uiState.resources[0].fields;
+
+    expect(fields[`metadata.labels["app.kubernetes.io/name"]`]).toEqual({
+      mode: "fixed",
+      fixedValue: "web-app",
+    });
+    expect(fields[`metadata.labels["app-tier"]`]).toEqual({
+      mode: "fixed",
+      fixedValue: "frontend",
+    });
+    expect(fields[`metadata.annotations["nginx.ingress.kubernetes.io/rewrite-target"]`]).toEqual({
+      mode: "fixed",
+      fixedValue: "/",
+    });
+
+    // The pre-fix output, spelled out so a regression is unambiguous.
+    expect(fields["metadata.labels.app.kubernetes.io/name"]).toBeUndefined();
+  });
+
+  it("still emits bare segments for ordinary keys", () => {
+    const { uiState } = yamlToUIState(withAwkwardKeys, "fields: []");
+    expect(uiState.resources[0].fields["spec.replicas"]).toEqual({
+      mode: "fixed",
+      fixedValue: 1,
+    });
+  });
+
+  it("matches a ui-spec entry whose path contains a quoted segment", () => {
+    const uiSpec = `fields:
+  - path: Deployment[web].metadata.labels["app.kubernetes.io/name"]
+    label: 앱 이름
+    type: string
+`;
+    const { uiState, warnings } = yamlToUIState(withAwkwardKeys, uiSpec);
+    expect(warnings).toEqual([]);
+    const field = uiState.resources[0].fields[`metadata.labels["app.kubernetes.io/name"]`];
+    expect(field.mode).toBe("exposed");
+    expect(field.uiSpec?.label).toBe("앱 이름");
+  });
+
+  it("every generated path parses back to the key it came from", () => {
+    const { uiState } = yamlToUIState(withAwkwardKeys, "fields: []");
+    for (const path of Object.keys(uiState.resources[0].fields)) {
+      const keys = parsePathSegments(path);
+      expect(keys, `path ${path} must parse`).not.toBeNull();
+      // The last segment is the leaf key; it must survive the round trip
+      // rather than having been split into fragments on its dots.
+      expect(String(keys![keys!.length - 1])).not.toContain("[");
+    }
   });
 });

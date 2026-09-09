@@ -3,9 +3,6 @@ package template
 import (
 	"bytes"
 	"fmt"
-	"regexp"
-	"strconv"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -112,26 +109,12 @@ func SerializeUIMode(ui UIModeTemplate) (resourcesYAML, uiSpecYAML string, err e
 // front), but here we're generating a fresh document from scratch so the
 // array is expected to be created on demand.
 func setJSONPathAbsolute(obj map[string]any, path string, v any) error {
-	// Tokenize the path into segments: either a map key or an array index.
-	type seg struct {
-		key string // set when segment is a map key
-		idx int    // set when segment is an array index
-		arr bool   // true if array segment
-	}
-	var segs []seg
-	rest := path
-	for rest != "" {
-		m := uimodeSegRE.FindStringSubmatch(rest)
-		if m == nil {
-			return fmt.Errorf("bad path remainder %q", rest)
-		}
-		rest = strings.TrimPrefix(rest[len(m[0]):], ".")
-		if m[1] != "" {
-			segs = append(segs, seg{key: m[1]})
-		} else {
-			n, _ := strconv.Atoi(m[2])
-			segs = append(segs, seg{idx: n, arr: true})
-		}
+	// One tokenizer, shared with jsonpath.go. The two used to carry separate
+	// copies of the same regex, which is why issue #129's bug existed twice:
+	// this function generates the paths that setInto then has to read back.
+	segs, err := parsePathSegments(path)
+	if err != nil {
+		return err
 	}
 	if len(segs) == 0 {
 		return fmt.Errorf("empty path")
@@ -217,5 +200,3 @@ func setJSONPathAbsolute(obj map[string]any, path string, v any) error {
 	}
 	return nil
 }
-
-var uimodeSegRE = regexp.MustCompile(`^(?:([A-Za-z_][A-Za-z0-9_]*)|\[(\d+)\])`)

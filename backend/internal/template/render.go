@@ -19,15 +19,30 @@ type Labels struct {
 }
 
 // ValidateSpec parses the resources and ui-spec YAML pair and returns a
-// non-nil error if either is malformed or if any ui-spec field has an
-// invalid pattern. It skips value injection and required-field checks so
-// admins can register templates whose fields are required at deploy time.
+// non-nil error if either is malformed, if any ui-spec field has an invalid
+// pattern, or if any field path is unparseable. It skips value injection and
+// required-field checks so admins can register templates whose fields are
+// required at deploy time.
+//
+// Path syntax is checked here rather than only at render time because every
+// caller is a write: an unparseable path saved now surfaces as a failed deploy
+// later, in front of the user rather than the admin who mistyped it. Quoted
+// segments make that more likely, since they are the one part of the grammar
+// an admin writes by hand.
 func ValidateSpec(resourcesYAML, uiSpecYAML string) error {
 	if _, err := parseMultiDoc(resourcesYAML); err != nil {
 		return err
 	}
-	if _, err := parseSpec(uiSpecYAML); err != nil {
+	spec, err := parseSpec(uiSpecYAML)
+	if err != nil {
 		return err
+	}
+	for _, f := range spec.Fields {
+		if _, _, rest, err := parseHead(f.Path); err != nil {
+			return fmt.Errorf("field %q: %w", f.Label, err)
+		} else if _, err := parsePathSegments(rest); err != nil {
+			return fmt.Errorf("field %q has an unusable path %q: %w", f.Label, f.Path, err)
+		}
 	}
 	return nil
 }
