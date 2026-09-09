@@ -11,7 +11,7 @@ controller. Cloud-neutrality is by design: only `ingress.className`,
 `postgres.storage.storageClassName`, the public host, and the OIDC issuer URL
 should differ between environments.
 
-## Quick install (Phase 1 — GCP bootstrap)
+## Quick install (any cluster)
 
 ```bash
 # 1. Generate secrets locally — never commit them
@@ -41,15 +41,30 @@ YAML
 
 # 3. Install the chart
 helm install kubeport deploy/helm/kubeport \
-  -f deploy/helm/kubeport/values-gcp-phase1.yaml \
   --namespace kubeport --create-namespace \
   --set host=demo.kubeport.example \
+  --set ingress.className=traefik \
+  --set postgres.storage.storageClassName=local-path \
+  --set oidc.issuer=https://accounts.google.com \
   --set oidc.clientId=$GOOGLE_OAUTH_CLIENT_ID \
   --set oidc.audience=$GOOGLE_OAUTH_CLIENT_ID \
+  --set-string auth.devAdminEmails=$YOUR_EMAIL \
   --set auth.appEncryptionKeyB64=$ENC_KEY \
   --set auth.oidcClientSecret=$GOOGLE_OAUTH_CLIENT_SECRET \
   --set postgres.password=$PG_PASS
 ```
+
+`ingress.className` and `postgres.storage.storageClassName` above are the k3s
+values — substitute your cluster's from the "Cloud-specific values" table below
+(GKE `gce`/`standard-rwo`, EKS `alb`/`gp3`, …). Leaving the k3s values on a
+managed cluster leaves the PVC `Pending` and the Ingress unassigned.
+
+`oidc.audience` must equal your client ID, and `auth.devAdminEmails` is what
+makes you an admin — see "After install" step 0 for why both matter.
+
+`values-gcp-phase1.yaml` and `values-oci-phase2.yaml` are presets for this
+project's own single-node k3s hosts. Read them for reference, but don't pass them
+with `-f` on a different cluster.
 
 ## After install — required on every cluster
 
@@ -60,10 +75,26 @@ user has to hold RBAC on it. Skip these steps and you reach the catalog with
 **zero deployable clusters** — the cluster dropdown is empty and nothing else
 looks broken.
 
-The three steps below are cluster-agnostic (GKE / EKS / AKS / k3s alike). Full
+The steps below are cluster-agnostic (GKE / EKS / AKS / k3s alike). Full
 commands, verification, and the k3s specifics are in `deploy/oci/README.md` §7
 ([link](../../oci/README.md)) — that file is named for OCI, but §7 is not
 OCI-specific.
+
+0. **Create the first in-app admin.** kubeport decides who is an admin by looking
+   for a `kubeport-admin` entry in the id_token's `groups` claim. **Google never
+   issues a `groups` claim**, so with Google as your IdP you must bootstrap by
+   email instead. `auth.devAdminEmails` defaults to empty, which means *nobody* is
+   an admin — and step 3 below is admin-only, so it returns
+   `403 admin group required` and the cluster dropdown stays empty forever.
+
+   ```bash
+   helm upgrade kubeport deploy/helm/kubeport --reuse-values \
+     --set-string auth.devAdminEmails="you@example.com"
+   ```
+
+   If your IdP does emit groups (Keycloak / Okta / Dex), map a `kubeport-admin`
+   group, set `oidc.scopes="openid email profile groups"`, and leave
+   `auth.devAdminEmails` empty.
 
 1. **Make the target API server trust your IdP** (§7.1) — an
    `AuthenticationConfiguration` whose `issuer.url` is your OIDC issuer and whose
@@ -71,31 +102,94 @@ OCI-specific.
    instead of a static file (GKE Workload Identity, EKS
    `associate-identity-provider-config`, AKS OIDC integration).
 
+   Two rules matter as soon as the cluster trusts **more than one** issuer, which
+   is the case the moment you enable demo mode (Dex is a second issuer):
+
+   - Give each issuer a distinct `claimMappings.username.prefix`. kubeport's demo
+     RBAC is bound to `dex:`-prefixed subjects and must match
+     `demo.usernamePrefix`. If two issuers share a prefix, one IdP can mint the
+     k8s identity of a user from the other — and the demo IdP's passwords are
+     published on the landing page by design. If the prefix merely disagrees with
+     `demo.usernamePrefix`, the demo RoleBindings silently bind nothing.
+   - When mapping `username` from the `email` claim, also require the address to
+     be verified:
+
+     ```yaml
+     claimValidationRules:
+       - claim: email_verified
+         requiredValue: "true"
+     ```
+
 2. **Bind RBAC for the operator** (§7.3) — the app never grants k8s permissions
-   itself, it only reflects them:
+   itself, it only reflects them.
+
+   On a single-purpose cluster (k3s demo / dev), the fastest path is a
+   cluster-admin binding:
 
    ```bash
    kubectl create clusterrolebinding kubeport-owner-admin \
      --clusterrole=cluster-admin --user="<operator email>"
    ```
 
+   On a shared or production cluster, do **not** do that — it puts permanent
+   cluster-admin on one personal account. kubeport only needs the MVP workload
+   resources, and this chart already ships a worked example of that least-privilege
+   set: copy the `demo-admin` Role in `templates/demo-rbac.yaml` and change the
+   namespace. The only cluster-scoped grant kubeport itself requires is
+   `selfsubjectaccessreviews: create`, which is what makes the RBAC panel work.
+
    Ordinary users need only namespace-scoped Roles; the deploy form's RBAC panel
    shows whatever `SelfSubjectAccessReview` reports for that user.
 
-3. **Register the cluster as a deploy target** (§7.4) — `POST /v1/clusters`
-   (admin only) with `api_url`, `ca_bundle`, `oidc_issuer_url`, and
-   `default_namespace`. There is no cluster-registration screen in the admin UI
-   yet, so call the API with an admin token.
+   Because the binding above is on a raw email address, it is only as strong as
+   the username prefix and `email_verified` rules in step 1.
+
+3. **Register the cluster as a deploy target** (§7.4) — `POST /v1/clusters`,
+   admin only. There is no cluster-registration screen in the admin UI yet.
+
+   | field | required | note |
+   |---|---|---|
+   | `name` | **yes** | cluster slug; releases reference it by this name |
+   | `api_url` | **yes** | validated as a URL |
+   | `oidc_issuer_url` | **yes** | validated as a URL |
+   | `ca_bundle` | no — but set it | PEM text, not base64. **If omitted the backend falls back to TLS verification disabled** (`NewInsecureWithToken`) and still returns 201, so the response cannot tell you this happened |
+   | `default_namespace` | no | deploy form starts on an empty namespace without it |
+   | `display_name` | no | UI label |
+
+   The Go API is **ClusterIP-only**: the chart's Ingress sends every external path
+   to the frontend BFF, and that BFF authenticates from the session cookie and
+   ignores any `Authorization` header you send. So there is no public route to
+   `/v1` — port-forward to the backend Service instead:
+
+   ```bash
+   kubectl -n kubeport port-forward svc/<release>-backend 8080:8080 &
+
+   curl -sS -X POST http://localhost:8080/v1/clusters \
+     -H "Authorization: Bearer $ADMIN_ID_TOKEN" \
+     -H 'content-type: application/json' -d '{
+       "name": "oci-a1",
+       "api_url": "https://kubernetes.default.svc",
+       "ca_bundle": "-----BEGIN CERTIFICATE-----\n...",
+       "oidc_issuer_url": "https://accounts.google.com",
+       "default_namespace": "default"
+     }'
+   ```
+
+   Obtaining `$ADMIN_ID_TOKEN` non-interactively is not currently documented for
+   production IdPs ([#34](https://github.com/shyuni4u/kubeport/issues/34)); Google
+   has no password grant. Until that is resolved, `deploy/oci/README.md` §7.4 also
+   allows inserting the row directly in the DB — it is infrastructure config, not
+   PII.
 
 **Verify the whole chain:** log in → publish a template → deploy it from the
-catalog → real Pods show up in the release detail. If the cluster dropdown is
-empty, step 3 is missing; if a deploy fails with 401, step 1; with 403, step 2.
+catalog → real Pods show up in the release detail. If `POST /v1/clusters` returns
+`403 admin group required`, step 0 is missing; if the cluster dropdown is empty,
+step 3; if a deploy fails with 401, step 1; with 403 from the cluster, step 2.
 
 ## Upgrade
 
 ```bash
 helm upgrade kubeport deploy/helm/kubeport \
-  -f deploy/helm/kubeport/values-gcp-phase1.yaml \
   --namespace kubeport \
   --reuse-values \
   --set images.backend.tag=$NEW_SHA \

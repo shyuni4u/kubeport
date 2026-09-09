@@ -70,6 +70,28 @@ Browser ── Next.js (k8s Pod, BFF) ── Go API (in k8s) ── Target k8s c
 
 전체 내용: [docs/superpowers/specs/2026-04-16-initial-design.md](docs/superpowers/specs/2026-04-16-initial-design.md).
 
+## 클러스터에 설치하기
+
+자가호스팅은 Helm chart 하나면 된다:
+
+```bash
+git clone https://github.com/shyuni4u/kubeport && cd kubeport
+helm install kubeport deploy/helm/kubeport --namespace kubeport --create-namespace \
+  --set host=kubeport.example.com \
+  --set oidc.issuer=https://accounts.google.com \
+  --set oidc.clientId=$CLIENT_ID --set oidc.audience=$CLIENT_ID \
+  --set-string auth.devAdminEmails=you@example.com \
+  --set auth.oidcClientSecret=$CLIENT_SECRET \
+  --set auth.appEncryptionKeyB64=$(openssl rand -base64 32) \
+  --set postgres.password=$(openssl rand -hex 24)
+```
+
+먼저 [deploy/helm/kubeport/README.md](deploy/helm/kubeport/README.md) 를 읽는다 —
+특히 **"After install — required on every cluster"**. 이 단계를 건너뛰면 앱은 뜨고
+로그인도 되지만 **아무것도 배포하지 못한다.**
+
+아래 "빠른 시작" 은 로컬 개발용이다.
+
 ## 빠른 시작
 
 ```bash
@@ -84,7 +106,7 @@ go run ./cmd/server
 
 # 4. 웹 앱 실행 (다른 터미널에서)
 cd ../frontend
-cp .env.example .env.local   # OIDC + DB 값 채우기
+# .env.local 은 scripts/e2e/up.sh 가 만들어 준다 (docs/local-e2e.md §0)
 pnpm install && pnpm dev
 
 # 5. http://localhost:3000 접속, alice / alice 로 로그인
@@ -107,7 +129,7 @@ make e2e
 
 - Docker (로컬 Postgres + dex)
 - Go 1.26+
-- Node 20+, pnpm 9+
+- Node 20+, pnpm 10+
 - [`atlas`](https://atlasgo.io) CLI, `sqlc`
 - (e2e 전용) kind 클러스터 + `kubectl`
 
@@ -119,7 +141,7 @@ make e2e
 |---|------|------|------|
 | 1 | **Vertical slice** | OIDC 로그인, YAML 모드 템플릿 CRUD, 배포 폼, 릴리스 목록·개요 | [plan](docs/superpowers/plans/2026-04-16-mvp-1-vertical-slice.md) ✅ |
 | 2 | **Admin UX** | UI 모드 에디터(트리 + 메타 + 라이브 프리뷰), publish/deprecate, 버전 히스토리, 팀 | [plan](docs/superpowers/plans/2026-04-18-mvp-2-admin-ux.md) ✅ |
-| 3 | **User observability** | 릴리스 로그(SSE), 이벤트, settings 탭, 업데이트 마이그레이션, 자가호스팅용 Helm chart | *(미작성)* |
+| 3 | **User observability** | 릴리스 로그(SSE), 이벤트, settings 탭, 업데이트 마이그레이션, 자가호스팅용 Helm chart | 출시 완료 — Plan 4~13 은 [CLAUDE.md](CLAUDE.md) ✅ |
 
 MVP 이후로 미룬 것: CRD 지원, Git 연동 템플릿, 팀/RBAC UI, Helm chart 임포트, 릴리스 히스토리.
 
@@ -130,7 +152,7 @@ kubeport/
 ├── backend/                          # Go API (Plan 1)
 ├── frontend/                         # Next.js (Plan 1)
 ├── deploy/docker/                    # 로컬 compose (Plan 1)
-├── deploy/helm/                      # Helm chart (Plan 3)
+├── deploy/helm/                      # Helm chart (운영 설치용)
 ├── docs/
 │   ├── superpowers/specs/            # 디자인 스펙
 │   ├── superpowers/plans/            # 구현 계획
@@ -149,7 +171,7 @@ kubeport/
 
 ## 기여
 
-아직 외부 기여는 받지 않는다 — 시스템의 모양이 아직 안정화 중이다. Plan 3 스코프가 정리되고 머지되면 이슈·PR 을 받기 시작한다.
+아직 외부 기여는 받지 않는다 — 시스템의 모양이 아직 안정화 중이다. 버그 리포트 이슈는 지금도 환영한다.
 
 ## 라이선스
 

@@ -70,6 +70,28 @@ Browser ── Next.js (k8s Pod, BFF) ── Go API (in k8s) ── Target k8s c
 
 Full details: [docs/superpowers/specs/2026-04-16-initial-design.md](docs/superpowers/specs/2026-04-16-initial-design.md).
 
+## Install on your cluster
+
+Self-hosting is a single Helm chart:
+
+```bash
+git clone https://github.com/shyuni4u/kubeport && cd kubeport
+helm install kubeport deploy/helm/kubeport --namespace kubeport --create-namespace \
+  --set host=kubeport.example.com \
+  --set oidc.issuer=https://accounts.google.com \
+  --set oidc.clientId=$CLIENT_ID --set oidc.audience=$CLIENT_ID \
+  --set-string auth.devAdminEmails=you@example.com \
+  --set auth.oidcClientSecret=$CLIENT_SECRET \
+  --set auth.appEncryptionKeyB64=$(openssl rand -base64 32) \
+  --set postgres.password=$(openssl rand -hex 24)
+```
+
+Read [deploy/helm/kubeport/README.md](deploy/helm/kubeport/README.md) first —
+especially **"After install — required on every cluster"**. Without those steps
+the app runs and people can log in, but it cannot deploy anything.
+
+The "Quick start" below is for local development only.
+
 ## Quick start
 
 ```bash
@@ -84,7 +106,7 @@ go run ./cmd/server
 
 # 4. Run the web app (another terminal)
 cd ../frontend
-cp .env.example .env.local   # fill in OIDC + DB values
+# .env.local is generated for you by scripts/e2e/up.sh (see docs/local-e2e.md §0)
 pnpm install && pnpm dev
 
 # 5. Open http://localhost:3000 and log in as alice / alice
@@ -107,7 +129,7 @@ make e2e
 
 - Docker (for local Postgres + dex)
 - Go 1.26+
-- Node 20+, pnpm 9+
+- Node 20+, pnpm 10+
 - [`atlas`](https://atlasgo.io) CLI (DB migrations), `sqlc`
 - (e2e only) a kind cluster and `kubectl`
 
@@ -119,7 +141,7 @@ Work is split into three plans that each ship usable software:
 |---|------|-------|------|
 | 1 | **Vertical slice** | OIDC login, YAML-mode template CRUD, deploy form, release list & overview | [plan](docs/superpowers/plans/2026-04-16-mvp-1-vertical-slice.md) ✅ |
 | 2 | **Admin UX** | UI-mode editor (tree + meta + live preview), publish/deprecate, version history, teams | [plan](docs/superpowers/plans/2026-04-18-mvp-2-admin-ux.md) ✅ |
-| 3 | **User observability** | Release logs (SSE), events, settings tabs, update-available migration, Helm chart for self-hosting | *(not written yet)* |
+| 3 | **User observability** | Release logs (SSE), events, settings tabs, update-available migration, Helm chart for self-hosting | shipped — see [CLAUDE.md](CLAUDE.md) for plans 4-13 ✅ |
 
 Deferred beyond the MVP: CRD support, Git-backed templates, team/RBAC UI, Helm chart import, release history.
 
@@ -130,7 +152,7 @@ kubeport/
 ├── backend/                          # Go API (Plan 1)
 ├── frontend/                         # Next.js (Plan 1)
 ├── deploy/docker/                    # local compose (Plan 1)
-├── deploy/helm/                      # Helm chart (Plan 3)
+├── deploy/helm/                      # Helm chart (production install)
 ├── docs/
 │   ├── superpowers/specs/            # design specs
 │   ├── superpowers/plans/            # implementation plans
@@ -149,7 +171,7 @@ kubeport/
 
 ## Contributing
 
-Not yet open to outside contributions — the shape of the system is still stabilizing. Issues and PRs will be welcome once Plan 3 is scoped and merged.
+Not yet open to outside contributions — the shape of the system is still stabilizing. Bug reports via Issues are welcome now.
 
 ## License
 

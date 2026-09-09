@@ -141,7 +141,11 @@ kubectl version --client
 # 2. 로컬 의존 서비스 기동 (postgres + dex — 이 둘뿐이다)
 #    ⚠️ dex 는 deploy/docker/certs/dex.{crt,key} 가 없으면 뜨지 않는다
 #    ("open /config/certs/dex.crt: no such file or directory").
-#    인증서는 scripts/e2e/up.sh 가 만들어 준다 — 먼저 한 번 실행할 것.
+#    최소 경로 — openssl 한 줄이면 된다 (kind 불필요):
+#      cd deploy/docker/certs && openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+#        -keyout dex.key -out dex.crt -subj "/CN=host.docker.internal" \
+#        -addext "subjectAltName=DNS:host.docker.internal,DNS:localhost,IP:127.0.0.1"
+#    kind 까지 포함한 e2e 스택 전체가 필요하면 scripts/e2e/up.sh 를 쓴다.
 docker compose -f deploy/docker/docker-compose.yml up -d
 docker compose -f deploy/docker/docker-compose.yml ps   # postgres, dex 가 Up (healthy)
 

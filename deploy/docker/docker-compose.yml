@@ -25,7 +25,9 @@ services:
     # HTTPS port: the image ships BusyBox wget, which has no --no-check-certificate,
     # so it cannot talk to dex's self-signed cert on 5556.
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5558/healthz"]
+      # 127.0.0.1, not localhost: BusyBox wget resolves localhost to ::1 first and
+      # dex's telemetry listener is IPv4-only, which fails with "Connection refused".
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5558/healthz"]
       interval: 5s
       timeout: 3s
       retries: 10
