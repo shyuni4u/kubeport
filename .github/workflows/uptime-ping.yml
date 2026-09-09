@@ -38,3 +38,54 @@ jobs:
             echo "::error::No HTTP response from $URL (connection failed)"
             exit 1
           fi
+
+      # The demo reset wipes first and re-seeds second, so a failed seed leaves
+      # an empty catalog. Nothing noticed that for up to six hours — #104 was
+      # found only because a browser review happened to run just after a reset.
+      # This job already runs every ten minutes, so it is the cheapest place to
+      # look (#119).
+      #
+      # `catalog` is absent unless the deployment opted in
+      # (demo.publicHealthCatalog), so a self-hosted or flag-off install skips
+      # this check rather than failing it.
+      - name: Check the demo catalog is seeded
+        env:
+          URL: https://kubeport.enzo.kr/api/healthz
+        run: |
+          body=$(curl -sS --max-time 30 --retry 2 "$URL" || echo '')
+          echo "GET $URL -> ${body:-<no body>}"
+          if [ -z "$body" ]; then
+            echo "::error::No body from $URL — the health endpoint itself is down"
+            exit 1
+          fi
+
+          # Order matters. "degraded" and "available: false" both omit
+          # catalog.templates, so testing for the field first would read an
+          # outage as "reporting is switched off" and pass. An empty demo and a
+          # database we cannot ask about are both things someone must look at.
+          status=$(printf '%s' "$body" | jq -r '.status // "unknown"')
+          if [ "$status" != "ok" ]; then
+            echo "::error::Health reports status=$status — the API or its database is unhealthy."
+            exit 1
+          fi
+          if [ "$(printf '%s' "$body" | jq -r '.catalog.available // "absent"')" = "false" ]; then
+            echo "::error::Catalog count unavailable — the API could not query its database."
+            exit 1
+          fi
+
+          count=$(printf '%s' "$body" | jq -r '.catalog.templates // empty')
+          if [ -z "$count" ]; then
+            # URL is the public demo, the one deployment that opts in. A
+            # missing catalog key here does not mean "this deployment does not
+            # report" — it means reporting disappeared. `helm upgrade
+            # --reuse-values` dropping demo.publicHealthCatalog, or a
+            # ConfigMap that did not roll, both land here, and skipping would
+            # leave the empty-demo alarm silently blind.
+            echo "::error::Health returned no catalog field — demo.publicHealthCatalog is off or the backend ConfigMap did not roll. The empty-demo check is currently blind."
+            exit 1
+          fi
+          echo "catalog.templates = $count"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::Demo catalog is empty — the reset CronJob wiped and failed to re-seed. See docs/oci-prod-runbook.md (demo reset)."
+            exit 1
+          fi

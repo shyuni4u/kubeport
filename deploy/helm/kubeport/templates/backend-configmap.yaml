@@ -24,6 +24,12 @@ data:
   # they survive a demo reset once someone deploys from them.
   KBP_DEMO_ALLOW_TEMPLATE_CREATE: "true"
   {{- end }}
+  {{- if .Values.demo.publicHealthCatalog }}
+  # Lets the unauthenticated /healthz?verbose=1 report the catalog size, so an
+  # external cron can tell a wiped-but-unseeded demo from a healthy one (#119).
+  # Off by default — a self-hosted install should not disclose it.
+  KBP_HEALTH_PUBLIC_CATALOG: "true"
+  {{- end }}
   {{- end }}
   {{- with include "kubeport.devAdminEmails" . }}
   # Bootstrap admin(s): matching login emails are granted the kubeport-admin

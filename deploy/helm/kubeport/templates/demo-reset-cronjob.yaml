@@ -57,6 +57,23 @@ spec:
           securityContext:
             {{- toYaml .Values.podSecurityContext | nindent 12 }}
           initContainers:
+            # Runs before wipe-k8s on purpose. The seeder proves its own
+            # dependencies before it deletes database rows, but that only
+            # governs the seed container: wipe-k8s used to empty the demo
+            # namespace with no idea whether the re-seed could succeed, so a
+            # Dex outage still destroyed the workloads and left the releases
+            # pointing at nothing until the next run six hours later (#105).
+            # Failing here fails the Job before anything is destroyed.
+            - name: preflight
+              image: {{ include "kubeport.backend.image" . }}
+              command: ["/seed-demo", "--preflight-only"]
+              env:
+                {{- include "kubeport.demoSeedEnv" . | nindent 16 }}
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
             - name: wipe-k8s
               image: {{ .Values.demo.kubectlImage | quote }}
               command: ["sh", "-c"]
@@ -77,42 +94,7 @@ spec:
               image: {{ include "kubeport.backend.image" . }}
               command: ["/seed-demo", "--reset"]
               env:
-                - name: DATABASE_URL
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ include "kubeport.auth.secretName" . }}
-                      key: DATABASE_URL
-                - name: DEMO_OIDC_CLIENT_SECRET
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ include "kubeport.auth.secretName" . }}
-                      key: DEMO_OIDC_CLIENT_SECRET
-                - name: KBP_API_BASE_URL
-                  value: {{ printf "http://%s:%v" (include "kubeport.backend.fullname" .) .Values.backend.service.port | quote }}
-                - name: DEMO_OIDC_ISSUER
-                  value: {{ include "kubeport.dex.issuer" . | quote }}
-                - name: DEMO_OIDC_CLIENT_ID
-                  value: {{ .Values.dex.clientId | quote }}
-                - name: DEMO_ADMIN_EMAIL
-                  value: {{ .Values.demo.adminEmail | quote }}
-                - name: DEMO_USER_EMAIL
-                  value: {{ .Values.demo.userEmail | quote }}
-                - name: DEMO_CLUSTER
-                  value: {{ .Values.demo.cluster | quote }}
-                - name: DEMO_NAMESPACE
-                  value: {{ .Values.demo.namespace | quote }}
-                - name: KBP_DEMO_EMAIL_DOMAIN
-                  value: {{ .Values.demo.emailDomain | quote }}
-                - name: DEMO_ADMIN_PASSWORD
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ include "kubeport.fullname" . }}-demo
-                      key: DEMO_ADMIN_PASSWORD
-                - name: DEMO_USER_PASSWORD
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ include "kubeport.fullname" . }}-demo
-                      key: DEMO_USER_PASSWORD
+                {{- include "kubeport.demoSeedEnv" . | nindent 16 }}
               securityContext:
                 {{- toYaml .Values.securityContext | nindent 16 }}
               volumeMounts:

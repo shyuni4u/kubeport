@@ -2165,7 +2165,9 @@ Order matters: Dex must be reachable before k3s trusts it, and the backend must 
 - [ ] **Step 1: DNS** — Cloudflare A record `dex.kubeport.enzo.kr` → current public IP (ephemeral; note in runbook).
 - [ ] **Step 2: Secrets** — generate once and store in the password manager:
 ```bash
-DEMO_PW=$(openssl rand -base64 9 | tr -d '/+=' | cut -c1-10)   # human-typeable, shown publicly
+# Shown publicly and copied by eye, so the alphabet drops the confusables
+# 0 O 1 l I — base64 emits all of them (#132). 32 chars x 10 = 50 bits.
+DEMO_PW=$(LC_ALL=C tr -dc '23456789ABCDEFGHJKLMNPQRSTUVWXYZ' < /dev/urandom | head -c 10)
 DEX_SECRET=$(openssl rand -hex 24)
 HASH=$(htpasswd -bnBC 10 "" "$DEMO_PW" | tr -d ':\n')
 ```

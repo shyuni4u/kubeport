@@ -23,7 +23,8 @@
 - [x] **B2. DNS**: GoDaddy(`enzo.kr`, 네임서버 `domaincontrol.com`) A 레코드 `dex.kubeport.enzo.kr` → 현재 공인 IP. 공인 IP 는 ephemeral 이라 stop/start 시 두 레코드(`kubeport.`, `dex.`) 모두 갱신해야 한다.
 - [x] **B3. 시크릿 생성 후 비밀번호 관리자에 저장**:
   ```bash
-  DEMO_PW=$(openssl rand -base64 9 | tr -d '/+=' | cut -c1-10)   # 사람이 칠 수 있게 짧게, 공개됨
+  # 공개되는 값이고 사람이 화면을 읽어 옮겨 적는다 — 혼동 문자(0 O 1 l I) 제외 (#132)
+  DEMO_PW=$(LC_ALL=C tr -dc '23456789ABCDEFGHJKLMNPQRSTUVWXYZ' < /dev/urandom | head -c 10)
   DEX_SECRET=$(openssl rand -hex 24)
   HASH=$(htpasswd -bnBC 10 "" "$DEMO_PW" | tr -d ':\n')
   ```

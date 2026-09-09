@@ -38,6 +38,10 @@ type Deps struct {
 	// the visit and reaches other people. Turn it on only where showing
 	// authoring is the point (docs/brainstorming-summary.md §14).
 	DemoAllowTemplateCreate bool
+	// HealthPublicCatalog lets the unauthenticated /healthz?verbose=1 report
+	// the catalog size. Off by default — see config.Config for why, and
+	// healthz() for what consumes it.
+	HealthPublicCatalog bool
 }
 
 type Handlers struct {
@@ -57,7 +61,7 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	r.HandleMethodNotAllowed = true
 	r.NoRoute(routeNotFound)
 	r.NoMethod(methodNotAllowed)
-	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	r.GET("/healthz", healthz(deps, &catalogGauge{}))
 
 	h := &Handlers{deps: deps, openapi: newOpenAPIProxy(cfg.OpenAPICacheMax)}
 	noDemo := denyDemo(deps.DemoEmailDomain)

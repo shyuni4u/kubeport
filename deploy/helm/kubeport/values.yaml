@@ -213,6 +213,13 @@ demo:
   # database, not the API. It did once, and leaving that coupling in place meant
   # a closed gate emptied the live demo every six hours (#104).
   allowTemplateCreate: false
+  # Lets the unauthenticated /healthz?verbose=1 (and the BFF's /api/healthz in
+  # front of it) report how many templates the catalog holds. Off by default:
+  # on a self-hosted install the catalog's size is not the anonymous internet's
+  # business. The public demo turns it on so an external cron can tell that a
+  # reset wiped and then failed to re-seed — which is otherwise invisible for
+  # six hours (#119; #104 was caught only by luck).
+  publicHealthCatalog: false
   adminPassword: ""               # --set; used by the reset job only
   userPassword: ""                # --set
   cluster: oci-a1

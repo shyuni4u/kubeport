@@ -172,6 +172,53 @@ OIDC redirect URI — derived from host if not explicitly set.
 {{- $list | toJson -}}
 {{- end -}}
 
+{{/*
+Environment for the demo reset Job's seed-demo containers.
+
+Shared by the preflight initContainer and the seed container so the two cannot
+drift: preflight is only meaningful if it proves the credentials the seed will
+actually use. Defined here rather than as a YAML anchor because the two
+containers sit in different lists.
+*/}}
+{{- define "kubeport.demoSeedEnv" -}}
+- name: DATABASE_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "kubeport.auth.secretName" . }}
+      key: DATABASE_URL
+- name: DEMO_OIDC_CLIENT_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "kubeport.auth.secretName" . }}
+      key: DEMO_OIDC_CLIENT_SECRET
+- name: KBP_API_BASE_URL
+  value: {{ printf "http://%s:%v" (include "kubeport.backend.fullname" .) .Values.backend.service.port | quote }}
+- name: DEMO_OIDC_ISSUER
+  value: {{ include "kubeport.dex.issuer" . | quote }}
+- name: DEMO_OIDC_CLIENT_ID
+  value: {{ .Values.dex.clientId | quote }}
+- name: DEMO_ADMIN_EMAIL
+  value: {{ .Values.demo.adminEmail | quote }}
+- name: DEMO_USER_EMAIL
+  value: {{ .Values.demo.userEmail | quote }}
+- name: DEMO_CLUSTER
+  value: {{ .Values.demo.cluster | quote }}
+- name: DEMO_NAMESPACE
+  value: {{ .Values.demo.namespace | quote }}
+- name: KBP_DEMO_EMAIL_DOMAIN
+  value: {{ .Values.demo.emailDomain | quote }}
+- name: DEMO_ADMIN_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "kubeport.fullname" . }}-demo
+      key: DEMO_ADMIN_PASSWORD
+- name: DEMO_USER_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "kubeport.fullname" . }}-demo
+      key: DEMO_USER_PASSWORD
+{{- end -}}
+
 {{/* KBP_DEV_ADMIN_EMAILS with demo admin appended when demo is enabled */}}
 {{- define "kubeport.devAdminEmails" -}}
 {{- $emails := .Values.auth.devAdminEmails -}}

@@ -273,7 +273,9 @@ admin UI 에 클러스터 등록 화면이 아직 없으므로, admin 토큰으�
   (이후 `--reuse-values` 가 유지). VM 에는 `htpasswd`(`apache2-utils`) 와 `jq` 가 필요하다:
 
   ```bash
-  DEMO_PW=$(openssl rand -base64 9 | tr -d '/+=' | cut -c1-10)   # 사람이 칠 수 있게 짧게 — 공개되는 값
+  # 화면에 띄워 놓고 사람이 읽어 옮겨 적는 값이라 혼동 문자를 뺀다 (0 O 1 l I).
+  # base64 는 l·I·1·O·0 을 그대로 뱉어서 못 쓴다 (#132). 32글자 × 10자 = 50비트.
+  DEMO_PW=$(LC_ALL=C tr -dc '23456789ABCDEFGHJKLMNPQRSTUVWXYZ' < /dev/urandom | head -c 10)
   DEX_SECRET=$(openssl rand -hex 24)                             # 비밀번호 관리자에 저장
   HASH=$(htpasswd -bnBC 10 "" "$DEMO_PW" | tr -d ':\n')
   helm upgrade kubeport ~/kubeport-chart/kubeport \
