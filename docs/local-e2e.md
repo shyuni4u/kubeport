@@ -26,6 +26,7 @@ scripts/e2e/run.sh         # = pnpm exec playwright test. 특정 스펙: run.sh 
 | 06 스펙 `draft must exist` | 시드가 draft 를 못 만듦(두 번 실행 필요한 케이스) → `seed.sh` 한 번 더 |
 | kind 가 `EOF` / 503 | apiserver 재시작 중 → 10초 후 재시도. `kubectl --context kind-kubeport get --raw /readyz` |
 | Windows 에서 `jq: command not found` | 스크립트는 jq 를 안 쓴다. §9 의 수동 curl 예시만 jq 를 쓰므로 스크립트를 쓸 것 |
+| 템플릿이 `/templates`·`/catalog` 목록에 없거나, 버전 상세가 403 / 404 | 아직 publish 안 된 **초안(draft)** 이다. 초안은 템플릿 소유자에게만 보인다 — 전역 템플릿은 `kubeport-admin`, 팀 템플릿은 그 팀 멤버(editor·viewer 둘 다). `publish` 하거나 해당 계정을 팀에 추가한다 |
 
 아래 §1~§10 은 스크립트가 하는 일의 설명서이자, 스크립트가 실패했을 때의 수동 경로다.
 
@@ -203,6 +204,7 @@ LISTEN_ADDR=:8080 \
   APP_ENCRYPTION_KEY_B64="$(openssl rand -base64 32)" \
   KBP_DEV_ADMIN_EMAILS=admin@example.com,demo-admin@demo.kubeport \
   KBP_DEMO_EMAIL_DOMAIN=demo.kubeport \
+  KBP_DEMO_ALLOW_TEMPLATE_CREATE=true \
   go run ./cmd/server
 ```
 
@@ -212,7 +214,13 @@ see **Known limits**. Never set in prod.
 `KBP_DEMO_EMAIL_DOMAIN` marks any user whose email ends in that domain as a
 demo account — the backend then rejects mutating requests outside the
 seeded demo scope (`demo-restricted`, see `internal/api/middleware.go`).
+
 Leave unset to disable demo restrictions entirely.
+
+`KBP_DEMO_ALLOW_TEMPLATE_CREATE=true` re-opens template authoring for demo
+accounts. The seed and the admin specs create templates as `demo-admin`, so the
+local stack and CI set it; production leaves it off (see
+[oci-prod-runbook §5](oci-prod-runbook.md)).
 
 ### 8. Frontend
 

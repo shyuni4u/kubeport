@@ -168,28 +168,106 @@ func (h *Handlers) CreateTemplate(c *gin.Context) {
 }
 
 func (h *Handlers) ListTemplates(c *gin.Context) {
-	rows, err := h.deps.Store.ListTemplates(c.Request.Context())
+	ctx := c.Request.Context()
+	rows, err := h.deps.Store.ListTemplates(ctx)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
-	if rows == nil {
-		rows = []store.ListTemplatesRow{}
+	// A template with no current version has never been published: it is
+	// unreleased authoring state, not catalog content, so only the people who
+	// can see its drafts should know it exists (issue #12). Published rows are
+	// visible to every authenticated user, so the per-row authorization below
+	// only runs for the handful of unpublished ones — and the shared reqCache
+	// keeps that O(distinct teams + owners) rather than O(rows).
+	rc := newReqCache()
+	visible := make([]store.ListTemplatesRow, 0, len(rows))
+	for _, row := range rows {
+		if row.CurrentVersionID.Valid {
+			visible = append(visible, row)
+			continue
+		}
+		ok, err := h.canReadTemplate(ctx, rc, ownershipOfListRow(row))
+		if err != nil {
+			log.Printf("ListTemplates: authorize %q: %v", row.Name, err)
+			writeError(c, http.StatusInternalServerError, "internal", "failed to authorize template list")
+			return
+		}
+		if ok {
+			visible = append(visible, row)
+		}
 	}
-	c.JSON(http.StatusOK, gin.H{"templates": rows})
+
+	visible, err = h.scopeTemplatesToDemo(c, rc, visible)
+	if err != nil {
+		log.Printf("ListTemplates: demo scoping: %v", err)
+		writeError(c, http.StatusInternalServerError, "internal", "failed to authorize template list")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"templates": visible})
+}
+
+// scopeTemplatesToDemo keeps demo content in the demo: a demo visitor sees the
+// templates demo accounts authored, a real end-user sees the operator's. The
+// real operator (admin, non-demo) keeps full visibility — they need to see
+// what is on their instance. This mirrors ListReleases.
+//
+// It matters because demo accounts carry kubeport-admin; without it, anything
+// a demo visitor publishes shows up in every real user's catalog, and
+// seed-demo's reset skips a template a real user has already deployed, so it
+// would stay there. See docs/brainstorming-summary.md §14.
+func (h *Handlers) scopeTemplatesToDemo(c *gin.Context, rc *reqCache, rows []store.ListTemplatesRow) ([]store.ListTemplatesRow, error) {
+	domain := h.deps.DemoEmailDomain
+	if domain == "" {
+		return rows, nil
+	}
+	demoCaller := h.isDemoCaller(c)
+	if !demoCaller && isAdmin(c) {
+		return rows, nil
+	}
+	ctx := c.Request.Context()
+	scoped := make([]store.ListTemplatesRow, 0, len(rows))
+	for _, row := range rows {
+		email, err := h.ownerEmail(ctx, rc, row.OwnerUserID)
+		if err != nil {
+			return nil, err
+		}
+		if auth.IsDemoEmail(email, domain) == demoCaller {
+			scoped = append(scoped, row)
+		}
+	}
+	return scoped, nil
 }
 
 func (h *Handlers) GetTemplate(c *gin.Context) {
-	t, err := h.deps.Store.GetTemplateByName(c.Request.Context(), c.Param("name"))
+	ctx := c.Request.Context()
+	t, err := h.deps.Store.GetTemplateByName(ctx, c.Param("name"))
 	if err != nil {
 		writeError(c, http.StatusNotFound, "not-found", "template")
 		return
+	}
+	// Same rule as ListTemplates, and the same answer: a never-published
+	// template does not exist as far as an outsider is concerned. Returning
+	// 403 here would confirm the name we just hid from their catalog.
+	if !t.CurrentVersionID.Valid {
+		ok, err := h.canReadTemplate(ctx, nil, ownershipOf(t))
+		if err != nil {
+			log.Printf("GetTemplate(%q): %v", t.Name, err)
+			writeError(c, http.StatusInternalServerError, "internal", "failed to authorize template read")
+			return
+		}
+		if !ok {
+			writeError(c, http.StatusNotFound, "not-found", "template")
+			return
+		}
 	}
 	c.JSON(http.StatusOK, t)
 }
 
 func (h *Handlers) ListTemplateVersions(c *gin.Context) {
-	vs, err := h.deps.Store.ListTemplateVersions(c.Request.Context(), c.Param("name"))
+	ctx := c.Request.Context()
+	name := c.Param("name")
+	vs, err := h.deps.Store.ListTemplateVersions(ctx, name)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "internal", err.Error())
 		return
@@ -197,24 +275,107 @@ func (h *Handlers) ListTemplateVersions(c *gin.Context) {
 	if vs == nil {
 		vs = []store.TemplateVersion{}
 	}
+	if hasDraft(vs) {
+		denial, ok := h.templateDraftAccess(c, name)
+		if !ok {
+			return // response already written
+		}
+		if denial != nil {
+			published := make([]store.TemplateVersion, 0, len(vs))
+			for _, v := range vs {
+				if v.Status != statusDraft {
+					published = append(published, v)
+				}
+			}
+			// Every version was a draft, so the template has never been
+			// published — answer exactly as ListTemplates/GetTemplate do
+			// instead of confirming its existence with an empty list.
+			if len(published) == 0 {
+				writeError(c, http.StatusNotFound, "not-found", "template")
+				return
+			}
+			vs = published
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"versions": vs})
 }
 
 func (h *Handlers) GetTemplateVersion(c *gin.Context) {
+	name := c.Param("name")
 	v64, err := strconv.ParseInt(c.Param("v"), 10, 32)
 	if err != nil {
 		writeError(c, http.StatusBadRequest, "validation-error", "version must be integer")
 		return
 	}
 	tv, err := h.deps.Store.GetTemplateVersion(c.Request.Context(), store.GetTemplateVersionParams{
-		Name:    c.Param("name"),
+		Name:    name,
 		Version: int32(v64),
 	})
 	if err != nil {
 		writeError(c, http.StatusNotFound, "not-found", "template version")
 		return
 	}
+	if !h.ensureCanReadVersion(c, name, tv.Status) {
+		return
+	}
 	c.JSON(http.StatusOK, tv)
+}
+
+const statusDraft = "draft"
+
+func hasDraft(vs []store.TemplateVersion) bool {
+	for _, v := range vs {
+		if v.Status == statusDraft {
+			return true
+		}
+	}
+	return false
+}
+
+// templateDraftAccess evaluates whether the caller may see the unpublished
+// versions of the named template — a nil denial means yes. ok=false means a
+// response has already been written (template missing, or the rule could not
+// be evaluated).
+func (h *Handlers) templateDraftAccess(c *gin.Context, name string) (denial *accessDenial, ok bool) {
+	ctx := c.Request.Context()
+	tpl, err := h.deps.Store.GetTemplateByName(ctx, name)
+	if err != nil {
+		writeError(c, http.StatusNotFound, "not-found", "template "+name)
+		return nil, false
+	}
+	d, err := h.evaluateTemplateAccess(ctx, nil, ownershipOf(tpl), false)
+	if err != nil {
+		log.Printf("templateDraftAccess(%q): %v", name, err)
+		writeError(c, http.StatusInternalServerError, "internal", "failed to authorize template read")
+		return nil, false
+	}
+	return d, true
+}
+
+// ensureCanReadVersion gates reads of a single template version. Published and
+// deprecated versions are catalog content that every authenticated user may
+// read. A draft is unreleased authoring state — the full resources.yaml,
+// including whatever the author put in a Secret — so it stays with the people
+// who own the template: kubeport-admin for a global template, any member of
+// the owning team otherwise, and demo accounts only within demo-owned
+// templates. Issue #12: this path previously had no authorization at all.
+func (h *Handlers) ensureCanReadVersion(c *gin.Context, name, status string) bool {
+	if status != statusDraft {
+		return true
+	}
+	denial, ok := h.templateDraftAccess(c, name)
+	if !ok {
+		return false
+	}
+	if denial != nil {
+		// Carry the rule's own reason through: "team membership required" and
+		// "demo accounts can only access demo-owned templates" call for very
+		// different next steps, and only one of them can be acted on.
+		writeError(c, denial.status, denial.code,
+			"version is an unpublished draft: "+denial.msg)
+		return false
+	}
+	return true
 }
 
 func (h *Handlers) PublishVersion(c *gin.Context) {

@@ -74,6 +74,12 @@ func (h *Handlers) GetOpenAPIGroupVersion(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "validation-error", "gv required")
 		return
 	}
+	// Reject before the cluster lookup so a malformed gv never reaches the
+	// store or the response cache.
+	if _, err := openapiUpstreamSegments(gv); err != nil {
+		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+		return
+	}
 	h.proxyOpenAPI(c, gv)
 }
 
@@ -115,20 +121,14 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 		return
 	}
 
-	// k8s serves OpenAPI v3 under two roots:
-	//   /openapi/v3/api/v1                 — core API (no group)
-	//   /openapi/v3/apis/<group>/<version> — named groups
-	// Empty gv is the index. A bare version ("v1") means core; anything
-	// containing "/" is a named group. Routing everything through /apis/
-	// was breaking core resources like Service and ConfigMap with 404.
-	upstreamPath := "/openapi/v3"
-	switch {
-	case gv == "":
-		// index
-	case !strings.Contains(gv, "/"):
-		upstreamPath = "/openapi/v3/api/" + gv
-	default:
-		upstreamPath = "/openapi/v3/apis/" + gv
+	// Empty gv is the index. A bare version ("v1") means core; a "group/version"
+	// pair is a named group. Routing everything through /apis/ was breaking core
+	// resources like Service and ConfigMap with 404. See openapi_path.go for the
+	// segment rules — never concatenate gv into the path.
+	segs, err := openapiUpstreamSegments(gv)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+		return
 	}
 	up, err := url.Parse(cluster.ApiUrl)
 	if err != nil {
@@ -137,7 +137,14 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 	}
 	// JoinPath preserves any base prefix in the cluster URL (e.g. a reverse
 	// proxy routing /k8s-cluster-1/… to the apiserver) instead of stomping it.
-	up = up.JoinPath(upstreamPath)
+	root := up.JoinPath("openapi", "v3")
+	up = root.JoinPath(segs...)
+	// Second line of defence behind the validation above: whatever we send must
+	// stay under the cluster's OpenAPI root (issue #11).
+	if !strings.HasPrefix(up.EscapedPath(), root.EscapedPath()) {
+		writeError(c, http.StatusBadRequest, "validation-error", errOpenAPIBadGroupVersion.Error())
+		return
+	}
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, up.String(), nil)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "internal", err.Error())

@@ -202,6 +202,13 @@ demo:
   adminEmail: demo-admin@demo.kubeport
   userEmail: demo-user@demo.kubeport
   passwordHint: ""                # shown on landing (public by design)
+  # Let demo accounts author new templates. Off by default: demo accounts carry
+  # kubeport-admin so they can show the admin UX, and authoring is the one admin
+  # power whose output outlives the visit and reaches other people. Their
+  # templates are kept out of real users' catalogs either way, but they survive a
+  # demo reset once someone deploys from them. Turn on only where demonstrating
+  # authoring is the point. See docs/brainstorming-summary.md §14.
+  allowTemplateCreate: false
   adminPassword: ""               # --set; used by the reset job only
   userPassword: ""                # --set
   cluster: oci-a1

@@ -139,6 +139,12 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
 - **오너 RBAC**: 오너 Google 이메일의 cluster-admin 바인딩 이름은 `kubeport-owner-admin`
   (예전 이름 `kubeport-demo-admin` 은 이름과 달리 오너 바인딩이었음 — 삭제 전 subject 확인).
   데모 계정은 chart 의 `demo` ns RoleBinding 만 갖는다. 검증: `kubectl auth can-i create deployments --as=dex:demo-user@demo.kubeport -n default` → **no**.
+- **데모 계정의 템플릿 저작**: 기본은 **막혀 있다**(`POST /v1/templates` → 403 `demo-restricted`).
+  데모 계정은 `kubeport-admin` 을 갖지만, 저작은 결과물이 방문자의 세션보다 오래 남고 남에게 보이는
+  유일한 관리자 권한이라서다. 저작 체험까지 보여주려면 `--set demo.allowTemplateCreate=true`
+  (backend `KBP_DEMO_ALLOW_TEMPLATE_CREATE`). 켜도 데모가 만든 템플릿은 실제 사용자 카탈로그에
+  안 보이지만, 누군가 그걸로 배포하면 6시간 리셋이 그 템플릿을 건너뛴다(`tolerateFK`).
+  결정 근거: [brainstorming-summary §14](brainstorming-summary.md).
 - **Dex 호스트도 ephemeral IP 를 본다**: VM stop/start 후 `dex.kubeport.enzo.kr` A 레코드까지 갱신하지 않으면
   인증서 갱신·데모 로그인이 깨진다.
 
@@ -184,6 +190,7 @@ sudo systemctl restart k3s
 | 로그인 후 `/` 로 되돌아오고 "로그인하지 못했습니다" 배너 | 콜백이 `?login_error=` 로 돌려보낸 것. 원인은 화면에 안 나오므로 `kubectl logs -n kubeport deploy/kubeport-frontend \| grep '\[auth/callback\]'` 확인. `cancelled` = 사용자가 동의화면에서 취소, `expired` = 10분 state 쿠키 만료, `failed` = IdP/DB 오류. 로그에 `suspicious=true` 면 state/nonce 불일치 — 콜백 위조·재생 시도일 수 있다 |
 | 로그아웃이 403 `cross-origin request rejected` | 브라우저가 보는 origin 이 허용목록(§4)에 없다. 도메인을 추가했거나 **TLS 를 클러스터 밖에서 종료하면서 `tls.enabled=false`** 로 뒀다면 `frontend.publicOrigins` 에 실제 https origin 을 넣고 `helm upgrade` |
 | 데모 로그인 후 배포 401/403 | k3s `auth.yaml` 에 Dex issuer 있는지, prefix `dex:` 와 RoleBinding subject 일치하는지 |
+| "템플릿이 안 보여요" / 버전 상세 403·404 | 대부분 publish 누락이다. 초안은 소유자에게만 보인다(전역=`kubeport-admin`, 팀=그 팀 멤버). admin 토큰으로 `GET /v1/templates/<name>/versions` 를 호출해 draft 만 있는지 먼저 확인 |
 
 ## 8. 보안 후속 (권장)
 
