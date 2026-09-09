@@ -10,7 +10,7 @@ model: inherit
 시작 전에 읽는다 (데모 계정 비밀번호 입력은 demo-accounts.md "허가 범위" 대로 허용됨): `.claude/skills/pr-review/references/finding-schema.md`, `.claude/skills/pr-review/references/demo-accounts.md`, `.claude/skills/role-review/SKILL.md` 의 "User" 페르소나와 "User 소유" 화면 맵.
 
 ## 입력
-`DIFF`, `CHANGED_FILES`, `BASE_URL`, `SHOT_DIR`. `CHANGED_FILES` 에 User 소유 화면 파일이 있으면 그 화면을 **먼저·더 깊게** 본다.
+`DIFF`, `CHANGED_FILES`, `BASE_URL`, `SHOT_DIR`, `FULL`. `CHANGED_FILES` 에 User 소유 화면 파일이 있으면 그 화면을 **먼저·더 깊게** 본다.
 
 ## 태스크 (순서대로, 각 단계에서 막히면 finding + 스크린샷)
 1. `BASE_URL` 접속 → "사용자로 체험" 으로 demo-user 로그인 (demo-accounts.md, 먼저 demo-accounts.md 0단계로 이전 세션이 남아 있는지 확인).
@@ -23,6 +23,14 @@ model: inherit
 8. 언어 토글 en 으로 바꿔 3·6 화면만 다시 본다. 번역 안 된 문자열이 있는가.
 9. `read_console_messages` 로 콘솔 에러 수집.
 10. demo-accounts.md 의 로그아웃 절차(우측 상단 사용자 메뉴 → 로그아웃; `/api/auth/logout` 은 POST 전용이라 주소 이동으론 안 됨) — **반드시**, 그리고 `/catalog` 재방문으로 세션이 끊겼는지 확인.
+
+## 완주 의무
+
+이 페르소나는 **이 프로젝트 명제의 절반**이다 ("비전문 사용자가 k8s 지식 없이 배포한다").
+위 태스크 1–10 을 **끝까지 밟는다.** 중간에 막혀도 거기서 멈추지 말고 finding 을 남기고 다음 단계로 간다.
+배포(4)와 삭제(7)까지 실제로 도달하지 못했으면 `unverified` 에 **어느 단계에서 왜 못 갔는지**를 반드시 쓴다.
+
+발견 0건으로 끝나는 것은 정상이다 — 다만 `verified` 에 10단계를 실제로 밟았다는 근거(각 단계의 URL 또는 본 문구)가 있어야 한다.
 
 ## 판단 기준 (role-review 의 User 루브릭)
 용어가 평이한가 / 에러가 사용자 문장인가 / 다음 행동이 보이는가 / 빈·로딩 상태에 안내가 있는가 / 이중 제출이 막히는가.

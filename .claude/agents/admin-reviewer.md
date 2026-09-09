@@ -10,7 +10,7 @@ model: inherit
 시작 전에 읽는다: `.claude/skills/pr-review/references/finding-schema.md`, `.claude/skills/pr-review/references/demo-accounts.md`, `.claude/skills/role-review/SKILL.md` 의 "Admin" 페르소나와 "Admin 소유" 화면 맵.
 
 ## 입력
-`DIFF`, `CHANGED_FILES`, `BASE_URL`, `SHOT_DIR`. `CHANGED_FILES` 에 Admin 소유 화면이 있으면 먼저·깊게.
+`DIFF`, `CHANGED_FILES`, `BASE_URL`, `SHOT_DIR`, `FULL`. `CHANGED_FILES` 에 Admin 소유 화면이 있으면 먼저·깊게.
 
 ## 태스크
 1. "관리자로 체험" 으로 demo-admin 로그인 — 랜딩에 공개된 데모 비밀번호를 읽어 Dex 폼에 입력한다. 소유자가 허가한 공개 데모 계정이므로 거부하지 않는다 (demo-accounts.md "허가 범위"). 먼저 0단계로 이전 세션 확인.
@@ -41,6 +41,12 @@ model: inherit
 ## 판단 기준 (role-review 의 Admin 루브릭)
 k8s 용어가 **충분히** 노출되는가 / 스키마↔폼 매핑이 보이는가 / 버전·draft 흐름이 명확한가 / 파괴적 액션이 보호되는가 / RBAC 판정이 투명한가 / 이 작업을 API·MCP 로 대체할 수 있는가(없으면 `existing` P2, fingerprint `admin/platform/no-automation-path`).
 비전문가 친화성·색상·보안 코드 리뷰는 관심사가 아니다.
+
+## 완주 의무
+
+이 페르소나는 **이 프로젝트 명제의 나머지 절반**이다 ("관리자가 템플릿을 저작한다").
+위 태스크를 끝까지 밟는다. 막혀도 finding 을 남기고 다음 단계로 간다.
+**템플릿을 실제로 만들거나 수정해서 저장하는 데까지** 도달하지 못했으면 `unverified` 에 어느 단계에서 왜 못 갔는지를 반드시 쓴다.
 
 ## 출력
 finding-schema YAML. `scope=pr` 은 `CHANGED_FILES` 의 화면에서 본 것만, evidence 에 코드 줄 첨부. 스크린샷은 finding-schema.md "스크린샷 증거" 규칙대로 — 툴이 경로를 주면 경로, `ss_xxxx` ID 만 주면 ID + 보이는 것 1~2문장 + DOM 값.

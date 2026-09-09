@@ -10,7 +10,7 @@ model: inherit
 시작 전에 읽는다: `.claude/skills/pr-review/references/finding-schema.md`, `.claude/skills/pr-review/references/demo-accounts.md`, `docs/superpowers/specs/2026-04-19-frontend-design-spec.md` (의도된 디자인).
 
 ## 입력
-`DIFF`, `CHANGED_FILES`, `BASE_URL`, `SHOT_DIR`. `CHANGED_FILES` 에 `frontend/components/**` 또는 `frontend/app/**` 가 있으면 그 화면을 먼저.
+`DIFF`, `CHANGED_FILES`, `BASE_URL`, `SHOT_DIR`, `FULL`. `CHANGED_FILES` 에 `frontend/components/**` 또는 `frontend/app/**` 가 있으면 그 화면을 먼저.
 
 ## 화면 (demo-accounts.md 0단계로 이전 세션 확인 후 demo-user 로 로그인해서 1–4, 사용자 메뉴로 로그아웃한 뒤 demo-admin 으로 5–6)
 1. 랜딩 `/` (비로그인) — YAML vs 폼 비교 쇼케이스 포함.
@@ -28,6 +28,22 @@ model: inherit
 - 반응형: 390px 에서 가로 스크롤·겹침·사이드바 처리.
 - 접근성 기본: `javascript_tool` 로 `document.querySelectorAll('img:not([alt]), button:not([aria-label]):empty, input:not([id])').length` 확인. 포커스 링이 보이는가 (Tab 키 3회 후 스크린샷).
 - 언어: ko/en 토글 후 레이아웃이 깨지는가 (영문이 길어 줄바꿈).
+
+## 범위와 묶기 — 실측 홍수 방지
+
+`FULL` 이 `false`(기본)이면 **`CHANGED_FILES` 에 닿는 화면만** 위 목록에서 골라 본다. 나머지 화면은
+랜딩 → 카탈로그 → 배포 폼 한 줄만 훑고 `verified` 에 "스모크만" 이라고 적는다.
+전면 감사(6개 화면 × 2뷰포트 전수 실측)는 `FULL: true` 일 때만 한다.
+
+**측정값 하나에 finding 하나를 만들지 않는다.** 대비·간격·타깃 크기 실측은 근본 원인으로 묶는다:
+
+| 이렇게 (X) | 이렇게 (O) |
+|---|---|
+| "ToggleGroup 1.00:1", "탭 1.00:1", "태그 필터 1.00:1" 3건 | "선택 상태가 `bg-muted` 하나에만 의존 — 3곳 1.00:1" **1건**, 3곳은 evidence 표로 |
+| "destructive 3.97:1", "포커스 링 2.13:1", "disabled 1.50:1" 3건 | 토큰이 다르면 별건이 맞다. 같은 토큰에서 왔으면 1건 |
+
+`scope: existing` 은 **최대 3건** (finding-schema "발견 예산"). 넘치면 severity 순으로 자르고
+`unverified` 에 "existing P2 N건 생략" 을 적는다.
 
 ## 판단 기준
 사용자 친화성·시인성·일관성. 기능 버그·보안·용어 적절성은 다른 리뷰어 몫 — 쓰지 않는다. 디자인 스펙과 다른 점은 "스펙과 불일치" 로 명시.
