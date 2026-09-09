@@ -397,6 +397,11 @@ paths:
       description: |
         The dry run to do before `POST /v1/releases`: same substitution, nothing
         written and nothing sent to a cluster.
+
+        Rendering an unpublished draft is authoring, not catalog browsing: it is
+        refused with 403 unless the caller owns the template (kubeport-admin for
+        a global template, a member of the owning team otherwise). Published and
+        deprecated versions are readable by any authenticated caller.
       parameters:
         - $ref: "#/components/parameters/TemplateName"
         - name: version
@@ -427,6 +432,7 @@ paths:
                   rendered_yaml: { type: string }
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/InternalError" }
 
@@ -529,6 +535,12 @@ paths:
       tags: [templates]
       operationId: getTemplateVersion
       summary: Get one version
+      description: |
+        Published and deprecated versions are catalog content that any
+        authenticated caller may read. A draft is unreleased authoring state —
+        the whole `resources.yaml`, Secrets included — so it is refused with 403
+        unless the caller owns the template (kubeport-admin for a global
+        template, a member of the owning team otherwise).
       parameters:
         - $ref: "#/components/parameters/TemplateName"
         - $ref: "#/components/parameters/VersionNumber"
@@ -540,6 +552,7 @@ paths:
               schema: { $ref: "#/components/schemas/TemplateVersion" }
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/InternalError" }
     patch:
@@ -803,6 +816,11 @@ paths:
       tags: [releases]
       operationId: updateRelease
       summary: Move a release to another version and/or values
+      description: |
+        The target version has to be deployable, the same gate `POST
+        /v1/releases` applies: a deprecated version is refused with 400, and a
+        draft — one that was never published, or was published and rolled back —
+        with 409.
       parameters: [{ $ref: "#/components/parameters/ReleaseID" }]
       requestBody:
         required: true
@@ -830,6 +848,12 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: |
+            The target version is not published, so it cannot back a release.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "502": { $ref: "#/components/responses/UpstreamError" }
         "500": { $ref: "#/components/responses/InternalError" }
     delete:

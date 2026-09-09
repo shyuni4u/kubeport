@@ -172,10 +172,41 @@ func TestOpenAPISpec_LivesWhereTheDocsSayItDoes(t *testing.T) {
 var (
 	// "kubeport/internal/api.(*Handlers).CreateRelease-fm" -> "CreateRelease"
 	handlerNameRe = regexp.MustCompile(`\(\*Handlers\)\.(\w+)`)
-	// Any http.StatusX passed to writeError / c.JSON / c.Status.
-	statusRe = regexp.MustCompile(`(?:writeError\(c,\s*|c\.JSON\(|c\.Status\()http\.(Status\w+)`)
-	funcRe   = regexp.MustCompile(`(?m)^func \(h \*Handlers\) (\w+)\(`)
+	// Any http.StatusX passed to writeError / c.JSON / c.Status, or carried in
+	// a composite verdict value such as accessDenial.
+	statusRe = regexp.MustCompile(`(?:writeError\(c,\s*|c\.JSON\(|c\.Status\(|\{)http\.(Status\w+)`)
+	// Every top-level func and method, whatever the receiver.
+	funcRe = regexp.MustCompile(`(?m)^func (?:\([^)]*\) )?(\w+)\(`)
+	// Package-level verdict values such as
+	//   denyTeamEditor = &accessDenial{http.StatusForbidden, "rbac-denied", ...}
+	// whose status appears in no function body at all.
+	verdictRe = regexp.MustCompile(`(?m)^\s*\w+\s*=\s*&?\w+\{(http\.Status\w+).*$`)
+	// A function that turns a verdict into a response, rather than passing it
+	// back to its caller: `d.write(c)` or `writeError(c, denial.status, ...)`.
+	verdictDispatchRe = regexp.MustCompile(`\.write\(c\)|writeError\(c,\s*\w+\.status`)
+	// Calls on the Handlers receiver: `h.ensureTemplateEditor(`. Deliberately
+	// not `h.deps.Store.GetTemplateVersion(` — several store methods share a
+	// name with a handler, and matching those made every route that reads a
+	// row inherit the statuses of the handler it is named after.
+	methodCallRe = regexp.MustCompile(`\bh\.(\w+)\(`)
+	// Package-level calls: `writeError(`, `ownershipOf(`. The leading class
+	// keeps out anything reached through a selector, which methodCallRe and
+	// verdictDispatchRe cover on their own terms.
+	funcCallRe = regexp.MustCompile(`(?:^|[^.\w])(\w+)\(`)
 )
+
+// unreachableOnRoute records statuses this guard can see but the route cannot
+// actually produce, because the reachability walk is blind to the arguments a
+// handler passes. Each entry has to be argued from the code; the alternative is
+// documenting a response no client will ever receive, which is the failure this
+// spec's review turned up in the first place.
+var unreachableOnRoute = map[string]string{
+	// GetOpenAPIIndex calls proxyOpenAPI(c, "") and openapiUpstreamSegments
+	// returns (nil, nil) for the empty string, so neither the validation nor
+	// the prefix assertion below it can fire. The 400 belongs to the sibling
+	// route GET /v1/clusters/{name}/openapi/{gv}, where gv is caller-supplied.
+	"GET /v1/clusters/:name/openapi 400": "index passes a constant empty gv",
+}
 
 var statusNames = map[string]string{
 	"StatusOK": "200", "StatusCreated": "201", "StatusNoContent": "204",
@@ -184,15 +215,21 @@ var statusNames = map[string]string{
 	"StatusInternalServerError": "500", "StatusBadGateway": "502",
 }
 
-// handlerBodies maps a handler method name to its source text, cut at the next
-// top-level func. Codes emitted by helpers the handler calls are not included,
-// which is why the assertion below is one-directional.
-func handlerBodies(t *testing.T) map[string]string {
+// symbolBodies maps every package-level func and method in the api package to
+// its source text, cut at the next top-level func, and returns the set of
+// statuses carried by package-level verdict values.
+//
+// Methods share one namespace here regardless of receiver, so two methods with
+// the same name on different receivers would merge. That over-approximates —
+// the spec is asked to document a status the route may not reach — rather than
+// letting a real one slip past. The package has no such pair today.
+func symbolBodies(t *testing.T) (map[string]string, map[string]bool) {
 	t.Helper()
 	files, err := filepath.Glob("*.go")
 	require.NoError(t, err)
 
 	out := map[string]string{}
+	verdictCodes := map[string]bool{}
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {
 			continue
@@ -207,20 +244,84 @@ func handlerBodies(t *testing.T) map[string]string {
 			}
 			out[name] = src[loc[0]:end]
 		}
+		for _, m := range verdictRe.FindAllStringSubmatch(src, -1) {
+			if code, known := statusNames[strings.TrimPrefix(m[1], "http.")]; known {
+				verdictCodes[code] = true
+			}
+		}
+	}
+	require.NotEmpty(t, out, "found no funcs — the regex has stopped matching")
+	require.NotEmpty(t, verdictCodes, "found no accessDenial values — the regex has stopped matching")
+	return out, verdictCodes
+}
+
+// statusesOf returns every status the named symbol can produce: the ones it
+// writes itself, plus the ones written by the package functions it calls,
+// transitively.
+//
+// Issue #47 is why it follows calls at all. It moved the template-read 403s
+// behind a table of `&accessDenial{http.StatusForbidden, ...}` verdicts, so no
+// status literal was left in the handler body and this guard passed while the
+// spec went stale — exactly the drift this file exists to prevent.
+//
+// A verdict's status is counted only in a function that *writes* the verdict
+// (`d.write(c)`, `writeError(c, denial.status, ...)`), never in one that
+// receives it and decides for itself. That distinction is the rule stated on
+// accessDenial in permissions.go, and it is load-bearing here: GetTemplate
+// deliberately turns a denial into 404 so the response cannot confirm a
+// template the caller may not see. Counting the verdict at the point of
+// evaluation would demand a documented 403 that the code refuses to send.
+func statusesOf(name string, bodies map[string]string, verdictCodes, seen map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	if seen[name] {
+		return out
+	}
+	seen[name] = true
+
+	body, ok := bodies[name]
+	if !ok {
+		return out
+	}
+	for _, sm := range statusRe.FindAllStringSubmatch(body, -1) {
+		if code, known := statusNames[sm[1]]; known {
+			out[code] = true
+		}
+	}
+	if verdictDispatchRe.MatchString(body) {
+		for code := range verdictCodes {
+			out[code] = true
+		}
+	}
+
+	callees := map[string]bool{}
+	for _, re := range []*regexp.Regexp{methodCallRe, funcCallRe} {
+		for _, m := range re.FindAllStringSubmatch(body, -1) {
+			callees[m[1]] = true
+		}
+	}
+	for callee := range callees {
+		if callee == name {
+			continue
+		}
+		if _, known := bodies[callee]; !known {
+			continue
+		}
+		for code := range statusesOf(callee, bodies, verdictCodes, seen) {
+			out[code] = true
+		}
 	}
 	return out
 }
 
-// Every status a handler can return itself must appear in that operation's
-// responses. The reverse is deliberately not checked: shared helpers
-// (resolveTemplateVersion, requireDeployableVersion, the auth middleware) emit
-// codes that never appear in the handler's own body, and documenting those is
-// correct.
+// Every status a handler can reach must appear in that operation's responses.
+// The reverse is deliberately not checked: the auth middleware runs before any
+// handler, so its codes belong on operations no handler body leads to.
 //
-// This is the guard that would have caught the 204-documented-as-200 and the
-// missing 404/409 on POST /v1/releases.
+// This is the guard that caught the 204-documented-as-200 and the missing
+// 404/409 on POST /v1/releases — and, once it learned to follow references, the
+// 403s #47 introduced on the template read paths.
 func TestOpenAPISpec_DocumentsEveryStatusHandlersEmit(t *testing.T) {
-	bodies := handlerBodies(t)
+	bodies, verdicts := symbolBodies(t)
 	doc := loadSpec(t)
 	brace := regexp.MustCompile(`\{([^}]+)\}`)
 
@@ -247,29 +348,43 @@ func TestOpenAPISpec_DocumentsEveryStatusHandlersEmit(t *testing.T) {
 
 	r := api.NewRouter(config.Config{}, api.Deps{Verifier: stubVerifier{}, Store: testStore(t)})
 	var problems []string
+	used := map[string]bool{}
 	for _, ri := range r.Routes() {
 		hm := handlerNameRe.FindStringSubmatch(ri.Handler)
 		if hm == nil {
 			continue // inline handler, e.g. /healthz
 		}
-		body, ok := bodies[hm[1]]
-		if !ok {
+		if _, ok := bodies[hm[1]]; !ok {
 			continue
 		}
 		key := strings.Replace(ri.Method+" "+ri.Path, "/*gv", "/:gv", 1)
 		declared := specCodes[key]
 
-		for _, sm := range statusRe.FindAllStringSubmatch(body, -1) {
-			code, known := statusNames[sm[1]]
-			if !known {
+		for _, code := range sortedKeys(statusesOf(hm[1], bodies, verdicts, map[string]bool{})) {
+			if declared[code] {
 				continue
 			}
-			if !declared[code] {
-				problems = append(problems,
-					ri.Method+" "+ri.Path+" returns "+code+" (http."+sm[1]+" in "+hm[1]+") but the spec does not list it")
+			if _, excused := unreachableOnRoute[key+" "+code]; excused {
+				used[key+" "+code] = true
+				continue
 			}
+			problems = append(problems,
+				ri.Method+" "+ri.Path+" can return "+code+" (reachable from "+hm[1]+") but the spec does not list it")
 		}
 	}
 	sort.Strings(problems)
 	require.Empty(t, problems, "%s is missing responses the handlers can actually return", specPath)
+
+	// An exception that stopped applying is a claim nobody is checking any
+	// more — the route may have changed, or the spec may now document the
+	// status outright. Either way the entry has to go.
+	var stale []string
+	for entry := range unreachableOnRoute {
+		if !used[entry] {
+			stale = append(stale, entry)
+		}
+	}
+	sort.Strings(stale)
+	require.Empty(t, stale,
+		"unreachableOnRoute excuses statuses that no longer need excusing — delete these entries")
 }
