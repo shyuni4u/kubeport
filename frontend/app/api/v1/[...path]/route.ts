@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requestIdFor, upstreamUrl } from "@/lib/bff-path";
+import { bffProblem } from "@/lib/bff-problem";
 import { getSession, getValidToken } from "@/lib/session";
 
 const STRIPPED_RESPONSE_HEADERS = new Set([
@@ -21,20 +22,6 @@ function filterUpstreamHeaders(upstream: Response): Headers {
   return out;
 }
 
-/** A Problem the BFF answers itself, carrying the same id as the log. */
-function bffProblem(kind: string, status: number, detail: string, requestId: string) {
-  return NextResponse.json(
-    {
-      type: `https://kubeport.io/errors/${kind}`,
-      title: kind,
-      status,
-      detail,
-      request_id: requestId,
-    },
-    { status, headers: { "X-Request-Id": requestId } },
-  );
-}
-
 async function proxy(
   req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
@@ -43,8 +30,6 @@ async function proxy(
   const session = await getSession();
   const token = session ? await getValidToken(session) : null;
   if (!token) {
-    // Same shape as the Go API's Problem (backend/internal/api/errors.go), so
-    // a client parses one schema across the whole /api/v1 surface (#56).
     return bffProblem("unauthenticated", 401, "no session cookie", requestId);
   }
 

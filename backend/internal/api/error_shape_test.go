@@ -66,6 +66,15 @@ var allowedErrorKinds = map[string]bool{
 	"conflict":         true,
 	"k8s-error":        true,
 	"cluster-config":   true,
+	// 405 from the router's own NoMethod fallback (#81). Gin folded a wrong
+	// verb into its 404, and an agent reading "not found" concludes the
+	// resource is gone rather than that it used the wrong method.
+	"method-not-allowed": true,
+	// 502 when the *cluster* rejects the token kubeport forwarded, as opposed
+	// to kubeport rejecting the session (#83). Separate from k8s-error because
+	// the right client response differs: signing in again fixes the second
+	// kind of 401 and never fixes this one.
+	"cluster-auth-denied": true,
 	// 429 from the SSAR proxy's per-caller budget (#73). Distinct from
 	// rbac-denied on purpose: the caller is allowed, just too fast, and the
 	// right client response is to back off rather than to give up.

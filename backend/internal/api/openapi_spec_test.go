@@ -122,7 +122,11 @@ func kindsEmittedByHandlers(t *testing.T) map[string]bool {
 	files, err := filepath.Glob("*.go")
 	require.NoError(t, err)
 
-	re := regexp.MustCompile(`writeError\([^,]+,\s*[^,]+,\s*"([a-z0-9-]+)"`)
+	// sseError is included because the in-stream error frame carries the same
+	// ErrorKind vocabulary as an ordinary response (#82). Leaving it out would
+	// let a kind reach a client while the spec said nothing about it — the
+	// exact drift this file exists to catch.
+	re := regexp.MustCompile(`(?:writeError|sseError)\([^,]+,\s*[^,]+,\s*"([a-z0-9-]+)"`)
 	out := map[string]bool{}
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {

@@ -186,15 +186,7 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 		return
 	}
 	if resp.StatusCode >= 400 {
-		// A 4xx from the apiserver is addressed to the caller ("no such group",
-		// "forbidden"), so it is passed through. A 5xx is the cluster's own
-		// trouble and its body can name internals; log it, don't echo it.
-		if resp.StatusCode >= 500 {
-			log.Printf("proxyOpenAPI: cluster %s returned %d: %s", name, resp.StatusCode, string(body))
-			writeError(c, http.StatusBadGateway, "k8s-error", "the cluster's OpenAPI endpoint returned an error")
-			return
-		}
-		writeError(c, resp.StatusCode, "k8s-error", string(body)) // raw-ok: 4xx body is the apiserver answering the caller
+		h.writeUpstreamOpenAPIError(c, name, resp.StatusCode, body)
 		return
 	}
 
@@ -204,6 +196,55 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 	}
 	h.openapi.cache.Add(key, openapiCacheEntry{body: body, storedAt: time.Now(), contentTy: ct})
 	c.Data(http.StatusOK, ct, body)
+}
+
+// upstreamDetailMax bounds how much of an upstream error body is quoted back.
+// The 10MiB read cap exists so a schema fits; it is not a sensible size for a
+// Problem detail, and nothing downstream reads past the first sentence anyway.
+const upstreamDetailMax = 512
+
+// writeUpstreamOpenAPIError maps a status the *cluster* chose onto one kubeport
+// owns. Passing the upstream status through verbatim made two of them lie
+// (issue #83):
+//
+//   - 401/403 said "your kubeport session is bad" when the cluster had refused
+//     the forwarded token. A client re-authenticates, gets an equally
+//     unwelcome token, and loops. PR #79 made "401 on /v1 means
+//     unauthenticated" an invariant; these two routes were the only exception,
+//     so the collision gets its own kind instead.
+//   - 429 collided with kubeport's own rate limiter, whose 429 carries
+//     Retry-After. A client would wait on a header that is not there.
+//
+// 404 is kept as-is: "this cluster has no apps/v99" is the apiserver answering
+// the question that was actually asked, and the editor's kind autocomplete
+// needs it to tell an unknown group from an unreachable cluster. It is
+// distinguishable from kubeport's own 404 (`not-found`) by title.
+func (h *Handlers) writeUpstreamOpenAPIError(c *gin.Context, cluster string, status int, body []byte) {
+	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		log.Printf("proxyOpenAPI: cluster %s refused the caller's token: %d", cluster, status)
+		writeError(c, http.StatusBadGateway, "cluster-auth-denied",
+			"the cluster rejected the credentials kubeport forwarded; this is the cluster's decision, not a kubeport session problem")
+	case status == http.StatusNotFound:
+		// raw-ok: a 404 body is the apiserver naming the group/version the
+		// caller asked for, bounded so it stays an error message.
+		writeError(c, http.StatusNotFound, "k8s-error", truncate(string(body), upstreamDetailMax))
+	case status >= 500:
+		// The cluster's own trouble, and its body can name internals.
+		log.Printf("proxyOpenAPI: cluster %s returned %d: %s", cluster, status, truncate(string(body), upstreamDetailMax))
+		writeError(c, http.StatusBadGateway, "k8s-error", "the cluster's OpenAPI endpoint returned an error")
+	default:
+		log.Printf("proxyOpenAPI: cluster %s returned %d: %s", cluster, status, truncate(string(body), upstreamDetailMax))
+		writeError(c, http.StatusBadGateway, "k8s-error",
+			"the cluster's OpenAPI endpoint refused the request")
+	}
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
 }
 
 // buildTransport returns an http.RoundTripper that trusts the cluster's

@@ -51,6 +51,12 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	// gets an id and a log line — Recovery converts the panic to a 500 within
 	// their scope rather than unwinding past them.
 	r.Use(requestID(), accessLog(), gin.Recovery(), limitBodySize(maxRequestBody))
+	// Without this, gin answers a wrong verb with its 404, and a caller reading
+	// "not found" concludes the resource is gone rather than that it used the
+	// wrong method (issue #81).
+	r.HandleMethodNotAllowed = true
+	r.NoRoute(routeNotFound)
+	r.NoMethod(methodNotAllowed)
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 
 	h := &Handlers{deps: deps, openapi: newOpenAPIProxy(cfg.OpenAPICacheMax)}
@@ -105,4 +111,23 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	v.POST("/teams/:id/members", requireAdmin(), noDemo, h.AddTeamMember)
 	v.DELETE("/teams/:id/members/:user_id", requireAdmin(), noDemo, h.RemoveTeamMember)
 	return r
+}
+
+// routeNotFound and methodNotAllowed are the only two responses in the service
+// that no handler produces. Gin's defaults for them are text/plain bodies
+// ("404 page not found"), so the single Problem shape #79 established for /v1
+// had two holes in it: a typo'd path and a wrong verb both came back in a
+// shape no client parses, and the BFF forwards the upstream content type
+// unchanged (issue #81).
+//
+// Neither echoes the request path. The caller already knows what it asked for,
+// and reflecting a caller-controlled string into a response is the same
+// mistake #72 closed in the access log.
+func routeNotFound(c *gin.Context) {
+	writeError(c, http.StatusNotFound, "not-found", "no route matches this path")
+}
+
+func methodNotAllowed(c *gin.Context) {
+	writeError(c, http.StatusMethodNotAllowed, "method-not-allowed",
+		"this path exists but does not accept this method")
 }

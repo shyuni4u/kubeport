@@ -28,6 +28,11 @@ type fakeK8sApplier struct {
 	instancesErr error
 	deleteErr    error
 
+	// logStreamErr makes StreamLogs fail the way a single-pod stream fails for
+	// real: the error goes to errCh, then both channels close because the pod
+	// goroutine has returned. That ordering is what ends the SSE loop.
+	logStreamErr error
+
 	// accessChecks records every CheckAccess call for assertions.
 	// accessResult is the stub response; accessErr overrides it when non-nil.
 	accessChecks []k8s.AccessCheck
@@ -57,7 +62,13 @@ func (f *fakeK8sApplier) ListInstances(_ context.Context, _, _ string) ([]k8s.In
 
 func (f *fakeK8sApplier) StreamLogs(ctx context.Context, _ string, _ []string) (<-chan k8s.LogLine, <-chan error) {
 	ch := make(chan k8s.LogLine)
-	errCh := make(chan error)
+	errCh := make(chan error, 1)
+	if f.logStreamErr != nil {
+		errCh <- f.logStreamErr
+		close(ch)
+		close(errCh)
+		return ch, errCh
+	}
 	go func() {
 		<-ctx.Done()
 		close(ch)

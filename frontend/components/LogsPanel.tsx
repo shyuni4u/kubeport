@@ -11,7 +11,22 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-type LogEntry = { id: number; time: number; pod: string; text: string; kind?: "log" | "error" };
+type LogEntry = {
+  id: number;
+  time: number;
+  pod: string;
+  text: string;
+  kind?: "log" | "error";
+  // Set on error rows only: the Problem's `title` picks the sentence and
+  // `request_id` is what support looks the real reason up by. The backend
+  // stopped sending the reason itself (#108).
+  errorTitle?: string;
+  requestId?: string;
+};
+
+// Error kinds the log stream can produce and we have a sentence for. Anything
+// else falls back rather than rendering a raw kind at the user.
+const KNOWN_STREAM_ERRORS = new Set(["k8s-error", "unauthenticated", "rbac-denied"]);
 
 type Props = {
   releaseId: string;
@@ -133,12 +148,29 @@ function Stream({ releaseId, instance, autoscroll }: StreamProps) {
         /* malformed line — drop */
       }
     });
-    // Backend emits named "error" events with {error: string}. EventSource
-    // .onerror catches connection errors only, not server-sent named events.
+    // Backend emits named "error" events carrying a Problem — the same schema
+    // as any other error response since #82. EventSource .onerror catches
+    // connection errors only, not server-sent named events.
+    //
+    // Only `title` and `request_id` are rendered. `detail` used to be
+    // client-go's raw text, which named the apiserver's address, the namespace
+    // and the pod, and this pane showed it to whoever was looking — demo
+    // visitors included (#108). The backend now withholds it, and rendering it
+    // here anyway would put us back where we started the next time a new kind
+    // arrives.
     es.addEventListener("error", (e: MessageEvent) => {
       try {
-        const data = JSON.parse(e.data) as { error: string };
-        append({ time: Date.now(), pod: "kubeport", text: data.error, kind: "error" });
+        const data = JSON.parse(e.data) as { title?: string; request_id?: string };
+        append({
+          time: Date.now(),
+          pod: "kubeport",
+          // Text is resolved at render time, not here: this effect must not
+          // depend on `t`, or switching locale would tear down the stream.
+          text: "",
+          kind: "error",
+          errorTitle: data.title,
+          requestId: data.request_id,
+        });
       } catch {
         /* connection-level error — handled by onerror below */
       }
@@ -187,12 +219,24 @@ function Stream({ releaseId, instance, autoscroll }: StreamProps) {
             <span className="text-slate-500">
               [{new Date(l.time).toLocaleTimeString()}]
             </span>{" "}
-            <span className="text-cyan-300">[{l.pod}]</span> {l.text}
+            <span className="text-cyan-300">[{l.pod}]</span>{" "}
+            {l.kind === "error" ? streamErrorText(t, l) : l.text}
           </div>
         ))}
       </div>
     </>
   );
+}
+
+// streamErrorText turns an error frame into the sentence the user reads.
+//
+// The backend deliberately sends no reason (#108), so all we have is the kind
+// and the request id — which is the point: the id is what an admin looks the
+// real reason up by, so it belongs on screen rather than buried in devtools.
+function streamErrorText(t: ReturnType<typeof useTranslations>, l: LogEntry): string {
+  const key = l.errorTitle && KNOWN_STREAM_ERRORS.has(l.errorTitle) ? l.errorTitle : "unknown";
+  const message = t(`error.${key}`);
+  return l.requestId ? t("error.withId", { message, requestId: l.requestId }) : message;
 }
 
 function ConnectionDot({ status }: { status: Status }) {

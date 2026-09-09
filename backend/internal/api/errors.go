@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 
@@ -27,6 +28,33 @@ func writeError(c *gin.Context, status int, kind, detail string) {
 		// declared but never populated.
 		RequestID: requestIDFrom(c),
 	})
+}
+
+// sseError writes a Problem as a named `error` event on an already-upgraded
+// stream, so a failure before and after the SSE handshake reach the client in
+// the same shape (issue #82). The old frame was a bare {"error": "..."} with
+// no kind, which forced a second parser on the client and gave it nothing to
+// branch on.
+//
+// detail is ours, never the underlying error: the frame is rendered verbatim
+// in the log pane, and client-go's text names the apiserver's address, the
+// namespace, and the pod (issue #108). The caller logs the real reason and the
+// request id ties the two together.
+func sseError(c *gin.Context, status int, kind, detail string) {
+	body, err := json.Marshal(Problem{
+		Type:      "https://kubeport.io/errors/" + kind,
+		Title:     kind,
+		Status:    status,
+		Detail:    detail,
+		RequestID: requestIDFrom(c),
+	})
+	if err != nil {
+		// Problem is a struct of strings and an int; this cannot fail. Bail
+		// rather than emit a half-written frame if it somehow does.
+		log.Printf("sseError: marshal problem: %v", err)
+		return
+	}
+	c.SSEvent("error", string(body))
 }
 
 // internalError answers 500 without the error text and logs the text instead.

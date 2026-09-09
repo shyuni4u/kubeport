@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -87,16 +88,31 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 			return true
 		case err, ok := <-errCh:
 			if !ok {
-				return false
+				// A closed channel is always ready, so leaving it in the
+				// select would spin. Drop it and keep serving the other one.
+				errCh = nil
+				return ch != nil
 			}
 			if err != nil {
-				body, _ := json.Marshal(map[string]string{"error": err.Error()})
-				c.SSEvent("error", string(body))
+				// client-go's text names the apiserver's address, the
+				// namespace and the pod, and this frame is rendered verbatim
+				// in the log pane — for demo visitors too (issue #108). The
+				// reason goes to the log; the caller gets the request id.
+				log.Printf("StreamReleaseLogs: release=%s namespace=%s stream: %v",
+					rel.Name, rel.Namespace, err)
+				sseError(c, http.StatusBadGateway, "k8s-error",
+					"the log stream from the cluster failed")
 			}
 			return true
 		case line, ok := <-ch:
 			if !ok {
-				return false
+				// StreamPodLogs buffers a pod's error and only then closes both
+				// channels, so at this point an error may already be waiting.
+				// Ending here would race it: select picks uniformly among ready
+				// cases, and the error frame was being dropped about half the
+				// time. Give up this channel and let errCh drain first.
+				ch = nil
+				return errCh != nil
 			}
 			body, _ := json.Marshal(map[string]any{
 				"time": time.Now().UnixMilli(),

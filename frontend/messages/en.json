@@ -206,6 +206,13 @@
     "clear": "Clear",
     "emptyWaiting": "No output yet. Lines appear here as soon as it runs.",
     "emptyDisconnected": "Connection lost. Reload the page; if it keeps dropping, contact an admin.",
+    "error": {
+      "k8s-error": "Could not read logs from the cluster.",
+      "unauthenticated": "Your session expired. Please sign in again.",
+      "rbac-denied": "You do not have permission to view this release's logs.",
+      "unknown": "Something went wrong with the log stream.",
+      "withId": "{message} (request ID for support: {requestId})"
+    },
     "status": {
       "connected": "Connected",
       "connecting": "Connecting",

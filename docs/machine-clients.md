@@ -236,6 +236,17 @@ helm upgrade kubeport deploy/helm/kubeport --reuse-values \
 `backend/internal/api/error_shape_test.go` 와 `openapi_spec_test.go` 가 빌드를 깬다. `detail` 은 사람이
 읽는 문장이라 바뀔 수 있다.
 
+여기엔 **핸들러가 만들지 않는 응답도 포함된다**([#81](https://github.com/shyuni4u/kubeport/issues/81)):
+
+- 라우트가 없는 경로 → `404 not-found`. 예전엔 gin 기본값인 `text/plain` `404 page not found` 였고,
+  BFF 가 업스트림 content-type 을 그대로 넘기므로 클라이언트까지 그대로 갔다.
+- 경로는 맞는데 메서드가 틀림 → `405 method-not-allowed`. 예전엔 이것도 404 라서 **에이전트가
+  "리소스가 없다"로 결론내고 재시도를 포기**했다.
+- `/api/v1` (세그먼트 0개) → `404 not-found`. Next 의 `[...path]` 가 안 잡아서 HTML 404 였다.
+
+둘 다 **요청 경로를 본문에 되돌려주지 않는다.** 호출자는 자기가 뭘 보냈는지 이미 알고, 호출자가
+정한 문자열을 응답에 반사하는 건 #72 가 액세스 로그에서 막은 것과 같은 종류의 실수다.
+
 **실패를 신고할 땐 `request_id` 를 같이 적는다.** 모든 응답에 `X-Request-Id` 헤더가 붙고, 에러 본문의
 `request_id` 가 같은 값이다. 인바운드 `X-Request-Id` 는 `^[A-Za-z0-9._-]{1,64}$` 에 맞으면 그대로
 채택되므로 **BFF 를 지나도 내 추적 id 가 살아남는다** (형식이 안 맞으면 서버가 새로 만든다. 헤더 값에는
@@ -247,6 +258,36 @@ apiserver 주소가 그대로 나갔다. 이유는 서버 로그에 있고, `req
 반면 **502 의 `detail` 은 apiserver 가 실제로 답한 경우에만** 원문이다(Forbidden/Invalid/NotFound/
 AlreadyExists/Conflict/Unauthorized). "User x cannot create deployments" 는 배포가 거부된 이유이므로
 화면에 있어야 한다. 전송 자체가 실패한 경우는 클러스터 내부 주소가 들어가므로 로그로만 간다.
+
+**클러스터 openapi 읽기 두 라우트는 업스트림 상태를 그대로 흘리지 않는다**
+([#83](https://github.com/shyuni4u/kubeport/issues/83)). 통과하는 건 404 뿐이고 — "이 클러스터엔
+`apps/v99` 가 없다"는 내가 던진 질문에 apiserver 가 답한 것이라 — 나머지는 kubeport 자신의 502 로
+접힌다.
+
+| 업스트림 | 나오는 응답 | 재시도 |
+|---|---|---|
+| 401 · 403 | `502 cluster-auth-denied` | ✗ 그 클러스터에 대한 내 권한이 바뀌어야 한다 |
+| 404 | `404 k8s-error` (`detail` 은 apiserver 원문, 잘림) | ✗ 없는 group/version |
+| 그 외 4xx (429 포함) | `502 k8s-error` | 상황에 따라 |
+| 5xx | `502 k8s-error` | ○ 대개 일시적 |
+
+401 을 접는 게 핵심이다. 그대로 흘리면 "**kubeport** 세션이 잘못됐다"로 읽혀서 클라이언트가 재로그인
+→ 똑같이 거부되는 토큰 획득 → 무한 반복이 된다. `cluster-auth-denied` 는 "kubeport 은 나를 알지만
+**클러스터가** 나를 거부했다"는 뜻이고, 재로그인으로는 절대 풀리지 않는다. 업스트림 429 를 접는
+이유도 같다 — kubeport 자신의 429 는 `Retry-After` 를 달고 오는데, 업스트림 429 엔 그게 없다.
+
+**SSE 로그 스트림의 에러도 같은 `Problem` 이다**([#82](https://github.com/shyuni4u/kubeport/issues/82)).
+예전엔 스트림 시작 전은 `Problem`, 시작 후는 `{"error": "..."}` 라 파서를 두 벌 들고 있어야 했다.
+
+```
+event:error
+data:{"type":"...","title":"k8s-error","status":502,"detail":"...","request_id":"..."}
+```
+
+`detail` 은 **일부러 두루뭉술하다** — client-go 원문에 apiserver 주소·네임스페이스·파드 이름이 들어
+있고 이 프레임은 로그 창에 그대로 렌더된다([#108](https://github.com/shyuni4u/kubeport/issues/108)).
+진짜 이유는 서버 로그에 있고 `request_id` 로 찾는다. `error` 프레임이 왔다고 스트림이 끝난 건 아니다;
+끝은 서버가 연결을 닫는 것으로 알린다.
 
 **429 를 만나면 `Retry-After` 를 지킨다.** `POST /v1/selfsubjectaccessreview` 와 클러스터 openapi 읽기
 두 라우트가 호출자(OIDC subject)별 토큰버킷 하나를 공유한다 — 분당 60회, 버스트 동일
@@ -278,6 +319,13 @@ SSAR 은 **물어볼 수 있는 질문이 정해져 있다**(#73). `verb` 는 ku
 `networking.k8s.io/ingresses`. 벗어나면 400 이고, **`detail` 이 허용 집합을 그대로 나열**하므로 목록을
 외울 필요는 없다.
 
+응답의 `reason` 은 **관리자에게만** 채워진다([#102](https://github.com/shyuni4u/kubeport/issues/102)).
+k8s authorizer 는 `RBAC: allowed by ClusterRoleBinding "..." of ClusterRole "..." to User "..."` 처럼
+**클러스터의 RBAC 오브젝트 이름을 그대로** 답하는데, SSAR 은 인증만 되면 누구나 호출할 수 있어서
+네임스페이스를 바꿔가며 물으면 바인딩 구조가 윤곽을 드러냈다. 권한 상승은 아니고 정보 노출이다.
+데모 계정은 `kubeport-admin` 을 갖고 있어도 빈 문자열을 받는다 — 그 그룹은 관리자 UX 를 보여주려고
+있는 것이지 호스트 클러스터 구성을 공개하려고 있는 게 아니다. `allowed`·`denied` 는 그대로다.
+
 **201 은 "적용을 접수했다"는 뜻이지 "떴다"가 아니다.** 상태는 `GET /v1/releases/{id}` 의 `status` 로
 확인한다. 그 값은 요청 시점에 클러스터를 조회해 만드는 파생값이라 저장돼 있지 않고, 따라서 "여기서 끝"
 이라고 볼 종료 상태가 없다. 목록(`GET /v1/releases`)에는 status 가 아예 없어서 N개 릴리스를 폴링하면
@@ -287,13 +335,14 @@ SSAR 은 **물어볼 수 있는 질문이 정해져 있다**(#73). `verb` 는 ku
 **목록은 페이지네이션 메타가 없다.** `total` 도 `next` 도 없어서 "다음 페이지가 있나"는 한 페이지가 꽉
 찼는지로 추측해야 한다. 템플릿 목록은 아예 페이지네이션이 없다(#58).
 
-**BFF 가 직접 답하는 응답 3가지.** `/api/v1/*` 로 붙는 경우(§1 의 B 경로), 아래는 Go API 까지 가지 않고
-Next.js Route Handler 가 만든다. 앞의 둘은 같은 `Problem` 스키마다.
+**BFF 가 직접 답하는 응답 4가지.** `/api/v1/*` 로 붙는 경우(§1 의 B 경로), 아래는 Go API 까지 가지 않고
+Next.js Route Handler 가 만든다. 499 를 뺀 셋은 같은 `Problem` 스키마다.
 
 | 상태 | `title` | 언제 |
 |---|---|---|
 | 401 | `unauthenticated` | 세션 쿠키가 없거나 만료 — 토큰 갱신도 실패 |
 | 400 | `validation-error` | 경로가 이상함(`detail: malformed request path`). 세그먼트에 `/`·`..`·제어문자가 있거나, 조립된 URL 이 `/<base>/v1/` 밖으로 나가면 업스트림에 보내지 않는다 ([#51](https://github.com/shyuni4u/kubeport/issues/51)) |
+| 404 | `not-found` | `/api/v1` 자체를 찌른 경우. 세션 검사도 안 한다 — 누가 묻든 여긴 아무 데도 안 이어지고, 401 을 먼저 주면 "뭔가 있긴 하다"는 뜻이 된다 (#81) |
 | 499 | — | 클라이언트가 먼저 끊음(nginx 관례). **본문이 없으므로** id 는 `X-Request-Id` 헤더로만 온다 |
 
 ---
