@@ -120,6 +120,11 @@ dex:
 demo:
   enabled: false
   cluster: oci-a1
+  # This is the public demo, so the catalog size is already visible to anyone
+  # who clicks through. Publishing it on /healthz lets uptime-ping.yml notice a
+  # reset that wiped and failed to re-seed, instead of the demo sitting empty
+  # for six hours (#119).
+  publicHealthCatalog: true
   passwordHint: ""             # --set demo.passwordHint=$DEMO_PW  (public)
   adminPassword: ""            # --set
   userPassword: ""             # --set

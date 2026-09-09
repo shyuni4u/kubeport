@@ -38,3 +38,33 @@ jobs:
             echo "::error::No HTTP response from $URL (connection failed)"
             exit 1
           fi
+
+      # The demo reset wipes first and re-seeds second, so a failed seed leaves
+      # an empty catalog. Nothing noticed that for up to six hours — #104 was
+      # found only because a browser review happened to run just after a reset.
+      # This job already runs every ten minutes, so it is the cheapest place to
+      # look (#119).
+      #
+      # `catalog` is absent unless the deployment opted in
+      # (demo.publicHealthCatalog), so a self-hosted or flag-off install skips
+      # this check rather than failing it.
+      - name: Check the demo catalog is seeded
+        env:
+          URL: https://kubeport.enzo.kr/api/healthz
+        run: |
+          body=$(curl -sS --max-time 30 --retry 2 "$URL" || echo '')
+          echo "GET $URL -> ${body:-<no body>}"
+          if [ -z "$body" ]; then
+            echo "::warning::No body from $URL; the liveness step above is authoritative"
+            exit 0
+          fi
+          count=$(printf '%s' "$body" | jq -r '.catalog.templates // empty')
+          if [ -z "$count" ]; then
+            echo "Catalog reporting is off for this deployment — skipping"
+            exit 0
+          fi
+          echo "catalog.templates = $count"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::Demo catalog is empty — the reset CronJob wiped and failed to re-seed. See docs/oci-prod-runbook.md (demo reset)."
+            exit 1
+          fi

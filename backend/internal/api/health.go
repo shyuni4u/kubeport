@@ -1,0 +1,79 @@
+package api
+
+import (
+	"context"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"kubeport/internal/store"
+)
+
+// healthCacheTTL keeps an unauthenticated endpoint from becoming a database
+// amplifier. The consumer is a 10-minute cron, so staleness costs nothing.
+const healthCacheTTL = 30 * time.Second
+
+// catalogGauge counts the catalog for /healthz?verbose=1, at most once per
+// healthCacheTTL. The lock is held across the query on purpose: a burst
+// collapses into one round trip instead of one per request.
+type catalogGauge struct {
+	mu        sync.Mutex
+	at        time.Time
+	templates int
+	err       error
+}
+
+func (g *catalogGauge) count(ctx context.Context, st *store.Store) (int, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.at.IsZero() && time.Since(g.at) < healthCacheTTL {
+		return g.templates, g.err
+	}
+	rows, err := st.ListTemplates(ctx)
+	g.at, g.templates, g.err = time.Now(), len(rows), err
+	return g.templates, err
+}
+
+// healthz answers the kubelet probes on the bare path with a constant — they
+// run every 10 and 20 seconds and must not touch the database.
+//
+// ?verbose=1 adds the catalog size, but only where HealthPublicCatalog says
+// so. The endpoint is unauthenticated, so a self-hosted install must not leak
+// its catalog's size to anyone who asks; the public demo opts in.
+//
+// The count is the signal #119 asked for: the
+// demo reset CronJob wipes first and re-seeds second, so a failed seed leaves
+// an empty catalog that nothing notices for up to six hours — the last
+// occurrence (#104) was found only because a browser review happened to run
+// just after a reset. Publishing the count lets the existing uptime ping
+// (.github/workflows/uptime-ping.yml) assert it is non-zero, which makes an
+// already-scheduled 10-minute cron the alert channel with no new infrastructure.
+//
+// It stays 200 even when the count is unavailable: the same path backs the
+// readiness probe, and failing it over a reporting problem would take the pod
+// out of service. Callers branch on the body, not the status.
+func healthz(deps Deps, gauge *catalogGauge) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Query("verbose") != "1" {
+			c.JSON(http.StatusOK, gin.H{"status": "ok"})
+			return
+		}
+		body := gin.H{"status": "ok"}
+		if deps.HealthPublicCatalog && deps.Store != nil {
+			n, err := gauge.count(c.Request.Context(), deps.Store)
+			if err != nil {
+				// Withheld for the same reason every other 5xx detail is: this
+				// endpoint is unauthenticated, and the error carries the DSN's
+				// host and the driver's internals.
+				logWithheld(c, "healthz: count templates", err)
+				body["status"] = "degraded"
+				body["catalog"] = gin.H{"available": false}
+			} else {
+				body["catalog"] = gin.H{"available": true, "templates": n}
+			}
+		}
+		c.JSON(http.StatusOK, body)
+	}
+}

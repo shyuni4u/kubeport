@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -54,21 +55,66 @@ func main() {
 			"(local dev: postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable)")
 	}
 	demoDomain := getenv("KBP_DEMO_EMAIL_DOMAIN", "demo.kubeport")
+
+	// Everything that can fail runs before anything is destroyed. Reset is a
+	// method on the value preflight returns, so it is not reachable until Dex,
+	// the API, the database and the demo identity have all answered.
+	pf, err := runPreflight(ctx, hc, dsn, demoDomain)
+	if err != nil {
+		log.Fatalf("preflight: %v — demo data left intact, nothing was deleted", err)
+	}
+	defer pf.st.Close()
+
 	if *reset {
-		if err := resetDB(ctx, dsn, demoDomain); err != nil {
+		if err := pf.reset(ctx, dsn, demoDomain); err != nil {
 			log.Fatalf("reset: %v", err)
 		}
 	}
+	if err := (&templateSeeder{st: pf.st, owner: pf.owner}).Run(ctx); err != nil {
+		log.Fatalf("seed templates: %v", err)
+	}
+	if err := pf.seeder.Run(ctx); err != nil {
+		log.Fatalf("seed releases: %v", err)
+	}
+	log.Println("seed-demo: done")
+}
 
+// preflight is proof that every failure-prone dependency answered while the
+// demo was still intact: Dex issued both tokens, the API accepted them, the
+// database opened, and DEMO_ADMIN_EMAIL resolves to the users row the catalog
+// is owned by.
+//
+// It exists because of the ordering bug in #105. resetDB used to run first, so
+// a Dex outage, an expired client secret or a stale DEMO_ADMIN_PASSWORD would
+// empty the demo and only then fail — leaving it empty until the next run six
+// hours later. reset() is a method here rather than a free function so that
+// order cannot be reintroduced: you cannot delete anything without first
+// holding the evidence that the re-seed has somewhere to come from.
+type preflight struct {
+	st     *store.Store
+	owner  store.User
+	seeder *Seeder
+}
+
+func runPreflight(ctx context.Context, hc *http.Client, dsn, demoDomain string) (*preflight, error) {
 	issuer, cid, csec := must("DEMO_OIDC_ISSUER"), must("DEMO_OIDC_CLIENT_ID"), must("DEMO_OIDC_CLIENT_SECRET")
 	adminEmail := must("DEMO_ADMIN_EMAIL")
+	// The catalog is global (no owning team); what keeps it out of real users'
+	// view and inside resetDB's reach is the demo domain on its owner. Seeding
+	// as anyone else would write a permanent global catalog no reset collects.
+	// Checked first because it needs no I/O — a misconfigured domain should
+	// never get as far as spending a token grant.
+	if !auth.IsDemoEmail(adminEmail, demoDomain) {
+		return nil, fmt.Errorf("DEMO_ADMIN_EMAIL %s is outside KBP_DEMO_EMAIL_DOMAIN %s — "+
+			"the seeded catalog would not be demo-owned", adminEmail, demoDomain)
+	}
 	adminTok, err := passwordGrant(ctx, hc, issuer, cid, csec, adminEmail, must("DEMO_ADMIN_PASSWORD"))
 	if err != nil {
-		log.Fatalf("admin token: %v", err)
+		return nil, fmt.Errorf("admin token: %w", err)
 	}
 	userTok, err := passwordGrant(ctx, hc, issuer, cid, csec, must("DEMO_USER_EMAIL"), must("DEMO_USER_PASSWORD"))
 	if err != nil {
-		log.Fatalf("user token: %v", err)
+		return nil, fmt.Errorf("user token: %w", err)
 	}
 	base := must("KBP_API_BASE_URL")
 	s := &Seeder{
@@ -77,43 +123,34 @@ func main() {
 		cluster: getenv("DEMO_CLUSTER", "oci-a1"),
 		ns:      getenv("DEMO_NAMESPACE", "demo"),
 	}
-	// Warm up users rows (GET /v1/me upserts on first sight) so team/ownership lookups work.
-	// The template seeder below also depends on this: it owns the catalog it
-	// writes by the demo-admin users row this call creates.
+	// Warm up users rows (GET /v1/me upserts on first sight) so team/ownership
+	// lookups work. The template seeder owns the catalog it writes by the
+	// demo-admin users row this call creates. It doubles as proof that the API
+	// is reachable and accepts these tokens — worth knowing before the wipe.
 	for _, c := range []*apiClient{s.admin, s.user} {
 		if code, b, err := c.do(ctx, http.MethodGet, "/v1/me", nil); err != nil || code != http.StatusOK {
-			log.Fatalf("/v1/me: %d %s %v", code, b, err)
+			return nil, fmt.Errorf("/v1/me: %d %s %v", code, b, err)
 		}
 	}
-
 	st, err := store.NewStore(ctx, dsn)
 	if err != nil {
-		log.Fatalf("store: %v", err)
-	}
-	defer st.Close()
-	// The catalog is global (no owning team); what keeps it out of real users'
-	// view and inside resetDB's reach is the demo domain on its owner. Seeding
-	// as anyone else would write a permanent global catalog no reset collects.
-	if !auth.IsDemoEmail(adminEmail, demoDomain) {
-		log.Fatalf("DEMO_ADMIN_EMAIL %s is outside KBP_DEMO_EMAIL_DOMAIN %s — "+
-			"the seeded catalog would not be demo-owned", adminEmail, demoDomain)
+		return nil, fmt.Errorf("store: %w", err)
 	}
 	owner, err := st.GetUserByEmail(ctx, store.PgText(adminEmail))
 	if err != nil {
-		log.Fatalf("demo admin %s not in users: %v", adminEmail, err)
+		st.Close()
+		return nil, fmt.Errorf("demo admin %s not in users: %w", adminEmail, err)
 	}
-	if err := (&templateSeeder{st: st, owner: owner}).Run(ctx); err != nil {
-		log.Fatalf("seed templates: %v", err)
-	}
-	if err := s.Run(ctx); err != nil {
-		log.Fatalf("seed releases: %v", err)
-	}
-	log.Println("seed-demo: done")
+	return &preflight{st: st, owner: owner, seeder: s}, nil
 }
 
-// resetDB removes everything demo accounts own. k8s objects in the demo
+// reset removes everything demo accounts own. k8s objects in the demo
 // namespace are wiped by the CronJob's kubectl initContainer, not here.
-func resetDB(ctx context.Context, dsn, demoDomain string) error {
+//
+// It hangs off *preflight deliberately — see that type's comment. The receiver
+// is unused; it is the compiler-checked evidence that the re-seed's
+// dependencies were reachable before this destroyed anything.
+func (*preflight) reset(ctx context.Context, dsn, demoDomain string) error {
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
 		return err
