@@ -8,7 +8,11 @@ description: >
 
 # /pr-review — 페르소나 리뷰 + PR 생성
 
-인자: `--deep` (master 가 kind 에 실제 설치), `--dry-run` (PR·이슈 생성 대신 명령만 출력), `--base-url URL` (기본 `https://kubeport.enzo.kr`).
+인자: `--deep` (master 가 kind 에 실제 설치), `--full` (전면 감사 — 아래 참조), `--dry-run` (PR·이슈 생성 대신 명령만 출력), `--base-url URL` (기본 `https://kubeport.enzo.kr`).
+
+**`--full` 이 없으면 기본은 diff 범위다.** 브라우저 리뷰어는 `CHANGED_FILES` 에 닿는 화면을 깊게 보고,
+나머지는 랜딩 → 카탈로그 → 배포 폼 스모크만 훑는다. 매 PR 마다 전체 앱을 전수 실측하면 이미 아는 기존 부채가
+실행마다 다시 쏟아져 트래커만 커진다. 전면 감사는 `--full` 로 주 1회 정도 따로 돌린다.
 
 ## 0. 사전 조건
 - 현재 브랜치가 `main` 이 아니어야 한다. 커밋되지 않은 변경이 있으면 멈추고 사용자에게 커밋을 요청.
@@ -24,6 +28,7 @@ description: >
 ```bash
 BASE_URL=${BASE_URL:-https://kubeport.enzo.kr}   # --base-url 인자가 있으면 그 값
 DEEP=false   # --deep 인자가 있으면 true
+FULL=false   # --full 인자가 있으면 true
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 HEAD=$(git rev-parse HEAD)
 git fetch -q origin main
@@ -42,6 +47,7 @@ BRANCH: <branch>
 HEAD: <sha>
 BASE_URL: <url>            (LIVE_OK=false 면 "UNREACHABLE")
 DEEP: <true|false>
+FULL: <true|false>            (false = diff 범위 우선, 나머지는 스모크만)
 SHOT_DIR: .claude/reviews/shots/<SAFE_BRANCH>   (리뷰어는 직접 쓰지 않는다 — 툴이 돌려준 경로 또는 ss_ ID 를 finding-schema.md "스크린샷 증거" 규칙대로 적는다)
 CHANGED_FILES:
 <목록>
@@ -68,8 +74,8 @@ find "$TEMP" -path '*claude-chrome-screenshots-*' -name 'screenshot-*.jpg' -newe
 (`$SHOT_DIR/.run-start` 는 §1 에서 `touch` 해 둔 마커. Windows Git Bash 에선 `$TEMP` 가 이미 설정돼 있다.) 리뷰어 YAML 의 임시 경로는 기록 파일(§5)에 쓸 때 `SHOT_DIR/<persona>/<파일명>` 으로 치환한다. `ss_xxxx` ID 만 있는 항목은 치환하지 않고 그대로 둔다 — 파일이 없다는 뜻이며, finding-schema.md 규칙대로 설명 + DOM 값이 근거를 대신한다.
 
 ## 4. 매니저
-`Agent(subagent_type="reviewer-manager")` 로 띄운다 (호출 규칙 참조). `BRANCH`, `HEAD`, `BASE_URL`, `DIFF_FILES`(이 필드에 `CHANGED_FILES` 값을 그대로 넣어 전달)와 6개 블록을 `--- <persona> ---` 구분자로 이어 전달. 응답을 `## PR_COMMENT` / `## ISSUES` / `## VERDICT` 로 자른다.
-`## PR_COMMENT` 본문이 통째로 코드 펜스(세 개의 백틱)로 감싸져 있으면 바깥 펜스 한 쌍을 벗긴다. `## VERDICT` 도 마찬가지. `## ISSUES` 는 `yaml` 코드 펜스 안의 YAML 을 파싱한다.
+`Agent(subagent_type="reviewer-manager")` 로 띄운다 (호출 규칙 참조). `BRANCH`, `HEAD`, `BASE_URL`, `DIFF_FILES`(이 필드에 `CHANGED_FILES` 값을 그대로 넣어 전달)와 6개 블록을 `--- <persona> ---` 구분자로 이어 전달. 응답을 `## PR_COMMENT` / `## ISSUES` / `## BACKLOG` / `## VERDICT` 로 자른다.
+`## PR_COMMENT` 본문이 통째로 코드 펜스(세 개의 백틱)로 감싸져 있으면 바깥 펜스 한 쌍을 벗긴다. `## VERDICT` 도 마찬가지. `## ISSUES` 와 `## BACKLOG` 는 각각 `yaml` 코드 펜스 안의 YAML 을 파싱한다.
 
 ## 5. 기록
 `.claude/reviews/<SAFE_BRANCH>.md` 에 쓴다:
@@ -106,15 +112,34 @@ PR_URL=$(gh pr view --json url -q .url)
 ```bash
 gh label create reviewer --color 5319e7 --force >/dev/null 2>&1
 gh label create "reviewer:<persona>" --color 5319e7 --force >/dev/null 2>&1
+gh label create "sev:blocks-visitor" --color B60205 --force >/dev/null 2>&1
+gh label create "sev:normal"         --color D93F0B --force >/dev/null 2>&1
+gh label create "sev:polish"         --color FEF2C0 --force >/dev/null 2>&1
 EXISTING=$(gh issue list --state open --label reviewer --search "reviewer-fp:<fingerprint>" --json number -q '.[0].number')
 if [ -n "$EXISTING" ]; then
   gh issue comment "$EXISTING" --body "다시 발견됨: $PR_URL 리뷰 (@<HEAD 7자>)"
 else
-  gh issue create --title "[reviewer:<persona>] <title>" --label reviewer --label "reviewer:<persona>" \
+  gh issue create --title "[reviewer:<persona>] <title>" --label reviewer --label "reviewer:<persona>" --label "sev:<impact>" \
     --body-file /tmp/issue-<n>.md     # body + "\n\n발견 PR: $PR_URL\n\n<!-- reviewer-fp:<fingerprint> -->"
 fi
 ```
 생성/코멘트된 이슈 URL 을 모아 `PR_COMMENT` 의 "이슈로 넘긴 기존 문제" 목록 항목을 URL 로 치환한다.
+
+## 7b. 백로그 append
+
+`## BACKLOG` 가 비어 있지 않으면 각 항목을 `docs/api-agent-backlog.md` 의 `## 항목` 절 **끝에** 이어 붙인다.
+이슈는 만들지 않는다.
+
+```markdown
+### N. <title> (<persona>, <PR_URL> 리뷰에서)
+
+<body>
+```
+
+번호는 문서에 있는 마지막 번호 + 1. 같은 주제가 이미 있으면 **추가하지 말고** 해당 항목에
+"<PR_URL> 리뷰에서 다시 지적됨" 한 줄만 덧붙인다.
+
+변경된 문서는 이 PR 에 커밋한다 (`git add docs/api-agent-backlog.md`). `--dry-run` 이면 append 할 내용만 출력.
 
 ## 8. PR 코멘트
 ```bash
@@ -122,7 +147,7 @@ gh pr comment "$PR_URL" --body-file /tmp/pr-comment.md
 ```
 
 ## 9. 마무리 보고 (사용자에게)
-PR URL, draft 여부, P0/P1/P2 합계, 이슈 N건(신규/코멘트), 미검증 페르소나와 사유. `SHOT_DIR` 경로와 회수된 파일 수 (0 이면 "확장이 이 세션에선 파일을 저장하지 않음 — evidence 는 ss_ ID + 설명" 이라고 명시).
+PR URL, draft 여부, P0/P1/P2 합계, 이슈 N건(신규/코멘트, `sev:*` 분포), 백로그 append N건, 미검증 페르소나와 사유. `SHOT_DIR` 경로와 회수된 파일 수 (0 이면 "확장이 이 세션에선 파일을 저장하지 않음 — evidence 는 ss_ ID + 설명" 이라고 명시).
 
 ## 실패 처리
 - 리뷰어 하나가 실패해도 계속. 매니저가 "미검증" 으로 표기.
