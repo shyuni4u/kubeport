@@ -16,13 +16,19 @@ function makeRepo() {
   return { dir, sha: run("git rev-parse HEAD") };
 }
 
-function runHook(command, { root, env = {} } = {}) {
-  const input = JSON.stringify({ tool_name: "Bash", tool_input: { command } });
+function runHook(command, { root, cwd, env = {} } = {}) {
+  const payload = { tool_name: "Bash", tool_input: { command } };
+  if (cwd) payload.cwd = cwd;
   return spawnSync("node", [HOOK], {
-    input,
+    input: JSON.stringify(payload),
     env: { ...process.env, PR_REVIEW_SKIP: "", PR_REVIEW_ROOT: root ?? "", ...env },
     encoding: "utf8",
   });
+}
+
+function writeReview(dir, branchFile, sha) {
+  mkdirSync(join(dir, ".claude/reviews"), { recursive: true });
+  writeFileSync(join(dir, ".claude/reviews", branchFile), `# review\n\nHEAD: ${sha}\n`);
 }
 
 test("non gh-pr-create commands pass through", () => {
@@ -78,6 +84,50 @@ test("real gh pr create after a heredoc is still blocked", () => {
   const { dir } = makeRepo();
   const cmd = "cat > body.md <<'EOF'\nsummary\nEOF\ngh pr create --body-file body.md";
   assert.equal(runHook(cmd, { root: dir }).status, 2);
+});
+
+// CLAUDE.md tells you to run plan work in a git worktree. The session's cwd is
+// then the worktree, while CLAUDE_PROJECT_DIR still points at the checkout
+// Claude Code was launched in — so resolving against the env var alone reads
+// the wrong branch and HEAD entirely.
+test("resolves against the payload cwd, not CLAUDE_PROJECT_DIR", () => {
+  const launched = makeRepo(); // still on feat/x, no review record
+  const { dir: work, sha } = makeRepo();
+  execSync("git branch -m feat/other", { cwd: work, stdio: "pipe" });
+  writeReview(work, "feat__other.md", sha);
+
+  const r = runHook("gh pr create --title x", {
+    cwd: work,
+    env: { CLAUDE_PROJECT_DIR: launched.dir },
+  });
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test("a real worktree is checked against its own branch", () => {
+  const { dir } = makeRepo();
+  const wt = join(dir, "..", `wt-${Date.now()}`);
+  execSync(`git worktree add -q -b feat/wt "${wt}"`, { cwd: dir, stdio: "pipe" });
+  const wtSha = execSync("git rev-parse HEAD", { cwd: wt, stdio: "pipe" }).toString().trim();
+
+  // The main checkout's record must not satisfy the worktree's branch.
+  writeReview(dir, "feat__x.md", wtSha);
+  const missing = runHook("gh pr create", { cwd: wt, env: { CLAUDE_PROJECT_DIR: dir } });
+  assert.equal(missing.status, 2);
+  assert.match(missing.stderr, /feat\/wt/);
+
+  // The worktree's own record does. `--show-toplevel` resolves to the worktree,
+  // so the file is expected next to the work, not in the main checkout.
+  writeReview(wt, "feat__wt.md", wtSha);
+  const ok = runHook("gh pr create", { cwd: wt, env: { CLAUDE_PROJECT_DIR: dir } });
+  assert.equal(ok.status, 0, ok.stderr);
+});
+
+test("PR_REVIEW_ROOT still overrides the payload cwd", () => {
+  const { dir, sha } = makeRepo();
+  writeReview(dir, "feat__x.md", sha);
+  const elsewhere = makeRepo();
+  const r = runHook("gh pr create", { root: dir, cwd: elsewhere.dir });
+  assert.equal(r.status, 0, r.stderr);
 });
 
 test("malformed stdin passes through (never break unrelated tools)", () => {
