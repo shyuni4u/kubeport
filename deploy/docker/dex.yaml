@@ -5,6 +5,10 @@ web:
   https: 0.0.0.0:5556
   tlsCert: /config/certs/dex.crt
   tlsKey: /config/certs/dex.key
+# Plaintext /healthz + /metrics, container-internal only (not published to the
+# host). The compose healthcheck probes this — see docker-compose.yml.
+telemetry:
+  http: 0.0.0.0:5558
 oauth2:
   passwordConnector: local
 enablePasswordDB: true

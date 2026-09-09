@@ -5,7 +5,7 @@
 > Template-driven self-service portal for Kubernetes.
 > Admins publish YAML + ui-spec templates; non-experts deploy and operate via abstracted forms.
 
-**Status:** Plans 1 and 2 shipped. Admins can build templates in a UI editor, own them via teams, deprecate versions; users deploy, see status, and never see deprecated templates in the catalog. Plan 3 (User observability) is not written yet.
+**Status:** Live at <https://kubeport.enzo.kr> (OCI Always Free A1), including a public demo mode you can click through without an account. Shipped and in production: the admin template editor, catalog, RBAC-aware deploy forms, release detail with live logs, DB↔cluster drift cleanup, and a single Helm chart that installs the whole stack. See [CLAUDE.md](CLAUDE.md) for the plan-by-plan table and what is still deferred.
 
 ---
 
@@ -64,7 +64,7 @@ Browser ── Next.js (k8s Pod, BFF) ── Go API (in k8s) ── Target k8s c
 ```
 
 - **Frontend**: Next.js 15 (App Router), Tailwind + shadcn/ui, Monaco for YAML, React Hook Form + Zod for dynamic forms. Shipped as a k8s `Deployment` alongside the Go API in the same Helm chart — one `helm install` boots the whole stack.
-- **Backend**: Go 1.22, Gin, `client-go`, `sqlc`, `atlas`, `coreos/go-oidc`.
+- **Backend**: Go 1.26+, Gin, `client-go`, `sqlc`, `atlas`, `coreos/go-oidc`.
 - **Data**: PostgreSQL 16 in prod (SQLite for dev); OIDC + httpOnly cookie session, refresh tokens encrypted at rest.
 - **Security model**: the app is a UX layer. Every k8s write is performed with the signed-in user's OIDC id_token, so Kubernetes RBAC decides what actually happens.
 
@@ -106,7 +106,7 @@ make e2e
 ## Prerequisites
 
 - Docker (for local Postgres + dex)
-- Go 1.22+
+- Go 1.26+
 - Node 20+, pnpm 9+
 - [`atlas`](https://atlasgo.io) CLI (DB migrations), `sqlc`
 - (e2e only) a kind cluster and `kubectl`

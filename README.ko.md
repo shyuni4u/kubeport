@@ -5,7 +5,7 @@
 > Kubernetes 를 위한 템플릿 기반 셀프서비스 포털.
 > 관리자는 YAML + ui-spec 템플릿을 발행하고, 비전문 사용자는 추상화된 폼으로 배포·운영한다.
 
-**상태:** Plan 1·2 출시. 관리자는 UI 에디터로 템플릿을 만들고 팀으로 소유하며 버전을 deprecate할 수 있다. 사용자는 배포·상태 조회가 가능하고 카탈로그에 deprecated 버전은 보이지 않는다. Plan 3(User observability) 미작성.
+**상태:** <https://kubeport.enzo.kr> 에서 라이브 운영 중(OCI Always Free A1). 계정 없이 눌러볼 수 있는 데모 모드도 함께 열려 있다. 출시 완료: 관리자 템플릿 에디터, 카탈로그, RBAC 반영 배포 폼, 실시간 로그가 있는 릴리스 상세, DB↔클러스터 drift 회수, 그리고 스택 전체를 한 번에 올리는 Helm chart. 플랜별 진행 상황과 보류 항목은 [CLAUDE.md](CLAUDE.md) 참조.
 
 ---
 
@@ -64,7 +64,7 @@ Browser ── Next.js (k8s Pod, BFF) ── Go API (in k8s) ── Target k8s c
 ```
 
 - **프론트엔드**: Next.js 15 (App Router), Tailwind + shadcn/ui, YAML 은 Monaco, 동적 폼은 React Hook Form + Zod. Go API 와 같은 Helm chart 안의 k8s `Deployment` 로 배포 — `helm install` 한 번으로 스택 전체가 올라간다.
-- **백엔드**: Go 1.22, Gin, `client-go`, `sqlc`, `atlas`, `coreos/go-oidc`.
+- **백엔드**: Go 1.26+, Gin, `client-go`, `sqlc`, `atlas`, `coreos/go-oidc`.
 - **데이터**: 운영은 PostgreSQL 16 (개발은 SQLite), OIDC + httpOnly 쿠키 세션, 리프레시 토큰은 저장 시 암호화.
 - **보안 모델**: 앱은 UX 레이어일 뿐이다. 모든 k8s 쓰기는 로그인한 사용자의 OIDC id_token 으로 수행되므로, 실제 허용 여부는 Kubernetes RBAC 가 결정한다.
 
@@ -106,7 +106,7 @@ make e2e
 ## 필수 도구
 
 - Docker (로컬 Postgres + dex)
-- Go 1.22+
+- Go 1.26+
 - Node 20+, pnpm 9+
 - [`atlas`](https://atlasgo.io) CLI, `sqlc`
 - (e2e 전용) kind 클러스터 + `kubectl`

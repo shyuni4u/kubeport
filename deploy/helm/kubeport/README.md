@@ -5,10 +5,10 @@ optional in-cluster Postgres, an Ingress, an optional cert-manager
 Certificate, and an `atlas schema apply` initContainer that runs ahead of
 the backend container on every Pod start.
 
-Target environments — k3s (Phase 1/2/3 per [ADR 0003](../../decisions/0003-hosting-oci-always-free.md))
+Target environments — k3s (Phase 1/2/3 per [ADR 0003](../../../docs/decisions/0003-hosting-oci-always-free.md))
 and any conformant Kubernetes cluster with cert-manager + an Ingress
 controller. Cloud-neutrality is by design: only `ingress.className`,
-`postgres.storageClassName`, the public host, and the OIDC issuer URL
+`postgres.storage.storageClassName`, the public host, and the OIDC issuer URL
 should differ between environments.
 
 ## Quick install (Phase 1 — GCP bootstrap)
@@ -45,10 +45,51 @@ helm install kubeport deploy/helm/kubeport \
   --namespace kubeport --create-namespace \
   --set host=demo.kubeport.example \
   --set oidc.clientId=$GOOGLE_OAUTH_CLIENT_ID \
+  --set oidc.audience=$GOOGLE_OAUTH_CLIENT_ID \
   --set auth.appEncryptionKeyB64=$ENC_KEY \
   --set auth.oidcClientSecret=$GOOGLE_OAUTH_CLIENT_SECRET \
   --set postgres.password=$PG_PASS
 ```
+
+## After install — required on every cluster
+
+`helm install` gets the app running and lets people log in. It does **not** yet
+let the app deploy anything. The backend forwards each user's own OIDC token to
+the target cluster's API server, so that cluster has to accept the token and the
+user has to hold RBAC on it. Skip these steps and you reach the catalog with
+**zero deployable clusters** — the cluster dropdown is empty and nothing else
+looks broken.
+
+The three steps below are cluster-agnostic (GKE / EKS / AKS / k3s alike). Full
+commands, verification, and the k3s specifics are in `deploy/oci/README.md` §7
+([link](../../oci/README.md)) — that file is named for OCI, but §7 is not
+OCI-specific.
+
+1. **Make the target API server trust your IdP** (§7.1) — an
+   `AuthenticationConfiguration` whose `issuer.url` is your OIDC issuer and whose
+   `audiences` is your OAuth client ID. Managed clusters use their own mechanism
+   instead of a static file (GKE Workload Identity, EKS
+   `associate-identity-provider-config`, AKS OIDC integration).
+
+2. **Bind RBAC for the operator** (§7.3) — the app never grants k8s permissions
+   itself, it only reflects them:
+
+   ```bash
+   kubectl create clusterrolebinding kubeport-owner-admin \
+     --clusterrole=cluster-admin --user="<operator email>"
+   ```
+
+   Ordinary users need only namespace-scoped Roles; the deploy form's RBAC panel
+   shows whatever `SelfSubjectAccessReview` reports for that user.
+
+3. **Register the cluster as a deploy target** (§7.4) — `POST /v1/clusters`
+   (admin only) with `api_url`, `ca_bundle`, `oidc_issuer_url`, and
+   `default_namespace`. There is no cluster-registration screen in the admin UI
+   yet, so call the API with an admin token.
+
+**Verify the whole chain:** log in → publish a template → deploy it from the
+catalog → real Pods show up in the release detail. If the cluster dropdown is
+empty, step 3 is missing; if a deploy fails with 401, step 1; with 403, step 2.
 
 ## Upgrade
 
@@ -236,12 +277,19 @@ make helm-lint
 make helm-snapshot
 ```
 
+`make helm-snapshot` is version-sensitive: CI pins Helm **v3.20.2**
+(`.github/workflows/helm.yml`), and Helm 4 renders an extra blank line before
+each `---` separator. On Helm 4 the diff is all-blank-line noise even with an
+unmodified chart — that is a local toolchain mismatch, not template drift. Match
+the pinned version before trusting the result, and never run
+`helm-snapshot-update` to "fix" it.
+
 For a real install on a kind cluster, follow the kind-smoke job in
 `.github/workflows/helm.yml` — same flow, same `ci/smoke-values.yaml`.
 
 ## See also
 
-- [Plan 9 — Helm chart MVP](../../docs/superpowers/plans/2026-04-29-plan9-helm-chart.md)
-- [ADR 0001](../../docs/decisions/0001-frontend-deployment-helm-over-vercel.md) — frontend in same Helm chart as backend
-- [ADR 0003](../../docs/decisions/0003-hosting-oci-always-free.md) — 3-Phase hosting decision tree
-- [docs/deploy/images.md](../../docs/deploy/images.md) — multi-arch image build pipeline
+- [Plan 9 — Helm chart MVP](../../../docs/superpowers/plans/2026-04-29-plan9-helm-chart.md)
+- [ADR 0001](../../../docs/decisions/0001-frontend-deployment-helm-over-vercel.md) — frontend in same Helm chart as backend
+- [ADR 0003](../../../docs/decisions/0003-hosting-oci-always-free.md) — 3-Phase hosting decision tree
+- [docs/deploy/images.md](../../../docs/deploy/images.md) — multi-arch image build pipeline

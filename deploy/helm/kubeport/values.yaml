@@ -33,12 +33,17 @@ host: kubeport.example.com  # override per environment
 # IdP you choose (Google: https://accounts.google.com, dex self-hosted, etc.)
 oidc:
   issuer: ""          # required — chart fails template render if empty
+  # MUST equal the `aud` claim of the IdP's id_token. Google and most IdPs set
+  # aud = client_id, so set this to the same value as clientId. Leaving the
+  # default with such an IdP makes every login fail token validation (401).
   audience: kubeport
   clientId: ""        # required
   # redirectUri auto-derived from .Values.host if left empty:
   redirectUri: ""
   # OAuth scopes requested at login. Empty = "openid email profile" (works with
-  # Google). Group-aware IdPs (Dex/Keycloak) can add groups: "openid email profile groups".
+  # Google — it rejects an unknown `groups` scope at the consent screen, so leave
+  # this empty there). Group-aware IdPs (Dex/Keycloak) can add groups:
+  # "openid email profile groups".
   scopes: ""
 
 # ----- Auth secrets -------------------------------------------------------

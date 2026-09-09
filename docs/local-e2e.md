@@ -41,7 +41,7 @@ a pod come up.
 ## Prereqs (install once per machine)
 
 - Docker Desktop (WSL2 integration on for Windows)
-- Go 1.22+, Node 20+, pnpm 9+
+- Go 1.26+, Node 20+, pnpm 9+
 - `atlas`, `kind` (`v0.23+`), `kubectl`, `jq`
 - `openssl`
 
