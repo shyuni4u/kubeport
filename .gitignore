@@ -18,6 +18,9 @@ Thumbs.db
 # Per-developer Claude Code settings (shared ones can be committed separately)
 .claude/settings.local.json
 
+# /pr-review 로컬 기록 (브랜치별 매니저 결과 + HEAD sha)
+.claude/reviews/
+
 # Go (once backend/ lands in Plan 1)
 backend/bin/
 backend/*.test
@@ -34,3 +37,4 @@ frontend/out/
 
 # Git worktrees (superpowers convention)
 .worktrees/
+.claude/worktrees/
