@@ -1,0 +1,60 @@
+version: 2
+
+# Division of labour: dependabot watches version drift, the weekly audit
+# routine reviews code. Grouping keeps a weekly run to a handful of PRs rather
+# than one per package — the point is to notice a security advisory, not to
+# spend the week reviewing patch bumps one at a time.
+updates:
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # next + eslint-config-next must move together; they are pinned to the
+      # same exact version on purpose.
+      next:
+        patterns: ["next", "eslint-config-next", "@next/*"]
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+      dev-minor-patch:
+        dependency-type: development
+        update-types: ["minor", "patch"]
+      prod-minor-patch:
+        dependency-type: production
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: gomod
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      k8s:
+        patterns: ["k8s.io/*", "sigs.k8s.io/*"]
+      minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Base images for the backend/frontend containers and the compose stack.
+  - package-ecosystem: docker
+    directories:
+      - /backend
+      - /frontend
+      - /deploy/docker
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      images:
+        patterns: ["*"]

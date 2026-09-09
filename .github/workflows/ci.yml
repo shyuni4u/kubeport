@@ -108,6 +108,30 @@ jobs:
       - name: Unit tests
         run: cd frontend && pnpm test
 
+  audit:
+    # Separate job on purpose: the advisory database changes without anyone
+    # touching this repo, so a new finding must not look like a test failure.
+    # Gated at critical and --prod only — high is currently 2 (browserslist and
+    # dompurify, both transitive and both waiting on upstream), so gating there
+    # would mean a permanently red job nobody reads.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: cd frontend && pnpm install --frozen-lockfile
+      - name: Audit production dependencies
+        run: cd frontend && pnpm audit --prod --audit-level critical
+      - name: Report everything else (informational)
+        if: always()
+        run: cd frontend && pnpm audit || true
+
   hooks:
     # The /pr-review guard is repo tooling with its own node:test suite; it is
     # cheap enough to keep honest.
