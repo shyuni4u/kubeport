@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 // PreToolUse hook: block `gh pr create` unless .claude/reviews/<branch>.md
 // records the current HEAD. Bypass: PR_REVIEW_SKIP=1. Test root: PR_REVIEW_ROOT.
+//
+// NOTE: settings.json loads this file from CLAUDE_PROJECT_DIR, so the copy that
+// actually runs is always the original checkout's working tree — while the
+// repository it *inspects* is the session cwd (see below). Editing this file in
+// a worktree therefore changes nothing until the original checkout has the
+// commit. If that checkout is on a branch without this file, node exits 1 and
+// the guard fails open silently.
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";

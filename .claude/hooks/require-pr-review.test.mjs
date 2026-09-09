@@ -1,19 +1,51 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), "require-pr-review.mjs");
 
+// Each makeRepo() leaves a git repo behind; on a dev machine that runs the
+// suite repeatedly they pile up in tmp.
+const CLEANUP = [];
+process.on("exit", () => {
+  for (const dir of CLEANUP) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Best effort — a leftover temp dir is not worth failing the run over.
+    }
+  }
+});
+
+// Neutralize the developer's global/system git config. This project is worked
+// on across home and work machines, and a global `commit.gpgsign=true` or
+// `core.hooksPath` would make the empty commit below fail — taking every test
+// in this file with it, for reasons that have nothing to do with the hook.
+const ISOLATED_GIT = {
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_SYSTEM: "/dev/null",
+};
+
+function git(cwd, cmd) {
+  return execSync(cmd, {
+    cwd,
+    stdio: "pipe",
+    env: { ...process.env, ...ISOLATED_GIT },
+  })
+    .toString()
+    .trim();
+}
+
 function makeRepo() {
   const dir = mkdtempSync(join(tmpdir(), "prreview-"));
-  const run = (cmd) => execSync(cmd, { cwd: dir, stdio: "pipe" }).toString().trim();
-  run("git init -q -b feat/x");
-  run('git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init');
-  return { dir, sha: run("git rev-parse HEAD") };
+  CLEANUP.push(dir);
+  git(dir, "git init -q -b feat/x");
+  git(dir, 'git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init');
+  return { dir, sha: git(dir, "git rev-parse HEAD") };
 }
 
 function runHook(command, { root, cwd, env = {} } = {}) {
@@ -105,9 +137,12 @@ test("resolves against the payload cwd, not CLAUDE_PROJECT_DIR", () => {
 
 test("a real worktree is checked against its own branch", () => {
   const { dir } = makeRepo();
-  const wt = join(dir, "..", `wt-${Date.now()}`);
-  execSync(`git worktree add -q -b feat/wt "${wt}"`, { cwd: dir, stdio: "pipe" });
-  const wtSha = execSync("git rev-parse HEAD", { cwd: wt, stdio: "pipe" }).toString().trim();
+  // Inside its own temp dir, not next to it, so cleanup takes the worktree too.
+  const wtParent = mkdtempSync(join(tmpdir(), "prreview-wt-"));
+  CLEANUP.push(wtParent);
+  const wt = join(wtParent, "wt");
+  git(dir, `git worktree add -q -b feat/wt "${wt}"`);
+  const wtSha = git(wt, "git rev-parse HEAD");
 
   // The main checkout's record must not satisfy the worktree's branch.
   writeReview(dir, "feat__x.md", wtSha);
