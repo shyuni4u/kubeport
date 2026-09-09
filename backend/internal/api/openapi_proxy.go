@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -132,7 +133,7 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 	}
 	up, err := url.Parse(cluster.ApiUrl)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "internal", err.Error())
+		internalError(c, "proxyOpenAPI: parse cluster api_url", err)
 		return
 	}
 	// JoinPath preserves any base prefix in the cluster URL (e.g. a reverse
@@ -147,7 +148,7 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 	}
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, up.String(), nil)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "internal", err.Error())
+		internalError(c, "proxyOpenAPI: build upstream request", err)
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+u.IDToken)
@@ -155,7 +156,11 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 
 	tr, err := h.openapi.transportFor(cluster.CaBundle.String)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "cluster-config", err.Error())
+		// The reason ("ca_bundle is not valid PEM", "no ca_bundle") is for the
+		// operator, not the caller — it goes to the log with the cluster name.
+		log.Printf("proxyOpenAPI: transport for cluster %s: %v", name, err)
+		writeError(c, http.StatusInternalServerError, "cluster-config",
+			"the cluster's TLS configuration is not usable; check its ca_bundle")
 		return
 	}
 	client := &http.Client{
@@ -164,7 +169,7 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		writeError(c, http.StatusBadGateway, "k8s-error", err.Error())
+		upstreamError(c, "proxyOpenAPI: upstream request", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -173,7 +178,7 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 	// "overflowed the limit" — io.LimitReader silently truncates otherwise.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(openapiMaxBytes)+1))
 	if err != nil {
-		writeError(c, http.StatusBadGateway, "k8s-error", err.Error())
+		upstreamError(c, "proxyOpenAPI: read upstream response", err)
 		return
 	}
 	if len(body) > openapiMaxBytes {
@@ -181,7 +186,15 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 		return
 	}
 	if resp.StatusCode >= 400 {
-		writeError(c, resp.StatusCode, "k8s-error", string(body))
+		// A 4xx from the apiserver is addressed to the caller ("no such group",
+		// "forbidden"), so it is passed through. A 5xx is the cluster's own
+		// trouble and its body can name internals; log it, don't echo it.
+		if resp.StatusCode >= 500 {
+			log.Printf("proxyOpenAPI: cluster %s returned %d: %s", name, resp.StatusCode, string(body))
+			writeError(c, http.StatusBadGateway, "k8s-error", "the cluster's OpenAPI endpoint returned an error")
+			return
+		}
+		writeError(c, resp.StatusCode, "k8s-error", string(body)) // raw-ok: 4xx body is the apiserver answering the caller
 		return
 	}
 

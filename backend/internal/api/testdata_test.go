@@ -2,11 +2,19 @@ package api_test
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"io"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"kubeport/internal/api"
 	"kubeport/internal/config"
@@ -38,6 +46,46 @@ fields:
 func newTestRouterAdmin(t *testing.T) http.Handler {
 	t.Helper()
 	return api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: testStore(t)})
+}
+
+// testCAPEM is a throwaway self-signed certificate, generated once per test
+// binary. Registering a cluster now validates the ca_bundle as PEM (#96), so
+// fixtures need a real one rather than a placeholder string — which is the
+// point: a paste error is caught at registration instead of at the first
+// deploy.
+var testCAPEM = sync.OnceValue(func() string {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		panic(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "kubeport-test-ca"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		panic(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+})
+
+// newAuthedRequest builds the same request `do` does, for tests that need to
+// set extra headers before sending.
+func newAuthedRequest(method, path string) *http.Request {
+	req := httptest.NewRequest(method, path, nil)
+	req.Header.Set("Authorization", "Bearer x")
+	return req
+}
+
+func serve(r http.Handler, req *http.Request) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
 }
 
 func do(t *testing.T, r http.Handler, method, path string, body io.Reader) *httptest.ResponseRecorder {

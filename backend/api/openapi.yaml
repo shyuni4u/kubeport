@@ -53,6 +53,19 @@ info:
     unsolved for Google — `docs/machine-clients.md` §2 and §3 spell out which is
     which, and issue #34 tracks the gap.
 
+    ## Correlating a failure
+
+    Every response carries `X-Request-Id`, and every error body repeats it as
+    `Problem.request_id`. A 500 no longer tells you what went wrong — the reason
+    was leaking connection strings and apiserver addresses (issue #49) — so the
+    id is what ties the response you are holding to the server's access-log
+    line. Send your own and it is kept, as long as it matches
+    `^[A-Za-z0-9._-]{1,64}$`.
+
+    Two paths are rate limited per caller: `POST /v1/selfsubjectaccessreview`
+    and the two cluster-openapi reads, which share one budget. A 429 carries
+    `Retry-After`.
+
 servers:
   - url: http://localhost:8080
     description: |
@@ -207,6 +220,11 @@ paths:
       description: |
         Proxies the cluster's own OpenAPI discovery, used by the template editor
         to offer resource kinds. Served from an in-process LRU cache.
+
+        **Rate limited**, sharing one per-caller budget with the sibling `{gv}`
+        route and `POST /v1/selfsubjectaccessreview`: a cache miss pulls up to
+        10 MiB from the apiserver, and a caller can force misses at will by
+        varying `gv` (issue #97).
       parameters:
         - $ref: "#/components/parameters/ClusterName"
       responses:
@@ -217,6 +235,7 @@ paths:
               schema: { type: object, additionalProperties: true }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "502": { $ref: "#/components/responses/UpstreamError" }
         "500": { $ref: "#/components/responses/InternalError" }
 
@@ -225,6 +244,14 @@ paths:
       tags: [clusters]
       operationId: getClusterOpenAPIGroupVersion
       summary: Schema for one group/version
+      description: |
+        Shares the per-caller rate-limit budget with the index route and
+        `POST /v1/selfsubjectaccessreview`.
+
+        `gv` is validated before it is joined onto the upstream URL: the group
+        must be a DNS subdomain and the version a DNS-1035 label, so a segment
+        can carry neither a `/` nor a `..` (issue #11). Anything else is a 400
+        rather than a proxied request.
       parameters:
         - $ref: "#/components/parameters/ClusterName"
         - name: gv
@@ -244,6 +271,7 @@ paths:
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "502": { $ref: "#/components/responses/UpstreamError" }
         "500": { $ref: "#/components/responses/InternalError" }
 
@@ -253,14 +281,17 @@ paths:
       operationId: refreshClusterOpenAPI
       summary: Drop the cached schema for this cluster
       description: |
-        Note: unlike the other cluster write, this carries no admin or demo
-        gate — any authenticated caller can clear the cache, and the next read
-        re-fetches the full schema from the apiserver.
+        Admin only, and refused for demo-domain callers (issue #97) — the same
+        gate the other cluster write carries. Clearing the cache makes the next
+        read pull the full schema from the apiserver, up to 10 MiB, so an
+        ungated version let any authenticated caller amplify load onto the
+        control plane.
       parameters:
         - $ref: "#/components/parameters/ClusterName"
       responses:
         "204": { description: "Cache cleared. No body." }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/InternalError" }
 
@@ -273,6 +304,21 @@ paths:
         Forwards a `SelfSubjectAccessReview` using the caller's own token. This
         is how the deploy form greys out actions before submitting — prefer it
         over attempting the write and handling the failure.
+
+        SSAR grants nothing: it reports the caller's own access, and the
+        cluster's authorizer decides. What is bounded is the **shape and the
+        rate** of the question, because each one becomes a real call to the
+        apiserver (issue #73):
+
+        - `verb` must be one kubeport itself performs — see the enum on
+          `SSARRequest`. `deletecollection` is in it because that is what
+          release deletion actually needs, and k8s authorizes it under its own
+          verb rather than under `delete`.
+        - `(group, resource)` must be one of the MVP resources kubeport
+          applies. Asking about anything else is a 400 whose `detail` **lists
+          the allowed set**, so the rule is learnable without guessing.
+        - Over budget is a 429 with `Retry-After`. The budget is shared with the
+          two cluster-openapi read routes.
       requestBody:
         required: true
         content:
@@ -292,13 +338,23 @@ paths:
                   reason:
                     type: string
                     description: Free text from the cluster; may be empty.
-        "400": { $ref: "#/components/responses/ValidationError" }
+        "400":
+          description: |
+            Body malformed, a required field missing, or `verb` /
+            `(group, resource)` outside the allowed sets — `detail` names the
+            set in the latter two cases.
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404":
           description: No cluster is registered under that name.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
         "502": { $ref: "#/components/responses/UpstreamError" }
 
@@ -1100,11 +1156,24 @@ components:
       required: true
       schema: { type: string, format: uuid }
 
+  headers:
+    RequestId:
+      description: |
+        Echoed on **every** response, and equal to `Problem.request_id` on an
+        error. An inbound `X-Request-Id` matching `^[A-Za-z0-9._-]{1,64}$` is
+        adopted, so a caller's own id survives the BFF hop; anything else is
+        replaced with a generated one.
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9._-]{1,64}$"
+
   responses:
     Unauthenticated:
       description: |
         Missing, malformed or rejected token. Through the BFF this also covers a
         missing or expired session cookie.
+      headers:
+        X-Request-Id: { $ref: "#/components/headers/RequestId" }
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -1113,21 +1182,52 @@ components:
             title: unauthenticated
             status: 401
             detail: missing bearer token
+            request_id: 4d3f0a2c-7c1e-4a6b-9f10-2f5f1f0b8e21
     Forbidden:
       description: |
         `title` says who refused: `rbac-denied` is kubeport's own check or the
         cluster's RBAC; `demo-restricted` is a demo account hitting a write that
         demo accounts never get.
+      headers:
+        X-Request-Id: { $ref: "#/components/headers/RequestId" }
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Problem" }
     NotFound:
       description: No such resource.
+      headers:
+        X-Request-Id: { $ref: "#/components/headers/RequestId" }
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Problem" }
     ValidationError:
       description: The request body or a parameter did not validate.
+      headers:
+        X-Request-Id: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    RateLimited:
+      description: |
+        Over the per-caller budget (`rate-limited`). The budget is a token
+        bucket keyed by OIDC subject, in-process and per replica — it exists to
+        bound how often a caller can make kubeport talk to a cluster's control
+        plane, not to price the API (issue #73).
+
+        `Retry-After` says how many seconds to wait; honour it rather than
+        retrying at once or sleeping an arbitrary constant. The demo's two Dex
+        accounts are static, so concurrent demo visitors share one bucket.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying. Always present on a 429.
+          schema: { type: integer, minimum: 1 }
+        X-RateLimit-Limit:
+          description: Requests allowed per minute for this caller.
+          schema: { type: integer }
+        X-RateLimit-Remaining:
+          description: Always `0` here — the header is emitted only on refusal.
+          schema: { type: integer }
+        X-Request-Id: { $ref: "#/components/headers/RequestId" }
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -1137,16 +1237,32 @@ components:
         RBAC denial from the apiserver arrives here rather than as a 403, so
         this is not automatically a transient condition — check `detail` before
         retrying.
+
+        `detail` is the apiserver's own words **only when the apiserver
+        answered** — a Forbidden, Invalid, NotFound, AlreadyExists, Conflict or
+        Unauthorized verdict. `User "x" cannot create deployments` is why the
+        deploy failed and belongs on screen. When the call never got there, the
+        transport error names the cluster's internal address, so it goes to the
+        log and `detail` is only the operation that failed (issue #49).
+      headers:
+        X-Request-Id: { $ref: "#/components/headers/RequestId" }
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Problem" }
     InternalError:
       description: |
         Something failed on kubeport's side. `title` is `internal` for a
-        database or rendering failure, `cluster-config` when the stored cluster
-        registration cannot be turned into a client, or `k8s-error` when
-        building the k8s client itself failed (as opposed to the call to the
-        cluster failing, which is a 502).
+        database, rendering or k8s-client-construction failure, or
+        `cluster-config` when the stored registration's TLS material is not
+        usable.
+
+        **`detail` no longer carries the underlying error** (issue #49). A pgx
+        connect failure spelled out `host=… user=… database=…`, and a k8s
+        transport failure carried the apiserver's address — the same value
+        `GET /v1/clusters` deliberately withholds (#52). The reason is in the
+        server log; quote `request_id` to have it looked up.
+      headers:
+        X-Request-Id: { $ref: "#/components/headers/RequestId" }
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Problem" }
@@ -1179,8 +1295,16 @@ components:
         request_id:
           type: string
           description: |
-            Reserved. Nothing sets it today, so it is always absent — do not
-            build correlation on it yet.
+            Present on every 4xx and 5xx, and equal to the `X-Request-Id`
+            response header. Quote it when reporting a failure: a 500 keeps its
+            reason in the server log rather than the body, and this is what ties
+            the two together.
+
+            An inbound `X-Request-Id` is adopted when it matches
+            `^[A-Za-z0-9._-]{1,64}$`, so a caller's own trace survives the BFF
+            hop; anything else is replaced. The charset is enforced because
+            header values may contain spaces and `=`, which would let a crafted
+            id forge fields inside the access-log line.
 
     ErrorKind:
       type: string
@@ -1197,13 +1321,19 @@ components:
         - user-not-found    # 404 — email has never signed in
         - no-pods           # 404 — release has no pod matching ?instance
         - conflict          # 409 — name taken, or version in the wrong state
-        - k8s-error         # 502 when the call to the cluster failed;
-                            # 500 when the client could not be built at all.
-                            # The cluster-openapi proxy also passes the
-                            # upstream status through verbatim, so this kind
-                            # can appear with 401/403 there.
-        - cluster-config    # 500 — stored registration unusable
-        - internal          # 500
+        - rate-limited      # 429 — over the per-caller budget on the SSAR and
+                            # cluster-openapi routes. Carries Retry-After.
+        - k8s-error         # 502 — the call to the cluster failed or was
+                            # refused. No longer a 500: a client that could not
+                            # be built at all is now `internal`, because the
+                            # reason named the apiserver's address (#49).
+                            # The cluster-openapi proxy also passes an upstream
+                            # 4xx status through verbatim, so this kind can
+                            # appear with 401/403/404 on those two routes.
+        - cluster-config    # 500 — stored registration unusable; `detail` says
+                            # to check the cluster's ca_bundle, and the reason
+                            # is in the server log rather than the body
+        - internal          # 500 — reason withheld; quote `request_id`
 
     ClusterSummary:
       type: object
@@ -1223,14 +1353,19 @@ components:
             api_url: { type: string, format: uri }
             ca_bundle:
               type: [string, "null"]
-              description: PEM text, not base64.
+              description: |
+                PEM text, not base64. Null only on a cluster registered before
+                validation existed, or with `KBP_DEV_ALLOW_INSECURE_CLUSTERS`.
             oidc_issuer_url: { type: string, format: uri }
             created_at: { type: string, format: date-time }
             updated_at: { type: string, format: date-time }
 
     CreateClusterRequest:
       type: object
-      required: [name, api_url, oidc_issuer_url]
+      # ca_bundle is listed as required because the endpoint refuses without
+      # it. The one exception is a backend running with
+      # KBP_DEV_ALLOW_INSECURE_CLUSTERS=true, which is local dev only.
+      required: [name, api_url, ca_bundle, oidc_issuer_url]
       properties:
         name:
           type: string
@@ -1244,9 +1379,18 @@ components:
         ca_bundle:
           type: string
           description: |
-            PEM text, not base64. Optional, but **omitting it makes the backend
-            connect with TLS verification disabled** and still return 201 — the
-            response cannot tell you this happened. Set it outside local dev.
+            PEM text, not base64. **Required**, and validated here: an empty or
+            unparseable bundle is a 400 (issue #96).
+
+            It used to be optional, and omitting it made the backend connect
+            with TLS verification disabled while still returning 201 — on the
+            very path that forwards the user's id_token to the apiserver. It now
+            fails at registration rather than at the first deploy, where the
+            reason reached only the pod log and the UI reported "cluster
+            unreachable", pointing the operator at the network.
+
+            `KBP_DEV_ALLOW_INSECURE_CLUSTERS=true` on the backend restores the
+            old behaviour for a local kind cluster. Local dev only.
         oidc_issuer_url: { type: string, format: uri }
         default_namespace:
           type: string
@@ -1254,6 +1398,10 @@ components:
 
     SSARRequest:
       type: object
+      description: |
+        `verb` and `(group, resource)` are constrained to what kubeport itself
+        performs — see the endpoint description. A rejected request's `detail`
+        lists the set it violated.
       required: [cluster, verb, resource]
       properties:
         cluster: { type: string }
@@ -1262,10 +1410,27 @@ components:
           description: Empty checks cluster scope.
         verb:
           type: string
+          description: |
+            `deletecollection` is what release deletion needs; k8s authorizes
+            it under that verb, not under `delete`.
+          enum:
+            - create
+            - update
+            - patch
+            - delete
+            - deletecollection
+            - get
+            - list
+            - watch
           example: create
         group:
           type: string
-          description: Empty for core resources.
+          description: |
+            Empty for core resources. The pair `(group, resource)` must be one
+            of the MVP set: `configmaps`, `persistentvolumeclaims`, `secrets`,
+            `services`, `apps/daemonsets`, `apps/deployments`,
+            `apps/statefulsets`, `batch/cronjobs`, `batch/jobs`,
+            `networking.k8s.io/ingresses`.
           example: apps
         resource:
           type: string

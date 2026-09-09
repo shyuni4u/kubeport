@@ -2,12 +2,43 @@ package api
 
 import (
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"kubeport/internal/auth"
 	"kubeport/internal/k8s"
 )
+
+// ssarVerbs are the verbs kubeport itself performs, so they are the only ones
+// worth asking a cluster about: apply (create/update/patch), delete, and the
+// reads behind the release detail page.
+//
+// `deletecollection` is in the list because that is what release deletion
+// actually needs: DeleteByRelease calls DeleteCollection, and the k8s
+// authorizer checks it under its own verb, not `delete`. Leaving it out made
+// preflight answer a question nobody asks — a caller could be allowed `delete`
+// and still have the real delete refused.
+var ssarVerbs = map[string]bool{
+	"create":           true,
+	"update":           true,
+	"patch":            true,
+	"delete":           true,
+	"deletecollection": true,
+	"get":              true,
+	"list":             true,
+	"watch":            true,
+}
+
+func sortedSSARVerbs() []string {
+	out := make([]string, 0, len(ssarVerbs))
+	for v := range ssarVerbs {
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // ssarReq is the POST /v1/selfsubjectaccessreview body.
 //
@@ -30,14 +61,18 @@ type ssarReq struct {
 // denials (debounced per resource kind on the client side).
 //
 // No admin gate: any authenticated caller can ask "can I...?"; the cluster's
-// own authorizer decides the answer.
+// own authorizer decides the answer. What is bounded is the shape and the rate
+// of the question, because each one becomes a real call to the apiserver (#73).
 //
 // Error mapping:
-//   - malformed JSON body                  → 400 validation-error
-//   - missing cluster/verb/resource        → 400 validation-error
-//   - unknown cluster                      → 404 not-found
-//   - k8s client construction fails        → 500 k8s-error
-//   - SSAR API call fails (upstream error) → 502 k8s-error
+//   - malformed JSON body                   → 400 validation-error
+//   - missing cluster/verb/resource         → 400 validation-error
+//   - verb outside ssarVerbs                → 400 validation-error (lists the set)
+//   - (group, resource) outside mvpResources → 400 validation-error (lists the set)
+//   - over the per-caller budget            → 429 rate-limited, with Retry-After
+//   - unknown cluster                       → 404 not-found
+//   - k8s client construction fails         → 500 internal (reason logged, not returned)
+//   - SSAR API call fails (upstream error)  → 502 k8s-error
 //
 // Response shape: {"allowed": bool, "denied": bool, "reason": string}.
 func (h *Handlers) CheckSelfSubjectAccess(c *gin.Context) {
@@ -51,6 +86,25 @@ func (h *Handlers) CheckSelfSubjectAccess(c *gin.Context) {
 			"cluster, verb, and resource are required")
 		return
 	}
+	// Every question here turns into a real call to the target apiserver, so
+	// bound what can be asked to what kubeport itself does (issue #73). SSAR
+	// never grants anything — it reports the caller's own access — but an
+	// unbounded proxy is still an unmetered load path onto a single-node
+	// control plane, and the demo is open to anyone.
+	if !ssarVerbs[req.Verb] {
+		writeError(c, http.StatusBadRequest, "validation-error",
+			"verb must be one of: "+strings.Join(sortedSSARVerbs(), ", "))
+		return
+	}
+	if !k8s.IsMVPResource(req.Group, req.Resource) {
+		// Name the set rather than pointing at a list the caller cannot read —
+		// the verb error above already does, and a client that can only learn
+		// the rule by trial and error will keep making the calls this limit
+		// exists to prevent.
+		writeError(c, http.StatusBadRequest, "validation-error",
+			"group/resource must be one of: "+strings.Join(k8s.MVPResourceNames(), ", "))
+		return
+	}
 
 	ctx := c.Request.Context()
 	cluster, err := h.deps.Store.GetClusterByName(ctx, req.Cluster)
@@ -62,9 +116,9 @@ func (h *Handlers) CheckSelfSubjectAccess(c *gin.Context) {
 	u, _ := auth.UserFrom(ctx)
 	cli, err := h.deps.K8sFactory.NewWithToken(cluster.ApiUrl, cluster.CaBundle.String, u.IDToken)
 	if err != nil {
-		// Matches releases.go:188 — surface raw err.Error() for debugging
-		// (e.g. "caBundle is required"). Does not leak DB internals.
-		writeError(c, http.StatusInternalServerError, "k8s-error", err.Error())
+		// The reason names the cluster's api_url (see #96), so it goes to the
+		// log and the caller gets the request id to quote (#49).
+		internalError(c, "CheckSelfSubjectAccess: k8s client", err)
 		return
 	}
 
@@ -78,7 +132,7 @@ func (h *Handlers) CheckSelfSubjectAccess(c *gin.Context) {
 	if err != nil {
 		// 502 matches the "upstream k8s failed" semantics used in releases.go
 		// (ApplyAll / DeleteByRelease errors also surface as 502).
-		writeError(c, http.StatusBadGateway, "k8s-error", err.Error())
+		upstreamError(c, "CheckSelfSubjectAccess", err)
 		return
 	}
 

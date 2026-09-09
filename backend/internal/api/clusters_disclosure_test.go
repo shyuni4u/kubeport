@@ -33,9 +33,15 @@ func (demoAdminVerifier) Verify(_ context.Context, _ string) (auth.Claims, error
 func registerCluster(t *testing.T, r http.Handler) string {
 	t.Helper()
 	name := "disc-" + randSuffix()
-	body := bytes.NewReader([]byte(`{"name":"` + name + `","api_url":"https://secret-apiserver.internal",` +
-		`"ca_bundle":"-----BEGIN CERTIFICATE-----","oidc_issuer_url":"https://issuer.example",` +
-		`"default_namespace":"default"}`))
+	payload, err := json.Marshal(map[string]any{
+		"name":              name,
+		"api_url":           "https://secret-apiserver.internal",
+		"ca_bundle":         testCAPEM(),
+		"oidc_issuer_url":   "https://issuer.example",
+		"default_namespace": "default",
+	})
+	require.NoError(t, err)
+	body := bytes.NewReader(payload)
 	req := httptest.NewRequest(http.MethodPost, "/v1/clusters", body)
 	req.Header.Set("Authorization", "Bearer x")
 	req.Header.Set("Content-Type", "application/json")
@@ -118,9 +124,14 @@ func TestCreateCluster_StillReturnsFullRecord(t *testing.T) {
 	admin := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: s})
 
 	name := "disc-full-" + randSuffix()
-	body := bytes.NewReader([]byte(`{"name":"` + name + `","api_url":"https://apiserver.internal",` +
-		`"oidc_issuer_url":"https://issuer.example"}`))
-	req := httptest.NewRequest(http.MethodPost, "/v1/clusters", body)
+	full, err := json.Marshal(map[string]any{
+		"name":            name,
+		"api_url":         "https://apiserver.internal",
+		"oidc_issuer_url": "https://issuer.example",
+		"ca_bundle":       testCAPEM(),
+	})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/v1/clusters", bytes.NewReader(full))
 	req.Header.Set("Authorization", "Bearer x")
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

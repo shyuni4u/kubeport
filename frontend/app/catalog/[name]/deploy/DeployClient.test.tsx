@@ -108,17 +108,21 @@ describe("DeployClient", () => {
     render(<DeployClient templateName="web-app" version={1} team={null} spec={spec} />);
     await fillMeta(user);
 
+    // Wait on the *parent's* output, not the panel's row. RBACCheckPanel
+    // renders "권한이 거부되었습니다" from its own state and reports the verdict
+    // upward from a separate effect, so the button is still enabled for one
+    // commit after that row appears. Waiting on the row and then asserting the
+    // button synchronously is a race, and CI lost it.
     await waitFor(() => {
-      expect(screen.getByText(/권한이 거부되었습니다/)).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "권한이 없어 지금은 배포할 수 없습니다. '권한 확인' 안내를 확인한 뒤 관리자에게 요청하세요.",
+        ),
+      ).toBeInTheDocument();
     });
 
-    const button = screen.getByRole("button", { name: /배포하기/ });
-    expect(button).toBeDisabled();
-    expect(
-      screen.getByText(
-        "권한이 없어 지금은 배포할 수 없습니다. '권한 확인' 안내를 확인한 뒤 관리자에게 요청하세요.",
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/권한이 거부되었습니다/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /배포하기/ })).toBeDisabled();
   });
 
   it("keeps submission enabled when RBAC allows everything", async () => {

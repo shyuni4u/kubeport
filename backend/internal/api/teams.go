@@ -49,7 +49,7 @@ func (h *Handlers) ListTeams(c *gin.Context) {
 	if isKubeportAdmin(u) {
 		all, err := h.deps.Store.ListTeams(c)
 		if err != nil {
-			writeError(c, http.StatusInternalServerError, "internal", err.Error())
+			internalError(c, "ListTeams", err)
 			return
 		}
 		if all == nil {
@@ -67,7 +67,7 @@ func (h *Handlers) ListTeams(c *gin.Context) {
 	}
 	mine, err := h.deps.Store.ListTeamsForUser(c, user.ID)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "internal", err.Error())
+		internalError(c, "ListTeamsForUser", err)
 		return
 	}
 	if mine == nil {
@@ -132,7 +132,7 @@ func (h *Handlers) ListTeamMembers(c *gin.Context) {
 
 	members, err := h.deps.Store.ListTeamMembers(c, tid)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "internal", err.Error())
+		internalError(c, "ListTeamMembers", err)
 		return
 	}
 	if members == nil {
@@ -163,7 +163,7 @@ func (h *Handlers) AddTeamMember(c *gin.Context) {
 		Role:   r.Role,
 	})
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "internal", err.Error())
+		internalError(c, "AddTeamMember", err)
 		return
 	}
 	c.JSON(http.StatusCreated, m)
@@ -179,7 +179,7 @@ func (h *Handlers) RemoveTeamMember(c *gin.Context) {
 		return
 	}
 	if err := h.deps.Store.DeleteTeamMembership(c, store.DeleteTeamMembershipParams{TeamID: tid, UserID: uid}); err != nil {
-		writeError(c, http.StatusInternalServerError, "internal", err.Error())
+		internalError(c, "RemoveTeamMember", err)
 		return
 	}
 	c.Status(http.StatusNoContent)

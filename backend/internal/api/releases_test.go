@@ -123,7 +123,7 @@ func seedCluster(t *testing.T, r http.Handler) string {
 		"name":           name,
 		"api_url":        "https://k8s.example.com",
 		"oidc_issuer_url": "http://localhost:5556",
-		"ca_bundle":      "fake-ca",
+		"ca_bundle":      testCAPEM(),
 	})
 	w := do(t, r, http.MethodPost, "/v1/clusters", bytes.NewReader(body))
 	require.Equal(t, http.StatusCreated, w.Code, "seed cluster: %s", w.Body.String())

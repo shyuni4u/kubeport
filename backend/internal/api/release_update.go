@@ -128,11 +128,11 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 	// still consistent (reflects the old, still-deployed, state).
 	cli, err := h.deps.K8sFactory.NewWithToken(rel.ClusterApiUrl, rel.ClusterCaBundle.String, u.IDToken)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "k8s-error", err.Error())
+		internalError(c, "UpdateRelease: k8s client", err)
 		return
 	}
 	if err := cli.ApplyAll(ctx, rel.Namespace, rendered); err != nil {
-		writeError(c, http.StatusBadGateway, "k8s-error", err.Error())
+		upstreamError(c, "UpdateRelease: apply", err)
 		return
 	}
 

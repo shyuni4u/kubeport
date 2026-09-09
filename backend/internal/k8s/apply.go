@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -117,6 +118,35 @@ var mvpResources = []schema.GroupVersionResource{
 	{Group: "", Version: "v1", Resource: "configmaps"},
 	{Group: "", Version: "v1", Resource: "secrets"},
 	{Group: "", Version: "v1", Resource: "persistentvolumeclaims"},
+}
+
+// IsMVPResource reports whether (group, resource) is one kubeport itself
+// manages. `mvpResources` is the single source of truth for that set, so the
+// SSAR proxy can refuse to ask a cluster about anything kubeport would never
+// apply (issue #73) without a second list drifting from this one.
+func IsMVPResource(group, resource string) bool {
+	for _, gvr := range mvpResources {
+		if gvr.Group == group && gvr.Resource == resource {
+			return true
+		}
+	}
+	return false
+}
+
+// MVPResourceNames lists the same set as "group/resource", core group first as
+// a bare name. A rejected request quotes it, so a client learns the allowed set
+// from the error instead of guessing at it.
+func MVPResourceNames() []string {
+	out := make([]string, 0, len(mvpResources))
+	for _, gvr := range mvpResources {
+		if gvr.Group == "" {
+			out = append(out, gvr.Resource)
+			continue
+		}
+		out = append(out, gvr.Group+"/"+gvr.Resource)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // DeleteByRelease deletes all MVP resources matching the kubeport.io/release label.

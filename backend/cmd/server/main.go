@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"kubeport/internal/api"
@@ -17,12 +19,23 @@ import (
 )
 
 // k8sFactory adapts the k8s package constructors to api.K8sClientFactory.
-// Falls back to insecure TLS when no CA bundle is registered for the cluster
-// (local dev / kind). Production clusters must register a CA bundle.
+//
+// Every caller of this factory forwards the user's id_token to the cluster —
+// deploy, delete, logs, SSAR. An unverified connection there means handing a
+// bearer token to whoever answers the address. So an empty CA bundle is
+// refused unless the operator opted in, the same gate openapi_proxy.go already
+// applies to schema reads; before, the read path was guarded and the write
+// path was not (issue #96).
 type k8sFactory struct{}
 
 func (k8sFactory) NewWithToken(apiURL, caBundle, bearer string) (api.K8sApplier, error) {
-	if caBundle == "" {
+	if strings.TrimSpace(caBundle) == "" {
+		if os.Getenv("KBP_DEV_ALLOW_INSECURE_CLUSTERS") != "true" {
+			return nil, fmt.Errorf(
+				"cluster %s has no ca_bundle; register one, or set KBP_DEV_ALLOW_INSECURE_CLUSTERS=true for local dev (never in production)",
+				apiURL)
+		}
+		log.Printf("WARN: connecting to %s with TLS verification disabled (KBP_DEV_ALLOW_INSECURE_CLUSTERS=true)", apiURL)
 		return k8s.NewInsecureWithToken(apiURL, bearer)
 	}
 	return k8s.NewWithToken(apiURL, caBundle, bearer)

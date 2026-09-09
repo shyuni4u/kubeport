@@ -30,6 +30,12 @@ type Querier interface {
 	// same order instead of racing for the same rows, so neither deadlocks and
 	// neither comes back short while work remains (which the caller reads as
 	// "nothing left" and would otherwise end the pass early).
+	// The batch must be a CTE, not an IN (SELECT ... LIMIT). Postgres plans the
+	// latter as a semi-join and re-executes the subquery per outer row; with
+	// SKIP LOCKED each re-execution returns a *different* row, so the DELETE
+	// removes more than batch_size (EXPLAIN shows Nested Loop Semi Join over the
+	// Limit node). A CTE carrying a locking clause is never inlined, so it is
+	// evaluated exactly once.
 	DeleteExpiredSessions(ctx context.Context, batchSize int32) (int64, error)
 	DeleteRelease(ctx context.Context, id pgtype.UUID) error
 	DeleteSession(ctx context.Context, id pgtype.UUID) error
