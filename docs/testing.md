@@ -56,6 +56,10 @@ docker compose -f deploy/docker/docker-compose.yml down -v     # pgdata 볼륨�
 | `TEST_DATABASE_URL` | `postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable` | 통합 테스트 DB DSN. CI 에서 주입 가능 |
 | `TEST_DEX_ISSUER` (예정, Task 7) | `http://localhost:5556` | OIDC 테스트용 dex 이슈어 |
 | `TEST_KUBECONFIG` (예정, Task 12) | `$HOME/.kube/config` | k8s 테스트용 kubeconfig |
+| `OIDC_ISSUER` | `http://localhost:5556` | `internal/auth` 가 붙을 dex. HTTPS dex 는 `https://host.docker.internal:5556` |
+| `OIDC_CA_FILE` | (없음) | 자체서명 dex 인증서 경로 (`deploy/docker/certs/dex.crt`) |
+| `KBP_REQUIRE_DEX` | (없음) | `1` 이면 dex 미기동 시 skip 대신 FAIL. **CI 전용** — 없으면 조용히 skip 되어 초록이 되므로 |
+| `SKIP_OIDC` | (없음) | 값이 있으면 dex 기반 테스트를 무조건 skip. `KBP_REQUIRE_DEX=1` 과 함께 주면 에러 |
 
 ## 5. 관례
 
@@ -83,9 +87,10 @@ clusterName  := "test-" + stamp
 
 ## 6. 알려진 갭 / TODO
 
-- [ ] **Integration 테스트 skip 경로 미구현.** `TEST_DATABASE_URL` 없고 `localhost:5432` 접속 실패 시 테스트가 connection error 로 FAIL 한다. `t.Skip("postgres unavailable; set TEST_DATABASE_URL or run compose")` 필요. 빠른 방법은 `store_test.go` 의 `NewStore` 호출 전 `pgxpool.Ping` 프로브 추가.
+- [~] **Integration 테스트 skip 경로 — dex 만 구현.** `internal/auth` 는 `requireDex()`(`verifier_test.go`)가 dex 도달성을 프로브해 skip 하므로, 인증서 없는 새 클론에서도 `go test ./...` 가 초록이다. **postgres 경로는 아직 미구현** — `TEST_DATABASE_URL` 없고 `localhost:5432` 접속 실패 시 `internal/store`·`internal/api` 가 connection error 로 FAIL 한다. 같은 방식(`NewStore` 호출 전 `pgxpool.Ping` 프로브 + `t.Skip`)으로 맞출 것.
 - [ ] **`-short` 플래그 미적용.** 모든 통합 테스트에 `if testing.Short() { t.Skip(...) }` 가 없다.
-- [ ] **CI 파이프라인 부재.** `.github/workflows/` 에 unit 전용 job + integration job(compose 기동) 분리 필요. Task 22/23 에서 다룬다.
+- [x] **CI 파이프라인** — `.github/workflows/ci.yml` (2026-09-09 추가). backend(compose + atlas + `go test -p 1 ./...`, `KBP_REQUIRE_DEX=1`) / frontend(`pnpm typecheck`·`lint`·`test`) / `pnpm audit` / 훅 테스트 4개 job.
+- [ ] **패키지 병렬 실행 불가.** `internal/api` 의 `TestMain` 이 이름 패턴으로 공유 DB 를 정리하는데 `internal/store` 가 같은 타임스탬프 접미사를 쓴다 → 동시 실행 시 서로의 픽스처를 지운다. CI 는 `-p 1` 로 우회 중이며, 근본 해결은 패키지별 스키마 분리 또는 접미사 네임스페이싱.
 - [ ] **schema.hcl ↔ schema.sql 드리프트 가드 없음.** atlas 로 regen 후 `git diff --exit-code schema.sql` 을 CI 가 돌려야 한다.
 
 ## 7. 태스크별 테스트 프리리퀴짓 매트릭스

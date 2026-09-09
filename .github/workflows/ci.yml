@@ -86,9 +86,14 @@ jobs:
         # here because this workflow doesn't stand up a cluster — playwright.yml
         # is their gate. Listing the skips in the step summary keeps that
         # visible, so nobody reads a green check as "the k8s paths are covered".
+        # -p 1: internal/api's TestMain deletes rows from the shared DB by name
+        # pattern, and internal/store builds fixtures with the same timestamp
+        # suffix — run in parallel they delete each other's rows. Locally store
+        # happens to finish first; under runner load that order flips, and a new
+        # gate that flakes is worse than no gate.
         run: |
           set -o pipefail
-          cd backend && go test ./... -v 2>&1 | tee /tmp/go-test.log
+          cd backend && go test -p 1 ./... -v 2>&1 | tee /tmp/go-test.log
           {
             echo "### Skipped Go tests"
             grep -E '^\s*--- SKIP' /tmp/go-test.log || echo "none"

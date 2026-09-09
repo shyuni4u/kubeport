@@ -64,6 +64,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 | 리소스 범위 v1.1 | B안 — 관리자가 수동 등록한 CRD 지원 |
 | Lifecycle | B안 — Versioned 템플릿, 릴리스는 버전에 pin (Helm/ArgoCD 방식) |
 | 템플릿 저장소 | 앱 DB (MVP), Git 연동은 v2 |
+| 데모용 완화 | **기본값은 안전한 쪽, 데모 완화는 설치 시 환경변수로 opt-in** (§14). 공개 데모를 위해 느슨해지는 동작이 자가호스팅 설치본의 기본값이 되면 안 된다. 데모와 무관한 취약점은 플래그로 미루지 말고 고친다 |
 | `kuberport` 표기 | **고치지 말 것.** SSH 키·디렉터리의 실제 이름이다 (`~/.ssh/kuberport-oci/oci_kuberport`, gpg 번들, `upload-gha-secrets.sh` 폴백). 초기 오타에서 왔지만 이름을 바꾸면 프로덕션 접속 절차가 문서상 깨진다 — 커밋 `106825c` 에서 "실제 파일명은 유지, 스크립트만 새 이름 우선" 으로 결정. runbook §1 참조 |
 
 ## 기술 스택
@@ -184,6 +185,7 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
 - **Unit** (외부 의존 없음) — 예: `TestHealthz`
 - **Integration** (로컬 compose: postgres + dex) — 현재 기본. 예: `internal/store/*_test.go`
 - **e2e** (Playwright, 로컬 kind) — **로컬에서 먼저 돌린다**: `scripts/e2e/doctor.sh` → `up.sh` → `backend.sh`/`frontend.sh` → `seed.sh` → `run.sh` ([docs/local-e2e.md §0](docs/local-e2e.md)). 어느 PC 에서든 같은 순서, 전부 멱등. CI `playwright.yml` 은 백스톱(느리고 가끔 kind 플레이크).
+- **CI** — `.github/workflows/ci.yml` 이 모든 PR 에서 backend(compose + atlas + `go test -p 1 ./...`)·frontend(`pnpm typecheck`/`lint`/`test`)·`pnpm audit`·훅 테스트를 돌린다. e2e 는 `playwright.yml`, 차트는 `helm.yml`.
 
 **기본 커맨드** (컴포즈 기동 상태 가정):
 ```bash
@@ -192,10 +194,12 @@ cd backend && go test ./...
 ```
 
 **환경 변수**: `TEST_DATABASE_URL` 미지정 시 `postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable` 기본값.
+`KBP_REQUIRE_DEX=1` 이면 dex 미기동을 skip 대신 실패로 처리(CI 전용), `SKIP_OIDC` 는 dex 기반 테스트를 무조건 skip — 둘을 함께 주면 에러.
 
 **관례**:
 - 통합 테스트의 유니크 키는 `time.Now().Format("150405.000000")` (마이크로초 포함 — 초 단위는 재실행 시 충돌).
-- 통합 테스트에서 `t.Skip` 경로는 아직 미구현 — 컴포즈 없이는 실패함 ([docs/testing.md §6](docs/testing.md) TODO).
+- dex 를 쓰는 `internal/auth` 테스트는 dex 가 안 떠 있으면 `t.Skip` 한다 — 인증서가 없는 새 클론에서도 `go test ./...` 는 초록이다. CI 는 `KBP_REQUIRE_DEX=1` 로 skip 대신 실패시킨다. postgres 를 쓰는 `internal/store`·`internal/api` 는 아직 skip 경로가 없어 컴포즈가 필요하다 ([docs/testing.md §6](docs/testing.md)).
+- `go test ./...` 를 병렬로 돌리지 말 것 — `internal/api` 의 `TestMain` 이 이름 패턴으로 공유 DB 를 정리하는데 `internal/store` 가 같은 접미사를 쓴다. CI 는 `-p 1`.
 
 ## 용어 (한국어 문서 기준)
 
