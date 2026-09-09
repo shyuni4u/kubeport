@@ -31,7 +31,22 @@ func requireAuth(v TokenVerifier) gin.HandlerFunc {
 		raw := strings.TrimPrefix(h, "Bearer ")
 		claims, err := v.Verify(c.Request.Context(), raw)
 		if err != nil {
-			writeError(c, http.StatusUnauthorized, "unauthenticated", err.Error())
+			// Two things used to ride out on this, both unauthenticated:
+			//
+			// The issuer's address. A discovery failure is wrapped as
+			// `issuer %s: Get "https://…/.well-known/openid-configuration":
+			// dial tcp <ClusterIP>:<port>: connect: connection refused`, so
+			// while Dex was down anyone could read an in-cluster address —
+			// the leak #49 and #108 closed on 500s and on the log stream,
+			// still open on the one response you get without signing in.
+			//
+			// And the caller's own string. `unknown issuer %q` quotes an
+			// `iss` that auth.peekIssuer reads out of the JWT payload
+			// *without verifying the signature*, so anything you put in an
+			// unsigned token came back in the body, length-unbounded. That is
+			// the reflection this PR's own fallback test forbids.
+			logWithheld(c, "requireAuth: verify", err)
+			writeError(c, http.StatusUnauthorized, "unauthenticated", "token verification failed")
 			return
 		}
 		if claims.Email != "" {

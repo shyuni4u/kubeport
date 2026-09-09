@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requestIdFor, upstreamUrl } from "@/lib/bff-path";
+import { bffProblem } from "@/lib/bff-problem";
 import { getSession, getValidToken } from "@/lib/session";
 
 const STRIPPED_RESPONSE_HEADERS = new Set([
@@ -21,30 +22,25 @@ function filterUpstreamHeaders(upstream: Response): Headers {
   return out;
 }
 
-/** A Problem the BFF answers itself, carrying the same id as the log. */
-function bffProblem(kind: string, status: number, detail: string, requestId: string) {
-  return NextResponse.json(
-    {
-      type: `https://kubeport.io/errors/${kind}`,
-      title: kind,
-      status,
-      detail,
-      request_id: requestId,
-    },
-    { status, headers: { "X-Request-Id": requestId } },
-  );
-}
-
 async function proxy(
   req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
   const requestId = requestIdFor(req.headers);
-  const session = await getSession();
-  const token = session ? await getValidToken(session) : null;
+  let session: Awaited<ReturnType<typeof getSession>>;
+  let token: string | null;
+  try {
+    session = await getSession();
+    token = session ? await getValidToken(session) : null;
+  } catch (e) {
+    // getSession reads the sessions table. If Postgres is unreachable this
+    // threw out of the handler and Next answered its own 500 — no Problem, no
+    // X-Request-Id — which is the one response docs/machine-clients.md's
+    // "four responses the BFF answers itself" table does not cover.
+    console.error(`bff session id=${requestId}:`, e);
+    return bffProblem("internal", 500, "could not read the session", requestId);
+  }
   if (!token) {
-    // Same shape as the Go API's Problem (backend/internal/api/errors.go), so
-    // a client parses one schema across the whole /api/v1 surface (#56).
     return bffProblem("unauthenticated", 401, "no session cookie", requestId);
   }
 
@@ -80,7 +76,18 @@ async function proxy(
       // so the id can only travel as a header.
       return new NextResponse(null, { status: 499, headers: { "X-Request-Id": requestId } });
     }
-    throw e;
+    // Anything else here is the Go API being unreachable — refused, DNS
+    // failure, timeout. Rethrowing handed the caller Next's own 500: HTML, no
+    // Problem, no request id. "The backend is down" is the most ordinary
+    // failure an agent meets, and it was the one that escaped the schema.
+    //
+    // `internal`, not a new kind: the ErrorKind enum is guarded in both
+    // directions against the Go handlers, so a kind only the BFF emits would
+    // fail openapi_spec_test.go as "listed but never emitted". 502 rather than
+    // 500 because the failure is one hop away, and from the caller's side
+    // kubeport is what did not answer either way.
+    console.error(`bff proxy id=${requestId}:`, e);
+    return bffProblem("internal", 502, "the kubeport API did not answer", requestId);
   }
 
   return new NextResponse(upstream.body, {

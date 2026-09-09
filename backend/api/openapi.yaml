@@ -66,6 +66,33 @@ info:
     and the two cluster-openapi reads, which share one budget. A 429 carries
     `Retry-After`.
 
+    ## Every error is a Problem
+
+    There is one error shape and one `ErrorKind` vocabulary, and since #81 that
+    now includes the responses no handler produces:
+
+    - a path matching no route is `404 not-found`, not gin's `text/plain`
+      `404 page not found`;
+    - a wrong verb on a real path is `405 method-not-allowed`, not a 404 —
+      folding the two made an agent conclude the resource was gone and stop
+      retrying;
+    - errors inside an open SSE stream carry the same `Problem` schema as
+      errors before it opened (#82).
+
+    No fallback echoes the request path back. A 405 does tell an
+    **unauthenticated** caller that the path exists — the fallbacks run on the
+    router's global middleware, which is outside the `/v1` group's auth gate,
+    and gin's default folds this case into a 404 where this API deliberately
+    does not. The trade is accepted: the route list is public in this file
+    anyway, a 405 says only that some verb is registered there, and the `Allow`
+    header it carries is the point of answering 405 at all.
+
+    What a `detail` may say is bounded by who sent the words. kubeport's own
+    are always safe to show. The cluster's are shown only where they answer the
+    caller's question — an apiserver RBAC verdict, an unknown group/version —
+    and never when they describe the cluster's own internals; those go to the
+    log with the request id (#49, #83, #108).
+
 servers:
   - url: http://localhost:8080
     description: |
@@ -225,6 +252,9 @@ paths:
         route and `POST /v1/selfsubjectaccessreview`: a cache miss pulls up to
         10 MiB from the apiserver, and a caller can force misses at will by
         varying `gv` (issue #97).
+
+        The cluster's own status codes are **not** passed through, apart from
+        404 — see the `{gv}` route for the mapping, which is shared.
       parameters:
         - $ref: "#/components/parameters/ClusterName"
       responses:
@@ -234,9 +264,16 @@ paths:
             application/json:
               schema: { type: object, additionalProperties: true }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "404": { $ref: "#/components/responses/NotFound" }
+        "404":
+          description: |
+            Either kubeport has no such cluster (`not-found`) or the cluster's
+            OpenAPI root answered 404 (`k8s-error`). Branch on `title` — the
+            two routes share one handler, so both 404s occur here too.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "429": { $ref: "#/components/responses/RateLimited" }
-        "502": { $ref: "#/components/responses/UpstreamError" }
+        "502": { $ref: "#/components/responses/ClusterOpenAPIUpstream" }
         "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/clusters/{name}/openapi/{gv}:
@@ -252,6 +289,19 @@ paths:
         must be a DNS subdomain and the version a DNS-1035 label, so a segment
         can carry neither a `/` nor a `..` (issue #11). Anything else is a 400
         rather than a proxied request.
+
+        **The cluster's status codes are folded into kubeport's own** (issue
+        #83). Only 404 survives the trip, because "this cluster has no
+        `apps/v99`" is the apiserver answering the question that was asked;
+        tell it from a missing *cluster* by `title` (`k8s-error` vs
+        `not-found`). Everything else the cluster refuses becomes a 502:
+        `cluster-auth-denied` for its 401/403, `k8s-error` for the rest.
+
+        The 401/403 fold is the load-bearing one. Passed through, they said
+        "your kubeport session is bad" when the cluster had refused the
+        forwarded token, so a client would re-authenticate, receive an equally
+        unwelcome token, and loop. On these routes a 401 now means only what it
+        means everywhere else on `/v1`.
       parameters:
         - $ref: "#/components/parameters/ClusterName"
         - name: gv
@@ -270,9 +320,23 @@ paths:
               schema: { type: object, additionalProperties: true }
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "404": { $ref: "#/components/responses/NotFound" }
+        "404":
+          description: |
+            Either kubeport has no such cluster (`not-found`) or the cluster
+            has no such group/version (`k8s-error`). Branch on `title`.
+
+            The apiserver's own words appear in `detail` only for a kubeport
+            admin on a non-demo account — the same rule the SSAR `reason`
+            follows, and for the same reason: these two routes carry no admin
+            gate and no ownership check, so any authenticated caller can point
+            them at any registered cluster (#102). Everyone else gets a fixed
+            sentence. The status and the title, which is what a client branches
+            on, are identical either way.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "429": { $ref: "#/components/responses/RateLimited" }
-        "502": { $ref: "#/components/responses/UpstreamError" }
+        "502": { $ref: "#/components/responses/ClusterOpenAPIUpstream" }
         "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/clusters/{name}/openapi/refresh:
@@ -337,7 +401,20 @@ paths:
                   denied: { type: boolean }
                   reason:
                     type: string
-                    description: Free text from the cluster; may be empty.
+                    description: |
+                      **Do not branch on this.** It is populated only for
+                      kubeport admins on non-demo accounts, and is the empty
+                      string for everyone else — including demo accounts, which
+                      hold `kubeport-admin` for UX reasons (issue #102).
+
+                      When present it is the cluster authorizer's own sentence,
+                      which names the ClusterRoleBinding, ClusterRole and User
+                      involved. SSAR is open to any authenticated caller and
+                      reports only that caller's own access, so nothing is
+                      escalated by it; what leaked was the cluster's binding
+                      layout, one namespace at a time.
+
+                      Act on `allowed` / `denied` instead.
         "400":
           description: |
             Body malformed, a required field missing, or `verb` /
@@ -954,10 +1031,20 @@ paths:
         |---|---|
         | `log`   | `{"time": <unix ms>, "pod": "<name>", "text": "<line>"}` |
         | `ping`  | unix seconds, every 15s to keep the connection open |
-        | `error` | `{"error": "<message>"}` — note this is **not** a Problem, and the stream stays open (issue #82) |
+        | `error` | a `Problem`, same schema and same `ErrorKind` vocabulary as any other error. `title` is `rbac-denied` (403, the caller may read the release but not its pods' logs — permanent), `cluster-auth-denied` (502, the cluster refused the forwarded token — permanent), or `k8s-error` (502, transport or anything else — retryable) |
 
         Authentication failures before the stream opens are ordinary JSON
-        Problems; once it is open, failures arrive as `error` events.
+        Problems; once it is open, failures arrive as `error` events — and
+        since #82 the two are the same shape, so one parser covers both. The
+        frame carries `request_id`, which is the only way to reach the reason:
+        `detail` is deliberately generic because client-go's text names the
+        apiserver's address, the namespace and the pod, and this frame is
+        rendered verbatim in the log pane (#108).
+
+        An `error` frame does not by itself mean the stream is over. It ends
+        when the server closes the connection, which happens once every pod has
+        stopped emitting. Errors buffered at that moment are flushed before the
+        close — they used to race it and were dropped about half the time.
       parameters:
         - $ref: "#/components/parameters/ReleaseID"
         - name: instance
@@ -1249,6 +1336,51 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Problem" }
+    MethodNotAllowed:
+      description: |
+        The path exists but does not accept this method (`method-not-allowed`).
+
+        **`Allow` is the actionable part** — it lists the verbs this path does
+        accept, so a client can correct itself rather than concluding the
+        resource is gone. That conclusion is exactly what the old behaviour
+        produced: gin folds a wrong verb into its 404 unless
+        `HandleMethodNotAllowed` is set, and it was not (issue #81).
+
+        Every path in this document can answer 405; it is written by the
+        router's fallback rather than by any operation, so it is not repeated
+        under each one. It is also answered before the auth gate — see
+        "Every error is a Problem".
+      headers:
+        Allow:
+          description: "Comma-separated verbs this path accepts, e.g. `GET, POST`."
+          schema: { type: string }
+        X-Request-Id: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    ClusterOpenAPIUpstream:
+      description: |
+        The cluster's OpenAPI endpoint failed or refused the request. Branch on
+        `title`:
+
+        | `title` | meaning | retry? |
+        |---|---|---|
+        | `cluster-auth-denied` | the cluster rejected the token kubeport forwarded (its 401 or 403) | no — the caller's access to *that cluster* has to change |
+        | `k8s-error` | the call failed, or the cluster refused it for another reason | maybe — transient for a transport failure, not for a refusal |
+
+        `cluster-auth-denied` exists because the upstream 401 used to be passed
+        through, and a client cannot tell "kubeport does not know you" from
+        "the cluster does not know you" by status alone. The first is fixed by
+        signing in again; the second never is (issue #83).
+
+        `detail` is kubeport's own sentence in both cases — the cluster's
+        response body can name its internals, so it goes to the server log with
+        the request id.
+      headers:
+        X-Request-Id: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Problem" }
     InternalError:
       description: |
         Something failed on kubeport's side. `title` is `internal` for a
@@ -1280,9 +1412,12 @@ components:
         - It is served as `application/json`, not `application/problem+json`
           (`errors.go` uses gin's `AbortWithStatusJSON`). A strict RFC 7807
           client that content-negotiates on the media type will not match.
-        - A request to a path the router does not know never reaches this at
-          all: gin's default 404 is `text/plain`. So handle a non-JSON body on
-          4xx rather than assuming this schema. Tracked in issue #81.
+        - There is no non-JSON error left to handle. A path matching no route
+          is `404 not-found`, a wrong verb is `405 method-not-allowed`, and a
+          panic is `500 internal` — all in this schema. Until #81 the first two
+          were gin's `text/plain` defaults and the third had no body at all, so
+          a parser written before that needed a content-type fallback. It does
+          not any more. See "Every error is a Problem" above.
       required: [type, title, status]
       properties:
         type:
@@ -1317,9 +1452,13 @@ components:
         - rbac-denied       # 403 — kubeport's own check refused
         - demo-restricted   # 403 — demo account, write not available
         - validation-error  # 400 — body or parameter rejected
-        - not-found         # 404
+        - not-found         # 404 — no such object, and also the router's own
+                            # fallback for a path that matches no route (#81)
         - user-not-found    # 404 — email has never signed in
         - no-pods           # 404 — release has no pod matching ?instance
+        - method-not-allowed # 405 — the path exists, the verb does not. Gin
+                            # folded this into 404 until #81; an agent reading
+                            # "not found" concluded the resource was gone.
         - conflict          # 409 — name taken, or version in the wrong state
         - rate-limited      # 429 — over the per-caller budget on the SSAR and
                             # cluster-openapi routes. Carries Retry-After.
@@ -1327,9 +1466,16 @@ components:
                             # refused. No longer a 500: a client that could not
                             # be built at all is now `internal`, because the
                             # reason named the apiserver's address (#49).
-                            # The cluster-openapi proxy also passes an upstream
-                            # 4xx status through verbatim, so this kind can
-                            # appear with 401/403/404 on those two routes.
+                            # Also appears with 404 on the cluster-openapi
+                            # routes, where an unknown group/version is the
+                            # apiserver answering the question that was asked.
+                            # Carried by the SSE `error` frame as well.
+        - cluster-auth-denied # 502 — the *cluster* refused the token kubeport
+                            # forwarded. Its own kind because passing the
+                            # upstream 401 through said "your kubeport session
+                            # is bad" and sent clients into a re-login loop
+                            # (#83). Retrying without changing the cluster's
+                            # RBAC will not help.
         - cluster-config    # 500 — stored registration unusable; `detail` says
                             # to check the cluster's ca_bundle, and the reason
                             # is in the server log rather than the body

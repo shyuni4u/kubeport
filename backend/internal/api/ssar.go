@@ -139,6 +139,35 @@ func (h *Handlers) CheckSelfSubjectAccess(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"allowed": out.Allowed,
 		"denied":  out.Denied,
-		"reason":  out.Reason,
+		"reason":  h.visibleSSARReason(c, out.Reason),
 	})
+}
+
+// visibleSSARReason decides who gets to read the authorizer's own sentence.
+//
+// The RBAC authorizer explains itself by naming the objects involved:
+//
+//	RBAC: allowed by ClusterRoleBinding "kubeport-demo" of ClusterRole
+//	"kubeport-demo-deployer" to User "demo-user@demo.kubeport"
+//
+// SSAR is open to every authenticated caller by design — it reports only the
+// caller's own access, so no privilege boundary is crossed. What was crossed is
+// an information one: asking the same question across namespaces let anyone who
+// could log in map the cluster's binding names, and on the live demo "anyone
+// who can log in" means anyone at all, because the demo password is printed on
+// the landing page (issue #102).
+//
+// Real operators keep it: it names the binding they would have to edit, and
+// they can read the cluster's RBAC directly anyway. Demo accounts do not, even
+// though they carry kubeport-admin — that group exists so they can show the
+// admin UX, not so the demo publishes the host cluster's layout.
+//
+// The frontend already renders its own sentence for the user and uses this
+// only as admin hover text (RBACCheckPanel.tsx), so an empty string costs a
+// non-admin nothing they were meant to see.
+func (h *Handlers) visibleSSARReason(c *gin.Context, reason string) string {
+	if isAdmin(c) && !h.isDemoCaller(c) {
+		return reason
+	}
+	return ""
 }

@@ -158,7 +158,7 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 	if err != nil {
 		// The reason ("ca_bundle is not valid PEM", "no ca_bundle") is for the
 		// operator, not the caller — it goes to the log with the cluster name.
-		log.Printf("proxyOpenAPI: transport for cluster %s: %v", name, err)
+		logWithheld(c, "proxyOpenAPI: transport for cluster "+name, err)
 		writeError(c, http.StatusInternalServerError, "cluster-config",
 			"the cluster's TLS configuration is not usable; check its ca_bundle")
 		return
@@ -185,16 +185,12 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 		writeError(c, http.StatusBadGateway, "k8s-error", "OpenAPI response exceeds 10MiB limit")
 		return
 	}
-	if resp.StatusCode >= 400 {
-		// A 4xx from the apiserver is addressed to the caller ("no such group",
-		// "forbidden"), so it is passed through. A 5xx is the cluster's own
-		// trouble and its body can name internals; log it, don't echo it.
-		if resp.StatusCode >= 500 {
-			log.Printf("proxyOpenAPI: cluster %s returned %d: %s", name, resp.StatusCode, string(body))
-			writeError(c, http.StatusBadGateway, "k8s-error", "the cluster's OpenAPI endpoint returned an error")
-			return
-		}
-		writeError(c, resp.StatusCode, "k8s-error", string(body)) // raw-ok: 4xx body is the apiserver answering the caller
+	// Anything but 200 is folded, not just 4xx/5xx. A 3xx with no Location
+	// survives http.Client's redirect following, and the old `>= 400` guard let
+	// it fall through to the success path below — where the upstream body and
+	// content type were cached under a 200 for an hour.
+	if resp.StatusCode != http.StatusOK {
+		h.writeUpstreamOpenAPIError(c, name, resp.StatusCode, body)
 		return
 	}
 
@@ -204,6 +200,71 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 	}
 	h.openapi.cache.Add(key, openapiCacheEntry{body: body, storedAt: time.Now(), contentTy: ct})
 	c.Data(http.StatusOK, ct, body)
+}
+
+// upstreamDetailMax bounds how much of an upstream error body is quoted back.
+// The 10MiB read cap exists so a schema fits; it is not a sensible size for a
+// Problem detail, and nothing downstream reads past the first sentence anyway.
+const upstreamDetailMax = 512
+
+// writeUpstreamOpenAPIError maps a status the *cluster* chose onto one kubeport
+// owns. Passing the upstream status through verbatim made two of them lie
+// (issue #83):
+//
+//   - 401/403 said "your kubeport session is bad" when the cluster had refused
+//     the forwarded token. A client re-authenticates, gets an equally
+//     unwelcome token, and loops. PR #79 made "401 on /v1 means
+//     unauthenticated" an invariant; these two routes were the only exception,
+//     so the collision gets its own kind instead.
+//   - 429 collided with kubeport's own rate limiter, whose 429 carries
+//     Retry-After. A client would wait on a header that is not there.
+//
+// 404 is kept as-is: "this cluster has no apps/v99" is the apiserver answering
+// the question that was actually asked, and the editor's kind autocomplete
+// needs it to tell an unknown group from an unreachable cluster. It is
+// distinguishable from kubeport's own 404 (`not-found`) by title.
+func (h *Handlers) writeUpstreamOpenAPIError(c *gin.Context, cluster string, status int, body []byte) {
+	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		log.Printf("id=%s proxyOpenAPI: cluster %s refused the caller's token: %d", requestIDFrom(c), cluster, status)
+		writeError(c, http.StatusBadGateway, "cluster-auth-denied",
+			"the cluster rejected the credentials kubeport forwarded; this is the cluster's decision, not a kubeport session problem")
+	case status == http.StatusNotFound:
+		// The apiserver's words go only to the caller this PR decided may read
+		// the cluster's words at all — the same predicate the SSAR reason uses
+		// (#102). These two routes carry no requireAdmin and no demo gate, and
+		// proxyOpenAPI does not check cluster ownership, so "any authenticated
+		// caller" here includes a demo visitor pointing at the production
+		// cluster. Everyone else gets our sentence, which is all the editor's
+		// kind autocomplete needs: it branches on status and title.
+		detail := "this cluster has no such group/version"
+		if isAdmin(c) && !h.isDemoCaller(c) {
+			detail = truncate(string(body), upstreamDetailMax)
+		}
+		writeError(c, http.StatusNotFound, "k8s-error", detail)
+	case status >= 500:
+		// The cluster's own trouble, and its body can name internals.
+		log.Printf("id=%s proxyOpenAPI: cluster %s returned %d: %s", requestIDFrom(c), cluster, status, truncate(string(body), upstreamDetailMax))
+		writeError(c, http.StatusBadGateway, "k8s-error", "the cluster's OpenAPI endpoint returned an error")
+	default:
+		log.Printf("id=%s proxyOpenAPI: cluster %s returned %d: %s", requestIDFrom(c), cluster, status, truncate(string(body), upstreamDetailMax))
+		writeError(c, http.StatusBadGateway, "k8s-error",
+			"the cluster's OpenAPI endpoint refused the request")
+	}
+}
+
+// truncate cuts on a rune boundary. Slicing bytes splits a multi-byte
+// character and the JSON encoder replaces the half with U+FFFD, so a truncated
+// apiserver message came back visibly corrupted rather than merely short.
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
 }
 
 // buildTransport returns an http.RoundTripper that trusts the cluster's

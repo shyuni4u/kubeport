@@ -3,11 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"kubeport/internal/auth"
 )
@@ -87,16 +89,37 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 			return true
 		case err, ok := <-errCh:
 			if !ok {
-				return false
+				// A closed channel is always ready, so leaving it in the
+				// select would spin. Drop it and keep serving the other one.
+				errCh = nil
+				return ch != nil
 			}
 			if err != nil {
-				body, _ := json.Marshal(map[string]string{"error": err.Error()})
-				c.SSEvent("error", string(body))
+				// client-go's text names the apiserver's address, the
+				// namespace and the pod, and this frame is rendered verbatim
+				// in the log pane — for demo visitors too (issue #108). The
+				// reason goes to the log; the caller gets the request id.
+				//
+				// %q on the namespace: it is user input and, unlike Name, it
+				// carries no format binding, so a newline in it would forge a
+				// log line — the rule #72 set in accesslog.go.
+				logWithheld(c,
+					fmt.Sprintf("StreamReleaseLogs: release=%q namespace=%q stream",
+						rel.Name, rel.Namespace),
+					err)
+				status, kind := streamErrorKind(err)
+				sseError(c, status, kind, "the log stream from the cluster failed")
 			}
 			return true
 		case line, ok := <-ch:
 			if !ok {
-				return false
+				// StreamPodLogs buffers a pod's error and only then closes both
+				// channels, so at this point an error may already be waiting.
+				// Ending here would race it: select picks uniformly among ready
+				// cases, and the error frame was being dropped about half the
+				// time. Give up this channel and let errCh drain first.
+				ch = nil
+				return errCh != nil
 			}
 			body, _ := json.Marshal(map[string]any{
 				"time": time.Now().UnixMilli(),
@@ -107,4 +130,29 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 			return true
 		}
 	})
+}
+
+// streamErrorKind picks the kind for an in-stream failure.
+//
+// Folding every failure into one kind made the frame's vocabulary a set of
+// size one: the title never varied, so there was nothing to branch on, and the
+// only thing that changed per frame was the request id — which an automated
+// client cannot look up, since it cannot read the server's log. The
+// distinctions below are the ones that change what a client should do next,
+// and they come from the predicate ordinary responses already use.
+func streamErrorKind(err error) (int, string) {
+	switch {
+	case apierrors.IsUnauthorized(err):
+		// The cluster refused the forwarded token, not kubeport's session —
+		// the distinction #83 drew for the OpenAPI proxy. Re-authenticating
+		// against kubeport will not help.
+		return http.StatusBadGateway, "cluster-auth-denied"
+	case apierrors.IsForbidden(err):
+		// The caller may read the release but not its pods' logs. Permanent
+		// until someone changes the cluster's RBAC.
+		return http.StatusForbidden, "rbac-denied"
+	default:
+		// Transport failures and everything else: worth retrying.
+		return http.StatusBadGateway, "k8s-error"
+	}
 }

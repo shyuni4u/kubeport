@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -122,7 +123,11 @@ func kindsEmittedByHandlers(t *testing.T) map[string]bool {
 	files, err := filepath.Glob("*.go")
 	require.NoError(t, err)
 
-	re := regexp.MustCompile(`writeError\([^,]+,\s*[^,]+,\s*"([a-z0-9-]+)"`)
+	// sseError is included because the in-stream error frame carries the same
+	// ErrorKind vocabulary as an ordinary response (#82). Leaving it out would
+	// let a kind reach a client while the spec said nothing about it — the
+	// exact drift this file exists to catch.
+	re := regexp.MustCompile(`(?:writeError|sseError)\([^,]+,\s*[^,]+,\s*"([a-z0-9-]+)"`)
 	out := map[string]bool{}
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {
@@ -135,6 +140,50 @@ func kindsEmittedByHandlers(t *testing.T) map[string]bool {
 		}
 	}
 	require.NotEmpty(t, out, "found no writeError calls — the regex has stopped matching")
+
+	for k := range kindsEmittedByBFF(t) {
+		out[k] = true
+	}
+	return out
+}
+
+// kindsEmittedByBFF reads the kinds the Next.js route handlers answer with
+// themselves, without reaching this service at all.
+//
+// The enum is asserted in both directions, so a kind only the BFF emitted
+// could not be listed: adding it failed "listed but no handler emits it", and
+// leaving it out made docs/machine-clients.md's "the closed list is the
+// ErrorKind enum" false. Today the three the BFF uses happen to be emitted
+// here too, which is precisely why nothing noticed. Read that side as well and
+// the enum covers the whole surface a client sees.
+func kindsEmittedByBFF(t *testing.T) map[string]bool {
+	t.Helper()
+	root := filepath.Join("..", "..", "..", "frontend", "app", "api", "v1")
+	// Not a skip: a guard that silently switches off when a path moves is
+	// worse than no guard, because it still reads as green.
+	_, err := os.Stat(root)
+	require.NoError(t, err, "BFF routes not found at %s — fix this path, do not delete the check", root)
+
+	re := regexp.MustCompile(`bffProblem\(\s*"([a-z0-9-]+)"`)
+	out := map[string]bool{}
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".ts") {
+			return nil
+		}
+		b, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		for _, m := range re.FindAllStringSubmatch(string(b), -1) {
+			out[m[1]] = true
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, out, "found no bffProblem calls under %s — the regex has stopped matching", root)
 	return out
 }
 
