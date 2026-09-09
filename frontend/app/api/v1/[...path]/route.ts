@@ -27,8 +27,15 @@ async function proxy(
   const session = await getSession();
   const token = session ? await getValidToken(session) : null;
   if (!token) {
+    // Same shape as the Go API's Problem (backend/internal/api/errors.go), so
+    // a client parses one schema across the whole /api/v1 surface (#56).
     return NextResponse.json(
-      { type: "unauthenticated", status: 401 },
+      {
+        type: "https://kubeport.io/errors/unauthenticated",
+        title: "unauthenticated",
+        status: 401,
+        detail: "no session cookie",
+      },
       { status: 401 },
     );
   }
