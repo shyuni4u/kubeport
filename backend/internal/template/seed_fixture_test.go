@@ -70,11 +70,11 @@ func TestSerializeUIMode_RoundTripsSeededLabelKeys(t *testing.T) {
 					if mk == "name" {
 						continue
 					}
-					walkLeaves(template.JoinPath("metadata", mk), mv, fields)
+					walkLeaves(t, mustJoin(t, "metadata", mk), mv, fields)
 				}
 				continue
 			}
-			walkLeaves(template.JoinPath("", k), v, fields)
+			walkLeaves(t, mustJoin(t, "", k), v, fields)
 		}
 
 		apiVersion, _ := doc["apiVersion"].(string)
@@ -95,15 +95,23 @@ func TestSerializeUIMode_RoundTripsSeededLabelKeys(t *testing.T) {
 	require.Greater(t, seen, 0, "no documents read from the seed fixture")
 }
 
-func walkLeaves(path string, v any, out map[string]template.UIField) {
-	switch t := v.(type) {
+func mustJoin(t *testing.T, prefix, key string) string {
+	t.Helper()
+	p, err := template.JoinPath(prefix, key)
+	require.NoErrorf(t, err, "joining %q + %q", prefix, key)
+	return p
+}
+
+func walkLeaves(t *testing.T, path string, v any, out map[string]template.UIField) {
+	t.Helper()
+	switch node := v.(type) {
 	case map[string]any:
-		for k, child := range t {
-			walkLeaves(template.JoinPath(path, k), child, out)
+		for k, child := range node {
+			walkLeaves(t, mustJoin(t, path, k), child, out)
 		}
 	case []any:
-		for i, child := range t {
-			walkLeaves(fmt.Sprintf("%s[%d]", path, i), child, out)
+		for i, child := range node {
+			walkLeaves(t, fmt.Sprintf("%s[%d]", path, i), child, out)
 		}
 	default:
 		out[path] = template.UIField{Mode: "fixed", FixedValue: v}

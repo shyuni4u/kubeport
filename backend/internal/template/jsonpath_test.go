@@ -219,3 +219,160 @@ func TestValidateSpec_AcceptsQuotedPath(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, template.ValidateSpec(resources, string(uispec)))
 }
+
+// Codex review. The tokenizer accepts spellings the generators never emit, so
+// two field keys can name the same document location. SerializeUIMode used to
+// write both, and Go's map iteration decided which value survived — the saved
+// template differed between saves of identical input.
+func TestSerializeUIMode_RejectsPathsThatCollideAfterCanonicalization(t *testing.T) {
+	for name, pair := range map[string][2]string{
+		"quote styles":     {`data["nginx.conf"]`, `data['nginx.conf']`},
+		"needless quoting": {"spec.replicas", `spec["replicas"]`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ui := template.UIModeTemplate{
+				Resources: []template.UIResource{{
+					APIVersion: "v1", Kind: "ConfigMap", Name: "conf",
+					Fields: map[string]template.UIField{
+						pair[0]: {Mode: "fixed", FixedValue: "a"},
+						pair[1]: {Mode: "fixed", FixedValue: "b"},
+					},
+				}},
+			}
+			_, _, err := template.SerializeUIMode(ui)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "same path")
+		})
+	}
+}
+
+func TestCanonicalPath(t *testing.T) {
+	// Equivalent spellings collapse; the canonical form is what the generators
+	// emit, so a path that is already canonical is returned unchanged.
+	for in, want := range map[string]string{
+		`data['nginx.conf']`:         `data["nginx.conf"]`,
+		`spec["replicas"]`:           "spec.replicas",
+		"spec.replicas":              "spec.replicas",
+		`data["nginx.conf"]`:         `data["nginx.conf"]`,
+		"spec.containers[0].image":   "spec.containers[0].image",
+		`metadata.labels['a.b/c'].d`: `metadata.labels["a.b/c"].d`,
+	} {
+		got, err := template.CanonicalPath(in)
+		require.NoErrorf(t, err, "canonicalizing %q", in)
+		require.Equalf(t, want, got, "canonicalizing %q", in)
+	}
+
+	_, err := template.CanonicalPath(`data["unterminated`)
+	require.Error(t, err)
+}
+
+// AI review. Render looks a value up with `input[f.Path]`, an exact string
+// match, so `spec["replicas"]` in the ui-spec and `spec.replicas` in the values
+// payload miss each other — the field silently falls back to its default and
+// the deploy returns 201 with a value the caller did not ask for. Requiring the
+// canonical spelling removes the class; the generators only ever emit it.
+func TestValidateSpec_RejectsNonCanonicalPath(t *testing.T) {
+	resources := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: conf\ndata:\n  a: b\n"
+
+	for name, tc := range map[string]struct{ path, want string }{
+		"needless quoting":  {`ConfigMap[conf].data["a"]`, "ConfigMap[conf].data.a"},
+		"other quote style": {`ConfigMap[conf].data['a.b']`, `ConfigMap[conf].data["a.b"]`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			uispec, err := yaml.Marshal(map[string]any{
+				"fields": []map[string]any{{"path": tc.path, "label": "필드", "type": "string"}},
+			})
+			require.NoError(t, err)
+
+			err = template.ValidateSpec(resources, string(uispec))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "not canonical")
+			require.Contains(t, err.Error(), tc.want, "the message must carry the corrected path")
+		})
+	}
+}
+
+// A path naming a resource and no field used to walk zero segments and return
+// nil, so the user's value vanished and the deploy reported success.
+func TestValidateSpec_RejectsResourceOnlyPath(t *testing.T) {
+	resources := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: conf\ndata:\n  a: b\n"
+	uispec, err := yaml.Marshal(map[string]any{
+		"fields": []map[string]any{{"path": "ConfigMap[conf]", "label": "필드", "type": "string"}},
+	})
+	require.NoError(t, err)
+
+	err = template.ValidateSpec(resources, string(uispec))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "whole resource")
+}
+
+// The error names the field by index. A label is a display string: not unique,
+// and translated, so a client cannot use it to decide which entry to correct.
+func TestValidateSpec_ErrorIdentifiesFieldByIndex(t *testing.T) {
+	resources := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: conf\ndata:\n  a: b\n"
+	uispec, err := yaml.Marshal(map[string]any{
+		"fields": []map[string]any{
+			{"path": "ConfigMap[conf].data.a", "label": "같은 라벨", "type": "string"},
+			{"path": "ConfigMap[conf].data.a.b/c", "label": "같은 라벨", "type": "string"},
+		},
+	})
+	require.NoError(t, err)
+
+	err = template.ValidateSpec(resources, string(uispec))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "fields[1]")
+}
+
+// Security review. Atoi accepts a leading sign, so `[+1]` parsed on the Go side
+// while template-path.ts (`/^\d+$/`) rejected it — a path that validated on the
+// server and was unreadable in the editor that has to display it.
+func TestParsePath_RejectsSignedIndex(t *testing.T) {
+	resources := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: conf\ndata:\n  a: b\n"
+	for _, path := range []string{"ConfigMap[conf].data[+1]", "ConfigMap[conf].data[ 1]", "ConfigMap[conf].data[1e3]"} {
+		uispec, err := yaml.Marshal(map[string]any{
+			"fields": []map[string]any{{"path": path, "label": "필드", "type": "string"}},
+		})
+		require.NoError(t, err)
+		require.Errorf(t, template.ValidateSpec(resources, string(uispec)), "path %q must be rejected", path)
+	}
+}
+
+// Security review. With no escape character a key is quoted with the style it
+// does not contain, so a key holding both is unrepresentable. Emitting
+// `['a"b'c']` would parse as something else entirely; refuse where the key is
+// still in hand.
+func TestFormatSegment_RefusesKeyHoldingBothQuoteStyles(t *testing.T) {
+	require.False(t, template.Addressable(`a"b'c`))
+	require.Equal(t, "", template.FormatSegment(`a"b'c`))
+
+	_, err := template.JoinPath("data", `a"b'c`)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "both quote styles")
+
+	// Either style alone is fine, and round-trips.
+	for _, key := range []string{`say"hi`, "it's"} {
+		seg, err := template.JoinPath("", key)
+		require.NoError(t, err)
+		canon, err := template.CanonicalPath(seg)
+		require.NoError(t, err)
+		require.Equal(t, seg, canon)
+	}
+}
+
+// The suggestion has to be the actual remedy: an agent reading
+// `bad path remainder "/name"` alone deletes the `/name` and addresses a
+// different key.
+func TestParsePath_UnquotedKeyErrorSuggestsQuoting(t *testing.T) {
+	resources := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: conf\ndata:\n  a: b\n"
+	uispec, err := yaml.Marshal(map[string]any{
+		"fields": []map[string]any{{
+			"path": "ConfigMap[conf].data.app.kubernetes.io/name", "label": "필드", "type": "string",
+		}},
+	})
+	require.NoError(t, err)
+
+	err = template.ValidateSpec(resources, string(uispec))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "quote a key")
+	require.Contains(t, err.Error(), `["/name"]`)
+}

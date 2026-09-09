@@ -73,6 +73,18 @@ type pathSeg struct {
 
 var plainSegRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*`)
 
+func isDecimalDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // parsePathSegments tokenizes the part of a path that follows Kind[selector].
 //
 // NAME covers the Go-identifier-shaped keys that make up most of a manifest,
@@ -99,11 +111,11 @@ func parsePathSegments(path string) ([]pathSeg, error) {
 				quote := rest[1]
 				end := strings.IndexByte(rest[2:], quote)
 				if end < 0 {
-					return nil, fmt.Errorf("unterminated quoted segment in %q", rest)
+					return nil, fmt.Errorf(`unterminated quoted segment in %q: add the closing quote and "]"`, rest)
 				}
 				key, after := rest[2:2+end], rest[2+end+1:]
 				if !strings.HasPrefix(after, "]") {
-					return nil, fmt.Errorf("expected ] after quoted segment in %q", rest)
+					return nil, fmt.Errorf(`expected ] after quoted segment in %q: a quoted key is written ["key"]`, rest)
 				}
 				segs = append(segs, pathSeg{key: key})
 				rest = strings.TrimPrefix(after[1:], ".")
@@ -113,13 +125,22 @@ func parsePathSegments(path string) ([]pathSeg, error) {
 			if end < 0 {
 				return nil, fmt.Errorf("unterminated index in %q", rest)
 			}
-			idx, err := strconv.Atoi(rest[1:end])
-			if err != nil {
-				return nil, fmt.Errorf("bad array index %q", rest[1:end])
+			body := rest[1:end]
+			// Decimal digits only, checked before Atoi rather than after:
+			// Atoi accepts a leading sign, so `[+1]` would parse here while
+			// template-path.ts (`/^\d+$/`) rejects it. A path that validates
+			// on one side and not the other is the differential this mirror
+			// exists to prevent.
+			if !isDecimalDigits(body) {
+				return nil, fmt.Errorf("bad array index %q", body)
 			}
-			// Rejected here rather than at each use: setJSONPathAbsolute grows
-			// arrays and only guards the upper bound, so a negative index
-			// reaches an indexing expression and panics.
+			idx, err := strconv.Atoi(body)
+			if err != nil {
+				return nil, fmt.Errorf("bad array index %q", body)
+			}
+			// Unreachable given the digit check, kept because
+			// setJSONPathAbsolute grows arrays and guards only the upper
+			// bound — a negative index would reach an indexing expression.
 			if idx < 0 {
 				return nil, fmt.Errorf("negative array index %d", idx)
 			}
@@ -129,7 +150,14 @@ func parsePathSegments(path string) ([]pathSeg, error) {
 		}
 		name := plainSegRE.FindString(rest)
 		if name == "" {
-			return nil, fmt.Errorf("bad path remainder %q", rest)
+			// Name the remedy, not just the offending text. The caller is
+			// usually an admin or an agent that has never seen this grammar,
+			// and "bad path remainder \"/name\"" invites deleting the `/name`
+			// — which silently addresses a different key.
+			return nil, fmt.Errorf(
+				"bad path remainder %q: a bare segment may hold only [A-Za-z0-9_]; "+
+					"quote a key containing `.`, `-` or `/`, as in %s",
+				rest, FormatSegment(rest))
 		}
 		segs = append(segs, pathSeg{key: name})
 		rest = strings.TrimPrefix(rest[len(name):], ".")
@@ -137,13 +165,32 @@ func parsePathSegments(path string) ([]pathSeg, error) {
 	return segs, nil
 }
 
+// Addressable reports whether key can be written as a path segment at all.
+//
+// With no escape character, a key is quoted with whichever style it does not
+// contain — so a key containing BOTH is unrepresentable. Kubernetes keys can
+// hold neither quote, but ConfigMap data keys and CRD fields are unconstrained,
+// so the case is reachable and has to be refused where it is understood rather
+// than emitted as a path that will not parse back.
+func Addressable(key string) bool {
+	return !strings.Contains(key, `"`) || !strings.Contains(key, "'")
+}
+
 // FormatSegment renders a map key as a path segment, quoting it only when the
-// bare form cannot express it. It is the inverse of parsePathSegments and the
-// definition the frontend's template-path.ts mirrors — anything that generates
-// a path must go through here, or it can emit paths this package cannot read.
+// bare form cannot express it. It is the inverse of parsePathSegments for every
+// key Addressable accepts, and the definition the frontend's template-path.ts
+// mirrors — anything generating a path must go through here, or it can emit
+// paths this package cannot read.
+//
+// An unaddressable key yields "", which JoinPath and the generators surface as
+// an error. Returning a broken path would be worse: it parses as something
+// else, or not at all, a long way from the key that caused it.
 func FormatSegment(key string) string {
 	if plainSegRE.FindString(key) == key && key != "" {
 		return key
+	}
+	if !Addressable(key) {
+		return ""
 	}
 	quote := byte('"')
 	if strings.ContainsRune(key, '"') {
@@ -153,22 +200,58 @@ func FormatSegment(key string) string {
 }
 
 // JoinPath appends key to prefix, quoting the key when necessary. A bracketed
-// segment is self-delimiting, so it takes no separating dot.
-func JoinPath(prefix, key string) string {
+// segment is self-delimiting, so it takes no separating dot. Returns an error
+// for a key FormatSegment cannot express.
+func JoinPath(prefix, key string) (string, error) {
 	seg := FormatSegment(key)
+	if seg == "" {
+		return "", fmt.Errorf("key %q holds both quote styles and cannot be written as a path segment", key)
+	}
 	if prefix == "" {
-		return seg
+		return seg, nil
 	}
 	if strings.HasPrefix(seg, "[") {
-		return prefix + seg
+		return prefix + seg, nil
 	}
-	return prefix + "." + seg
+	return prefix + "." + seg, nil
+}
+
+// CanonicalPath re-spells a resource-relative path in the one form the
+// generators emit, so that two spellings of the same path compare equal.
+//
+// The tokenizer accepts more than FormatSegment produces — `['a']` for
+// `["a"]`, `["replicas"]` for `replicas` — which is right for input and wrong
+// for a map key. Field paths ARE map keys here, so without this two entries
+// can describe the same document location and the later write wins at random.
+func CanonicalPath(path string) (string, error) {
+	segs, err := parsePathSegments(path)
+	if err != nil {
+		return "", err
+	}
+	var out string
+	for _, s := range segs {
+		if s.arr {
+			out += "[" + strconv.Itoa(s.idx) + "]"
+			continue
+		}
+		if out, err = JoinPath(out, s.key); err != nil {
+			return "", err
+		}
+	}
+	return out, nil
 }
 
 func setInto(node any, rest string, v any) error {
 	segs, err := parsePathSegments(rest)
 	if err != nil {
 		return err
+	}
+	// Matches setJSONPathAbsolute, which has always rejected this. Without the
+	// guard `Deployment[web]` — a path naming a resource and no field — walked
+	// zero segments and returned nil, so the user's value vanished and the
+	// deploy reported success.
+	if len(segs) == 0 {
+		return fmt.Errorf("path selects a whole resource, not a field")
 	}
 	for i, s := range segs {
 		last := i == len(segs)-1

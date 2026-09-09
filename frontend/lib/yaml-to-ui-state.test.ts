@@ -234,3 +234,72 @@ spec:
     }
   });
 });
+
+// Codex review. The parser accepts both quote styles but the generator emits
+// only one, so a hand-written ui-spec spelled `data['nginx.conf']` did not
+// match the generated `data["nginx.conf"]` — the override landed as a SECOND
+// entry beside the fixed one instead of promoting it. Both then describe the
+// same YAML key, and SerializeUIMode writes them in Go map order, so which
+// value survives is nondeterministic.
+//
+// The parser stays permissive on input; what has to be canonical is the key
+// these two sides meet on.
+describe("ui-spec paths spelled differently from the generated ones", () => {
+  const resources = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: conf
+data:
+  nginx.conf: "listen 80;"
+`;
+
+  it("promotes the fixed entry when the ui-spec uses the other quote style", () => {
+    const { uiState, warnings } = yamlToUIState(
+      resources,
+      `fields:
+  - path: ConfigMap[conf].data['nginx.conf']
+    label: 설정
+    type: string
+`,
+    );
+    expect(warnings).toEqual([]);
+
+    const fields = uiState.resources[0].fields;
+    // Exactly one entry for this key, and it is the exposed one.
+    const forKey = Object.keys(fields).filter((k) => k.includes("nginx.conf"));
+    expect(forKey).toHaveLength(1);
+    expect(fields[forKey[0]].mode).toBe("exposed");
+  });
+
+  it("promotes the fixed entry when the ui-spec quotes a key that need not be", () => {
+    const { uiState } = yamlToUIState(
+      `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  replicas: 1
+`,
+      `fields:
+  - path: Deployment[web].spec["replicas"]
+    label: 개수
+    type: integer
+`,
+    );
+    const fields = uiState.resources[0].fields;
+    expect(Object.keys(fields)).toEqual(["spec.replicas"]);
+    expect(fields["spec.replicas"].mode).toBe("exposed");
+  });
+
+  it("warns instead of silently dropping an unparseable ui-spec path", () => {
+    const { warnings } = yamlToUIState(
+      resources,
+      `fields:
+  - path: ConfigMap[conf].data["unterminated
+    label: X
+    type: string
+`,
+    );
+    expect(warnings.some((w) => w.includes("unparseable"))).toBe(true);
+  });
+});

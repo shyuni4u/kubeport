@@ -14,6 +14,7 @@ import (
 
 	"kubeport/internal/api"
 	"kubeport/internal/config"
+	"kubeport/internal/template"
 )
 
 // backend/api/openapi.yaml is written by hand — Gin carries no type
@@ -436,4 +437,90 @@ func TestOpenAPISpec_DocumentsEveryStatusHandlersEmit(t *testing.T) {
 	sort.Strings(stale)
 	require.Empty(t, stale,
 		"unreachableOnRoute excuses statuses that no longer need excusing — delete these entries")
+}
+
+// The UiSpec description is the only place a machine client learns the path
+// grammar — README and the design spec are prose the client never fetches. The
+// grammar has changed once already (issue #129 added quoted segments) and the
+// spec did not move with it, so a client following the documented syntax
+// received a 400 from a template it had written correctly by the docs.
+//
+// These pin the two halves: that the description still describes the grammar
+// the parser implements, and that every path it offers as an example is one
+// ValidateSpec accepts.
+func TestOpenAPISpec_UiSpecDescribesTheCurrentPathGrammar(t *testing.T) {
+	desc := uiSpecDescription(t)
+
+	for _, want := range []string{"QUOTED", `["app.kubernetes.io/name"]`} {
+		require.Containsf(t, desc, want,
+			"UiSpec.description must document quoted segments; the grammar has them and this is where clients read it")
+	}
+}
+
+func TestOpenAPISpec_UiSpecExamplePathsValidate(t *testing.T) {
+	desc := uiSpecDescription(t)
+
+	// Backtick-free: examples are written in backticks in the description.
+	paths := regexp.MustCompile("`([A-Z][A-Za-z]+(?:\\[[^\\]]*\\])?\\.[^`]+)`").FindAllStringSubmatch(desc, -1)
+	require.NotEmpty(t, paths, "no example paths found — the extraction pattern has drifted from the description")
+
+	resources := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app.kubernetes.io/name: web
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.25
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  ports:
+    - port: 80
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: conf
+data:
+  nginx.conf: "listen 80;"
+`
+
+	for _, m := range paths {
+		path := m[1]
+		spec, err := yaml.Marshal(map[string]any{
+			"fields": []map[string]any{{"path": path, "label": "L", "type": "string"}},
+		})
+		require.NoError(t, err)
+		require.NoErrorf(t, template.ValidateSpec(resources, string(spec)),
+			"UiSpec.description offers %s as an example, but ValidateSpec rejects it", path)
+	}
+}
+
+func uiSpecDescription(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile(specPath)
+	require.NoError(t, err)
+
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Description string `yaml:"description"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	require.NoError(t, yaml.Unmarshal(raw, &doc))
+
+	s, ok := doc.Components.Schemas["UiSpec"]
+	require.True(t, ok, "UiSpec schema not found in %s", specPath)
+	require.NotEmpty(t, s.Description)
+	return s.Description
 }

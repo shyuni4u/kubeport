@@ -49,6 +49,8 @@ fields:
     type: string
 ```
 
+A `path` segment must look like a Go identifier. Kubernetes keys that do not — labels, annotations, ConfigMap data filenames — go in quotes, which makes them one key despite the dots: `Deployment[web].metadata.labels["app.kubernetes.io/name"]`. The UI-mode editor adds the quotes for you; hand-written ui-spec YAML needs them.
+
 End users see a form with two fields (plus a release name). Everything else in `resources.yaml` is fixed by the admin.
 
 A **release** is one deployment of a template version into a specific cluster + namespace. Releases are pinned to a template version (Helm/ArgoCD-style). When the admin publishes a new version, running releases keep working and get an "update available" nudge.

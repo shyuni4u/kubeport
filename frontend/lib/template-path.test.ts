@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { formatSegment, parsePathSegments, parseTemplatePath } from "./template-path";
+import {
+  addressable,
+  formatSegment,
+  joinPath,
+  parsePathSegments,
+  parseTemplatePath,
+  splitHead,
+} from "./template-path";
 
 // This module is the single definition of the path grammar on the frontend.
 // Three copies of it used to exist (two in Go, one here) and issue #129 was
@@ -38,8 +45,20 @@ describe("formatSegment", () => {
       "it's",
       "",
     ]) {
-      expect(parsePathSegments(formatSegment(key))).toEqual([key]);
+      const seg = formatSegment(key);
+      expect(seg, `${key} must be addressable`).not.toBeNull();
+      expect(parsePathSegments(seg!)).toEqual([key]);
     }
+  });
+
+  it("refuses a key holding both quote styles rather than emitting a broken path", () => {
+    // There is no escape character, so `['a"b'c']` would parse as something
+    // else entirely. Refuse where the key is still in hand.
+    expect(addressable(`a"b'c`)).toBe(false);
+    expect(formatSegment(`a"b'c`)).toBeNull();
+    expect(joinPath("data", `a"b'c`)).toBeNull();
+    expect(addressable('say"hi')).toBe(true);
+    expect(addressable("it's")).toBe(true);
   });
 });
 
@@ -108,6 +127,36 @@ describe("parseTemplatePath", () => {
       kind: "Deployment",
       selector: "web",
       keys: ["metadata", "labels", "app.kubernetes.io/name"],
+    });
+  });
+});
+
+describe("splitHead", () => {
+  it("returns the tail unparsed so callers decide whether to canonicalize", () => {
+    expect(splitHead(`Deployment[web].spec['replicas']`)).toEqual({
+      kind: "Deployment",
+      selector: "web",
+      rest: `spec['replicas']`,
+    });
+  });
+
+  it("accepts an omitted selector", () => {
+    // openapi.yaml documents `Deployment.spec.replicas` as valid. The regex
+    // this replaced required a selector, so this shape was reported
+    // unparseable — and in yaml-to-ui-state that demoted an exposed field
+    // back to fixed, removing it from the deploy form.
+    expect(splitHead("Deployment.spec.replicas")).toEqual({
+      kind: "Deployment",
+      selector: "",
+      rest: "spec.replicas",
+    });
+  });
+
+  it("accepts an index selector", () => {
+    expect(splitHead("Deployment[0].spec.replicas")).toEqual({
+      kind: "Deployment",
+      selector: "0",
+      rest: "spec.replicas",
     });
   });
 });

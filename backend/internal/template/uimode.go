@@ -61,6 +61,23 @@ func SerializeUIMode(ui UIModeTemplate) (resourcesYAML, uiSpecYAML string, err e
 			"kind":       r.Kind,
 			"metadata":   map[string]any{"name": r.Name},
 		}
+		// Two field paths that canonicalize to the same location would both be
+		// written into the same key, and Go's map iteration order decides
+		// which value survives. Refuse rather than save something the admin
+		// cannot predict — the editor cannot produce this, but the API takes a
+		// UIModeTemplate directly.
+		canon := make(map[string]string, len(r.Fields))
+		for fpath := range r.Fields {
+			c, err := CanonicalPath(fpath)
+			if err != nil {
+				return "", "", fmt.Errorf("resource %s/%s field %q: %w", r.Kind, r.Name, fpath, err)
+			}
+			if prev, dup := canon[c]; dup {
+				return "", "", fmt.Errorf("resource %s/%s: fields %q and %q address the same path", r.Kind, r.Name, prev, fpath)
+			}
+			canon[c] = fpath
+		}
+
 		for fpath, f := range r.Fields {
 			switch f.Mode {
 			case "fixed":

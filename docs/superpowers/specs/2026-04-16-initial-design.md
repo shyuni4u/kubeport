@@ -125,11 +125,17 @@ MVP 이후 추가 예정: `secret`(비밀값), `object`(중첩), `array`(동적 
 
 ### 3.4 JSONPath와 멀티 리소스 식별
 
-`path`는 `Kind.jsonpath` 형태. 같은 Kind가 여러 개면 `Kind[index]` 또는 `Kind[metadata.name=web]` 사용:
+`path`는 `Kind.jsonpath` 형태. 같은 Kind가 여러 개면 `Kind[web]`(metadata.name) 또는
+`Kind[0]`(같은 Kind 문서 중 0-based 인덱스)로 식별한다. 단일이면 생략 가능:
 ```yaml
 - path: "Deployment[web].spec.replicas"           # name으로 식별
 - path: "Deployment[0].spec.replicas"             # 인덱스로 식별 (단일이면 생략 가능)
 ```
+
+`Kind[metadata.name=web]` 같은 표현식 셀렉터는 **지원하지 않는다.** `findDoc` 은 셀렉터를
+인덱스 또는 `metadata.name` 과의 완전 일치로만 푼다 — 이 스펙에 예시로 남아 있었지만
+구현된 적이 없고, `ValidateSpec` 은 문서를 해석하지 않으므로 저장은 통과하고
+사용자가 배포하는 순간 `no Deployment matching "metadata.name=web"` 로 실패한다.
 
 **세그먼트에 `.` · `-` · `/` 가 들어가면 인용한다.** 기본 세그먼트는 `[A-Za-z_][A-Za-z0-9_]*`
 뿐이다 — k8s 라벨·애노테이션 키와 ConfigMap 데이터 키는 이 형태가 아니다:

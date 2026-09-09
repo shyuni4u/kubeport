@@ -1732,6 +1732,35 @@ components:
         `Deployment.spec.replicas`,
         `Service[web].spec.ports[0].port`,
         `Deployment[api].spec.template.spec.containers[0].image`.
+
+        Grammar:
+
+            <Kind>[<selector>] ( "." ? <segment> )*
+            <segment> ::= NAME | "[" INT "]" | "[" QUOTED "]"
+            NAME      ::= [A-Za-z_][A-Za-z0-9_]*
+            QUOTED    ::= '"' [^"]* '"' | "'" [^']* "'"
+
+        NAME cannot hold `.`, `-` or `/`, all of which are legal in a
+        Kubernetes key. Widening it would not help: `.` separates segments, so
+        `metadata.labels.app.kubernetes.io/name` is ambiguous between one key
+        and four. A key that NAME cannot spell — a label, an annotation, a
+        ConfigMap data filename — goes in a quoted segment, which is ONE key
+        despite the dots inside it:
+        `Deployment[web].metadata.labels["app.kubernetes.io/name"]`,
+        `ConfigMap[conf].data["nginx.conf"]`.
+
+        There is exactly one spelling per path, and a path written any other
+        way is rejected with the corrected form in the error:
+
+          - quote only what NAME cannot spell. `spec["replicas"]` names the
+            same node as `spec.replicas` and is refused.
+          - use `"`. There is no escape character, so a key containing `"` is
+            the one case written with `'` instead — and a key containing both
+            cannot be addressed at all.
+
+        A path is checked when the template is written (400), not when a
+        release is deployed, so `path` is safe to treat as valid once
+        `POST /v1/templates` has accepted it.
       properties:
         fields:
           type: array

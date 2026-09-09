@@ -1,6 +1,6 @@
 import { parseAllDocuments, parse } from "yaml";
 
-import { joinPath } from "./template-path";
+import { canonicalizePath, joinPath, splitHead } from "./template-path";
 
 // Mirrors backend UIModeTemplate / UIResource / UIField exactly so the state
 // we build here round-trips through POST /v1/templates/:name/versions.
@@ -79,7 +79,15 @@ function walkScalars(
   if (t === "object") {
     const obj = value as Record<string, unknown>;
     for (const [k, v] of Object.entries(obj)) {
-      walkScalars(v, joinPath(path, k), fields, warnings);
+      const child = joinPath(path, k);
+      if (child === null) {
+        // A key holding both quote styles has no spelling in this grammar.
+        // Dropping it loudly beats emitting a path that parses as something
+        // else — the admin can see which key the editor cannot represent.
+        warnings.push(`key cannot be addressed by a path (it holds both quote styles): ${path ? `${path}.` : ""}${k}`);
+        continue;
+      }
+      walkScalars(v, child, fields, warnings);
     }
     return;
   }
@@ -124,7 +132,12 @@ export function yamlToUIState(resourcesYaml: string, uiSpecYaml: string): YamlTo
         }
         for (const [mk, mv] of Object.entries(v as Record<string, unknown>)) {
           if (mk === "name") continue;
-          walkScalars(mv, joinPath("metadata", mk), fields, warnings);
+          const sub = joinPath("metadata", mk);
+          if (sub === null) {
+            warnings.push(`key cannot be addressed by a path (it holds both quote styles): metadata.${mk}`);
+            continue;
+          }
+          walkScalars(mv, sub, fields, warnings);
         }
         continue;
       }
@@ -140,24 +153,48 @@ export function yamlToUIState(resourcesYaml: string, uiSpecYaml: string): YamlTo
     const spec = parse(uiSpecYaml) as { fields?: UISpecEntry[] } | null;
     const entries = spec?.fields ?? [];
     for (const entry of entries) {
-      // The selector cannot open with a quote — same rule as template-path's
-      // headRE, so `Kind["a.b"]` is a quoted first segment, not a resource
-      // named `"a.b"`. The remainder is kept as text: UIField keys are
-      // resource-relative path strings, not parsed segments.
-      const m = /^(\w+)\[([^"'\]][^\]]*)\]\.(.+)$/.exec(entry.path);
-      if (!m) {
+      // splitHead rather than a regex of its own. The copy that used to live
+      // here required a selector, so `Deployment.spec.replicas` — a spelling
+      // openapi.yaml documents as valid — fell through to the warning below.
+      // That did not just warn: every scalar is already a `fixed` field by
+      // this point, so skipping the promotion demoted an exposed field to
+      // fixed, and it disappeared from the deploy form on the next save.
+      const head = splitHead(entry.path);
+      if (!head || head.rest === "") {
         warnings.push(`ui-spec path unparseable: ${entry.path}`);
         continue;
       }
-      const [, kind, name, sub] = m;
-      const res = resources.find((r) => r.kind === kind && r.name === name);
+      const { kind, selector } = head;
+      const ofKind = resources.filter((r) => r.kind === kind);
+      // An omitted selector means "the only document of this Kind", matching
+      // the backend's findDoc. Ambiguity is reported rather than guessed.
+      const res =
+        selector === ""
+          ? ofKind.length === 1
+            ? ofKind[0]
+            : undefined
+          : ofKind.find((r) => r.name === selector || String(ofKind.indexOf(r)) === selector);
       if (!res) {
-        warnings.push(`ui-spec entry references missing resource ${kind}[${name}]`);
+        warnings.push(
+          selector === "" && ofKind.length > 1
+            ? `ui-spec path omits a selector but ${ofKind.length} ${kind} documents exist: ${entry.path}`
+            : `ui-spec entry references missing resource ${kind}[${selector}]`,
+        );
         continue;
       }
+      const sub = head.rest;
       // Strip the `Kind[name].` prefix before storing; UIField keys are the
-      // resource-relative JSON path.
-      res.fields[sub] = { mode: "exposed", uiSpec: entry };
+      // resource-relative JSON path — canonicalized, because the parser accepts
+      // spellings walkScalars never emits (`['a']`, `["replicas"]`). Indexing
+      // by the raw text let an equivalent spelling create a SECOND entry beside
+      // the generated `fixed` one; both then described the same YAML key and
+      // SerializeUIMode wrote whichever Go's map iteration reached last.
+      const key = canonicalizePath(sub);
+      if (key === null) {
+        warnings.push(`ui-spec path unparseable: ${entry.path}`);
+        continue;
+      }
+      res.fields[key] = { mode: "exposed", uiSpec: entry };
     }
   } catch (e) {
     warnings.push(`ui-spec parse error: ${e instanceof Error ? e.message : String(e)}`);
