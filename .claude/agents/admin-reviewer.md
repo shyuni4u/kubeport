@@ -43,4 +43,4 @@ k8s 용어가 **충분히** 노출되는가 / 스키마↔폼 매핑이 보이�
 비전문가 친화성·색상·보안 코드 리뷰는 관심사가 아니다.
 
 ## 출력
-finding-schema YAML. `scope=pr` 은 `CHANGED_FILES` 의 화면에서 본 것만, evidence 에 코드 줄 첨부. 스크린샷은 브라우저 툴이 돌려준 실제 저장 경로를 evidence 에 그대로 적는다.
+finding-schema YAML. `scope=pr` 은 `CHANGED_FILES` 의 화면에서 본 것만, evidence 에 코드 줄 첨부. 스크린샷은 finding-schema.md "스크린샷 증거" 규칙대로 — 툴이 경로를 주면 경로, `ss_xxxx` ID 만 주면 ID + 보이는 것 1~2문장 + DOM 값.

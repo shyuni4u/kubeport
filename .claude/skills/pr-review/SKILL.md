@@ -25,7 +25,8 @@ git fetch -q origin main
 CHANGED_FILES=$(git diff --name-only origin/main...HEAD)
 DIFF=$(git diff origin/main...HEAD)          # 4000줄 넘으면 파일별로 나눠 각 리뷰어엔 관련 파일만
 SAFE_BRANCH=${BRANCH//\//__}
-mkdir -p .claude/reviews/shots
+SHOT_DIR=.claude/reviews/shots/$SAFE_BRANCH
+mkdir -p "$SHOT_DIR" && touch "$SHOT_DIR/.run-start"   # 스크린샷 회수 기준 시각 (§3)
 curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/"   # 200 아니면 LIVE_OK=false, LIVE_OK=true/false 로 기록
 ```
 `CHANGED_FILES` 에 `deploy/`, `README.md`, `docs/dev-setup.md`, `docs/oci-prod-runbook.md` 가 있고 `--deep` 이 없으면 한 줄 안내: "설치 관련 변경이 있습니다. `--deep` 으로 실제 설치 검증을 권합니다." (계속 진행.)
@@ -36,7 +37,7 @@ BRANCH: <branch>
 HEAD: <sha>
 BASE_URL: <url>            (LIVE_OK=false 면 "UNREACHABLE")
 DEEP: <true|false>
-SHOT_DIR: .claude/reviews/shots   (참고용 — 브라우저 확장이 자체 임시 경로에 저장하므로 리뷰어는 툴이 돌려준 경로를 evidence 에 적는다)
+SHOT_DIR: .claude/reviews/shots/<SAFE_BRANCH>   (리뷰어는 직접 쓰지 않는다 — 툴이 돌려준 경로 또는 ss_ ID 를 finding-schema.md "스크린샷 증거" 규칙대로 적는다)
 CHANGED_FILES:
 <목록>
 DIFF:
@@ -53,6 +54,13 @@ DIFF:
 LIVE_OK=false 면 셋 다 `FAILED: 대상 URL 응답 없음` 으로 건너뛴다.
 아니면 **반드시 한 번에 하나씩**: `user-reviewer` 완료 → `admin-reviewer` 완료 → `design-reviewer` 순으로 `Agent` 로 띄운다 (호출 규칙 참조). 같은 Chrome 프로파일이라 동시 로그인은 쿠키 충돌.
 각 리뷰어는 demo-accounts.md 의 절차로 시작 시 이전 세션을 확인하고 종료 시 UI 메뉴로 로그아웃한다 (`/api/auth/logout` 은 POST 전용). 리뷰어 출력의 `verified` 에 로그아웃 확인이 없으면 다음 리뷰어 프롬프트 맨 앞에 "먼저 demo-accounts.md 0단계로 남은 세션을 정리하라" 를 붙인다.
+
+**스크린샷 회수 (각 브라우저 리뷰어 종료 직후).** 확장은 `%TEMP%/claude-chrome-screenshots-*/screenshot-<ts>-N.jpg` 에 저장하거나(세션에 따라) 아예 저장하지 않고 `ss_xxxx` ID 만 돌려준다. 임시 디렉터리는 휘발되므로 리뷰어가 끝날 때마다 회수한다:
+```bash
+mkdir -p "$SHOT_DIR/<persona>"
+find "$TEMP" -path '*claude-chrome-screenshots-*' -name 'screenshot-*.jpg' -newer "$SHOT_DIR/.run-start" -exec cp {} "$SHOT_DIR/<persona>/" \;
+```
+(`$SHOT_DIR/.run-start` 는 §1 에서 `touch` 해 둔 마커. Windows Git Bash 에선 `$TEMP` 가 이미 설정돼 있다.) 리뷰어 YAML 의 임시 경로는 기록 파일(§5)에 쓸 때 `SHOT_DIR/<persona>/<파일명>` 으로 치환한다. `ss_xxxx` ID 만 있는 항목은 치환하지 않고 그대로 둔다 — 파일이 없다는 뜻이며, finding-schema.md 규칙대로 설명 + DOM 값이 근거를 대신한다.
 
 ## 4. 매니저
 `Agent(subagent_type="reviewer-manager")` 로 띄운다 (호출 규칙 참조). `BRANCH`, `HEAD`, `BASE_URL`, `DIFF_FILES`(이 필드에 `CHANGED_FILES` 값을 그대로 넣어 전달)와 6개 블록을 `--- <persona> ---` 구분자로 이어 전달. 응답을 `## PR_COMMENT` / `## ISSUES` / `## VERDICT` 로 자른다.
@@ -107,7 +115,7 @@ gh pr comment "$PR_URL" --body-file /tmp/pr-comment.md
 ```
 
 ## 9. 마무리 보고 (사용자에게)
-PR URL, draft 여부, P0/P1/P2 합계, 이슈 N건(신규/코멘트), 미검증 페르소나와 사유. 스크린샷 디렉터리 경로.
+PR URL, draft 여부, P0/P1/P2 합계, 이슈 N건(신규/코멘트), 미검증 페르소나와 사유. `SHOT_DIR` 경로와 회수된 파일 수 (0 이면 "확장이 이 세션에선 파일을 저장하지 않음 — evidence 는 ss_ ID + 설명" 이라고 명시).
 
 ## 실패 처리
 - 리뷰어 하나가 실패해도 계속. 매니저가 "미검증" 으로 표기.

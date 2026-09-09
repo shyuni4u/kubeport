@@ -30,4 +30,4 @@ model: inherit
 
 ## 출력
 finding-schema YAML. 라이브는 main 코드이므로 대부분 `scope=existing`. `CHANGED_FILES` 의 화면에서 본 문제만 `pr` 로 표시하되, 근거 코드 줄(`Grep` 으로 찾아)을 evidence 에 붙인다.
-스크린샷은 브라우저 툴이 돌려준 실제 저장 경로를 evidence 에 그대로 적는다 (`SHOT_DIR` 는 참고용, 직접 쓰지 못함). 태스크마다 단계 수·잘못 클릭 수를 `verified` 에 한 줄로.
+스크린샷은 finding-schema.md "스크린샷 증거" 규칙대로 — 툴이 경로를 주면 경로, `ss_xxxx` ID 만 주면 ID + 보이는 것 1~2문장 + `get_page_text`/`javascript_tool` 로 읽은 DOM 값 (`SHOT_DIR` 는 직접 쓰지 못함). 태스크마다 단계 수·잘못 클릭 수를 `verified` 에 한 줄로.

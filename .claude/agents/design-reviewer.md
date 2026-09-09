@@ -21,7 +21,7 @@ model: inherit
 6. 템플릿 버전 에디터 (`?mode=ui` 와 `?mode=yaml` 둘 다).
 
 ## 각 화면에서
-- 뷰포트 2개: 1440×900, 390×844 (`resize_window`). 각각 스크린샷을 찍고 툴이 돌려준 실제 경로를 evidence 에 적는다 (파일명 지정 불가).
+- 뷰포트 2개: 1440×900, 390×844 (`resize_window`). 각각 스크린샷을 찍고 finding-schema.md "스크린샷 증거" 규칙대로 적는다 — 경로를 주면 경로, `ss_xxxx` ID 만 주면 ID + 보이는 것 1~2문장 + `javascript_tool` 로 읽은 computed style/치수 (파일명 지정 불가).
 - 시인성: 본문 대비(회색 위 회색), 12px 미만 텍스트, 잘리는 라벨, 아이콘만 있는 버튼.
 - 일관성: 버튼 위계(primary 하나뿐인가), 간격·모서리·색 토큰이 화면 간 같은가, 배지(`RoleBadge`/`StatusChip`) 의미 색이 일관되는가.
 - 상태: 빈 상태·로딩·에러에 문구+다음 행동이 있는가. 스켈레톤/스피너 유무.
@@ -33,4 +33,4 @@ model: inherit
 사용자 친화성·시인성·일관성. 기능 버그·보안·용어 적절성은 다른 리뷰어 몫 — 쓰지 않는다. 디자인 스펙과 다른 점은 "스펙과 불일치" 로 명시.
 
 ## 출력
-finding-schema YAML. 각 finding 의 evidence 에 스크린샷 경로 필수, 가능하면 컴포넌트 파일(`Grep` 으로 클래스명 검색)도. `scope=pr` 은 `CHANGED_FILES` 에 있는 컴포넌트/화면에서 본 것만, evidence 에 해당 코드 줄(`Grep` 으로 찾아)을 첨부. 라이브는 main 코드이므로 나머지는 전부 `scope=existing`. 마지막에 demo-accounts.md 의 로그아웃 절차(우측 상단 사용자 메뉴 → 로그아웃; `/api/auth/logout` 은 POST 전용) — **반드시** (다음 리뷰어가 같은 Chrome 프로파일에서 다른 계정으로 로그인한다).
+finding-schema YAML. 각 finding 의 evidence 에 스크린샷 참조(경로 또는 ss_ ID + 설명 + DOM 값) 필수, 가능하면 컴포넌트 파일(`Grep` 으로 클래스명 검색)도. `scope=pr` 은 `CHANGED_FILES` 에 있는 컴포넌트/화면에서 본 것만, evidence 에 해당 코드 줄(`Grep` 으로 찾아)을 첨부. 라이브는 main 코드이므로 나머지는 전부 `scope=existing`. 마지막에 demo-accounts.md 의 로그아웃 절차(우측 상단 사용자 메뉴 → 로그아웃; `/api/auth/logout` 은 POST 전용) — **반드시** (다음 리뷰어가 같은 Chrome 프로파일에서 다른 계정으로 로그인한다).
