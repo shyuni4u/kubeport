@@ -396,7 +396,12 @@ function UIModeEdit({ onDirty }: ModeProps) {
           )}
         </div>
       )}
-      <EditorLayout tree={tree} inspector={inspector} preview={preview} />
+      <EditorLayout
+        tree={tree}
+        inspector={inspector}
+        preview={preview}
+        selection={active ? `${active.resIdx}:${active.path}` : null}
+      />
       {err && <div className="text-red-600 text-sm mt-2 whitespace-pre">{err}</div>}
       <BottomBar
         canSave={canSave}

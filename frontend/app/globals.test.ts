@@ -24,22 +24,41 @@ function block(selector: string): string {
   return css.slice(start, end);
 }
 
-/** Oklch lightness of a token, e.g. `--muted: oklch(0.94 0 0)` -> 0.94. */
+/**
+ * Oklch lightness of a token, e.g. `--muted: oklch(0.93 0 0)` -> 0.93.
+ *
+ * Rejects anything with chroma, because `contrast()` below is only valid for
+ * greys. Without the guard, pointing any of these assertions at a tinted token
+ * like `--accent: oklch(0.95 0.03 275)` would not fail — it would quietly
+ * assert a wrong number.
+ */
 function lightness(scope: string, token: string): number {
-  const m = new RegExp(`${token}:\\s*oklch\\(([\\d.]+)`).exec(block(scope));
+  const m = new RegExp(`${token}:\\s*oklch\\(([\\d.]+)\\s+([\\d.]+)`).exec(block(scope));
   if (!m) throw new Error(`${token} is not a plain oklch() value in ${scope}`);
+  if (Number(m[2]) !== 0) {
+    throw new Error(
+      `${token} has chroma ${m[2]}; the L = Y^(1/3) identity holds only for greys`,
+    );
+  }
   return Number(m[1]);
 }
 
 /**
- * WCAG relative-luminance contrast. For an achromatic colour Oklab's lightness
- * is the cube root of the relative luminance, which is what lets this compare
- * tokens straight out of the CSS without a colour library.
+ * WCAG relative-luminance contrast, for achromatic colours only — `lightness()`
+ * enforces that.
+ *
+ * Oklab's linear-sRGB→LMS rows each sum to 1, so a grey has l = m = s = Y and
+ * L = Y^(1/3); WCAG's luminance coefficients also sum to 1, so its Y is the
+ * same number. That identity is what lets this compare tokens straight out of
+ * the CSS without a colour library.
  */
 function contrast(a: number, b: number): number {
   const [hi, lo] = a > b ? [a, b] : [b, a];
   return (hi ** 3 + 0.05) / (lo ** 3 + 0.05);
 }
+
+/** Every surface a component can be drawn on, per theme. */
+const SURFACES = ["--background", "--card"] as const;
 
 describe("light-mode surface tokens", () => {
   const surfaces = ["--muted", "--secondary"] as const;
@@ -74,14 +93,35 @@ describe("dark-mode surface tokens", () => {
   });
 });
 
+describe("--muted-foreground", () => {
+  // The label colour has to survive the surface moving under it. shadcn's
+  // default sat at 4.34:1 on the old --background and would have dropped to
+  // 3.85:1 once --muted darkened — on the very surfaces #71 makes solid.
+  it.each([...SURFACES, "--muted"] as const)("clears 4.5:1 on %s", (surface) => {
+    expect(
+      contrast(lightness(":root", "--muted-foreground"), lightness(":root", surface)),
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
 describe("--slider-track", () => {
   // #43's dedicated token outlives the #71 fix: a slider track is a non-text UI
   // component under WCAG 1.4.11, and no muted-weight fill reaches 3:1 against a
   // light page. Written as an assertion so that "can we drop --slider-track
   // now?" has an answer in the repo instead of being re-argued.
-  it("clears 3:1 against the card surface it sits on", () => {
+  //
+  // Every surface, both themes. Checking only --card is what let 0.66 stand at
+  // 2.85:1 against --background — and the deploy form, the one screen with a
+  // slider, draws it on --background.
+  it.each(SURFACES)("clears 3:1 against %s in light mode", (surface) => {
     expect(
-      contrast(lightness(":root", "--slider-track"), lightness(":root", "--card")),
+      contrast(lightness(":root", "--slider-track"), lightness(":root", surface)),
+    ).toBeGreaterThanOrEqual(3);
+  });
+
+  it.each(SURFACES)("clears 3:1 against %s in dark mode", (surface) => {
+    expect(
+      contrast(lightness(".dark", "--slider-track"), lightness(".dark", surface)),
     ).toBeGreaterThanOrEqual(3);
   });
 

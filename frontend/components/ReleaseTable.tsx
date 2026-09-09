@@ -38,7 +38,7 @@ export function ReleaseTable({ rows }: { rows: ReleaseRow[] }) {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.id} className="border-t border-border transition hover:bg-muted/30">
+            <tr key={r.id} className="border-t border-border transition hover:bg-muted">
               <td className="px-4 py-3">
                 <Link
                   href={`/releases/${r.id}`}

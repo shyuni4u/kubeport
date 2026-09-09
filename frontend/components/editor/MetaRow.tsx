@@ -79,10 +79,16 @@ export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Prop
               <button
                 type="button"
                 aria-label={t("removeTag", { tag })}
-                // A real icon at a real hit area: "×" was a text glyph whose
-                // size followed the badge's own font size, so it shrank with
-                // it and landed well under any usable target (#44).
-                className="-mr-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-sm opacity-60 hover:bg-secondary-foreground/10 hover:opacity-100 focus-visible:outline-2 focus-visible:outline-ring"
+                // A real icon at a real hit area (#44). "×" was a text glyph
+                // whose size followed the badge's own font size, so it shrank
+                // with it. The icon is 16px to fit the badge, but `after:`
+                // stretches the pointer target to 24px for WCAG 2.2 SC 2.5.8 —
+                // growing the button itself would grow the badge.
+                //
+                // ring, not outline: the parent Badge is `overflow-hidden`, and
+                // an outline on a child flush with its edge gets clipped. A
+                // ring is a box-shadow, which is not.
+                className="relative -mr-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-sm opacity-60 after:absolute after:-inset-1 after:content-[''] hover:bg-secondary-foreground/10 hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() =>
                   onChange({
                     ...meta,

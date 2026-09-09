@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -29,37 +29,16 @@ const LINE_CAP = 2000;
 export function LogsPanel({ releaseId, instances, initialInstance = "all" }: Props) {
   const [instance, setInstance] = useState(initialInstance);
   const [autoscroll, setAutoscroll] = useState(true);
-  // Bumped by the reconnect action, and folded into Stream's key so the
-  // remount closes the dead EventSource and puts the status dot back to
-  // "connecting" by construction, with no setState inside an effect (#46).
+  // Bumped by the reconnect action and folded into Stream's key, so the remount
+  // closes the dead EventSource, empties the buffer and puts the status dot
+  // back to "connecting" — all by construction, with no setState in an effect.
+  //
+  // Emptying it is the point, not a side effect (#46). The backend opens each
+  // stream with PodLogOptions{Follow: true} and no SinceTime, so a reconnect
+  // replays the container log from the beginning: keeping the old lines would
+  // show every one of them twice, and dropping them loses nothing, because the
+  // replay brings them straight back.
   const [attempt, setAttempt] = useState(0);
-
-  // The buffer lives here, above that key: a reconnect must not throw away the
-  // lines the reader was looking at, and those are usually the last ones
-  // before the drop.
-  const [lines, setLines] = useState<LogEntry[]>([]);
-  // Monotonic id for stable React keys. Sliced lines (LINE_CAP) keep their
-  // original id, so reconciliation only re-renders the new row.
-  const seqRef = useRef(0);
-
-  const append = useCallback((entry: Omit<LogEntry, "id">) => {
-    seqRef.current += 1;
-    const next: LogEntry = { id: seqRef.current, ...entry };
-    setLines((prev) => {
-      const trimmed = prev.length >= LINE_CAP ? prev.slice(-LINE_CAP + 1) : prev;
-      return [...trimmed, next];
-    });
-  }, []);
-
-  // A different release or instance is a different source, so its lines go.
-  // Adjusting state during render on a changed input is React's documented
-  // alternative to a setState effect: it re-renders before anything commits.
-  const source = `${releaseId}:${instance}`;
-  const [lastSource, setLastSource] = useState(source);
-  if (source !== lastSource) {
-    setLastSource(source);
-    setLines([]);
-  }
 
   return (
     <div className="flex flex-col gap-2">
@@ -71,13 +50,10 @@ export function LogsPanel({ releaseId, instances, initialInstance = "all" }: Pro
         onAutoscrollChange={setAutoscroll}
       >
         <Stream
-          key={`${source}:${attempt}`}
+          key={`${releaseId}:${instance}:${attempt}`}
           releaseId={releaseId}
           instance={instance}
           autoscroll={autoscroll}
-          lines={lines}
-          onAppend={append}
-          onClear={() => setLines([])}
           onReconnect={() => setAttempt((n) => n + 1)}
         />
       </Toolbar>
@@ -145,30 +121,30 @@ type StreamProps = {
   releaseId: string;
   instance: string;
   autoscroll: boolean;
-  lines: LogEntry[];
-  onAppend: (entry: Omit<LogEntry, "id">) => void;
-  onClear: () => void;
   onReconnect: () => void;
 };
 
-function Stream({
-  releaseId,
-  instance,
-  autoscroll,
-  lines,
-  onAppend,
-  onClear,
-  onReconnect,
-}: StreamProps) {
+function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
   const t = useTranslations("logs");
+  const [lines, setLines] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<Status>("connecting");
   const boxRef = useRef<HTMLDivElement>(null);
+  // Monotonic id for stable React keys. Sliced lines (LINE_CAP) keep
+  // their original id, so reconciliation only re-renders the new row.
+  const seqRef = useRef(0);
 
   useEffect(() => {
     const es = new EventSource(
       `/api/v1/releases/${releaseId}/logs?instance=${encodeURIComponent(instance)}`,
     );
-    const append = onAppend;
+    const append = (entry: Omit<LogEntry, "id">) => {
+      seqRef.current += 1;
+      const next: LogEntry = { id: seqRef.current, ...entry };
+      setLines((prev) => {
+        const trimmed = prev.length >= LINE_CAP ? prev.slice(-LINE_CAP + 1) : prev;
+        return [...trimmed, next];
+      });
+    };
     es.addEventListener("log", (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data) as { time: number; pod: string; text: string };
@@ -192,7 +168,7 @@ function Stream({
     return () => {
       es.close();
     };
-  }, [releaseId, instance, onAppend]);
+  }, [releaseId, instance]);
 
   useEffect(() => {
     if (!autoscroll) return;
@@ -215,7 +191,7 @@ function Stream({
           size="sm"
           variant="outline"
           className="ml-auto"
-          onClick={onClear}
+          onClick={() => setLines([])}
         >
           {t("clear")}
         </Button>

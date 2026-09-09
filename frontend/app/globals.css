@@ -71,7 +71,14 @@
   --secondary: oklch(0.93 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.93 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  /*
+    Darkened with --muted. shadcn's 0.556 was 4.34:1 on the old 0.97 surface —
+    already under WCAG 1.4.3 AA — and would have fallen to 3.85:1 once --muted
+    moved, on exactly the surfaces this change makes solid (the release table
+    header, the editor meta row). 0.50 clears 4.5:1 on --muted, --background
+    and --card alike.
+  */
+  --muted-foreground: oklch(0.5 0 0);
   --accent: oklch(0.95 0.03 275);
   --accent-foreground: oklch(0.35 0.2 275);
   --destructive: oklch(0.577 0.245 27.325);
@@ -81,10 +88,14 @@
     Slider tracks are non-text UI components, so WCAG 1.4.11 asks for 3:1
     against the adjacent surface. Still needed after #71 separated --muted from
     --background: a muted-weight fill tops out near 1.2:1 on a light page, an
-    order of magnitude short of 3:1. --border (0.922) is no better. Dedicated
-    token, deliberately darker. globals.test.ts asserts both halves of this.
+    order of magnitude short of 3:1. --border (0.922) is no better.
+
+    0.64, not the original 0.66: the only slider in the app is in the deploy
+    form, which sits on --background rather than on a card, and 0.66 was 2.85:1
+    there — the requirement was being missed on the one surface it had to hold.
+    globals.test.ts now checks every surface, in both themes.
   */
-  --slider-track: oklch(0.66 0 0);
+  --slider-track: oklch(0.64 0 0);
   --ring: oklch(0.55 0.22 275);
   --chart-1: oklch(0.55 0.22 275);
   --chart-2: oklch(0.68 0.16 50);
@@ -120,8 +131,12 @@
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  /* Lighter than the dark surface, for the same 3:1 reason as light mode. */
-  --slider-track: oklch(0.48 0 0);
+  /*
+    Lighter than the dark surface, for the same 3:1 reason as light mode.
+    0.51, not 0.48: 0.48 cleared --background (3.03:1) but only reached 2.74:1
+    against --card, so a slider inside a card would have missed.
+  */
+  --slider-track: oklch(0.51 0 0);
   --ring: oklch(0.65 0.22 275);
   --chart-1: oklch(0.65 0.22 275);
   --chart-2: oklch(0.7 0.16 50);

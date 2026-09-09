@@ -79,6 +79,28 @@ shadcn `Breadcrumb` 그대로. 모든 내부 페이지 상단.
 | Danger | `red-700` | `#A32D2D` |
 | Info / highlight | `blue-500` | `#378ADD` |
 
+### 1.6 타입 스케일 하한 (2026-09-09 추가, [#44](https://github.com/shyuni4u/kubeport/issues/44))
+
+본문·배지·레이블을 통틀어 **11px 미만은 쓰지 않는다.** 랩톱을 팔 길이에서 볼 때 판독이
+무너지는 크기이고, 에디터의 fixed/exposed 배지처럼 저작 모델 전체가 걸린 구분이 그 크기에
+놓여 있었다. `frontend/components/design-consistency.test.ts` 가 리포 전역으로 고정한다.
+
+이 절이 생기기 전 §4.3 은 카탈로그 태그를 10px 로 규정하고 있었다. 그 값은 이 하한으로
+대체됐다 — 개별 화면의 수치보다 하한이 우선한다.
+
+### 1.7 라이트 모드 표면 토큰 ([#71](https://github.com/shyuni4u/kubeport/issues/71))
+
+`--background` 는 흰색이 아니라 `oklch(0.97)` 이고 `--card` 가 `oklch(1.0)` 이다 — "회색 지면
+위의 흰 카드". 그래서 shadcn 기본값을 그대로 쓰면 안 되는 토큰이 있다:
+
+- `--muted` · `--secondary` 는 지면보다 **어두워야** 한다 (`oklch(0.93)`). shadcn 기본값
+  `0.97` 은 흰 지면을 전제하므로, 여기서는 `--background` 와 같은 값이 되어 `bg-muted` 면이
+  통째로 사라진다.
+- 슬라이더 트랙처럼 WCAG 1.4.11 이 3:1 을 요구하는 비텍스트 컴포넌트는 muted 급 채움으로
+  덮을 수 없다 (muted 는 지면 대비 1.1~1.2:1 이 한계). 전용 `--slider-track` 을 쓴다.
+
+`frontend/app/globals.test.ts` 가 두 규칙을 라이트·다크 양쪽에서 고정한다.
+
 ---
 
 ## 2. 공통 레이아웃
@@ -208,7 +230,7 @@ CatalogCard 내부:
 - 아이콘 (lucide-react, 색 배경 30×30 rounded-md)
 - 타이틀 (`display_name`, 14px / 500)
 - 설명 (12px / text-secondary, `line-clamp-2`, min-height 36px 로 카드 높이 통일)
-- 태그들 (shadcn Badge variant=secondary, 10px)
+- 태그들 (shadcn Badge variant=secondary, 11px — §1.6 하한이 이전의 10px 을 대체)
 - 하단: "v2 · platform" + "배포하기 →" (링크)
 - 클릭 → `router.push('/catalog/${template.name}/deploy')`
 

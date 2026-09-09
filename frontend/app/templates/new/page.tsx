@@ -325,7 +325,12 @@ function UIModeNew({ onDirty }: ModeProps) {
           <strong>{t("getStartedLead")}</strong>{t("getStarted")}
         </div>
       )}
-      <EditorLayout tree={tree} inspector={inspector} preview={preview} />
+      <EditorLayout
+        tree={tree}
+        inspector={inspector}
+        preview={preview}
+        selection={active ? `${active.resIdx}:${active.path}` : null}
+      />
       {err && <div className="text-red-600 text-sm whitespace-pre">{err}</div>}
       <BottomBar
         canSave={canSave}
