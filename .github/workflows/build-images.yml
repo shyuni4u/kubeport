@@ -69,12 +69,19 @@ permissions:
 # was waiting on any more.
 #
 # Pull requests only. This job publishes on main and on tags, and
-# docs/oci-prod-runbook.md deploys by pinning `sha-<shortsha>` — cancelling a
-# main run mid-push would leave that sha with no image in ghcr, so an operator
-# pinning it (or rolling back to it) meets ImagePullBackOff. A superseded PR
-# build produces nothing anyone can pin, so there it is free.
+# docs/oci-prod-runbook.md deploys by pinning `sha-<shortsha>` — losing a main
+# run leaves that sha with no image in ghcr, so an operator pinning it (or
+# rolling back to it) meets ImagePullBackOff. A superseded PR build produces
+# nothing anyone can pin, so there it is free.
+#
+# Non-PR runs get a group of their own (run_id is unique) rather than sharing
+# one with cancel-in-progress off. `cancel-in-progress: false` only protects the
+# run that is already executing: GitHub keeps a single *pending* run per group,
+# so with three merges in quick succession the third cancels the second while it
+# waits, and that commit is never built. A per-run group means main and tag
+# builds never queue against each other at all.
 concurrency:
-  group: build-images-${{ github.ref }}
+  group: build-images-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
