@@ -44,16 +44,31 @@ info:
     server-side. It **ignores any `Authorization` header you send**. Paths and
     bodies are otherwise identical to this spec.
 
-    So a script has two options, both covered in
-    `docs/machine-clients.md`: port-forward to the backend Service and use a
-    bearer token, or drive the browser session. There is no public bearer-token
-    route today — see issue #34.
+    So a script port-forwards to the backend Service and sends a bearer
+    id_token. Driving the browser session is **not** a client path: the BFF
+    ignores `Authorization`, and the session token never leaves the server (it
+    is held encrypted in the `sessions` table, not in the cookie).
+
+    Getting that id_token without a human is solved for the local dex stack and
+    unsolved for Google — `docs/machine-clients.md` §2 and §3 spell out which is
+    which, and issue #34 tracks the gap.
 
 servers:
   - url: http://localhost:8080
-    description: Go API, reached directly (port-forward or in-cluster)
-  - url: https://kubeport.enzo.kr/api
-    description: Next.js BFF (session cookie, not bearer)
+    description: |
+      The Go API, reached directly — port-forward, or in-cluster. This is the
+      server the `bearerAuth` scheme below applies to.
+  - url: https://{host}/api
+    description: |
+      The Next.js BFF. Browser-only: it authenticates from an httpOnly session
+      cookie and ignores any `Authorization` header, so `bearerAuth` does not
+      apply here. Listed because paths and bodies are identical.
+    variables:
+      host:
+        default: kubeport.example.com
+        description: |
+          Your install's Ingress host. The project's public demo runs at
+          kubeport.enzo.kr — do not point a client at it by accident.
 
 security:
   - bearerAuth: []
@@ -105,6 +120,13 @@ paths:
         `kubeport-admin`. That group comes from the IdP's `groups` claim, or —
         when the IdP does not emit one, as with Google — from the
         `KBP_DEV_ADMIN_EMAILS` allowlist.
+
+        The allowlist is a bootstrap escape hatch, not a role system: the
+        backend logs a warning at startup when it is set
+        (`cmd/server/main.go`), and enabling demo mode makes the chart append
+        the public demo admin's address to it
+        (`templates/_helpers.tpl`, `kubeport.devAdminEmails`). Keep it to the
+        smallest possible list, and empty it once the IdP emits groups.
       responses:
         "200":
           description: OK
@@ -120,6 +142,7 @@ paths:
                     type: array
                     items: { type: string }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/clusters:
     get:
@@ -144,6 +167,7 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/ClusterSummary" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "500": { $ref: "#/components/responses/InternalError" }
     post:
       tags: [clusters]
       operationId: createCluster
@@ -171,8 +195,9 @@ paths:
         "409":
           description: A cluster with that name already exists.
           content:
-            application/problem+json:
+            application/json:
               schema: { $ref: "#/components/schemas/Problem" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/clusters/{name}/openapi:
     get:
@@ -193,6 +218,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/UpstreamError" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/clusters/{name}/openapi/{gv}:
     get:
@@ -219,18 +245,24 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/UpstreamError" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/clusters/{name}/openapi/refresh:
     post:
       tags: [clusters]
       operationId: refreshClusterOpenAPI
       summary: Drop the cached schema for this cluster
+      description: |
+        Note: unlike the other cluster write, this carries no admin or demo
+        gate — any authenticated caller can clear the cache, and the next read
+        re-fetches the full schema from the apiserver.
       parameters:
         - $ref: "#/components/parameters/ClusterName"
       responses:
-        "200": { description: Cache cleared. }
+        "204": { description: "Cache cleared. No body." }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/selfsubjectaccessreview:
     post:
@@ -262,6 +294,12 @@ paths:
                     description: Free text from the cluster; may be empty.
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404":
+          description: No cluster is registered under that name.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "500": { $ref: "#/components/responses/InternalError" }
         "502": { $ref: "#/components/responses/UpstreamError" }
 
   /v1/templates:
@@ -287,6 +325,7 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/TemplateListItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "500": { $ref: "#/components/responses/InternalError" }
     post:
       tags: [templates]
       operationId: createTemplate
@@ -318,8 +357,9 @@ paths:
         "409":
           description: A template with that name already exists.
           content:
-            application/problem+json:
+            application/json:
               schema: { $ref: "#/components/schemas/Problem" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/templates/preview:
     post:
@@ -347,6 +387,7 @@ paths:
                   ui_spec_yaml: { type: string }
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/templates/{name}/render:
     post:
@@ -387,6 +428,7 @@ paths:
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/templates/{name}:
     get:
@@ -402,6 +444,7 @@ paths:
               schema: { $ref: "#/components/schemas/TemplateDetail" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
     patch:
       tags: [templates]
       operationId: updateTemplate
@@ -430,6 +473,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/templates/{name}/versions:
     get:
@@ -451,6 +495,7 @@ paths:
                     items: { $ref: "#/components/schemas/TemplateVersion" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
     post:
       tags: [templates]
       operationId: createTemplateVersion
@@ -471,6 +516,13 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: |
+            A version with that number already exists for this template.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/templates/{name}/versions/{v}:
     get:
@@ -486,8 +538,10 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TemplateVersion" }
+        "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
     patch:
       tags: [templates]
       operationId: updateTemplateVersion
@@ -516,8 +570,9 @@ paths:
         "409":
           description: The version is not a draft.
           content:
-            application/problem+json:
+            application/json:
               schema: { $ref: "#/components/schemas/Problem" }
+        "500": { $ref: "#/components/responses/InternalError" }
     delete:
       tags: [templates]
       operationId: deleteTemplateVersion
@@ -526,15 +581,17 @@ paths:
         - $ref: "#/components/parameters/TemplateName"
         - $ref: "#/components/parameters/VersionNumber"
       responses:
-        "200": { description: Deleted. }
+        "204": { description: "Deleted. No body." }
+        "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409":
           description: The version is not a draft.
           content:
-            application/problem+json:
+            application/json:
               schema: { $ref: "#/components/schemas/Problem" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/templates/{name}/versions/{v}/publish:
     post:
@@ -553,9 +610,18 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TemplateVersion" }
+        "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: |
+            The version is not in the state this transition requires; `detail`
+            names the state it is actually in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/templates/{name}/versions/{v}/deprecate:
     post:
@@ -572,9 +638,18 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TemplateVersion" }
+        "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: |
+            The version is not in the state this transition requires; `detail`
+            names the state it is actually in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/templates/{name}/versions/{v}/undeprecate:
     post:
@@ -590,9 +665,18 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TemplateVersion" }
+        "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: |
+            The version is not in the state this transition requires; `detail`
+            names the state it is actually in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/releases:
     get:
@@ -631,6 +715,7 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/ReleaseListItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "500": { $ref: "#/components/responses/InternalError" }
     post:
       tags: [releases]
       operationId: createRelease
@@ -653,21 +738,45 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Release" }
-        "400": { $ref: "#/components/responses/ValidationError" }
-        "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403":
+        "400":
           description: |
-            Refused by kubeport (demo restriction) **or** by the cluster's RBAC.
-            `title` separates them: `demo-restricted` vs `rbac-denied`.
+            The body failed validation, or the target version is deprecated.
           content:
-            application/problem+json:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404":
+          description: |
+            No such template version, or no such cluster — `detail` says which.
+            This is what a mistyped `template` or `cluster` returns.
+          content:
+            application/json:
               schema: { $ref: "#/components/schemas/Problem" }
         "409":
-          description: A release with that name already exists in the namespace.
+          description: |
+            Either a release of that name already exists in the cluster and
+            namespace, **or the target version is not published**
+            (`detail: version not published`). Retrying with a different name
+            will not fix the second one, so read `detail` before retrying.
           content:
-            application/problem+json:
+            application/json:
               schema: { $ref: "#/components/schemas/Problem" }
-        "502": { $ref: "#/components/responses/UpstreamError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502":
+          description: |
+            The apply failed at the cluster. **A permission denial arrives here,
+            not as a 403** — the apiserver's rejection is surfaced as
+            `k8s-error`, so do not treat 502 as purely transient and retry it
+            blindly.
+
+            kubeport applies no demo restriction of its own to this endpoint:
+            demo isolation rests entirely on the target cluster's RBAC
+            (`deploy/helm/kubeport/templates/demo-rbac.yaml`). Register a
+            cluster without those bindings and there is no application-level
+            guard behind them.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
 
   /v1/releases/{id}:
     get:
@@ -689,6 +798,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
     put:
       tags: [releases]
       operationId: updateRelease
@@ -721,6 +831,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/UpstreamError" }
+        "500": { $ref: "#/components/responses/InternalError" }
     delete:
       tags: [releases]
       operationId: deleteRelease
@@ -749,6 +860,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/UpstreamError" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/releases/{id}/logs:
     get:
@@ -786,9 +898,10 @@ paths:
             No such release, or no pod matched `instance` — `title` is
             `not-found` or `no-pods`.
           content:
-            application/problem+json:
+            application/json:
               schema: { $ref: "#/components/schemas/Problem" }
         "502": { $ref: "#/components/responses/UpstreamError" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/teams:
     get:
@@ -808,7 +921,9 @@ paths:
                   teams:
                     type: array
                     items: { $ref: "#/components/schemas/Team" }
+        "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "500": { $ref: "#/components/responses/InternalError" }
     post:
       tags: [teams]
       operationId: createTeam
@@ -836,8 +951,9 @@ paths:
         "409":
           description: A team with that name already exists.
           content:
-            application/problem+json:
+            application/json:
               schema: { $ref: "#/components/schemas/Problem" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/teams/{id}/members:
     get:
@@ -859,7 +975,9 @@ paths:
                     items: { $ref: "#/components/schemas/TeamMember" }
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
     post:
       tags: [teams]
       operationId: addTeamMember
@@ -893,8 +1011,9 @@ paths:
             `title` is `not-found` or `user-not-found`. kubeport cannot invite
             people; they must log in once first.
           content:
-            application/problem+json:
+            application/json:
               schema: { $ref: "#/components/schemas/Problem" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/teams/{id}/members/{user_id}:
     delete:
@@ -908,11 +1027,12 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        "200": { description: Removed. }
+        "204": { description: "Removed. No body." }
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
 components:
   securitySchemes:
@@ -962,7 +1082,7 @@ components:
         Missing, malformed or rejected token. Through the BFF this also covers a
         missing or expired session cookie.
       content:
-        application/problem+json:
+        application/json:
           schema: { $ref: "#/components/schemas/Problem" }
           example:
             type: https://kubeport.io/errors/unauthenticated
@@ -975,34 +1095,54 @@ components:
         cluster's RBAC; `demo-restricted` is a demo account hitting a write that
         demo accounts never get.
       content:
-        application/problem+json:
+        application/json:
           schema: { $ref: "#/components/schemas/Problem" }
     NotFound:
       description: No such resource.
       content:
-        application/problem+json:
+        application/json:
           schema: { $ref: "#/components/schemas/Problem" }
     ValidationError:
       description: The request body or a parameter did not validate.
       content:
-        application/problem+json:
+        application/json:
           schema: { $ref: "#/components/schemas/Problem" }
     UpstreamError:
       description: |
-        The target cluster failed or refused the request. `title` is
-        `k8s-error`, or `cluster-config` when the stored registration cannot be
-        used to build a client.
+        The call to the target cluster failed or was refused (`k8s-error`). An
+        RBAC denial from the apiserver arrives here rather than as a 403, so
+        this is not automatically a transient condition — check `detail` before
+        retrying.
       content:
-        application/problem+json:
+        application/json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    InternalError:
+      description: |
+        Something failed on kubeport's side. `title` is `internal` for a
+        database or rendering failure, `cluster-config` when the stored cluster
+        registration cannot be turned into a client, or `k8s-error` when
+        building the k8s client itself failed (as opposed to the call to the
+        cluster failing, which is a 502).
+      content:
+        application/json:
           schema: { $ref: "#/components/schemas/Problem" }
 
   schemas:
     Problem:
       type: object
       description: |
-        RFC 7807-shaped. Every JSON error from this API and from the BFF uses
-        it — branch on `title`, which is the stable machine-readable kind;
-        `detail` is prose and may change.
+        RFC 7807-shaped. Every error this API and the BFF *route* uses it —
+        branch on `title`, the stable machine-readable kind; `detail` is prose
+        and may change.
+
+        Two caveats worth knowing before you write a parser:
+
+        - It is served as `application/json`, not `application/problem+json`
+          (`errors.go` uses gin's `AbortWithStatusJSON`). A strict RFC 7807
+          client that content-negotiates on the media type will not match.
+        - A request to a path the router does not know never reaches this at
+          all: gin's default 404 is `text/plain`. So handle a non-JSON body on
+          4xx rather than assuming this schema. Tracked in issue #81.
       required: [type, title, status]
       properties:
         type:
@@ -1012,23 +1152,32 @@ components:
         title: { $ref: "#/components/schemas/ErrorKind" }
         status: { type: integer }
         detail: { type: string }
-        request_id: { type: string }
+        request_id:
+          type: string
+          description: |
+            Reserved. Nothing sets it today, so it is always absent — do not
+            build correlation on it yet.
 
     ErrorKind:
       type: string
       description: |
-        The closed set of error kinds. `backend/internal/api/error_shape_test.go`
-        fails the build if a handler introduces one that is not listed here.
+        The closed set of error kinds. `openapi_spec_test.go` fails the build if
+        this list and the kinds the handlers emit fall out of step, in either
+        direction.
       enum:
         - unauthenticated   # 401 — no/invalid token or session
-        - rbac-denied       # 403 — kubeport or cluster RBAC refused
+        - rbac-denied       # 403 — kubeport's own check refused
         - demo-restricted   # 403 — demo account, write not available
         - validation-error  # 400 — body or parameter rejected
         - not-found         # 404
         - user-not-found    # 404 — email has never signed in
         - no-pods           # 404 — release has no pod matching ?instance
-        - conflict          # 409 — name already taken, or version not a draft
-        - k8s-error         # 502 — target cluster failed or refused
+        - conflict          # 409 — name taken, or version in the wrong state
+        - k8s-error         # 502 when the call to the cluster failed;
+                            # 500 when the client could not be built at all.
+                            # The cluster-openapi proxy also passes the
+                            # upstream status through verbatim, so this kind
+                            # can appear with 401/403 there.
         - cluster-config    # 500 — stored registration unusable
         - internal          # 500
 
@@ -1081,9 +1230,12 @@ components:
 
     SSARRequest:
       type: object
+      required: [cluster, verb, resource]
       properties:
         cluster: { type: string }
-        namespace: { type: string }
+        namespace:
+          type: string
+          description: Empty checks cluster scope.
         verb:
           type: string
           example: create
@@ -1094,7 +1246,9 @@ components:
         resource:
           type: string
           example: deployments
-        name: { type: string }
+        name:
+          type: string
+          description: Empty checks the whole collection.
 
     Template:
       type: object
@@ -1128,9 +1282,12 @@ components:
             current_version: { type: [integer, "null"] }
             current_ui_spec:
               type: [string, "null"]
+              contentMediaType: application/yaml
+              contentSchema: { $ref: "#/components/schemas/UiSpec" }
               description: |
                 The published version's ui-spec YAML. Present so a client can
-                build a deploy form from the list alone.
+                build a deploy form from the list alone — parse it as the
+                UiSpec schema below.
             current_status:
               type: [string, "null"]
               description: null when the template has no version yet.
@@ -1143,7 +1300,10 @@ components:
         template_id: { type: string, format: uuid }
         version: { type: integer }
         resources_yaml: { type: string }
-        ui_spec_yaml: { type: string }
+        ui_spec_yaml:
+          type: string
+          contentMediaType: application/yaml
+          contentSchema: { $ref: "#/components/schemas/UiSpec" }
         metadata_yaml: { type: [string, "null"] }
         status:
           type: string
@@ -1197,7 +1357,10 @@ components:
           type: string
           enum: [yaml, ui]
         resources_yaml: { type: string }
-        ui_spec_yaml: { type: string }
+        ui_spec_yaml:
+          type: string
+          contentMediaType: application/yaml
+          contentSchema: { $ref: "#/components/schemas/UiSpec" }
         ui_state:
           type: object
           additionalProperties: true
@@ -1209,12 +1372,59 @@ components:
       description: Only the fields present are changed.
       properties:
         resources_yaml: { type: string }
-        ui_spec_yaml: { type: string }
+        ui_spec_yaml:
+          type: string
+          contentMediaType: application/yaml
+          contentSchema: { $ref: "#/components/schemas/UiSpec" }
         ui_state:
           type: object
           additionalProperties: true
         metadata_yaml: { type: string }
         notes: { type: string }
+
+    UiSpec:
+      type: object
+      description: |
+        What the YAML in `current_ui_spec` / `ui_spec_yaml` parses to. This is
+        the contract for building a deploy form and for keying `values`.
+
+        A `path` selects a node in the template's resources.yaml:
+
+            <Kind>[<selector>].<field>(.<field>|[<index>])*
+
+        `<selector>` is a list index or a metadata.name, and may be omitted when
+        only one object of that Kind exists. Examples:
+        `Deployment.spec.replicas`,
+        `Service[web].spec.ports[0].port`,
+        `Deployment[api].spec.template.spec.containers[0].image`.
+      properties:
+        fields:
+          type: array
+          items:
+            type: object
+            required: [path, label, type]
+            properties:
+              path:
+                type: string
+                description: Also the key to use in a release's `values`.
+              label: { type: string }
+              help: { type: string }
+              type:
+                type: string
+                enum: [string, integer, boolean, enum, autocomplete]
+              min: { type: integer }
+              max: { type: integer }
+              pattern:
+                type: string
+                description: Go RE2 syntax.
+              values:
+                type: array
+                items: { type: string }
+                description: |
+                  Allowed values for `enum`. For `autocomplete` these are
+                  suggestions only and are not enforced.
+              default: {}
+              required: { type: boolean }
 
     CreateReleaseRequest:
       type: object
@@ -1232,7 +1442,12 @@ components:
         values:
           type: object
           additionalProperties: true
-          description: Keyed by the paths the template's ui-spec exposes.
+          description: |
+            A **flat** object — not nested — whose keys are the ui-spec's
+            `fields[].path` strings verbatim. See the UiSpec schema.
+          example:
+            Deployment.spec.replicas: 2
+            Deployment.spec.template.spec.containers[0].image: nginx:1.27
 
     Release:
       type: object

@@ -166,3 +166,110 @@ func TestOpenAPISpec_LivesWhereTheDocsSayItDoes(t *testing.T) {
 	require.NoError(t, err)
 	require.FileExists(t, abs)
 }
+
+// --- status codes -----------------------------------------------------------
+
+var (
+	// "kubeport/internal/api.(*Handlers).CreateRelease-fm" -> "CreateRelease"
+	handlerNameRe = regexp.MustCompile(`\(\*Handlers\)\.(\w+)`)
+	// Any http.StatusX passed to writeError / c.JSON / c.Status.
+	statusRe = regexp.MustCompile(`(?:writeError\(c,\s*|c\.JSON\(|c\.Status\()http\.(Status\w+)`)
+	funcRe   = regexp.MustCompile(`(?m)^func \(h \*Handlers\) (\w+)\(`)
+)
+
+var statusNames = map[string]string{
+	"StatusOK": "200", "StatusCreated": "201", "StatusNoContent": "204",
+	"StatusBadRequest": "400", "StatusUnauthorized": "401", "StatusForbidden": "403",
+	"StatusNotFound": "404", "StatusMethodNotAllowed": "405", "StatusConflict": "409",
+	"StatusInternalServerError": "500", "StatusBadGateway": "502",
+}
+
+// handlerBodies maps a handler method name to its source text, cut at the next
+// top-level func. Codes emitted by helpers the handler calls are not included,
+// which is why the assertion below is one-directional.
+func handlerBodies(t *testing.T) map[string]string {
+	t.Helper()
+	files, err := filepath.Glob("*.go")
+	require.NoError(t, err)
+
+	out := map[string]string{}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		src := readSourceFile(t, f)
+		locs := funcRe.FindAllStringSubmatchIndex(src, -1)
+		for i, loc := range locs {
+			name := src[loc[2]:loc[3]]
+			end := len(src)
+			if i+1 < len(locs) {
+				end = locs[i+1][0]
+			}
+			out[name] = src[loc[0]:end]
+		}
+	}
+	return out
+}
+
+// Every status a handler can return itself must appear in that operation's
+// responses. The reverse is deliberately not checked: shared helpers
+// (resolveTemplateVersion, requireDeployableVersion, the auth middleware) emit
+// codes that never appear in the handler's own body, and documenting those is
+// correct.
+//
+// This is the guard that would have caught the 204-documented-as-200 and the
+// missing 404/409 on POST /v1/releases.
+func TestOpenAPISpec_DocumentsEveryStatusHandlersEmit(t *testing.T) {
+	bodies := handlerBodies(t)
+	doc := loadSpec(t)
+	brace := regexp.MustCompile(`\{([^}]+)\}`)
+
+	// spec responses keyed by "METHOD /gin/path"
+	specCodes := map[string]map[string]bool{}
+	for path, item := range doc.Paths {
+		ginPath := brace.ReplaceAllString(path, ":$1")
+		for method, op := range item {
+			m, ok := op.(map[string]any)
+			if !ok {
+				continue
+			}
+			resp, ok := m["responses"].(map[string]any)
+			if !ok {
+				continue
+			}
+			codes := map[string]bool{}
+			for code := range resp {
+				codes[code] = true
+			}
+			specCodes[strings.ToUpper(method)+" "+ginPath] = codes
+		}
+	}
+
+	r := api.NewRouter(config.Config{}, api.Deps{Verifier: stubVerifier{}, Store: testStore(t)})
+	var problems []string
+	for _, ri := range r.Routes() {
+		hm := handlerNameRe.FindStringSubmatch(ri.Handler)
+		if hm == nil {
+			continue // inline handler, e.g. /healthz
+		}
+		body, ok := bodies[hm[1]]
+		if !ok {
+			continue
+		}
+		key := strings.Replace(ri.Method+" "+ri.Path, "/*gv", "/:gv", 1)
+		declared := specCodes[key]
+
+		for _, sm := range statusRe.FindAllStringSubmatch(body, -1) {
+			code, known := statusNames[sm[1]]
+			if !known {
+				continue
+			}
+			if !declared[code] {
+				problems = append(problems,
+					ri.Method+" "+ri.Path+" returns "+code+" (http."+sm[1]+" in "+hm[1]+") but the spec does not list it")
+			}
+		}
+	}
+	sort.Strings(problems)
+	require.Empty(t, problems, "%s is missing responses the handlers can actually return", specPath)
+}

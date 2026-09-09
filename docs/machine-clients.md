@@ -5,8 +5,9 @@ API 계약 자체는 [`backend/api/openapi.yaml`](../backend/api/openapi.yaml) �
 어떻게 붙느냐**만 다룬다.
 
 > **요약을 먼저:** 로컬 개발 환경에서는 dex 의 password grant 로 토큰을 얻어 바로 호출할 수 있다(§2, 검증됨).
-> **운영 환경(Google IdP)에는 비대화형 토큰 획득 경로가 아직 없다**(§3). 클러스터 등록 같은 운영자 1회성
-> 작업은 §4 의 우회 경로를 쓴다. 장기 해법은 [issue #34](https://github.com/shyuni4u/kubeport/issues/34).
+> **운영 환경에서 실사용자 권한으로 쓸 비대화형 경로는 아직 없다**(§3) — 데모 dex 를 통한 데모 범위
+> 자동화만 가능하다. 클러스터 등록 같은 운영자 1회성 작업은 §4 의 우회 경로를 쓴다. 장기 해법은
+> [issue #34](https://github.com/shyuni4u/kubeport/issues/34).
 
 ---
 
@@ -26,7 +27,11 @@ API 계약 자체는 [`backend/api/openapi.yaml`](../backend/api/openapi.yaml) �
 Go API 는 클러스터 밖에서 안 보이므로 port-forward 로 연다:
 
 ```bash
-kubectl -n kubeport port-forward svc/<release>-backend 8080:8080 &
+# Service 이름은 릴리스 이름에 따라 달라진다 (myrel → myrel-kubeport-backend). 라벨로 찾는다:
+BACKEND_SVC=$(kubectl -n kubeport get svc \
+  -l app.kubernetes.io/name=kubeport,app.kubernetes.io/component=backend \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl -n kubeport port-forward "svc/$BACKEND_SVC" 8080:8080 &
 curl -sS -H "Authorization: Bearer $TOKEN" http://localhost:8080/v1/me
 ```
 
@@ -37,7 +42,25 @@ curl -sS -H "Authorization: Bearer $TOKEN" http://localhost:8080/v1/me
 
 ## 2. 로컬 개발 — dex password grant (검증됨)
 
-`deploy/docker/docker-compose.yml` 의 dex 는 password grant 를 허용하므로 브라우저 없이 토큰이 나온다.
+**먼저 dex 가 떠 있어야 한다.** 새로 클론하면 `deploy/docker/certs/` 는 비어 있고(인증서는 gitignore
+대상), dex 는 TLS 인증서가 없으면 `loading TLS keypair: no such file or directory` 로 즉시 죽는다.
+
+```bash
+# 한 번만 — 자가서명 인증서 (docs/local-e2e.md §2 와 같은 명령)
+cd deploy/docker/certs
+openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+  -keyout dex.key -out dex.crt \
+  -subj "/CN=host.docker.internal" \
+  -addext "subjectAltName=DNS:host.docker.internal,DNS:localhost,IP:127.0.0.1"
+cd -
+
+docker compose -f deploy/docker/docker-compose.yml up -d
+docker compose -f deploy/docker/docker-compose.yml ps   # dex 가 Up 인지 확인
+```
+
+(`scripts/e2e/up.sh` 가 이 두 단계를 대신 해 준다.)
+
+그 다음 password grant 로 토큰을 받는다 — 브라우저가 필요 없다.
 
 ```bash
 curl -ks -X POST https://host.docker.internal:5556/token \
@@ -51,11 +74,12 @@ curl -ks -X POST https://host.docker.internal:5556/token \
 계정은 `deploy/docker/dex.yaml` 의 `staticPasswords` 에 있다 (`alice/alice`, `admin/admin`,
 데모 계정 2개는 비밀번호 `demo`).
 
-**2026-09-09 확인 결과** — 위 요청이 돌려주는 id_token 의 클레임:
+**2026-09-09 확인 결과** — 리포의 `deploy/docker/docker-compose.yml` 스택이 돌려주는 id_token 클레임:
 
 ```json
 {
-  "iss": "https://localhost:15556",
+  "iss": "https://host.docker.internal:5556",
+  "sub": "CglhZG1pbi0wMDASBWxvY2Fs",
   "aud": "kubeport",
   "email": "admin@example.com",
   "email_verified": true,
@@ -63,7 +87,11 @@ curl -ks -X POST https://host.docker.internal:5556/token \
 }
 ```
 
-여기서 두 가지가 중요하다.
+여기서 세 가지가 중요하다.
+
+- **`iss` 는 `dex.yaml` 의 `issuer` 와 문자열까지 같아야 한다.** 백엔드 `OIDC_ISSUER`, 차트
+  `oidc.issuer`, 클러스터의 `oidc_issuer_url` 을 전부 이 값으로 맞춘다. 포트를 다르게 매핑한
+  dex 로 토큰을 받아 놓고 issuer 를 안 맞추면 401 이 나는데, 원인을 찾기 어렵다.
 
 - **`groups` 클레임이 없다.** `scope` 에 `groups` 를 넣어도 안 나온다 — 이 static password 들에
   `groups` 가 설정돼 있지 않기 때문이다. 그래서 **로컬에서 관리자가 되는 경로는 groups 가 아니라
@@ -78,18 +106,31 @@ curl -ks -X POST https://host.docker.internal:5556/token \
 
 ---
 
-## 3. 운영 환경 — 아직 지원되는 경로가 없다
+## 3. 운영 환경 — 실사용자 권한으로는 경로가 없다
 
-운영은 Google 을 IdP 로 쓴다(`deploy/helm/kubeport/values.yaml` 의 `oidc.issuer`). 문제는:
+운영 설치는 IdP 가 **둘**이다: 주 IdP 인 Google(`values.yaml` 의 `oidc.issuer`)과, 데모 모드를 켰다면
+자체 호스팅 dex. 둘을 구분해야 답이 정확해진다.
 
-- **Google 은 password grant 를 지원하지 않는다.** §2 방식이 그대로는 안 통한다.
+**Google 쪽 — 경로 없음.**
+
+- **password grant 를 지원하지 않는다.** §2 방식이 통하지 않는다.
 - **`client_credentials` 는 이 리포 어디에도 구현돼 있지 않다.** 백엔드는 `requireAuth` 에서 오직
   id_token 만 검증한다(`backend/internal/api/middleware.go`).
 - **브라우저 세션에서 토큰을 꺼낼 수 없다.** 세션 쿠키는 httpOnly 라 JS 로 못 읽고, 애초에 쿠키 안에
   토큰이 없다 — 서버 측 DB 에 암호화되어 저장된다(`sessions` 테이블).
 
-즉 **라이브 kubeport 에 대해 사람 없이 토큰을 얻는 문서화된 방법이 0개**다. 이게
-[issue #34](https://github.com/shyuni4u/kubeport/issues/34) 의 내용이고, 후보 해법 두 가지는:
+**데모 dex 쪽 — 경로는 있지만 데모 권한까지만.** `dex.enabled` 인 설치에서는 dex 가
+`passwordConnector: local` + `enablePasswordDB: true` 로 배포되고(`templates/dex-configmap.yaml`)
+`dex.host` 로 공인 Ingress 에 노출된다(`templates/dex-ingress.yaml`). 즉 §2 와 **같은 password grant 가
+운영에서도 통한다.** 다만 쓸모가 제한된다:
+
+- `dex.clientSecret` 이 필요하다 — 클러스터 Secret 이라 `kubectl` 을 가진 사람만 얻는다.
+- 얻은 신원은 데모 도메인이라 `denyDemo` 가 걸린 라우트(`POST /v1/clusters`, `POST /v1/teams`,
+  팀 멤버 추가·삭제)에서 **403 `demo-restricted`** 다.
+- k8s 쪽 권한도 `demo` 네임스페이스로 묶여 있다(`templates/demo-rbac.yaml`).
+
+그래서 **데모 범위의 스모크 자동화는 가능하고, 실사용자 권한으로 운영을 자동화하는 경로는 여전히
+없다.** 후자가 [issue #34](https://github.com/shyuni4u/kubeport/issues/34) 의 내용이고, 후보 해법 두 가지는:
 
 1. **서비스 계정 토큰(장수명 API key)을 `/v1` 에 도입** — `Authorization: Bearer kbp_...` 를
    `requireAuth` 가 함께 받도록. 다만 kubeport 의 보안 모델은 "사용자 토큰을 k8s 로 그대로 포워딩"
@@ -97,22 +138,48 @@ curl -ks -X POST https://host.docker.internal:5556/token \
 2. **IdP 쪽에서 서비스 계정 발급** — Google 서비스 계정으로 대상 audience 의 id_token 을 받는 방식.
    이 경우 그 서비스 계정 이메일에 대해 k8s RBAC 바인딩도 별도로 걸어야 한다.
 
-둘 다 설계 결정이 필요하므로 여기서 임의로 안내하지 않는다. **현재로서는 운영 환경의 자동화가
-불가능하다는 것이 정확한 답이다.**
+둘 다 설계 결정이 필요하므로 여기서 임의로 안내하지 않는다.
 
 ---
 
 ## 4. 운영자 1회성 작업 — 클러스터 등록
 
-설치 직후 대상 클러스터를 등록하는 건 §3 의 공백에도 불구하고 지금 해야 하는 일이다. 두 가지 경로가 있다.
+설치 직후 대상 클러스터를 등록하는 건 §3 의 공백에도 불구하고 지금 해야 하는 일이다. 두 가지 경로가 있고,
+**어느 쪽이든 `ca_bundle` 을 반드시 채운다** — 비우면 백엔드가 그 클러스터에 대해 TLS 검증을 끈 채로
+접속하고(`backend/cmd/server/main.go` 의 `k8sFactory.NewWithToken` → `NewInsecureWithToken`),
+**그 연결로 사용자 id_token 이 그대로 나간다.** 등록은 201 로 성공하므로 응답만 봐서는 알 수 없다.
+
+k3s 라면 값은 `/var/lib/rancher/k3s/server/tls/server-ca.crt` 의 내용(PEM 원문, base64 아님).
 
 **A. DB 에 직접 insert.** `deploy/oci/README.md` §7.4 가 허용하는 방식이다. 클러스터 접속 정보는
-인프라 설정이지 PII 가 아니므로 이 경로가 정당하다. 토큰이 아예 필요 없어서 가장 확실하다.
+인프라 설정이지 PII 가 아니므로 이 경로가 정당하고, 토큰이 필요 없어서 §3 의 공백을 우회한다.
+
+```bash
+# 차트 내장 Postgres 기준. 외부 DB 면 psql 접속만 바꾼다.
+PG_POD=$(kubectl -n kubeport get pod \
+  -l app.kubernetes.io/name=kubeport,app.kubernetes.io/component=postgres \
+  -o jsonpath='{.items[0].metadata.name}')
+
+CA=$(sudo cat /var/lib/rancher/k3s/server/tls/server-ca.crt)   # k3s 기준
+
+kubectl -n kubeport exec -i "$PG_POD" -- psql -U kubeport -d kubeport <<SQL
+INSERT INTO clusters (name, display_name, api_url, ca_bundle, oidc_issuer_url, default_namespace)
+VALUES ('oci-a1', 'OCI A1', 'https://kubernetes.default.svc',
+        \$ca\$${CA}\$ca\$, 'https://accounts.google.com', 'default');
+SQL
+```
+
+컬럼 목록의 근거는 `backend/internal/store/clusters.sql.go` 의 `InsertCluster` 다 — 스키마가 바뀌면
+거기부터 확인한다. `ca_bundle` 을 빼먹지 말 것: 위 경고가 그대로 적용된다.
 
 **B. port-forward + 토큰.** 토큰을 어떻게든 손에 넣었다면:
 
 ```bash
-kubectl -n kubeport port-forward svc/<release>-backend 8080:8080 &
+# Service 이름은 릴리스 이름에 따라 달라진다 (myrel → myrel-kubeport-backend). 라벨로 찾는다:
+BACKEND_SVC=$(kubectl -n kubeport get svc \
+  -l app.kubernetes.io/name=kubeport,app.kubernetes.io/component=backend \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl -n kubeport port-forward "svc/$BACKEND_SVC" 8080:8080 &
 
 curl -sS -X POST http://localhost:8080/v1/clusters \
   -H "Authorization: Bearer $ADMIN_ID_TOKEN" \
@@ -125,13 +192,33 @@ curl -sS -X POST http://localhost:8080/v1/clusters \
   }'
 ```
 
-`name` 은 **필수**이고, `ca_bundle` 은 필수가 아니지만 **비우면 백엔드가 TLS 검증을 끈 채로 접속하면서도
-201 을 돌려준다** — 응답만 봐서는 알 수 없다. 운영 클러스터에서는 반드시 넣는다. 필드 표 전체는
+`name` 은 **필수**이고 `ca_bundle` 은 스키마상 선택이지만 위 경고대로 실질 필수다. 필드 표 전체는
 `openapi.yaml` 의 `CreateClusterRequest` 참조.
 
-관리자 판정은 `KBP_DEV_ADMIN_EMAILS`(차트의 `auth.devAdminEmails`)에 이메일이 있어야 선다 — Google 은
-`groups` 를 발급하지 않기 때문이다. 이걸 안 하면 위 호출이 `403 admin group required` 로 막힌다.
-자세한 건 `deploy/helm/kubeport/README.md` 의 "After install" 0단계.
+### 관리자 판정 — 그리고 그 방식의 문제
+
+위 호출은 admin 전용이라, 호출자가 `kubeport-admin` 그룹에 있어야 한다. Google 은 `groups` 클레임을
+발급하지 않으므로 실제로는 `KBP_DEV_ADMIN_EMAILS`(차트의 `auth.devAdminEmails`)에 이메일을 넣는 것이
+**현재 유일한 방법**이다. 안 하면 `403 admin group required`.
+
+```bash
+helm upgrade kubeport deploy/helm/kubeport --reuse-values \
+  --set-string auth.devAdminEmails="you@example.com"
+```
+
+같은 내용이 [deploy/oci/README.md §4](../deploy/oci/README.md) 에도 있다 (`auth.devAdminEmails` 설명).
+
+다만 이건 **정식 역할 시스템이 아니라 부트스트랩 우회**라는 걸 알고 써야 한다:
+
+- 백엔드는 이 값이 설정되면 기동 시 경고를 남긴다 — `backend/cmd/server/main.go`:
+  `"WARN: KBP_DEV_ADMIN_EMAILS is set, elevating %q to kubeport-admin — dev only, never set in production"`.
+  즉 **코드의 의도와 실제 운영 방식이 어긋나 있다**(운영은 이 값에 의존한다).
+- 데모 모드를 켜면 차트가 **공개 데모 관리자 이메일을 이 목록에 자동으로 덧붙인다**
+  (`deploy/helm/kubeport/templates/_helpers.tpl` 의 `kubeport.devAdminEmails`). 비밀번호가 랜딩에
+  공개된 계정이 in-app admin 이 된다는 뜻이므로, 권한 설계를 할 때 이 사실을 전제해야 한다.
+
+그래서 목록은 최소 인원으로 유지하고, groups 를 발급하는 IdP(Keycloak/Okta/Dex)로 옮길 수 있으면
+옮긴 뒤 비운다.
 
 ---
 
@@ -141,14 +228,16 @@ curl -sS -X POST http://localhost:8080/v1/clusters \
 값의 닫힌 목록은 `openapi.yaml` 의 `ErrorKind` enum 에 있고, 새 kind 가 몰래 생기면
 `backend/internal/api/error_shape_test.go` 가 빌드를 깬다. `detail` 은 사람이 읽는 문장이라 바뀔 수 있다.
 
-**비인증 호출은 JSON 401 이다.** BFF 든 Go API 든:
+**비인증 호출은 JSON 401 이다 — 단, [#24](https://github.com/shyuni4u/kubeport/issues/24) 수정이 배포된
+리비전부터.** 그 이전 리비전의 BFF 는 `/api/auth/login` 으로 **307** 을 보낸다.
 
 ```json
 {"type":"https://kubeport.io/errors/unauthenticated","title":"unauthenticated","status":401,"detail":"..."}
 ```
 
-(예전에는 BFF 가 로그인 화면으로 307 리다이렉트를 보냈고, 따라가면 Google 동의 화면이 200 으로 떨어져
-성공으로 오인되기 쉬웠다. [#24](https://github.com/shyuni4u/kubeport/issues/24) 에서 고쳤다.)
+어느 쪽을 만나든 **리다이렉트를 따라가지 않는 게 맞다** (`curl` 에 `-L` 금지). 307 을 따라가면 Google
+동의 화면이 `200` 으로 떨어져서 순진한 클라이언트가 성공으로 오인한다. 2xx 가 아닌 응답은 전부 실패로
+처리할 것.
 
 **배포 전에 두 번 물어볼 수 있다.** 값이 맞는지는 `POST /v1/templates/{name}/render`(적용 없이 렌더만),
 권한이 있는지는 `POST /v1/selfsubjectaccessreview`. 둘 다 부작용이 없으니 실패를 겪기 전에 쓰는 게 낫다.

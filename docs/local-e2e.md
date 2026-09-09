@@ -256,11 +256,16 @@ NODE_EXTRA_CA_CERTS="$(pwd)/../deploy/docker/certs/dex.crt" pnpm dev
 
 ### 9. Register the cluster + seed a template
 
+> The token recipe below is documented in full — claims, gotchas, and the
+> production story — in [docs/machine-clients.md §2](machine-clients.md).
+> `groups` is deliberately not requested: these static passwords define none,
+> so asking for it changes nothing.
+
 ```bash
 ADM=$(curl -ks -X POST https://host.docker.internal:5556/token \
   -d grant_type=password -d client_id=kubeport -d client_secret=local-dev-secret \
   -d username=admin@example.com -d password=admin \
-  -d 'scope=openid email profile groups' | jq -r .id_token)
+  -d 'scope=openid email profile' | jq -r .id_token)
 
 # Cluster — register with kind's own CA (not dex's; the CA here validates
 # the apiserver cert, and kind signs that with its internal cluster CA).
