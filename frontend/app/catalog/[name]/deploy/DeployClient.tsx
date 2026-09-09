@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import YAML from "yaml";
-import { useDebouncedCallback } from "use-debounce";
+import { useDebounce, useDebouncedCallback } from "use-debounce";
 
 import { CLUSTER_CHANGED_EVENT } from "@/components/ClusterPicker";
 import { DynamicForm } from "@/components/DynamicForm";
@@ -74,7 +74,20 @@ export function DeployClient({
   const [pending, setPending] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [rbacStatus, setRbacStatus] = useState<RbacStatus>("unknown");
+  /**
+   * UX gate only. Authorization is decided by the backend forwarding the
+   * user's own token to the k8s API, and k8s RBAC has the final say — never
+   * send this value to the server or let it stand in for a server-side check.
+   * Its fail-open bias (see RbacStatus) is deliberate for the same reason.
+   *
+   * Stored with the inputs it was computed for: a verdict about
+   * `kube-system` must not gate a submit to `default`.
+   */
+  const [rbac, setRbac] = useState<{
+    cluster: string;
+    namespace: string;
+    status: RbacStatus;
+  }>({ cluster: "", namespace: "", status: "unknown" });
   // Move focus to the error notice when it appears so keyboard / screen
   // reader users land on it instead of hunting below the (long) form.
   const errRef = useRef<HTMLParagraphElement>(null);
@@ -174,12 +187,18 @@ export function DeployClient({
   // Kinds extracted from the rendered YAML for RBAC preflight. Deriving from
   // the *rendered* yaml (not the template source) ensures conditionally-
   // included resources are reflected correctly.
+  // Deduplicated: a template with two Deployments needs one SSAR, not two,
+  // and RBACCheckPanel keys its rows by resource name.
   const kinds = useMemo(() => {
     if (!rendered) return [];
     try {
-      return YAML.parseAllDocuments(rendered)
-        .map((d) => (d.toJS() as { kind?: string } | null)?.kind)
-        .filter((k): k is string => !!k);
+      return [
+        ...new Set(
+          YAML.parseAllDocuments(rendered)
+            .map((d) => (d.toJS() as { kind?: string } | null)?.kind)
+            .filter((k): k is string => !!k),
+        ),
+      ];
     } catch {
       return [];
     }
@@ -196,10 +215,25 @@ export function DeployClient({
     [clearErr, preview],
   );
 
-  // The preflight only runs once cluster + namespace exist, so a stale
-  // "denied" must not survive the panel disappearing.
-  const rbacPanelVisible = Boolean(meta.cluster) && Boolean(meta.namespace);
-  const rbacBlocked = rbacPanelVisible && rbacStatus === "denied";
+  // Debounced, because the preflight now drives the submit button: without
+  // it every keystroke in the namespace field fires one SSAR per kind and
+  // the button + red notice flicker between "unknown" and "denied".
+  const [debouncedNamespace] = useDebounce(meta.namespace, 300);
+
+  const rbacPanelVisible = Boolean(meta.cluster) && Boolean(debouncedNamespace);
+  const handleRbacResult = useCallback(
+    (status: RbacStatus) => {
+      setRbac({ cluster: meta.cluster, namespace: debouncedNamespace, status });
+    },
+    [meta.cluster, debouncedNamespace],
+  );
+  // Blocking requires a denial that was issued for exactly these inputs, so
+  // no reset is needed when the panel is hidden or its target changes.
+  const rbacBlocked =
+    rbacPanelVisible &&
+    rbac.status === "denied" &&
+    rbac.cluster === meta.cluster &&
+    rbac.namespace === debouncedNamespace;
 
   const submit = useCallback(
     async (values: Record<string, unknown>) => {
@@ -241,7 +275,10 @@ export function DeployClient({
         }
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
-      } finally {
+        // Released only on failure. `router.push` returns immediately and the
+        // RSC transition takes hundreds of ms, during which this form is still
+        // mounted — unlocking here would hand the user a second POST and a
+        // 409 "이미 있습니다", which is the very symptom #31 is about.
         setSubmitting(false);
       }
     },
@@ -394,9 +431,9 @@ export function DeployClient({
         {rbacPanelVisible && (
           <RBACCheckPanel
             cluster={meta.cluster}
-            namespace={meta.namespace}
+            namespace={debouncedNamespace}
             kinds={kinds}
-            onResult={setRbacStatus}
+            onResult={handleRbacResult}
           />
         )}
       </aside>

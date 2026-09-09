@@ -22,6 +22,15 @@ const spec: UISpec = {
       default: 1,
       required: true,
     },
+    // A typeable field, so tests can exercise the DynamicForm onChange path
+    // and not just the meta inputs.
+    {
+      path: "metadata.name",
+      label: "앱 이름",
+      type: "string",
+      default: "nginx",
+      required: true,
+    },
   ],
 };
 
@@ -167,5 +176,53 @@ describe("DeployClient", () => {
     await waitFor(() => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
+  });
+
+  // The main path of #42 is a *form field* edit — it runs through
+  // handleValuesChange, not the meta inputs' inline handlers.
+  it("clears a previous failure when the user edits a form field", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({ releases: () => jsonResponse({ message: "boom" }, 502) }),
+    );
+
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={spec} />);
+    await fillMeta(user);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /배포하기/ })).toBeEnabled();
+    });
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/앱 이름/), "-2");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+
+  // #31, second half: `router.push` returns immediately, so the form is still
+  // on screen during the RSC transition. Unlocking there gives a second POST.
+  it("stays locked after a successful deploy while navigation is pending", async () => {
+    const user = userEvent.setup();
+    const fetchMock = routedFetch({});
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={spec} />);
+    await fillMeta(user);
+
+    const button = screen.getByRole("button", { name: /배포하기/ });
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/releases/rel-1"));
+    expect(button).toBeDisabled();
+
+    const releaseCalls = fetchMock.mock.calls.filter(
+      ([url]) => url === "/api/v1/releases",
+    );
+    expect(releaseCalls).toHaveLength(1);
   });
 });

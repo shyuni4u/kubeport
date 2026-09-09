@@ -30,9 +30,11 @@ function Slider({
       <SliderPrimitive.Control className="relative flex w-full touch-none items-center select-none data-disabled:opacity-50 data-vertical:h-full data-vertical:min-h-40 data-vertical:w-auto data-vertical:flex-col">
         <SliderPrimitive.Track
           data-slot="slider-track"
-          // bg-border, not bg-muted: `--muted` and `--background` are the same
-          // oklch value in globals.css, so a bg-muted track is invisible (#43).
-          className="relative grow overflow-hidden rounded-full bg-border select-none data-horizontal:h-1.5 data-horizontal:w-full data-vertical:h-full data-vertical:w-1.5"
+          // LOCAL EDIT (see components/ui/README.md before regenerating).
+          // Was `bg-muted`, which is byte-identical to `--background` in
+          // globals.css — the track was invisible (#43). `--slider-track` is
+          // a dedicated token dark enough to clear WCAG 1.4.11's 3:1.
+          className="relative grow overflow-hidden rounded-full bg-slider-track select-none data-horizontal:h-1.5 data-horizontal:w-full data-vertical:h-full data-vertical:w-1.5"
         >
           <SliderPrimitive.Indicator
             data-slot="slider-range"

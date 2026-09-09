@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NextIntlClientProvider } from "next-intl";
 import { DynamicForm } from "./DynamicForm";
@@ -440,14 +440,33 @@ describe("DynamicForm double submit", () => {
     release();
   });
 
-  it("re-enables submission after the first submit settles", async () => {
+  // The guard is scoped to "a submit is in flight" and nothing more —
+  // DynamicForm cannot know whether the parent is about to navigate away.
+  // Staying locked *after a successful* submit is the parent's job, pinned by
+  // DeployClient.test.tsx "stays locked after a successful deploy".
+  it("accepts a new submit once the previous one has settled", async () => {
     const user = userEvent.setup();
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    let release!: () => void;
+    const onSubmit = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((r) => {
+            release = r;
+          }),
+      )
+      .mockResolvedValue(undefined);
 
     renderWithIntl(<DynamicForm spec={nameSpec} onSubmit={onSubmit} />);
     const button = screen.getByRole("button", { name: /배포하기/ });
 
     await user.click(button);
+    await user.click(button);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+
+    release();
+    await waitFor(() => expect(button).toBeEnabled());
+
     await user.click(button);
     expect(onSubmit).toHaveBeenCalledTimes(2);
   });
@@ -525,13 +544,20 @@ describe("DynamicForm slider affordance", () => {
     expect(screen.getByTestId("slider-max")).toHaveTextContent("10");
   });
 
-  it("gives the track a fill that is distinct from the page background", () => {
+  // Asserted as a whitelist, not as "not bg-muted": the negative form passes
+  // for bg-transparent, bg-background, or no class at all — every way of
+  // being *more* invisible than the bug it is supposed to guard.
+  it("fills the track with a token that clears the background", () => {
     const { container } = renderWithIntl(
       <DynamicForm spec={rangeSpec} onSubmit={() => {}} />,
     );
     const track = container.querySelector('[data-slot="slider-track"]');
     expect(track).not.toBeNull();
-    // `bg-muted` === `--background` in globals.css, so it is invisible.
-    expect(track!.className).not.toMatch(/\bbg-muted\b/);
+    // jsdom has no Tailwind, so the computed color is unavailable here; the
+    // real contrast is asserted in tests/e2e/05-user-deploy.spec.ts.
+    const ALLOWED = ["bg-slider-track"];
+    expect(ALLOWED.some((c) => track!.className.split(/\s+/).includes(c))).toBe(
+      true,
+    );
   });
 });
