@@ -24,6 +24,8 @@ func testDSN() string {
 	return "postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable"
 }
 
+const testDemoDomain = "demo.kubeport"
+
 func newTestSeeder(t *testing.T) (*templateSeeder, context.Context) {
 	t.Helper()
 	ctx := context.Background()
@@ -31,37 +33,59 @@ func newTestSeeder(t *testing.T) (*templateSeeder, context.Context) {
 	require.NoError(t, err)
 	t.Cleanup(st.Close)
 
-	owner, err := st.UpsertUser(ctx, store.UpsertUserParams{
-		OidcSubject: "seed-test-" + time.Now().Format("150405.000000"),
-		Email:       store.PgText("seed-test-" + time.Now().Format("150405.000000") + "@demo.kubeport"),
-		DisplayName: store.PgText("seed test"),
-	})
-	require.NoError(t, err)
-
-	clearFixtures(t, ctx)
-	t.Cleanup(func() { clearFixtures(t, ctx) })
+	owner := newDemoUser(t, ctx, st, "seed-test")
+	clearFixtures(t, ctx, testDemoDomain)
+	t.Cleanup(func() { clearFixtures(t, ctx, testDemoDomain) })
 	return &templateSeeder{st: st, owner: owner}, ctx
 }
 
+func newDemoUser(t *testing.T, ctx context.Context, st *store.Store, prefix string) store.User {
+	t.Helper()
+	id := prefix + "-" + time.Now().Format("150405.000000")
+	u, err := st.UpsertUser(ctx, store.UpsertUserParams{
+		OidcSubject: id,
+		Email:       store.PgText(id + "@" + testDemoDomain),
+		DisplayName: store.PgText(prefix),
+	})
+	require.NoError(t, err)
+	return u
+}
+
 // clearFixtures drops the seeded catalog — including releases deployed from it,
-// which hold a foreign key to its versions. Everything it removes is demo data
-// that `scripts/e2e/seed.sh` (or the reset CronJob) puts back.
-func clearFixtures(t *testing.T, ctx context.Context) {
+// which hold a foreign key to its versions. Every statement is scoped to
+// demo-owned rows, the same predicate resetDB uses: a fixture name is not
+// reserved, so an unscoped delete here would take a real user's template and
+// somebody else's releases with it. If a fixture name is held outside the demo
+// domain the test skips instead, because seeding would (correctly) refuse it.
+func clearFixtures(t *testing.T, ctx context.Context, demoDomain string) {
 	t.Helper()
 	conn, err := pgx.Connect(ctx, testDSN())
 	require.NoError(t, err)
 	defer conn.Close(ctx)
 
+	demoOwned := `owner_user_id IN (SELECT id FROM users WHERE lower(email) LIKE lower($2))`
+	like := "%@" + demoDomain
 	for _, f := range fixtures.All() {
+		var foreign bool
+		require.NoError(t, conn.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM templates WHERE name = $1 AND NOT (`+demoOwned+`))`,
+			f.Name, like).Scan(&foreign))
+		if foreign {
+			t.Skipf("template %q exists outside the demo domain on this database — "+
+				"seeding refuses to touch it; drop the row or point TEST_DATABASE_URL elsewhere", f.Name)
+		}
+
 		for _, sql := range []string{
-			`UPDATE templates SET current_version_id = NULL WHERE name = $1`,
+			`UPDATE templates SET current_version_id = NULL WHERE name = $1 AND ` + demoOwned,
 			`DELETE FROM releases WHERE template_version_id IN (
 			   SELECT tv.id FROM template_versions tv
-			   JOIN templates t ON t.id = tv.template_id WHERE t.name = $1)`,
-			`DELETE FROM template_versions WHERE template_id IN (SELECT id FROM templates WHERE name = $1)`,
-			`DELETE FROM templates WHERE name = $1`,
+			   JOIN templates t ON t.id = tv.template_id
+			   WHERE t.name = $1 AND t.` + demoOwned + `)`,
+			`DELETE FROM template_versions WHERE template_id IN (
+			   SELECT id FROM templates WHERE name = $1 AND ` + demoOwned + `)`,
+			`DELETE FROM templates WHERE name = $1 AND ` + demoOwned,
 		} {
-			_, err := conn.Exec(ctx, sql, f.Name)
+			_, err := conn.Exec(ctx, sql, f.Name, like)
 			require.NoError(t, err, f.Name)
 		}
 	}
@@ -96,6 +120,87 @@ func TestTemplateSeeder_SeedsPublishedV1AndDraft(t *testing.T) {
 		require.Equal(t, draftNotes, byVersion[2].Notes.String, f.Name)
 		require.Equal(t, f.ResourcesYAML, byVersion[1].ResourcesYaml, f.Name)
 	}
+}
+
+// deployable reports what the catalog needs: the template points at a version
+// that is actually published. A visitor deprecating v1 breaks this without
+// changing which version the template points at.
+func deployable(t *testing.T, s *templateSeeder, ctx context.Context, name string) bool {
+	t.Helper()
+	tpl, err := s.st.GetTemplateByName(ctx, name)
+	require.NoError(t, err)
+	for _, v := range versionsOf(t, s, ctx, name) {
+		if v.ID == tpl.CurrentVersionID && v.Status == "published" {
+			return true
+		}
+	}
+	return false
+}
+
+func TestTemplateSeeder_RepairsDeprecatedCurrentVersion(t *testing.T) {
+	s, ctx := newTestSeeder(t)
+	require.NoError(t, s.Run(ctx))
+	name := fixtures.All()[0].Name
+
+	// demo-admin can deprecate the published version during a visit; nothing
+	// moves current_version_id, so the catalog entry stops being deployable.
+	tpl, err := s.st.GetTemplateByName(ctx, name)
+	require.NoError(t, err)
+	_, err = s.st.SetTemplateVersionStatus(ctx, store.SetTemplateVersionStatusParams{
+		ID: tpl.CurrentVersionID, Status: "deprecated",
+	})
+	require.NoError(t, err)
+	require.False(t, deployable(t, s, ctx, name), "precondition")
+
+	require.NoError(t, s.Run(ctx))
+	require.True(t, deployable(t, s, ctx, name), "the next reset must make the catalog deployable again")
+}
+
+func TestTemplateSeeder_RepairsTemplateWithNoVersions(t *testing.T) {
+	s, ctx := newTestSeeder(t)
+	require.NoError(t, s.Run(ctx))
+	name := fixtures.All()[0].Name
+
+	tpl, err := s.st.GetTemplateByName(ctx, name)
+	require.NoError(t, err)
+	conn, err := pgx.Connect(ctx, testDSN())
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+	_, err = conn.Exec(ctx, `UPDATE templates SET current_version_id = NULL WHERE id = $1`, tpl.ID)
+	require.NoError(t, err)
+	_, err = conn.Exec(ctx, `DELETE FROM template_versions WHERE template_id = $1`, tpl.ID)
+	require.NoError(t, err)
+
+	require.NoError(t, s.Run(ctx))
+	require.True(t, deployable(t, s, ctx, name), "a template row with no versions is invisible to visitors")
+	var drafts int
+	for _, v := range versionsOf(t, s, ctx, name) {
+		if v.Status == "draft" {
+			drafts++
+		}
+	}
+	require.Equal(t, 1, drafts, "and demo-admin still needs something to edit")
+}
+
+func TestTemplateSeeder_RefusesAnotherOwnersTemplate(t *testing.T) {
+	s, ctx := newTestSeeder(t)
+	require.NoError(t, s.Run(ctx))
+
+	// Someone else now holds the fixture name — template names are global, and
+	// going around the API must not turn that into a silent edit of their rows.
+	other := newDemoUser(t, ctx, s.st, "seed-test-other")
+	name := fixtures.All()[0].Name
+	tpl, err := s.st.GetTemplateByName(ctx, name)
+	require.NoError(t, err)
+	conn, err := pgx.Connect(ctx, testDSN())
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+	_, err = conn.Exec(ctx, `UPDATE templates SET owner_user_id = $2 WHERE id = $1`, tpl.ID, other.ID)
+	require.NoError(t, err)
+
+	err = s.Run(ctx)
+	require.ErrorContains(t, err, "belongs to another owner")
+	require.ErrorContains(t, err, name)
 }
 
 func TestTemplateSeeder_IsIdempotent(t *testing.T) {

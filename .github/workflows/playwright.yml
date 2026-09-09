@@ -229,6 +229,10 @@ jobs:
 
       - name: Seed demo data
         env:
+          # The seeder writes templates straight to the database, so this is
+          # required whether or not --reset is passed. Step env is not shared
+          # with the backend step above.
+          DATABASE_URL: "postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable"
           DEMO_OIDC_ISSUER: "https://host.docker.internal:5556"
           DEMO_OIDC_CLIENT_ID: "kubeport"
           DEMO_OIDC_CLIENT_SECRET: "local-dev-secret"

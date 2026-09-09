@@ -134,8 +134,15 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
 - **데모 비밀번호 회전**: [deploy/oci/README.md §7.6](../deploy/oci/README.md) 의 `--set` 목록을
   새 `DEMO_PW`/`HASH` 로 다시 실행 (`staticPasswords[N]` 네 필드 전부, `--reset-then-reuse-values`).
   `DEX_SECRET` 은 유지해도 된다. Dex 는 `storage: memory` 라 재시작 시 서명 키가 바뀐다 (§5 주의 참조).
-- **리셋**: CronJob `kubeport-demo-reset` 6시간 주기. 수동: `kubectl -n kubeport create job --from=cronjob/kubeport-demo-reset demo-reset-manual`
-  → 로그 `seed-demo: done`. wipe 단계가 `demo` ns 의 configmap 을 전부 지우므로 `kube-root-ca.crt deleted` 가 찍히는 건 정상(자동 재생성).
+- **리셋**: CronJob `kubeport-demo-reset` 6시간 주기. 수동 실행은 잡 이름을 매번 다르게 준다 —
+  성공한 수동 잡은 CronJob 의 `successfulJobsHistoryLimit` 대상이 아니라 남으므로 고정 이름은
+  두 번째 실행에서 `already exists` 로 실패한다:
+  ```bash
+  JOB=demo-reset-$(date +%s)
+  kubectl -n kubeport create job --from=cronjob/kubeport-demo-reset "$JOB"
+  kubectl -n kubeport logs "job/$JOB" -c seed -f    # 마지막 줄 `seed-demo: done`
+  ```
+  wipe 단계가 `demo` ns 의 configmap 을 전부 지우므로 `kube-root-ca.crt deleted` 가 찍히는 건 정상(자동 재생성).
 - **오너 RBAC**: 오너 Google 이메일의 cluster-admin 바인딩 이름은 `kubeport-owner-admin`
   (예전 이름 `kubeport-demo-admin` 은 이름과 달리 오너 바인딩이었음 — 삭제 전 subject 확인).
   데모 계정은 chart 의 `demo` ns RoleBinding 만 갖는다. 검증: `kubectl auth can-i create deployments --as=dex:demo-user@demo.kubeport -n default` → **no**.
@@ -148,8 +155,12 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
   **리셋 CronJob 은 이 플래그와 무관하다** — 시드는 API 가 아니라 DB 로 직접 쓴다
   (`cmd/seed-demo/templates.go`). 한때 API 를 타서, 게이트가 닫힌 상태로 배포하자 6시간마다
   데모가 비워졌다([#104](https://github.com/shyuni4u/kubeport/issues/104)). 시드가 실패하면
-  잡이 Failed 로 남고 카탈로그가 빈 채로 방치되니, 배포 후 한 번은
-  `kubectl -n kubeport get job` 으로 확인할 것.
+  wipe 만 끝난 상태(빈 카탈로그)로 6시간 방치되고 자동 알림은 없다. 배포 직후와 리셋 직후에 확인:
+  ```bash
+  kubectl -n kubeport get job -l app.kubernetes.io/instance=kubeport   # COMPLETIONS 1/1
+  kubectl -n kubeport logs job/<최근 demo-reset 잡> -c seed | tail -5   # 마지막 줄 `seed-demo: done`
+  ```
+  `1/1` 이 아니거나 마지막 줄이 다르면 `-c seed` 로그의 첫 `log.Fatalf` 줄이 원인이다.
 - **Dex 호스트도 ephemeral IP 를 본다**: VM stop/start 후 `dex.kubeport.enzo.kr` A 레코드까지 갱신하지 않으면
   인증서 갱신·데모 로그인이 깨진다.
 

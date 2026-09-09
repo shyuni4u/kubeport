@@ -7,6 +7,7 @@ import (
 	"log"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"kubeport/cmd/seed-demo/fixtures"
@@ -57,11 +58,19 @@ func (t *templateSeeder) Run(ctx context.Context) error {
 		case err != nil:
 			return fmt.Errorf("lookup template %s: %w", f.Name, err)
 		default:
+			// templates.name is globally unique, so a real user's template can
+			// carry a fixture name. Repairing it would publish their draft and
+			// graft demo YAML onto it — the HTTP path this replaced got a 403
+			// here, and going around the API must not lose that refusal.
+			if existing.OwnerUserID != t.owner.ID {
+				return fmt.Errorf("template %s exists but belongs to another owner (%x); "+
+					"refusing to modify it", f.Name, existing.OwnerUserID.Bytes)
+			}
 			log.Printf("template %s exists, skipping", f.Name)
 			// A partially seeded template — created but never published, or its
 			// draft deleted by a demo visitor — must still end up in the seeded
 			// shape.
-			if err := t.repair(ctx, existing.ID, f); err != nil {
+			if err := t.repair(ctx, existing, f); err != nil {
 				return fmt.Errorf("repair template %s: %w", f.Name, err)
 			}
 		}
@@ -93,58 +102,82 @@ func (t *templateSeeder) create(ctx context.Context, f fixtures.Template) error 
 }
 
 // repair re-establishes the two invariants on a template that already exists:
-// v1 is published (the catalog deploys it) and some later version is a draft.
-func (t *templateSeeder) repair(ctx context.Context, templateID pgtype.UUID, f fixtures.Template) error {
+// the catalog can deploy it (current_version_id points at a published version)
+// and there is a draft to edit.
+//
+// The test is the post-condition itself, not "is v1 a draft". A demo visitor
+// can deprecate v1 — status changes without moving current_version_id — and a
+// version-shaped check would call that healthy and leave the catalog entry
+// undeployable, which is #104 again with a green exit code.
+func (t *templateSeeder) repair(ctx context.Context, tpl store.GetTemplateByNameRow, f fixtures.Template) error {
 	versions, err := t.st.ListTemplateVersions(ctx, f.Name)
 	if err != nil {
 		return err
 	}
 
-	var v1Draft, laterDraft bool
-	for _, v := range versions {
-		if v.Status != "draft" {
-			continue
+	deployable := false
+	var firstDraft *store.TemplateVersion
+	for i, v := range versions {
+		if v.ID == tpl.CurrentVersionID && v.Status == "published" {
+			deployable = true
 		}
-		if v.Version == 1 {
-			v1Draft = true
-		} else {
-			laterDraft = true
+		if v.Status == "draft" && firstDraft == nil {
+			firstDraft = &versions[i]
 		}
 	}
 
-	if v1Draft {
-		if err := t.st.WithTx(ctx, func(q *store.Queries) error {
-			for _, v := range versions {
-				if v.Version != 1 {
-					continue
-				}
-				return publish(ctx, q, v.ID, templateID)
+	if !deployable {
+		// Publishing consumes a draft, so remember whether one was spent here.
+		if firstDraft != nil {
+			if err := t.st.WithTx(ctx, func(q *store.Queries) error {
+				return publish(ctx, q, firstDraft.ID, tpl.ID)
+			}); err != nil {
+				return err
 			}
-			return nil
+			log.Printf("template %s v%d published", f.Name, firstDraft.Version)
+			firstDraft = nil
+		} else if err := t.st.WithTx(ctx, func(q *store.Queries) error {
+			next, err := q.NextTemplateVersion(ctx, tpl.ID)
+			if err != nil {
+				return err
+			}
+			log.Printf("template %s had no publishable version, adding v%d", f.Name, next)
+			return t.publishNewVersion(ctx, q, tpl.ID, next, f)
 		}); err != nil {
 			return err
 		}
-		log.Printf("template %s v1 published", f.Name)
 	}
 
-	// Publishing v1 leaves nothing editable behind, so only a draft at a later
-	// version counts.
-	if laterDraft {
+	if firstDraft != nil {
 		log.Printf("template %s already has a draft, skipping", f.Name)
 		return nil
 	}
-	next, err := t.st.NextTemplateVersion(ctx, templateID)
-	if err != nil {
-		return err
-	}
+	// Read-then-insert inside one transaction: a demo visitor creating a draft
+	// between the two would otherwise fail the unique index and kill the job.
 	if err := t.st.WithTx(ctx, func(q *store.Queries) error {
-		_, err := t.insertVersion(ctx, q, templateID, next, "draft", f)
+		next, err := q.NextTemplateVersion(ctx, tpl.ID)
+		if err != nil {
+			return err
+		}
+		_, err = t.insertVersion(ctx, q, tpl.ID, next, "draft", f)
 		return err
 	}); err != nil {
+		if isUniqueViolation(err) {
+			log.Printf("template %s: another writer created the draft, skipping", f.Name)
+			return nil
+		}
 		return err
 	}
 	log.Printf("template %s draft created", f.Name)
 	return nil
+}
+
+// isUniqueViolation reports the collision the handler translates into 409
+// ("a draft already exists for this template"). Down here it means a
+// concurrent seeder or a demo visitor got there first, which is not a failure.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 func (t *templateSeeder) publishNewVersion(ctx context.Context, q *store.Queries, templateID pgtype.UUID, version int32, f fixtures.Template) error {

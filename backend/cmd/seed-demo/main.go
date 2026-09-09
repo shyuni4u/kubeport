@@ -32,7 +32,7 @@ func getenv(k, def string) string {
 }
 
 func main() {
-	reset := flag.Bool("reset", false, "delete demo-owned rows before seeding (requires DATABASE_URL)")
+	reset := flag.Bool("reset", false, "delete demo-owned rows before seeding (DATABASE_URL is required either way)")
 	flag.Parse()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -46,9 +46,13 @@ func main() {
 		hc = c
 	}
 
-	// DATABASE_URL is required for the template half of the seed, not just for
-	// -reset: templates are written straight to the database (see templates.go).
-	dsn := must("DATABASE_URL")
+	// Required for the template half of the seed, not just for -reset:
+	// templates are written straight to the database (see templates.go).
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		log.Fatal("DATABASE_URL is required — the catalog is seeded straight into the database " +
+			"(local dev: postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable)")
+	}
 	demoDomain := getenv("KBP_DEMO_EMAIL_DOMAIN", "demo.kubeport")
 	if *reset {
 		if err := resetDB(ctx, dsn, demoDomain); err != nil {
@@ -87,6 +91,13 @@ func main() {
 		log.Fatalf("store: %v", err)
 	}
 	defer st.Close()
+	// The catalog is global (no owning team); what keeps it out of real users'
+	// view and inside resetDB's reach is the demo domain on its owner. Seeding
+	// as anyone else would write a permanent global catalog no reset collects.
+	if !auth.IsDemoEmail(adminEmail, demoDomain) {
+		log.Fatalf("DEMO_ADMIN_EMAIL %s is outside KBP_DEMO_EMAIL_DOMAIN %s — "+
+			"the seeded catalog would not be demo-owned", adminEmail, demoDomain)
+	}
 	owner, err := st.GetUserByEmail(ctx, store.PgText(adminEmail))
 	if err != nil {
 		log.Fatalf("demo admin %s not in users: %v", adminEmail, err)
