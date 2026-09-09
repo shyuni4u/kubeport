@@ -35,12 +35,14 @@ describe("DemoBanner", () => {
   // #40 — `toLocaleTimeString([])` follows the *browser*, not the app locale,
   // so an English UI rendered "Next reset: 오후 03:00".
   //
-  // Asserted in both directions on purpose. The old code produced one string
-  // regardless of the app locale, so whatever the machine running the suite is
-  // set to, one of these two must fail — a single-locale assertion would pass
-  // by luck on a matching machine.
+  // Asserted as "the two locales disagree", not as "ko contains 오후". The
+  // day-period *names* depend on how much ICU data the runtime ships: this
+  // machine renders "오후 03:00" but the CI runner renders "PM 03:00" for the
+  // same locale. What the fix actually guarantees — and what the old code
+  // broke — is that the app locale, not the runtime's, decides the format. So
+  // compare the two renders: before the fix they were byte-identical.
   // Read the message span, not the whole banner: the dismiss button's label
-  // butts right up against the time ("03:00 PMDismiss") and eats the \b.
+  // butts right up against the time ("03:00 PMDismiss").
   const message = () =>
     screen.getByRole("status").firstElementChild?.textContent ?? "";
 
@@ -51,16 +53,16 @@ describe("DemoBanner", () => {
     renderBanner("en");
     const enText = message();
 
-    expect(koText).toMatch(/오전|오후/);
-    expect(koText).not.toMatch(/\bAM\b|\bPM\b/);
-    expect(enText).toMatch(/\bAM\b|\bPM\b/);
-    expect(enText).not.toMatch(/오전|오후/);
+    // The surrounding sentence differs by locale too, so compare just the
+    // formatted time — everything after the last colon-space.
+    const timeOf = (s: string) => s.slice(s.lastIndexOf(": ") + 2);
+    expect(timeOf(koText)).not.toBe(timeOf(enText));
   });
 
-  // 06:00Z is 15:00 in Asia/Seoul. Pinning the zone keeps the server and the
-  // browser from disagreeing during hydration.
+  // 06:00Z is 15:00 in Asia/Seoul — locale-independent, so this one can assert
+  // the value directly.
   it("renders the time in the configured time zone", () => {
     renderBanner("ko");
-    expect(screen.getByRole("status").textContent).toMatch(/오후 0?3:00/);
+    expect(message()).toMatch(/\b0?3:00\b/);
   });
 });
