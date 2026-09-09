@@ -60,6 +60,15 @@ function contrast(a: number, b: number): number {
 /** Every surface a component can be drawn on, per theme. */
 const SURFACES = ["--background", "--card"] as const;
 
+/**
+ * WCAG 1.4.11 asks 3:1 of a non-text UI component. The bar here is 3.3 so the
+ * tokens keep a margin: oklch is resolved to 8-bit channels and then through
+ * the viewer's colour management, and a value that passes by 2% on paper is
+ * relying on where those round. Asserting the margin is what stops a later
+ * edit from spending it while still "passing".
+ */
+const SLIDER_TRACK_MIN_CONTRAST = 3.3;
+
 describe("light-mode surface tokens", () => {
   const surfaces = ["--muted", "--secondary"] as const;
 
@@ -116,13 +125,13 @@ describe("--slider-track", () => {
   it.each(SURFACES)("clears 3:1 against %s in light mode", (surface) => {
     expect(
       contrast(lightness(":root", "--slider-track"), lightness(":root", surface)),
-    ).toBeGreaterThanOrEqual(3);
+    ).toBeGreaterThanOrEqual(SLIDER_TRACK_MIN_CONTRAST);
   });
 
   it.each(SURFACES)("clears 3:1 against %s in dark mode", (surface) => {
     expect(
       contrast(lightness(".dark", "--slider-track"), lightness(".dark", surface)),
-    ).toBeGreaterThanOrEqual(3);
+    ).toBeGreaterThanOrEqual(SLIDER_TRACK_MIN_CONTRAST);
   });
 
   it("is darker than any muted-weight fill, so bg-muted cannot replace it", () => {

@@ -90,12 +90,19 @@
     --background: a muted-weight fill tops out near 1.2:1 on a light page, an
     order of magnitude short of 3:1. --border (0.922) is no better.
 
-    0.64, not the original 0.66: the only slider in the app is in the deploy
-    form, which sits on --background rather than on a card, and 0.66 was 2.85:1
+    Not the original 0.66: the only slider in the app is in the deploy form,
+    which sits on --background rather than on a card, and 0.66 was 2.85:1
     there — the requirement was being missed on the one surface it had to hold.
-    globals.test.ts now checks every surface, in both themes.
+
+    0.62 rather than the 0.64 that first replaced it. 0.64 is 3.08:1, which
+    passes on paper by 2.7%; oklch is resolved to 8-bit channels and then
+    through the display's colour management, and a requirement should not
+    depend on where those round. 0.62 is 3.34:1.
+
+    globals.test.ts checks every surface in both themes, and asks for 3.3 so
+    this margin cannot be spent by a later edit that still "passes".
   */
-  --slider-track: oklch(0.64 0 0);
+  --slider-track: oklch(0.62 0 0);
   --ring: oklch(0.55 0.22 275);
   --chart-1: oklch(0.55 0.22 275);
   --chart-2: oklch(0.68 0.16 50);
@@ -133,10 +140,12 @@
   --input: oklch(1 0 0 / 15%);
   /*
     Lighter than the dark surface, for the same 3:1 reason as light mode.
-    0.51, not 0.48: 0.48 cleared --background (3.03:1) but only reached 2.74:1
-    against --card, so a slider inside a card would have missed.
+    Not 0.48: that cleared --background (3.03:1) but only reached 2.74:1 against
+    --card, so a slider inside a card would have missed. And not 0.51 either —
+    3.12:1 on --card is the same 4%-of-headroom the light track was corrected
+    for, so it gets the same treatment. 0.53 is 3.39:1 there.
   */
-  --slider-track: oklch(0.51 0 0);
+  --slider-track: oklch(0.53 0 0);
   --ring: oklch(0.65 0.22 275);
   --chart-1: oklch(0.65 0.22 275);
   --chart-2: oklch(0.7 0.16 50);

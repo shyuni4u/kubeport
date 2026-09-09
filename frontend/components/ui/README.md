@@ -9,7 +9,7 @@
 
 | 파일 | 수정 | 이유 |
 |---|---|---|
-| `slider.tsx` | Track `bg-muted` → `bg-slider-track`, 두께 `h-1` → `h-1.5` | [#43](https://github.com/shyuni4u/kubeport/issues/43). `globals.css` 의 `--muted` 가 `--background` 와 **같은 oklch 값**이라 기본 `bg-muted` 트랙이 페이지 배경에 묻혀 보이지 않았습니다. `--border` 도 배경 대비 약 1.2:1 이라 부족해, WCAG 1.4.11(비텍스트 UI 3:1)을 넘기는 전용 토큰 `--slider-track` 을 뒀습니다. |
+| `slider.tsx` | Track `bg-muted` → `bg-slider-track`, 두께 `h-1` → `h-1.5` | [#43](https://github.com/shyuni4u/kubeport/issues/43). `globals.css` 의 `--muted` 가 `--background` 와 **같은 oklch 값**이라 기본 `bg-muted` 트랙이 페이지 배경에 묻혀 보이지 않았습니다. `--border` 도 배경 대비 약 1.2:1 이라 부족해, WCAG 1.4.11(비텍스트 UI 3:1)용 전용 토큰 `--slider-track` 을 뒀습니다. |
 
 ## 근본 원인 메모 — 해결됨 ([#71](https://github.com/shyuni4u/kubeport/issues/71))
 
@@ -22,3 +22,14 @@
 UI 컴포넌트인데, muted 급 채움은 라이트 배경 대비 1.2:1 이 한계라 자릿수가 다릅니다. 이 판단도
 `app/globals.test.ts` 가 assertion 으로 갖고 있어, "이제 지워도 되나?" 를 다시 논쟁하지 않아도
 됩니다.
+
+### 정정 — #43 당시 이 토큰은 기준을 넘지 못했습니다
+
+위 표에 "3:1 을 넘긴다" 고 적혀 있었지만, `oklch(0.66)` 은 **흰 카드(1.0) 기준 3.11:1 로 계산된
+값**이었습니다. 실제로 슬라이더가 놓이는 곳은 배포 폼이고 그건 카드가 아니라 `--background`
+(0.97) 위라, 진짜 값은 **2.85:1 — 미달**이었습니다. 통과하는 표면을 골라 잰 셈입니다.
+
+#71 에서 라이트 `0.62`(배경 대비 3.34:1) · 다크 `0.53`(카드 대비 3.39:1) 로 올려 실제 표면에서
+기준을 넘겼습니다. `app/globals.test.ts` 는 이제 **두 테마의 모든 표면**을 훑고, 3.0 이 아니라
+**3.3** 을 요구합니다 — oklch 는 8비트 채널로 반올림된 뒤 디스플레이 색관리를 거치므로, 서류상
+2% 여유로 통과하는 값은 반올림에 기대는 것이기 때문입니다.
