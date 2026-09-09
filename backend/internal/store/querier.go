@@ -19,6 +19,18 @@ type Querier interface {
 	// shape: returns zero rows when the version is not draft so the handler can
 	// return 409 instead of a generic DB error.
 	DeleteDraftTemplateVersion(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
+	// Retention: an expired session is already unusable (GetSession filters on
+	// expires_at), so the row is nothing but an encrypted id_token and refresh
+	// token we no longer need. Sweep them instead of keeping them forever — the
+	// s_expires_at index makes this cheap. Deletes in bounded batches so one call
+	// can never hold a long lock on a table that logins are writing to.
+	//
+	// ORDER BY + FOR UPDATE SKIP LOCKED makes concurrent sweepers actually safe
+	// rather than merely idempotent: two replicas take disjoint batches in the
+	// same order instead of racing for the same rows, so neither deadlocks and
+	// neither comes back short while work remains (which the caller reads as
+	// "nothing left" and would otherwise end the pass early).
+	DeleteExpiredSessions(ctx context.Context, batchSize int32) (int64, error)
 	DeleteRelease(ctx context.Context, id pgtype.UUID) error
 	DeleteSession(ctx context.Context, id pgtype.UUID) error
 	DeleteTeam(ctx context.Context, id pgtype.UUID) error

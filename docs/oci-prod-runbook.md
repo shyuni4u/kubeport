@@ -66,6 +66,12 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
 - **프록시 뒤 origin**: frontend 는 traefik 뒤라 `req.nextUrl.origin` 이 내부 주소
   (`https://0.0.0.0:3000`)로 잡힌다. auth 라우트는 `lib/request-origin.ts`(x-forwarded-host)로
   외부 origin 을 유도한다 — 로그인/로그아웃 리다이렉트가 깨지면 여길 본다.
+  단, 유도한 값은 **허용 목록과 대조**한 뒤에만 쓴다. 목록은 `PUBLIC_ORIGIN`(콤마구분, 선택)이
+  있으면 그것, 없으면 `OIDC_REDIRECT_URI` 의 origin 이다. 즉 차트가 이미 `OIDC_REDIRECT_URI` 를
+  넣어 주므로 **운영에서 추가 설정은 필요 없다.** 목록 밖 호스트로 위조된 `X-Forwarded-Host` 는
+  무시되고 첫 번째 허용 origin 으로 고정된다. 도메인을 여러 개 붙일 때만 차트 값
+  `frontend.publicOrigins`(리스트)로 전부 나열한다 — ConfigMap 의 `PUBLIC_ORIGIN` 으로 렌더된다.
+  둘 다 비면 헤더 값을 그대로 쓰고(로컬 개발용) 프로덕션에서는 기동 로그에 경고가 한 번 찍힌다.
 
 ## 5. 실제 배포 활성화 (k3s ↔ Google OIDC ↔ RBAC ↔ 클러스터 등록)
 
@@ -154,6 +160,14 @@ sudo systemctl restart k3s
 - **백업**: 커스텀 정책 `kubeport-weekly-4w`(주간 증분, 28일 보존 = 최대 4개, 무료 5개 한도 내)가
   boot volume 에 연결됨. Postgres 데이터(local-path PVC)도 boot volume 안이라 함께 보존.
   ⚠️ Oracle 기본 **Bronze 는 월간/연간 장기보존이라 무료 한도 초과 → 쓰지 말 것.**
+- **세션 보관 정책**: 유예 없음 — 만료된 행은 **다음 정리 주기(기본 1시간)** 에 삭제된다. backend 가
+  기동 직후 한 번, 이후 1시간마다 `expires_at < now()` 인 `sessions` 행을 1000개씩, 한 주기 최대
+  20회(=2만 행)까지 지운다(`internal/session` reaper). 만료된 세션은 이미 사용 불가이고 행에는
+  암호화된 id/refresh token 만 남으므로 보관할 이유가 없다 — PVC 용량과 주간 백업 크기를 함께 줄인다.
+  **밀린 백로그가 2만 행을 넘으면 여러 주기에 걸쳐 나눠 빠지므로, 첫 배포 직후 한 번에 줄지 않는 것은
+  정상이다.** 주기는 차트 값 `backend.sessionReapInterval`(Go duration, 예 `30m` → ConfigMap 의
+  `KBP_SESSION_REAP_INTERVAL`)로 조정하며, 1분 미만은 1분으로 잘린다.
+  삭제량은 backend 로그에 `session reaper: removed N expired sessions` 로 남는다.
 - **로그**: `kubectl logs -n kubeport deploy/kubeport-{frontend,backend}`. k3s: `journalctl -u k3s`.
 - **인증서**: `letsencrypt-prod` 자동 갱신(만료 30일 전). `kubectl get certificate -n kubeport`.
 
@@ -167,6 +181,8 @@ sudo systemctl restart k3s
 | 홈 `502` | 롤아웃 순간 일시적. 30초 뒤 재확인. 지속되면 파드 로그 |
 | 좌측하단 클러스터 비어있음 | 등록 클러스터 0개 — §5-4. `kubectl exec ... psql -c "select name from clusters"` |
 | 로그아웃 무반응 | 프록시 origin(§4) 또는 리다이렉트 status(303 이어야 함) |
+| 로그인 후 `/` 로 되돌아오고 "로그인하지 못했습니다" 배너 | 콜백이 `?login_error=` 로 돌려보낸 것. 원인은 화면에 안 나오므로 `kubectl logs -n kubeport deploy/kubeport-frontend \| grep '\[auth/callback\]'` 확인. `cancelled` = 사용자가 동의화면에서 취소, `expired` = 10분 state 쿠키 만료, `failed` = IdP/DB 오류. 로그에 `suspicious=true` 면 state/nonce 불일치 — 콜백 위조·재생 시도일 수 있다 |
+| 로그아웃이 403 `cross-origin request rejected` | 브라우저가 보는 origin 이 허용목록(§4)에 없다. 도메인을 추가했거나 **TLS 를 클러스터 밖에서 종료하면서 `tls.enabled=false`** 로 뒀다면 `frontend.publicOrigins` 에 실제 https origin 을 넣고 `helm upgrade` |
 | 데모 로그인 후 배포 401/403 | k3s `auth.yaml` 에 Dex issuer 있는지, prefix `dex:` 와 RoleBinding subject 일치하는지 |
 
 ## 8. 보안 후속 (권장)

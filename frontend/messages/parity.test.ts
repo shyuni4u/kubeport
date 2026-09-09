@@ -41,4 +41,27 @@ describe("messages", () => {
       expect(empty, `${locale} 에 빈 문자열 키가 있습니다`).toEqual([]);
     }
   });
+
+  // Interpolations are part of the contract: `{count}` in one locale and
+  // `{total}` in the other silently renders the placeholder.
+  it("양쪽 로케일이 같은 플레이스홀더를 쓴다", () => {
+    const placeholders = (s: string) =>
+      [...s.matchAll(/\{(\w+)[^}]*\}/g)].map((m) => m[1]).sort();
+    const read = (bundle: unknown, path: string): unknown =>
+      path
+        .split(".")
+        .reduce<unknown>(
+          (acc, k) => (acc as Record<string, unknown>)?.[k],
+          bundle,
+        );
+
+    for (const key of leafKeys(ko).sort()) {
+      const k = read(ko, key);
+      const e = read(en, key);
+      if (typeof k !== "string" || typeof e !== "string") continue;
+      expect(placeholders(e), `placeholders differ at ${key}`).toEqual(
+        placeholders(k),
+      );
+    }
+  });
 });

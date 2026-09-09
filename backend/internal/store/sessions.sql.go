@@ -47,6 +47,36 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 	return i, err
 }
 
+const deleteExpiredSessions = `-- name: DeleteExpiredSessions :execrows
+DELETE FROM sessions
+ WHERE id IN (
+   SELECT id FROM sessions
+    WHERE expires_at < now()
+    ORDER BY expires_at
+      FOR UPDATE SKIP LOCKED
+    LIMIT $1
+ )
+`
+
+// Retention: an expired session is already unusable (GetSession filters on
+// expires_at), so the row is nothing but an encrypted id_token and refresh
+// token we no longer need. Sweep them instead of keeping them forever — the
+// s_expires_at index makes this cheap. Deletes in bounded batches so one call
+// can never hold a long lock on a table that logins are writing to.
+//
+// ORDER BY + FOR UPDATE SKIP LOCKED makes concurrent sweepers actually safe
+// rather than merely idempotent: two replicas take disjoint batches in the
+// same order instead of racing for the same rows, so neither deadlocks and
+// neither comes back short while work remains (which the caller reads as
+// "nothing left" and would otherwise end the pass early).
+func (q *Queries) DeleteExpiredSessions(ctx context.Context, batchSize int32) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredSessions, batchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteSession = `-- name: DeleteSession :exec
 DELETE FROM sessions WHERE id = $1
 `

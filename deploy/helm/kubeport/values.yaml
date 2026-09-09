@@ -69,12 +69,21 @@ backend:
       memory: 256Mi
   # Optional non-secret config
   openapiCacheMax: 64
+  # How often expired sessions are deleted (Go duration, e.g. "30m"). Empty
+  # uses the built-in default of 1h; anything under 1m is clamped to 1m.
+  sessionReapInterval: ""
 
 # ----- Frontend -----------------------------------------------------------
 frontend:
   replicaCount: 1
   service:
     port: 3000
+  # Public origins this install is served on, e.g.
+  # ["https://kubeport.example.com", "https://kp.example.com"]. Login/logout
+  # redirects and the logout same-origin check are pinned to this list so a
+  # forged X-Forwarded-Host can't steer them. Leave empty for a single domain —
+  # the origin of oidc.redirectUri is used then.
+  publicOrigins: []
   resources:
     requests:
       cpu: 50m
@@ -114,6 +123,11 @@ ingress:
   # tls handled by .Values.tls below
 
 tls:
+  # Setting this to false makes the derived oidc.redirectUri http://, and that
+  # URI is also the default public-origin allowlist. So if TLS is terminated
+  # outside the cluster (Cloudflare, an external LB) and you set this to false,
+  # put the https origin the browser actually sees in frontend.publicOrigins —
+  # otherwise logout answers 403 and the post-login redirect downgrades to http.
   enabled: true
   # cert-manager Certificate (recommended)
   certManager:

@@ -1,5 +1,7 @@
 package config
 
+import "time"
+
 type Config struct {
 	ListenAddr          string
 	DatabaseURL         string
@@ -9,4 +11,7 @@ type Config struct {
 	DemoEmailDomain     string // KBP_DEMO_EMAIL_DOMAIN — "" disables demo restrictions
 	AppEncryptionKeyB64 string
 	OpenAPICacheMax     int
+	// SessionReapInterval — KBP_SESSION_REAP_INTERVAL. How often expired
+	// sessions are deleted. Zero uses session.DefaultInterval.
+	SessionReapInterval time.Duration
 }
