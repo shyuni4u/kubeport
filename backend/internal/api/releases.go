@@ -220,6 +220,13 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		if delErr := h.deps.Store.DeleteRelease(cleanupCtx, rel.ID); delErr != nil {
 			log.Printf("rollback: failed to delete release %s from DB: %v", rel.Name, delErr)
 		}
+		// The apply failing is usually the cluster's authorizer saying no. That
+		// is the event an operator needs to be able to look up later — "who
+		// tried to deploy what, where, and was refused" — and it used to leave
+		// no trace at all (#72). The access log has the request id; this line
+		// has the target.
+		log.Printf("release apply failed id=%s user=%s cluster=%s ns=%s release=%s: %v",
+			requestIDFrom(c), u.Email, cluster.Name, r.Namespace, r.Name, err)
 		writeError(c, http.StatusBadGateway, "k8s-error", err.Error())
 		return
 	}

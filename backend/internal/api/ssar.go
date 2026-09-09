@@ -2,12 +2,36 @@ package api
 
 import (
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"kubeport/internal/auth"
 	"kubeport/internal/k8s"
 )
+
+// ssarVerbs are the verbs kubeport itself performs, so they are the only ones
+// worth asking a cluster about: apply (create/update/patch), delete, and the
+// reads behind the release detail page.
+var ssarVerbs = map[string]bool{
+	"create": true,
+	"update": true,
+	"patch":  true,
+	"delete": true,
+	"get":    true,
+	"list":   true,
+	"watch":  true,
+}
+
+func sortedSSARVerbs() []string {
+	out := make([]string, 0, len(ssarVerbs))
+	for v := range ssarVerbs {
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // ssarReq is the POST /v1/selfsubjectaccessreview body.
 //
@@ -49,6 +73,21 @@ func (h *Handlers) CheckSelfSubjectAccess(c *gin.Context) {
 	if req.Cluster == "" || req.Verb == "" || req.Resource == "" {
 		writeError(c, http.StatusBadRequest, "validation-error",
 			"cluster, verb, and resource are required")
+		return
+	}
+	// Every question here turns into a real call to the target apiserver, so
+	// bound what can be asked to what kubeport itself does (issue #73). SSAR
+	// never grants anything — it reports the caller's own access — but an
+	// unbounded proxy is still an unmetered load path onto a single-node
+	// control plane, and the demo is open to anyone.
+	if !ssarVerbs[req.Verb] {
+		writeError(c, http.StatusBadRequest, "validation-error",
+			"verb must be one of: "+strings.Join(sortedSSARVerbs(), ", "))
+		return
+	}
+	if !k8s.IsMVPResource(req.Group, req.Resource) {
+		writeError(c, http.StatusBadRequest, "validation-error",
+			"resource is not one kubeport manages; see the MVP kind list")
 		return
 	}
 

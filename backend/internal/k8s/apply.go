@@ -119,6 +119,19 @@ var mvpResources = []schema.GroupVersionResource{
 	{Group: "", Version: "v1", Resource: "persistentvolumeclaims"},
 }
 
+// IsMVPResource reports whether (group, resource) is one kubeport itself
+// manages. `mvpResources` is the single source of truth for that set, so the
+// SSAR proxy can refuse to ask a cluster about anything kubeport would never
+// apply (issue #73) without a second list drifting from this one.
+func IsMVPResource(group, resource string) bool {
+	for _, gvr := range mvpResources {
+		if gvr.Group == group && gvr.Resource == resource {
+			return true
+		}
+	}
+	return false
+}
+
 // DeleteByRelease deletes all MVP resources matching the kubeport.io/release label.
 func (c *Client) DeleteByRelease(ctx context.Context, namespace, release string) error {
 	sel := "kubeport.io/release=" + release

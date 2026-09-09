@@ -40,6 +40,20 @@ func newTestRouterAdmin(t *testing.T) http.Handler {
 	return api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: testStore(t)})
 }
 
+// newAuthedRequest builds the same request `do` does, for tests that need to
+// set extra headers before sending.
+func newAuthedRequest(method, path string) *http.Request {
+	req := httptest.NewRequest(method, path, nil)
+	req.Header.Set("Authorization", "Bearer x")
+	return req
+}
+
+func serve(r http.Handler, req *http.Request) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
 func do(t *testing.T, r http.Handler, method, path string, body io.Reader) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, path, body)

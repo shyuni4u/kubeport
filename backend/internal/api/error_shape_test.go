@@ -66,7 +66,11 @@ var allowedErrorKinds = map[string]bool{
 	"conflict":         true,
 	"k8s-error":        true,
 	"cluster-config":   true,
-	"internal":         true,
+	// 429 from the SSAR proxy's per-caller budget (#73). Distinct from
+	// rbac-denied on purpose: the caller is allowed, just too fast, and the
+	// right client response is to back off rather than to give up.
+	"rate-limited": true,
+	"internal":     true,
 }
 
 func TestErrorKinds_AllowlistOnly(t *testing.T) {

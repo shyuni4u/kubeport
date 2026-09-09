@@ -67,6 +67,7 @@ func TestSSAR_UnknownCluster(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"cluster":  "does-not-exist-" + randSuffix(),
 		"verb":     "create",
+		"group":    "apps",
 		"resource": "deployments",
 	})
 	w := do(t, r, http.MethodPost, "/v1/selfsubjectaccessreview",
@@ -145,6 +146,7 @@ func TestSSAR_K8sFactoryError(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"cluster":  clusterName,
 		"verb":     "create",
+		"group":    "apps",
 		"resource": "deployments",
 	})
 	w := do(t, r, http.MethodPost, "/v1/selfsubjectaccessreview",
@@ -166,6 +168,7 @@ func TestSSAR_K8sCheckError(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"cluster":  clusterName,
 		"verb":     "create",
+		"group":    "apps",
 		"resource": "deployments",
 	})
 	w := do(t, r, http.MethodPost, "/v1/selfsubjectaccessreview",

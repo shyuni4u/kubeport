@@ -1,6 +1,8 @@
 package api_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -45,4 +47,71 @@ func TestOpenAPIRefresh_AllowedForRealAdmin(t *testing.T) {
 	r := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: testStore(t)})
 	w := do(t, r, http.MethodPost, "/v1/clusters/oci-a1/openapi/refresh", nil)
 	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+}
+
+// Every SSAR turns into a real call to the target apiserver, so the proxy only
+// asks about the verbs and resources kubeport itself uses. Refusing here costs
+// the control plane nothing — the alternative forwards the question. Issue #73.
+func TestSSAR_RejectsVerbsKubeportNeverUses(t *testing.T) {
+	r, _, _ := newSSARRouter(t)
+	for _, verb := range []string{"impersonate", "escalate", "bind", "*", "proxy"} {
+		t.Run(verb, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]any{
+				"cluster": "any", "verb": verb, "group": "apps", "resource": "deployments",
+			})
+			w := do(t, r, http.MethodPost, "/v1/selfsubjectaccessreview", bytes.NewReader(body))
+			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+			require.Contains(t, w.Body.String(), "validation-error")
+		})
+	}
+}
+
+func TestSSAR_RejectsResourcesKubeportDoesNotManage(t *testing.T) {
+	r, _, _ := newSSARRouter(t)
+	for _, tc := range []struct{ group, resource string }{
+		{"", "secrets/finalize"},
+		{"rbac.authorization.k8s.io", "clusterrolebindings"},
+		{"", "nodes"},
+		{"", "pods"},
+		// Right resource, wrong group — deployments live in apps, not core.
+		{"", "deployments"},
+	} {
+		t.Run(tc.group+"/"+tc.resource, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]any{
+				"cluster": "any", "verb": "create", "group": tc.group, "resource": tc.resource,
+			})
+			w := do(t, r, http.MethodPost, "/v1/selfsubjectaccessreview", bytes.NewReader(body))
+			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		})
+	}
+}
+
+// The validation must not reject what the deploy form actually sends — every
+// pair in the client's KIND_TO_RESOURCE map.
+func TestSSAR_AcceptsEveryKindTheDeployFormChecks(t *testing.T) {
+	r, _, _ := newSSARRouter(t)
+	for _, tc := range []struct{ group, resource string }{
+		{"apps", "deployments"},
+		{"apps", "statefulsets"},
+		{"apps", "daemonsets"},
+		{"batch", "jobs"},
+		{"batch", "cronjobs"},
+		{"", "services"},
+		{"networking.k8s.io", "ingresses"},
+		{"", "configmaps"},
+		{"", "secrets"},
+		{"", "persistentvolumeclaims"},
+	} {
+		t.Run(tc.group+"/"+tc.resource, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]any{
+				"cluster":  "no-such-cluster-" + randSuffix(),
+				"verb":     "create",
+				"group":    tc.group,
+				"resource": tc.resource,
+			})
+			w := do(t, r, http.MethodPost, "/v1/selfsubjectaccessreview", bytes.NewReader(body))
+			// Past validation, so it fails on the cluster lookup instead.
+			require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+		})
+	}
 }

@@ -47,7 +47,7 @@ type Handlers struct {
 
 func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Recovery())
+	r.Use(gin.Recovery(), requestID(), accessLog())
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 
 	h := &Handlers{deps: deps, openapi: newOpenAPIProxy(cfg.OpenAPICacheMax)}
@@ -62,7 +62,11 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	// target apiserver, so this is a load amplifier on the control plane, not
 	// a read. Gate it like the other management routes (issue #97).
 	v.POST("/clusters/:name/openapi/refresh", requireAdmin(), noDemo, h.RefreshOpenAPI)
-	v.POST("/selfsubjectaccessreview", h.CheckSelfSubjectAccess)
+	// One deploy-form page view fans out to several SSARs against the real
+	// apiserver, and nothing else bounds how often a caller can make kubeport
+	// talk to the control plane. The burst is sized so a single page load is
+	// never refused (issue #73).
+	v.POST("/selfsubjectaccessreview", rateLimit(newRateLimiter(60, 4096)), h.CheckSelfSubjectAccess)
 	v.GET("/templates", h.ListTemplates)
 	// Authoring is gated for demo accounts unless the deployment opted in;
 	// everything else about the admin UX stays available to them.

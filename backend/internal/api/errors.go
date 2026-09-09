@@ -21,6 +21,10 @@ func writeError(c *gin.Context, status int, kind, detail string) {
 		Title:  kind,
 		Status: status,
 		Detail: detail,
+		// Ties the response the user is looking at to the access-log line and
+		// any server-side detail we withheld from them (#72). The field was
+		// declared but never populated.
+		RequestID: requestIDFrom(c),
 	})
 }
 
