@@ -86,7 +86,6 @@
 - 기존 e2e `03-deprecate-flow.spec.ts` 는 main 에서도 실패(ko 로케일 버튼 라벨 vs 영어 정규식). Plan 11 에서 로케일 고정 또는 i18n 키 기반 셀렉터로 수정.
 - Plan 11 로 이월된 e2e: demo-user 배포→릴리스 상세→로그, demo-admin 새 버전 저장.
 - 프론트 기존 vitest 실패 12건(`RBACCheckPanel`/`InstancesTable`/`LogsPanel`, `NextIntlClientProvider` 누락) — 이 브랜치와 무관, 테스트 래퍼 추가로 해결.
-- `kuberport` 오타 → `kubeport` 통일 (docs/oci README·runbook·upload-gha-secrets.sh·CLAUDE.md 잔존).
 - 데모 RBAC/policy 객체에 차트 표준 라벨은 이번에 추가했으나, `demo-admin` 이 `pods/exec` 가 필요해지면 명시적으로 검토 후 추가.
 - Sentry 피드백 위젯 버튼(배너) 은 Plan 14 에서 SDK 와 함께.
 

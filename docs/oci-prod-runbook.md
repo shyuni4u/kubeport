@@ -161,7 +161,7 @@ sudo systemctl restart k3s
 
 | 증상 | 확인 |
 |---|---|
-| 로그인 후 `redirect_uri_mismatch` | Google 콘솔 Authorized redirect URI 가 정확히 `https://kubeport.enzo.kr/api/auth/callback` 인지(도메인 오타 `kubeport`↔`kubeport` 주의). authorize 는 되고 token 만 실패하면 콜백이 내부 host 로 redirect_uri 를 보낸 것 → `callback/route.ts` 가 `OIDC_REDIRECT_URI` 를 쓰는지 |
+| 로그인 후 `redirect_uri_mismatch` | Google 콘솔 Authorized redirect URI 가 정확히 `https://kubeport.enzo.kr/api/auth/callback` 인지(`kubeport`↔`kuberport` 오타 주의 — 단 SSH 키 경로 `~/.ssh/kuberport-oci/` 는 실제 이름이라 그대로 둔다). authorize 는 되고 token 만 실패하면 콜백이 내부 host 로 redirect_uri 를 보낸 것 → `callback/route.ts` 가 `OIDC_REDIRECT_URI` 를 쓰는지 |
 | 로그인 시 `invalid_scope` | `groups` scope. `oidc.scopes` 기본(`openid email profile`)이면 안 나야 함 |
 | 배포가 조용히 실패 | pod→apiserver 차단(§5-2 iptables) 또는 사용자에 RBAC 바인딩 없음(§5-3) |
 | 홈 `502` | 롤아웃 순간 일시적. 30초 뒤 재확인. 지속되면 파드 로그 |

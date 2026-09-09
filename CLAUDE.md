@@ -19,7 +19,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 >   - `kuberport` 잔존은 실제 파일명이라 유지, 스크립트만 새 이름 우선 (#9). `bootstrap.sh` CIDR/OIDC 반영은 #1 로 완료.
 > - **PR 리뷰어 시스템 (2026-09-08)** — `/pr-review` 스킬 + `.claude/agents/*-reviewer.md` 7개 + `gh pr create` 훅(`.claude/hooks/require-pr-review.mjs`, node 테스트 6개). 리포에 커밋되어 모든 PC 공통. 브라우저 대상은 라이브 데모(`--base-url` 로 staging 교체 예정). 첫 dry-run 이 자기 PR 의 P0(커밋된 settings.json 의 프로덕션 SSH 허용 규칙)·P1(helm template 검증 명령 오류)을 잡아 수정함.
 > - **남은 것**: (a) **[issue #20](https://github.com/shyuni4u/kubeport/issues/20)** 다른 PC 에서 `scripts/e2e/up.sh` 생성 경로(인증서·kind) 첫 검증, (b) Plan 11 후속 — 라이브 OCI smoke(프로덕션에 릴리스 생성/삭제 여부 결정 필요)·클러스터 끊김/drift 케이스, (c) 프론트 eslint 기존 오류 6건(`set-state-in-effect`), (d) 라이브 데모에서 관리자/사용자 체험 한 바퀴.
-> - **주의**: 공인 IP `168.107.55.95` 는 ephemeral(stop/start 시 변경), SSH 키는 gpg 번들→`~/.ssh/kuberport-oci/` (`kuberport` 는 초기 오타지만 실제 디렉터리·키 파일명 — 문서에서 고치지 말 것, runbook §1 참조). 재배포·RBAC·롤백은 runbook.
+> - **주의**: 공인 IP `168.107.55.95` 는 ephemeral(stop/start 시 변경), SSH 키는 gpg 번들→`~/.ssh/kuberport-oci/` (`kuberport` 표기는 아래 "확정된 결정" 표 참조 — 고치지 말 것). 재배포·RBAC·롤백은 runbook.
 
 스펙: [docs/superpowers/specs/2026-04-19-frontend-design-spec.md](docs/superpowers/specs/2026-04-19-frontend-design-spec.md) (4 화면: Admin UI 에디터 / 카탈로그 / 배포 폼 / 릴리스 상세)
 
@@ -64,6 +64,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 | 리소스 범위 v1.1 | B안 — 관리자가 수동 등록한 CRD 지원 |
 | Lifecycle | B안 — Versioned 템플릿, 릴리스는 버전에 pin (Helm/ArgoCD 방식) |
 | 템플릿 저장소 | 앱 DB (MVP), Git 연동은 v2 |
+| `kuberport` 표기 | **고치지 말 것.** SSH 키·디렉터리의 실제 이름이다 (`~/.ssh/kuberport-oci/oci_kuberport`, gpg 번들, `upload-gha-secrets.sh` 폴백). 초기 오타에서 왔지만 이름을 바꾸면 프로덕션 접속 절차가 문서상 깨진다 — 커밋 `106825c` 에서 "실제 파일명은 유지, 스크립트만 새 이름 우선" 으로 결정. runbook §1 참조 |
 
 ## 기술 스택
 
