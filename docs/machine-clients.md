@@ -145,9 +145,16 @@ curl -ks -X POST https://host.docker.internal:5556/token \
 ## 4. 운영자 1회성 작업 — 클러스터 등록
 
 설치 직후 대상 클러스터를 등록하는 건 §3 의 공백에도 불구하고 지금 해야 하는 일이다. 두 가지 경로가 있고,
-**어느 쪽이든 `ca_bundle` 을 반드시 채운다** — 비우면 백엔드가 그 클러스터에 대해 TLS 검증을 끈 채로
-접속하고(`backend/cmd/server/main.go` 의 `k8sFactory.NewWithToken` → `NewInsecureWithToken`),
-**그 연결로 사용자 id_token 이 그대로 나간다.** 등록은 201 로 성공하므로 응답만 봐서는 알 수 없다.
+**어느 쪽이든 `ca_bundle` 을 반드시 채운다.**
+
+`POST /v1/clusters` 는 이제 `ca_bundle` 을 PEM 으로 검증하고, 비었거나 파싱되지 않으면 **400** 이다
+([#96](https://github.com/shyuni4u/kubeport/issues/96)). 예전에는 선택 항목이라 비우면 백엔드가 그
+클러스터에 TLS 검증을 끈 채로 접속했고(`k8sFactory.NewWithToken` → `NewInsecureWithToken`),
+**그 연결로 사용자 id_token 이 그대로 나갔다.** 등록은 201 로 성공했으므로 응답만 봐서는 알 수 없었다.
+
+로컬 kind 처럼 CA 를 넣을 수 없는 환경만 백엔드에 `KBP_DEV_ALLOW_INSECURE_CLUSTERS=true` 를 준다.
+**운영에서는 켜지 않는다** — 이 값이 켜져 있으면 위 검증과 접속 시점 검증이 둘 다 비활성이다.
+아래 A 경로(DB 직접 insert)는 API 를 거치지 않으므로 검증도 거치지 않는다. 직접 넣을 때는 본인이 확인해야 한다.
 
 k3s 라면 값은 `/var/lib/rancher/k3s/server/tls/server-ca.crt` 의 내용(PEM 원문, base64 아님).
 
@@ -192,8 +199,8 @@ curl -sS -X POST http://localhost:8080/v1/clusters \
   }'
 ```
 
-`name` 은 **필수**이고 `ca_bundle` 은 스키마상 선택이지만 위 경고대로 실질 필수다. 필드 표 전체는
-`openapi.yaml` 의 `CreateClusterRequest` 참조.
+`name` 과 `ca_bundle` 둘 다 **필수**다(후자는 위 검증 때문에). 필드 표 전체는 `openapi.yaml` 의
+`CreateClusterRequest` 참조.
 
 ### 관리자 판정 — 그리고 그 방식의 문제
 
@@ -224,9 +231,30 @@ helm upgrade kubeport deploy/helm/kubeport --reuse-values \
 
 ## 5. 호출할 때 알아두면 좋은 것
 
-**에러는 전부 한 가지 형태다.** `Problem{type,title,status,detail}`. 분기는 `title` 로 한다 —
+**에러는 전부 한 가지 형태다.** `Problem{type,title,status,detail,request_id}`. 분기는 `title` 로 한다 —
 값의 닫힌 목록은 `openapi.yaml` 의 `ErrorKind` enum 에 있고, 새 kind 가 몰래 생기면
-`backend/internal/api/error_shape_test.go` 가 빌드를 깬다. `detail` 은 사람이 읽는 문장이라 바뀔 수 있다.
+`backend/internal/api/error_shape_test.go` 와 `openapi_spec_test.go` 가 빌드를 깬다. `detail` 은 사람이
+읽는 문장이라 바뀔 수 있다.
+
+**실패를 신고할 땐 `request_id` 를 같이 적는다.** 모든 응답에 `X-Request-Id` 헤더가 붙고, 에러 본문의
+`request_id` 가 같은 값이다. 인바운드 `X-Request-Id` 는 `^[A-Za-z0-9._-]{1,64}$` 에 맞으면 그대로
+채택되므로 **BFF 를 지나도 내 추적 id 가 살아남는다** (형식이 안 맞으면 서버가 새로 만든다. 헤더 값에는
+공백과 `=` 가 허용돼서, 제한이 없으면 액세스 로그의 필드를 위조할 수 있다).
+
+**500 은 이유를 알려주지 않는다.** `detail` 은 "어떤 작업이 실패했는지"까지다
+([#49](https://github.com/shyuni4u/kubeport/issues/49)) — 예전에는 pgx 접속 문자열(`host=… user=…`)과
+apiserver 주소가 그대로 나갔다. 이유는 서버 로그에 있고, `request_id` 가 그 줄을 찾는 열쇠다.
+반면 **502 의 `detail` 은 apiserver 가 실제로 답한 경우에만** 원문이다(Forbidden/Invalid/NotFound/
+AlreadyExists/Conflict/Unauthorized). "User x cannot create deployments" 는 배포가 거부된 이유이므로
+화면에 있어야 한다. 전송 자체가 실패한 경우는 클러스터 내부 주소가 들어가므로 로그로만 간다.
+
+**429 를 만나면 `Retry-After` 를 지킨다.** `POST /v1/selfsubjectaccessreview` 와 클러스터 openapi 읽기
+두 라우트가 호출자(OIDC subject)별 토큰버킷 하나를 공유한다 — 분당 60회, 버스트 동일
+([#73](https://github.com/shyuni4u/kubeport/issues/73)). 응답에 `Retry-After`(초)와 `X-RateLimit-Limit`·
+`X-RateLimit-Remaining` 이 붙는다. 즉시 재시도하면 제한만 다시 맞는다. 데모의 Dex 계정 2개는 정적이라
+동시 접속자들이 **한 버킷을 공유**한다는 점도 감안할 것.
+
+**요청 바디는 4 MiB 까지다.** 넘으면 읽는 쪽에서 끊긴다.
 
 **비인증 호출은 JSON 401 이다 — 단, [#24](https://github.com/shyuni4u/kubeport/issues/24) 수정이 배포된
 리비전부터.** 그 이전 리비전의 BFF 는 `/api/auth/login` 으로 **307** 을 보낸다.
@@ -242,6 +270,14 @@ helm upgrade kubeport deploy/helm/kubeport --reuse-values \
 **배포 전에 두 번 물어볼 수 있다.** 값이 맞는지는 `POST /v1/templates/{name}/render`(적용 없이 렌더만),
 권한이 있는지는 `POST /v1/selfsubjectaccessreview`. 둘 다 부작용이 없으니 실패를 겪기 전에 쓰는 게 낫다.
 
+SSAR 은 **물어볼 수 있는 질문이 정해져 있다**(#73). `verb` 는 kubeport 가 실제로 수행하는 것만 —
+`create` `update` `patch` `delete` `deletecollection` `get` `list` `watch`. `deletecollection` 이 있는
+이유는 릴리스 삭제가 `DeleteCollection` 을 쓰고 k8s 가 이를 `delete` 가 아닌 자기 verb 로 인가하기
+때문이다. `(group, resource)` 는 MVP 리소스 10종만 — `configmaps` `persistentvolumeclaims` `secrets`
+`services` `apps/daemonsets` `apps/deployments` `apps/statefulsets` `batch/cronjobs` `batch/jobs`
+`networking.k8s.io/ingresses`. 벗어나면 400 이고, **`detail` 이 허용 집합을 그대로 나열**하므로 목록을
+외울 필요는 없다.
+
 **201 은 "적용을 접수했다"는 뜻이지 "떴다"가 아니다.** 상태는 `GET /v1/releases/{id}` 의 `status` 로
 확인한다. 그 값은 요청 시점에 클러스터를 조회해 만드는 파생값이라 저장돼 있지 않고, 따라서 "여기서 끝"
 이라고 볼 종료 상태가 없다. 목록(`GET /v1/releases`)에는 status 가 아예 없어서 N개 릴리스를 폴링하면
@@ -250,6 +286,15 @@ helm upgrade kubeport deploy/helm/kubeport --reuse-values \
 
 **목록은 페이지네이션 메타가 없다.** `total` 도 `next` 도 없어서 "다음 페이지가 있나"는 한 페이지가 꽉
 찼는지로 추측해야 한다. 템플릿 목록은 아예 페이지네이션이 없다(#58).
+
+**BFF 가 직접 답하는 응답 3가지.** `/api/v1/*` 로 붙는 경우(§1 의 B 경로), 아래는 Go API 까지 가지 않고
+Next.js Route Handler 가 만든다. 앞의 둘은 같은 `Problem` 스키마다.
+
+| 상태 | `title` | 언제 |
+|---|---|---|
+| 401 | `unauthenticated` | 세션 쿠키가 없거나 만료 — 토큰 갱신도 실패 |
+| 400 | `validation-error` | 경로가 이상함(`detail: malformed request path`). 세그먼트에 `/`·`..`·제어문자가 있거나, 조립된 URL 이 `/<base>/v1/` 밖으로 나가면 업스트림에 보내지 않는다 ([#51](https://github.com/shyuni4u/kubeport/issues/51)) |
+| 499 | — | 클라이언트가 먼저 끊음(nginx 관례). **본문이 없으므로** id 는 `X-Request-Id` 헤더로만 온다 |
 
 ---
 
