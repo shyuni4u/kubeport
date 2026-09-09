@@ -75,12 +75,30 @@ func clearFixtures(t *testing.T, ctx context.Context, demoDomain string) {
 				"seeding refuses to touch it; drop the row or point TEST_DATABASE_URL elsewhere", f.Name)
 		}
 
+		// Releases are scoped by who deployed them, not by who owns the template
+		// — resetDB draws the line the same way. A real user can deploy from a
+		// demo template, and dropping that row would leave their workload
+		// running in the cluster with nothing in the database pointing at it.
+		fromFixture := `template_version_id IN (
+		   SELECT tv.id FROM template_versions tv
+		   JOIN templates t ON t.id = tv.template_id
+		   WHERE t.name = $1 AND t.` + demoOwned + `)`
+		_, err := conn.Exec(ctx,
+			`DELETE FROM releases WHERE `+fromFixture+
+				` AND created_by_user_id IN (SELECT id FROM users WHERE lower(email) LIKE lower($2))`,
+			f.Name, like)
+		require.NoError(t, err, f.Name)
+
+		var held bool
+		require.NoError(t, conn.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM releases WHERE `+fromFixture+`)`, f.Name, like).Scan(&held))
+		if held {
+			t.Skipf("a non-demo release still points at %q on this database — "+
+				"dropping the template would orphan it; clean it up or point TEST_DATABASE_URL elsewhere", f.Name)
+		}
+
 		for _, sql := range []string{
 			`UPDATE templates SET current_version_id = NULL WHERE name = $1 AND ` + demoOwned,
-			`DELETE FROM releases WHERE template_version_id IN (
-			   SELECT tv.id FROM template_versions tv
-			   JOIN templates t ON t.id = tv.template_id
-			   WHERE t.name = $1 AND t.` + demoOwned + `)`,
 			`DELETE FROM template_versions WHERE template_id IN (
 			   SELECT id FROM templates WHERE name = $1 AND ` + demoOwned + `)`,
 			`DELETE FROM templates WHERE name = $1 AND ` + demoOwned,
