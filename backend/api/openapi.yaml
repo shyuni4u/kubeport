@@ -1,0 +1,1335 @@
+openapi: 3.1.0
+
+# Hand-written, not generated. Gin does not carry enough type information to
+# derive this, so it can drift — `backend/internal/api/openapi_spec_test.go`
+# pins the two things most likely to rot: the route list and the error kinds.
+#
+# NOTE (2026-09-09): PR #47 changes template read authorization (drafts become
+# visible only to their editors). The 403/404 wording on the /templates paths
+# needs one re-read after that merges.
+#
+# `redocly lint` reports two warnings that are correct as written; please don't
+# "fix" them:
+#   - no-server-example.com on http://localhost:8080 — that really is how you
+#     reach this API, because the Go service is ClusterIP-only and you get to it
+#     through a port-forward. There is no public URL to put here.
+#   - operation-4xx-response on /healthz — it takes no input and no auth, so it
+#     has no 4xx to document.
+
+info:
+  title: kubeport API
+  version: "0.1.0"
+  license:
+    name: MIT
+    identifier: MIT
+  description: |
+    kubeport turns Kubernetes resources into a self-service catalog: admins
+    publish versioned templates, everyone else deploys them through generated
+    forms.
+
+    **This API is a UX layer, not an authorization boundary.** Every write that
+    touches a cluster is performed with the caller's own OIDC id_token, forwarded
+    unchanged to that cluster's apiserver. Kubernetes RBAC decides what actually
+    happens, so a 201 from kubeport only means kubeport accepted the request —
+    the cluster may still refuse it.
+
+    ## Two ways in
+
+    The Go API described here listens on `:8080` **inside the cluster only**
+    (`ClusterIP`; the Ingress routes all external traffic to the frontend). It
+    takes an OIDC id_token as a bearer token.
+
+    Browsers instead talk to the Next.js BFF at `https://<host>/api/v1/*`, which
+    authenticates from an httpOnly session cookie and injects the bearer token
+    server-side. It **ignores any `Authorization` header you send**. Paths and
+    bodies are otherwise identical to this spec.
+
+    So a script has two options, both covered in
+    `docs/machine-clients.md`: port-forward to the backend Service and use a
+    bearer token, or drive the browser session. There is no public bearer-token
+    route today — see issue #34.
+
+servers:
+  - url: http://localhost:8080
+    description: Go API, reached directly (port-forward or in-cluster)
+  - url: https://kubeport.enzo.kr/api
+    description: Next.js BFF (session cookie, not bearer)
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: identity
+    description: Who the caller is, and whether they are an admin.
+  - name: clusters
+    description: |
+      Registered deploy targets, and pass-throughs to a target's own apiserver
+      (schema discovery, permission checks).
+  - name: templates
+    description: |
+      Versioned blueprints. A template owns many versions; a version is a draft
+      until published, and immutable once it is.
+  - name: releases
+    description: |
+      One template version deployed into a cluster and namespace, pinned to that
+      version.
+  - name: teams
+    description: Template ownership and who may edit what.
+  - name: meta
+    description: Probes. No authentication.
+
+paths:
+  /healthz:
+    get:
+      tags: [meta]
+      operationId: healthz
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: Process is up. Does not check the database.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: ok }
+
+  /v1/me:
+    get:
+      tags: [identity]
+      operationId: getMe
+      summary: The caller as kubeport sees them
+      description: |
+        Use this to discover whether the caller is an admin: `groups` contains
+        `kubeport-admin`. That group comes from the IdP's `groups` claim, or —
+        when the IdP does not emit one, as with Google — from the
+        `KBP_DEV_ADMIN_EMAILS` allowlist.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [subject, email, groups]
+                properties:
+                  subject: { type: string }
+                  email: { type: string, format: email }
+                  groups:
+                    type: array
+                    items: { type: string }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+
+  /v1/clusters:
+    get:
+      tags: [clusters]
+      operationId: listClusters
+      summary: List clusters available as deploy targets
+      description: |
+        Returns only what is needed to target a deploy. `api_url`, `ca_bundle`
+        and `oidc_issuer_url` are deliberately **not** included for any caller,
+        admin included — see issue #52. Register a cluster to see them once, in
+        the POST response.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [clusters]
+                properties:
+                  clusters:
+                    type: array
+                    items: { $ref: "#/components/schemas/ClusterSummary" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+    post:
+      tags: [clusters]
+      operationId: createCluster
+      summary: Register a cluster as a deploy target
+      description: |
+        Admin only, and refused for demo-domain callers. There is no
+        cluster-registration screen in the admin UI, so this endpoint is the
+        supported path — see `deploy/helm/kubeport/README.md`, "After install".
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateClusterRequest" }
+      responses:
+        "201":
+          description: |
+            Created. This is the only response that carries the connection
+            fields back, so keep it if you want to verify what was stored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Cluster" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: A cluster with that name already exists.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /v1/clusters/{name}/openapi:
+    get:
+      tags: [clusters]
+      operationId: getClusterOpenAPIIndex
+      summary: Group/version index from the target cluster
+      description: |
+        Proxies the cluster's own OpenAPI discovery, used by the template editor
+        to offer resource kinds. Served from an in-process LRU cache.
+      parameters:
+        - $ref: "#/components/parameters/ClusterName"
+      responses:
+        "200":
+          description: Passed through from the cluster.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/UpstreamError" }
+
+  /v1/clusters/{name}/openapi/{gv}:
+    get:
+      tags: [clusters]
+      operationId: getClusterOpenAPIGroupVersion
+      summary: Schema for one group/version
+      parameters:
+        - $ref: "#/components/parameters/ClusterName"
+        - name: gv
+          in: path
+          required: true
+          description: |
+            Group and version, e.g. `apps/v1` or `v1`. Matched as a
+            trailing wildcard, so it may contain a slash.
+          schema: { type: string }
+          example: apps/v1
+      responses:
+        "200":
+          description: Passed through from the cluster.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/UpstreamError" }
+
+  /v1/clusters/{name}/openapi/refresh:
+    post:
+      tags: [clusters]
+      operationId: refreshClusterOpenAPI
+      summary: Drop the cached schema for this cluster
+      parameters:
+        - $ref: "#/components/parameters/ClusterName"
+      responses:
+        "200": { description: Cache cleared. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/selfsubjectaccessreview:
+    post:
+      tags: [clusters]
+      operationId: checkSelfSubjectAccess
+      summary: Ask the cluster whether the caller may do something
+      description: |
+        Forwards a `SelfSubjectAccessReview` using the caller's own token. This
+        is how the deploy form greys out actions before submitting — prefer it
+        over attempting the write and handling the failure.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SSARRequest" }
+      responses:
+        "200":
+          description: The cluster's verdict.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [allowed, denied, reason]
+                properties:
+                  allowed: { type: boolean }
+                  denied: { type: boolean }
+                  reason:
+                    type: string
+                    description: Free text from the cluster; may be empty.
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "502": { $ref: "#/components/responses/UpstreamError" }
+
+  /v1/templates:
+    get:
+      tags: [templates]
+      operationId: listTemplates
+      summary: List templates
+      description: |
+        Each row carries `current_ui_spec`, so one call is enough to render a
+        deploy form — no follow-up per template.
+
+        **Not paginated** (issue #58): the whole table is returned.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [templates]
+                properties:
+                  templates:
+                    type: array
+                    items: { $ref: "#/components/schemas/TemplateListItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+    post:
+      tags: [templates]
+      operationId: createTemplate
+      summary: Create a template and its first version
+      description: |
+        `authoring_mode` decides which body fields are read: `yaml` uses
+        `resources_yaml` + `ui_spec_yaml`, `ui` uses `ui_state`. The first
+        version is created as a draft.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateTemplateRequest" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  template: { $ref: "#/components/schemas/Template" }
+                  version: { $ref: "#/components/schemas/TemplateVersion" }
+                  resources_yaml: { type: string }
+                  ui_spec_yaml: { type: string }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: A template with that name already exists.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /v1/templates/preview:
+    post:
+      tags: [templates]
+      operationId: previewTemplate
+      summary: Convert UI-mode state to YAML without saving
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ui_state]
+              properties:
+                ui_state: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resources_yaml: { type: string }
+                  ui_spec_yaml: { type: string }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+
+  /v1/templates/{name}/render:
+    post:
+      tags: [templates]
+      operationId: renderTemplate
+      summary: Render a template with values, without deploying
+      description: |
+        The dry run to do before `POST /v1/releases`: same substitution, nothing
+        written and nothing sent to a cluster.
+      parameters:
+        - $ref: "#/components/parameters/TemplateName"
+        - name: version
+          in: query
+          required: false
+          description: Defaults to the template's current published version.
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                values:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  template: { type: string }
+                  version: { type: integer }
+                  rendered_yaml: { type: string }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/templates/{name}:
+    get:
+      tags: [templates]
+      operationId: getTemplate
+      summary: Get one template
+      parameters: [{ $ref: "#/components/parameters/TemplateName" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TemplateDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [templates]
+      operationId: updateTemplate
+      summary: Edit template metadata
+      description: Only the fields present in the body are changed.
+      parameters: [{ $ref: "#/components/parameters/TemplateName" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string }
+                description: { type: string }
+                tags:
+                  type: array
+                  items: { type: string }
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Template" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/templates/{name}/versions:
+    get:
+      tags: [templates]
+      operationId: listTemplateVersions
+      summary: List versions, newest first
+      parameters: [{ $ref: "#/components/parameters/TemplateName" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [versions]
+                properties:
+                  versions:
+                    type: array
+                    items: { $ref: "#/components/schemas/TemplateVersion" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [templates]
+      operationId: createTemplateVersion
+      summary: Add a draft version
+      parameters: [{ $ref: "#/components/parameters/TemplateName" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateVersionRequest" }
+      responses:
+        "201":
+          description: Created as a draft.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TemplateVersion" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/templates/{name}/versions/{v}:
+    get:
+      tags: [templates]
+      operationId: getTemplateVersion
+      summary: Get one version
+      parameters:
+        - $ref: "#/components/parameters/TemplateName"
+        - $ref: "#/components/parameters/VersionNumber"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TemplateVersion" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [templates]
+      operationId: updateTemplateVersion
+      summary: Edit a draft version
+      description: |
+        Drafts only. A published or deprecated version is immutable — releases
+        are pinned to it.
+      parameters:
+        - $ref: "#/components/parameters/TemplateName"
+        - $ref: "#/components/parameters/VersionNumber"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateVersionRequest" }
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TemplateVersion" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The version is not a draft.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+    delete:
+      tags: [templates]
+      operationId: deleteTemplateVersion
+      summary: Delete a draft version
+      parameters:
+        - $ref: "#/components/parameters/TemplateName"
+        - $ref: "#/components/parameters/VersionNumber"
+      responses:
+        "200": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The version is not a draft.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /v1/templates/{name}/versions/{v}/publish:
+    post:
+      tags: [templates]
+      operationId: publishTemplateVersion
+      summary: Publish a draft
+      description: |
+        Makes this the template's current version. Existing releases stay pinned
+        to the version they were deployed from.
+      parameters:
+        - $ref: "#/components/parameters/TemplateName"
+        - $ref: "#/components/parameters/VersionNumber"
+      responses:
+        "200":
+          description: Published.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TemplateVersion" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/templates/{name}/versions/{v}/deprecate:
+    post:
+      tags: [templates]
+      operationId: deprecateTemplateVersion
+      summary: Deprecate a published version
+      description: Hides it from the catalog. Running releases are untouched.
+      parameters:
+        - $ref: "#/components/parameters/TemplateName"
+        - $ref: "#/components/parameters/VersionNumber"
+      responses:
+        "200":
+          description: Deprecated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TemplateVersion" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/templates/{name}/versions/{v}/undeprecate:
+    post:
+      tags: [templates]
+      operationId: undeprecateTemplateVersion
+      summary: Undo a deprecation
+      parameters:
+        - $ref: "#/components/parameters/TemplateName"
+        - $ref: "#/components/parameters/VersionNumber"
+      responses:
+        "200":
+          description: Restored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TemplateVersion" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/releases:
+    get:
+      tags: [releases]
+      operationId: listReleases
+      summary: List the caller's releases
+      description: |
+        Admins see every release; everyone else sees their own.
+
+        **No status field and no total count.** Status is derived per release by
+        querying the cluster, so it only appears on `GET /v1/releases/{id}` —
+        polling a list of N releases costs N cluster round-trips (issues #57,
+        #58). There is also no `total`, so "is there another page" has to be
+        inferred from a full page.
+      parameters:
+        - name: limit
+          in: query
+          description: |
+            1–200, default 50. Out-of-range and non-numeric values are ignored
+            in favour of the default rather than rejected, so the response
+            cannot confirm what was applied (#58).
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [releases]
+                properties:
+                  releases:
+                    type: array
+                    items: { $ref: "#/components/schemas/ReleaseListItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+    post:
+      tags: [releases]
+      operationId: createRelease
+      summary: Deploy a template version
+      description: |
+        Renders the template with `values` and applies it with the caller's
+        token. A 201 means the apply was accepted; readiness is not waited for,
+        so poll `GET /v1/releases/{id}` for status.
+
+        Call `POST /v1/templates/{name}/render` first to check the values, and
+        `POST /v1/selfsubjectaccessreview` to check permissions.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateReleaseRequest" }
+      responses:
+        "201":
+          description: Applied.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Release" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403":
+          description: |
+            Refused by kubeport (demo restriction) **or** by the cluster's RBAC.
+            `title` separates them: `demo-restricted` vs `rbac-denied`.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "409":
+          description: A release with that name already exists in the namespace.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "502": { $ref: "#/components/responses/UpstreamError" }
+
+  /v1/releases/{id}:
+    get:
+      tags: [releases]
+      operationId: getRelease
+      summary: Release detail with live status
+      description: |
+        `status` is computed at request time from the cluster, not stored, so
+        two calls can disagree without anything having been written. See the
+        `status` enum for what each value means.
+      parameters: [{ $ref: "#/components/parameters/ReleaseID" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReleaseDetail" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [releases]
+      operationId: updateRelease
+      summary: Move a release to another version and/or values
+      parameters: [{ $ref: "#/components/parameters/ReleaseID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, values]
+              properties:
+                version: { type: integer, minimum: 1 }
+                values:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "200":
+          description: Applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  version: { type: integer }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/UpstreamError" }
+    delete:
+      tags: [releases]
+      operationId: deleteRelease
+      summary: Delete a release
+      parameters:
+        - $ref: "#/components/parameters/ReleaseID"
+        - name: force
+          in: query
+          description: |
+            Admin only. Skips the cluster entirely and removes just the database
+            row. For releases whose cluster is gone or whose objects were
+            deleted outside kubeport, where an ordinary delete cannot succeed.
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: boolean }
+                  force: { type: boolean }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/UpstreamError" }
+
+  /v1/releases/{id}/logs:
+    get:
+      tags: [releases]
+      operationId: streamReleaseLogs
+      summary: Follow pod logs (Server-Sent Events)
+      description: |
+        Long-lived `text/event-stream`. Event types:
+
+        | event | data |
+        |---|---|
+        | `log`   | `{"time": <unix ms>, "pod": "<name>", "text": "<line>"}` |
+        | `ping`  | unix seconds, every 15s to keep the connection open |
+        | `error` | `{"error": "<message>"}` — note this is **not** a Problem, and the stream stays open (issue #82) |
+
+        Authentication failures before the stream opens are ordinary JSON
+        Problems; once it is open, failures arrive as `error` events.
+      parameters:
+        - $ref: "#/components/parameters/ReleaseID"
+        - name: instance
+          in: query
+          description: Pod name, or `all` (default) to follow every pod.
+          schema: { type: string, default: all }
+      responses:
+        "200":
+          description: Stream opened.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: |
+            No such release, or no pod matched `instance` — `title` is
+            `not-found` or `no-pods`.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "502": { $ref: "#/components/responses/UpstreamError" }
+
+  /v1/teams:
+    get:
+      tags: [teams]
+      operationId: listTeams
+      summary: List teams
+      description: Admins see all teams; everyone else sees their own.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [teams]
+                properties:
+                  teams:
+                    type: array
+                    items: { $ref: "#/components/schemas/Team" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+    post:
+      tags: [teams]
+      operationId: createTeam
+      summary: Create a team
+      description: Admin only, refused for demo-domain callers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1 }
+                display_name: { type: string }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Team" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: A team with that name already exists.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /v1/teams/{id}/members:
+    get:
+      tags: [teams]
+      operationId: listTeamMembers
+      summary: List team members
+      parameters: [{ $ref: "#/components/parameters/TeamID" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [members]
+                properties:
+                  members:
+                    type: array
+                    items: { $ref: "#/components/schemas/TeamMember" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [teams]
+      operationId: addTeamMember
+      summary: Add a member
+      description: |
+        Admin only, refused for demo-domain callers. `editor` may author
+        templates the team owns; `viewer` may read them, drafts included.
+      parameters: [{ $ref: "#/components/parameters/TeamID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, format: email }
+                role: { type: string, enum: [editor, viewer] }
+      responses:
+        "201":
+          description: Added.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TeamMember" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: |
+            No such team, or no user with that email has ever signed in —
+            `title` is `not-found` or `user-not-found`. kubeport cannot invite
+            people; they must log in once first.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /v1/teams/{id}/members/{user_id}:
+    delete:
+      tags: [teams]
+      operationId: removeTeamMember
+      summary: Remove a member
+      parameters:
+        - $ref: "#/components/parameters/TeamID"
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Removed. }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        An OIDC **id_token** (not an access token) from an issuer this install
+        trusts. The backend checks signature, issuer and `aud`, then forwards
+        the same token to the target cluster.
+
+        How to obtain one non-interactively is not solved for production IdPs —
+        see `docs/machine-clients.md` and issue #34.
+
+  parameters:
+    ClusterName:
+      name: name
+      in: path
+      required: true
+      description: The cluster's registered `name`, not its UUID.
+      schema: { type: string }
+    TemplateName:
+      name: name
+      in: path
+      required: true
+      schema: { type: string }
+    VersionNumber:
+      name: v
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+    ReleaseID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TeamID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    Unauthenticated:
+      description: |
+        Missing, malformed or rejected token. Through the BFF this also covers a
+        missing or expired session cookie.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+          example:
+            type: https://kubeport.io/errors/unauthenticated
+            title: unauthenticated
+            status: 401
+            detail: missing bearer token
+    Forbidden:
+      description: |
+        `title` says who refused: `rbac-denied` is kubeport's own check or the
+        cluster's RBAC; `demo-restricted` is a demo account hitting a write that
+        demo accounts never get.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: No such resource.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    ValidationError:
+      description: The request body or a parameter did not validate.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    UpstreamError:
+      description: |
+        The target cluster failed or refused the request. `title` is
+        `k8s-error`, or `cluster-config` when the stored registration cannot be
+        used to build a client.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+  schemas:
+    Problem:
+      type: object
+      description: |
+        RFC 7807-shaped. Every JSON error from this API and from the BFF uses
+        it — branch on `title`, which is the stable machine-readable kind;
+        `detail` is prose and may change.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: "`https://kubeport.io/errors/<title>`. Not dereferenceable."
+        title: { $ref: "#/components/schemas/ErrorKind" }
+        status: { type: integer }
+        detail: { type: string }
+        request_id: { type: string }
+
+    ErrorKind:
+      type: string
+      description: |
+        The closed set of error kinds. `backend/internal/api/error_shape_test.go`
+        fails the build if a handler introduces one that is not listed here.
+      enum:
+        - unauthenticated   # 401 — no/invalid token or session
+        - rbac-denied       # 403 — kubeport or cluster RBAC refused
+        - demo-restricted   # 403 — demo account, write not available
+        - validation-error  # 400 — body or parameter rejected
+        - not-found         # 404
+        - user-not-found    # 404 — email has never signed in
+        - no-pods           # 404 — release has no pod matching ?instance
+        - conflict          # 409 — name already taken, or version not a draft
+        - k8s-error         # 502 — target cluster failed or refused
+        - cluster-config    # 500 — stored registration unusable
+        - internal          # 500
+
+    ClusterSummary:
+      type: object
+      description: What GET /v1/clusters returns. Connection fields are omitted.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        display_name: { type: [string, "null"] }
+        default_namespace: { type: [string, "null"] }
+
+    Cluster:
+      allOf:
+        - $ref: "#/components/schemas/ClusterSummary"
+        - type: object
+          description: Full record, returned only by POST /v1/clusters.
+          properties:
+            api_url: { type: string, format: uri }
+            ca_bundle:
+              type: [string, "null"]
+              description: PEM text, not base64.
+            oidc_issuer_url: { type: string, format: uri }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+
+    CreateClusterRequest:
+      type: object
+      required: [name, api_url, oidc_issuer_url]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Slug releases refer to. Must be unique.
+        display_name: { type: string }
+        api_url:
+          type: string
+          format: uri
+          description: For an in-cluster target, `https://kubernetes.default.svc`.
+        ca_bundle:
+          type: string
+          description: |
+            PEM text, not base64. Optional, but **omitting it makes the backend
+            connect with TLS verification disabled** and still return 201 — the
+            response cannot tell you this happened. Set it outside local dev.
+        oidc_issuer_url: { type: string, format: uri }
+        default_namespace:
+          type: string
+          description: Pre-selected in the deploy form.
+
+    SSARRequest:
+      type: object
+      properties:
+        cluster: { type: string }
+        namespace: { type: string }
+        verb:
+          type: string
+          example: create
+        group:
+          type: string
+          description: Empty for core resources.
+          example: apps
+        resource:
+          type: string
+          example: deployments
+        name: { type: string }
+
+    Template:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        display_name: { type: string }
+        description: { type: [string, "null"] }
+        tags:
+          type: array
+          items: { type: string }
+        owner_user_id: { type: string, format: uuid }
+        current_version_id: { type: [string, "null"], format: uuid }
+        owning_team_id: { type: [string, "null"], format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    TemplateDetail:
+      allOf:
+        - $ref: "#/components/schemas/Template"
+        - type: object
+          properties:
+            current_version: { type: [integer, "null"] }
+            owning_team_name: { type: [string, "null"] }
+
+    TemplateListItem:
+      allOf:
+        - $ref: "#/components/schemas/Template"
+        - type: object
+          properties:
+            current_version: { type: [integer, "null"] }
+            current_ui_spec:
+              type: [string, "null"]
+              description: |
+                The published version's ui-spec YAML. Present so a client can
+                build a deploy form from the list alone.
+            current_status:
+              type: [string, "null"]
+              description: null when the template has no version yet.
+              enum: [draft, published, deprecated, null]
+
+    TemplateVersion:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        template_id: { type: string, format: uuid }
+        version: { type: integer }
+        resources_yaml: { type: string }
+        ui_spec_yaml: { type: string }
+        metadata_yaml: { type: [string, "null"] }
+        status:
+          type: string
+          enum: [draft, published, deprecated]
+        notes: { type: [string, "null"] }
+        authoring_mode:
+          type: string
+          enum: [yaml, ui]
+        ui_state_json:
+          type: [object, "null"]
+          additionalProperties: true
+        created_by_user_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        published_at: { type: [string, "null"], format: date-time }
+
+    CreateTemplateRequest:
+      type: object
+      required: [name, display_name, authoring_mode]
+      properties:
+        name: { type: string }
+        display_name: { type: string }
+        description: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        authoring_mode:
+          type: string
+          enum: [yaml, ui]
+        owning_team_id:
+          type: string
+          description: |
+            UUID, or empty for a global template. Publishing a global template
+            is admin-only.
+        resources_yaml:
+          type: string
+          description: Read when authoring_mode is `yaml`.
+        ui_spec_yaml:
+          type: string
+          description: Read when authoring_mode is `yaml`.
+        ui_state:
+          type: object
+          additionalProperties: true
+          description: Read when authoring_mode is `ui`.
+        metadata_yaml: { type: string }
+
+    CreateVersionRequest:
+      type: object
+      required: [authoring_mode]
+      properties:
+        authoring_mode:
+          type: string
+          enum: [yaml, ui]
+        resources_yaml: { type: string }
+        ui_spec_yaml: { type: string }
+        ui_state:
+          type: object
+          additionalProperties: true
+        metadata_yaml: { type: string }
+        notes: { type: string }
+
+    UpdateVersionRequest:
+      type: object
+      description: Only the fields present are changed.
+      properties:
+        resources_yaml: { type: string }
+        ui_spec_yaml: { type: string }
+        ui_state:
+          type: object
+          additionalProperties: true
+        metadata_yaml: { type: string }
+        notes: { type: string }
+
+    CreateReleaseRequest:
+      type: object
+      required: [template, version, cluster, namespace, name, values]
+      properties:
+        template: { type: string }
+        version: { type: integer, minimum: 1 }
+        cluster:
+          type: string
+          description: A registered cluster's `name`.
+        namespace: { type: string }
+        name:
+          type: string
+          description: RFC 1123 hostname. Unique within cluster + namespace.
+        values:
+          type: object
+          additionalProperties: true
+          description: Keyed by the paths the template's ui-spec exposes.
+
+    Release:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        template_version_id: { type: string, format: uuid }
+        cluster_id: { type: string, format: uuid }
+        namespace: { type: string }
+        values_json:
+          type: object
+          additionalProperties: true
+        rendered_yaml: { type: string }
+        created_by_user_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ReleaseListItem:
+      type: object
+      description: No status — see GET /v1/releases.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        template_version_id: { type: string, format: uuid }
+        template_name: { type: string }
+        template_version: { type: integer }
+        cluster_id: { type: string, format: uuid }
+        cluster_name: { type: string }
+        namespace: { type: string }
+        created_by_user_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ReleaseDetail:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        template:
+          type: object
+          properties:
+            name: { type: string }
+            version: { type: integer }
+        cluster: { type: string }
+        namespace: { type: string }
+        values_json:
+          type: object
+          additionalProperties: true
+        rendered_yaml: { type: string }
+        instances_total: { type: integer }
+        instances_ready: { type: integer }
+        instances:
+          type: array
+          items: { $ref: "#/components/schemas/Instance" }
+        status: { $ref: "#/components/schemas/ReleaseStatus" }
+        created_at: { type: string, format: date-time }
+
+    ReleaseStatus:
+      type: string
+      description: |
+        Derived per request from the cluster; never stored, so there is no
+        terminal value to wait for and no transition to subscribe to. A
+        background reconciler that would make this durable is deferred
+        (Plan 12).
+      enum:
+        - healthy              # every instance ready
+        - warning              # some instance not ready yet
+        - error                # an instance Failed, or restarted more than 5 times
+        - unknown              # no instances found, cause undetermined
+        - cluster-unreachable  # the cluster did not answer — says nothing about the workload
+        - resources-missing    # cluster answered, objects are gone (deleted outside kubeport)
+
+    Instance:
+      type: object
+      description: One pod.
+      properties:
+        name: { type: string }
+        phase:
+          type: string
+          example: Running
+        ready: { type: boolean }
+        restarts: { type: integer }
+
+    Team:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        display_name: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+
+    TeamMember:
+      type: object
+      properties:
+        user_id: { type: string, format: uuid }
+        team_id: { type: string, format: uuid }
+        role:
+          type: string
+          enum: [editor, viewer]
+        created_at: { type: string, format: date-time }
