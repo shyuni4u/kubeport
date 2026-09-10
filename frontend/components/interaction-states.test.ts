@@ -122,18 +122,46 @@ describe("hover and highlight", () => {
  * Confirmed against the emitted CSS in cross-review, not inferred.
  */
 describe("dark-mode base fills", () => {
-  it("never leave a hover to a rule the dark base outranks", () => {
+  /**
+   * The unit checked is what actually renders together, which is not one string
+   * literal: `cva` splits a component's classes across a base literal and one
+   * literal per variant, and the browser sees base + variant. The dark fill and
+   * the state that loses to it are routinely in different halves — the outline
+   * button keeps `dark:bg-input/30` in its variant while `disabled:bg-muted`
+   * lives in the base.
+   *
+   * So cva files are checked as base ∪ each variant, and everything else per
+   * literal. Taking the whole file's union instead would pair a dark fill in
+   * one variant with a hover in a different one and report a component that
+   * cannot render both at once.
+   */
+  const STATES = ["hover", "focus", "disabled", "aria-pressed", "data-active"] as const;
+
+  /** Literals that plausibly hold Tailwind classes, so import paths drop out. */
+  const classish = (s: string) => /(^|\s)(bg-|text-|border-|dark:|hover:|focus|disabled:)/.test(s);
+
+  function renderedCombinations(text: string): string[] {
+    const literals = [...text.matchAll(/"([^"\\]*(?:\\.[^"\\]*)*)"/g)]
+      .map((m) => m[1])
+      .filter(classish);
+    if (!text.includes("cva(") || literals.length < 2) return literals;
+    const [base, ...variants] = literals;
+    return variants.map((v) => `${base} ${v}`);
+  }
+
+  it("never leave a state fill to a rule the dark base outranks", () => {
     const broken: string[] = [];
     for (const { file, text } of FILES) {
-      for (const m of text.matchAll(/"([^"\\]*(?:\\.[^"\\]*)*)"/g)) {
-        const classes = m[1];
+      for (const classes of renderedCombinations(text)) {
         if (!/(?:^|\s)dark:bg-/.test(classes)) continue;
-        if (!/(?:^|\s)hover:bg-/.test(classes)) continue;
-        if (/(?:^|\s)dark:hover:bg-/.test(classes)) continue;
-        broken.push(`${file}: a dark base fill with no dark hover`);
+        for (const state of STATES) {
+          if (!new RegExp(`(?:^|\\s)${state}:bg-`).test(classes)) continue;
+          if (new RegExp(`(?:^|\\s)dark:${state}:bg-`).test(classes)) continue;
+          broken.push(`${file}: dark base fill outranks \`${state}:bg-*\``);
+        }
       }
     }
-    expect(broken).toEqual([]);
+    expect([...new Set(broken)]).toEqual([]);
   });
 });
 
