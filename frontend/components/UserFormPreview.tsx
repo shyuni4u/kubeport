@@ -6,6 +6,8 @@ import { parse } from "yaml";
 import { useDebouncedCallback } from "use-debounce";
 
 import { DynamicForm, type UISpec } from "@/components/DynamicForm";
+import { PreviewErrorBoundary } from "@/components/PreviewErrorBoundary";
+import { normalizeUISpec } from "@/lib/ui-spec-to-zod";
 import type { UIModeTemplate } from "@/components/YamlPreview";
 
 // UserFormPreview renders DynamicForm against a template's ui-spec so the
@@ -75,11 +77,34 @@ export function UserFormPreview(props: Props) {
   }, [uiStateKey, fetchPreview]);
 
   const err = local ? (local.parseError && t("parseFailed", { detail: local.parseError })) : fetchErr;
-  const uiSpec = local ? local.spec : fetched;
+  const parsed = local ? local.spec : fetched;
 
   if (err) return <div className="text-sm text-red-600 whitespace-pre">{err}</div>;
-  if (!uiSpec) return <div className="text-sm text-muted-foreground">{t("loading")}</div>;
+  if (!parsed) return <div className="text-sm text-muted-foreground">{t("loading")}</div>;
+
+  // The trust boundary (#164). Everything below — DynamicForm, its widgets,
+  // its schema — may assume the UISpec type from here on, which is the point:
+  // guarding the schema builder alone still left the widget renderer reading
+  // `values.length` off an enum that had none.
+  const { spec: uiSpec, problems } = normalizeUISpec(parsed);
+
+  // Fields left out are reported, not thrown on, and not silently dropped —
+  // otherwise a field the admin just wrote simply fails to appear.
+  //
+  // Muted rather than red: mid-edit is the normal state of a ui-spec, and a
+  // warning that fires on the way to every valid field is one the reader
+  // learns to ignore. Unparseable YAML is a different thing and stays red.
+  const note = problems.length > 0 && (
+    <p className="mb-3 text-xs text-muted-foreground">
+      {t("skippedFields", { fields: problems.join(", ") })}
+    </p>
+  );
+
   if (uiSpec.fields.length === 0) {
+    // "Nothing exposed yet" is the wrong sentence when fields exist but none
+    // of them survived — that reads as "you have not written any", which is
+    // exactly the misunderstanding the note prevents.
+    if (problems.length > 0) return <div>{note}</div>;
     return (
       <div className="text-sm text-muted-foreground">
         {t.rich("noExposed", {
@@ -90,13 +115,22 @@ export function UserFormPreview(props: Props) {
     );
   }
   return (
-    <DynamicForm
-      spec={uiSpec}
-      onSubmit={() => { /* preview only — no submit */ }}
-      submitLabel={t("previewSubmit")}
-      submitVariant="outline"
-      disabled
-    />
+    <PreviewErrorBoundary
+      fallback={(message) => (
+        <div className="text-sm text-red-600 whitespace-pre-wrap">
+          {t("renderFailed", { detail: message })}
+        </div>
+      )}
+    >
+      {note}
+      <DynamicForm
+        spec={uiSpec}
+        onSubmit={() => { /* preview only — no submit */ }}
+        submitLabel={t("previewSubmit")}
+        submitVariant="outline"
+        disabled
+      />
+    </PreviewErrorBoundary>
   );
 }
 

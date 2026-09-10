@@ -99,8 +99,10 @@ describe("RBACCheckPanel", () => {
         kinds={["Deployment", "Service"]}
       />,
     );
-    const row = await screen.findByText("❌ Service: 권한이 거부되었습니다.");
-    expect(row).toHaveAttribute("title", raw);
+    // The icon is a lucide <svg> sibling since #114, so the sentence is its
+    // own element and the admin-only raw reason stays on the <li>.
+    const row = await screen.findByText("Service: 권한이 거부되었습니다.");
+    expect(row.closest("li")).toHaveAttribute("title", raw);
     expect(screen.queryByText(/is forbidden/)).not.toBeInTheDocument();
     expect(screen.getByText(/이 상태로는 배포가 실패합니다/)).toBeInTheDocument();
     // Deployment (allowed) should not be in the denied list.
@@ -116,7 +118,7 @@ describe("RBACCheckPanel", () => {
     );
     await waitFor(() => {
       expect(
-        screen.getByText("❌ Deployment: 권한 확인에 실패했습니다 (HTTP 403)."),
+        screen.getByText("Deployment: 권한 확인에 실패했습니다 (HTTP 403)."),
       ).toBeInTheDocument();
     });
   });
@@ -129,8 +131,10 @@ describe("RBACCheckPanel", () => {
     render(
       <RBACCheckPanel cluster="dev" namespace="default" kinds={["Deployment"]} />,
     );
-    const row = await screen.findByText("❌ Deployment: 권한 확인에 실패했습니다 (HTTP 0).");
-    expect(row).toHaveAttribute("title", "network down");
+    const row = await screen.findByText(
+      "Deployment: 권한 확인에 실패했습니다 (HTTP 0).",
+    );
+    expect(row.closest("li")).toHaveAttribute("title", "network down");
     expect(screen.queryByText(/Deployment: network down/)).not.toBeInTheDocument();
   });
 

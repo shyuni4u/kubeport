@@ -66,6 +66,41 @@ describe("InstancesTable", () => {
     expect(screen.getByText("Phase")).toBeInTheDocument();
   });
 
+  // #114 — an empty <tbody> left the three column headers floating over blank
+  // space. Nothing said whether the table was loading, broken, or just empty.
+  describe("with no instances", () => {
+    it("says the table is empty instead of rendering nothing", () => {
+      render(<InstancesTable releaseId="abc" instances={[]} />);
+      expect(
+        screen.getByText("실행 중인 인스턴스가 없습니다."),
+      ).toBeInTheDocument();
+    });
+
+    // "See the notice above" is only true when ReleaseStaleBanner is above it.
+    // An empty table is otherwise perfectly ordinary — a CronJob between runs,
+    // a Deployment scaled to zero — and pointing at a notice that is not on
+    // the page sends the reader looking for something that does not exist.
+    it("points at the stale banner only when there is one", () => {
+      const { unmount } = render(
+        <InstancesTable releaseId="abc" instances={[]} />,
+      );
+      expect(screen.queryByText(/위 안내/)).toBeNull();
+      unmount();
+
+      render(<InstancesTable releaseId="abc" instances={[]} staleNotice />);
+      expect(screen.getByText(/위 안내를 확인해 주세요/)).toBeInTheDocument();
+    });
+
+    it("keeps the empty row spanning the full width of the header", () => {
+      render(<InstancesTable releaseId="abc" instances={[]} />);
+      const cell = screen
+        .getByText("실행 중인 인스턴스가 없습니다.")
+        .closest("td");
+      const headers = document.querySelectorAll("thead th");
+      expect(cell).toHaveAttribute("colSpan", String(headers.length));
+    });
+  });
+
   it("renders multiple rows", () => {
     render(
       <InstancesTable

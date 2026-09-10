@@ -145,7 +145,9 @@
       "forbidden": "You do not have permission to delete this release."
     },
     "instances": {
-      "logsLink": "Logs →"
+      "logsLink": "Logs →",
+      "empty": "No running instances.",
+      "emptyWithNotice": "No running instances. See the notice above."
     },
     "phase": {
       "Running": "Running",
@@ -359,7 +361,9 @@
         "noExposed": "No fields are exposed yet. In UI mode, mark a value in the tree as <strong>exposed</strong> and it shows up here. In YAML mode, add entries to <code>fields[]</code> in <code>ui-spec.yaml</code>.",
         "previewSubmit": "Deploy (preview — does nothing)",
         "parseFailed": "Failed to parse ui-spec: {detail}",
-        "previewFailed": "Failed to build the preview (HTTP {status}). {detail}"
+        "previewFailed": "Failed to build the preview (HTTP {status}). {detail}",
+        "skippedFields": "Left out of the preview: {fields}. The type is not valid yet.",
+        "renderFailed": "Could not draw the preview. The editor is untouched — undo the line you just changed. ({detail})"
       },
       "convert": {
         "yamlDraftPreview": "This draft was authored in YAML mode, so the UI editor is preview-only. To edit it in the UI, delete this draft from the detail page and start a new version.",

@@ -4,6 +4,21 @@ import { ForceDeleteButton } from "./ForceDeleteButton";
 
 export type StaleStatus = "cluster-unreachable" | "resources-missing";
 
+const STALE_STATUSES = new Set<StaleStatus>([
+  "cluster-unreachable",
+  "resources-missing",
+]);
+
+/**
+ * Whether this status puts a ReleaseStaleBanner above the tab content.
+ *
+ * Exported because the overview page needs the same answer: its empty
+ * instances table says "see the notice above" only when there is one (#114).
+ */
+export function isStaleStatus(status: string): status is StaleStatus {
+  return STALE_STATUSES.has(status as StaleStatus);
+}
+
 export async function ReleaseStaleBanner({
   status,
   releaseId,
