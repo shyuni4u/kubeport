@@ -106,23 +106,37 @@ func limitBodySize(max int64) gin.HandlerFunc {
 // trusting a header.
 func rateLimit(rl *rateLimiter) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		u, _ := auth.UserFrom(c.Request.Context())
-		ok, wait := rl.allow(u.Subject, time.Now())
-		if !ok {
-			// Retry-After is RFC 9110, so most HTTP clients and agent SDKs
-			// already honour it. Without it a program either retries at once —
-			// defeating the limit — or sleeps an arbitrary constant.
-			secs := int(math.Ceil(wait.Seconds()))
-			if secs < 1 {
-				secs = 1
-			}
-			c.Header("Retry-After", strconv.Itoa(secs))
-			c.Header("X-RateLimit-Limit", strconv.Itoa(int(rl.burst)))
-			c.Header("X-RateLimit-Remaining", "0")
-			writeError(c, http.StatusTooManyRequests, "rate-limited",
-				"too many requests; retry after "+strconv.Itoa(secs)+"s")
+		if overBudget(c, rl) {
 			return
 		}
 		c.Next()
 	}
+}
+
+// overBudget spends one of the caller's tokens from rl, or writes the 429 and
+// reports true when there is none. rateLimit uses it as route middleware; a
+// handler calls it directly when a request should only pay once it is past
+// the checks that refuse it for free (Handlers.releaseWrite, #232).
+func overBudget(c *gin.Context, rl *rateLimiter) bool {
+	if rl == nil {
+		return false
+	}
+	u, _ := auth.UserFrom(c.Request.Context())
+	ok, wait := rl.allow(u.Subject, time.Now())
+	if ok {
+		return false
+	}
+	// Retry-After is RFC 9110, so most HTTP clients and agent SDKs already
+	// honour it. Without it a program either retries at once — defeating the
+	// limit — or sleeps an arbitrary constant.
+	secs := int(math.Ceil(wait.Seconds()))
+	if secs < 1 {
+		secs = 1
+	}
+	c.Header("Retry-After", strconv.Itoa(secs))
+	c.Header("X-RateLimit-Limit", strconv.Itoa(int(rl.burst)))
+	c.Header("X-RateLimit-Remaining", "0")
+	writeError(c, http.StatusTooManyRequests, "rate-limited",
+		"too many requests; retry after "+strconv.Itoa(secs)+"s")
+	return true
 }

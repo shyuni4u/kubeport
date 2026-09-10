@@ -198,6 +198,12 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		return
 	}
 
+	// The write budget is spent here, past every check that refuses the
+	// request without a cluster call — see Handlers.releaseWrite (#232).
+	if overBudget(c, h.releaseWrite) {
+		return
+	}
+
 	caBundle := cluster.CaBundle.String
 	cli, err := h.deps.K8sFactory.NewWithToken(cluster.ApiUrl, caBundle, u.IDToken)
 	if err != nil {
@@ -508,6 +514,10 @@ func (h *Handlers) DeleteRelease(c *gin.Context) {
 	}
 
 	if !h.authorizeReleaseAccess(c, rel) {
+		return
+	}
+	// Spent once the caller may delete this release — see Handlers.releaseWrite.
+	if overBudget(c, h.releaseWrite) {
 		return
 	}
 

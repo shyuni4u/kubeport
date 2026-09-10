@@ -126,6 +126,12 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 		return
 	}
 
+	// The write budget is spent here, past every check that refuses the
+	// request without a cluster call — see Handlers.releaseWrite (#232).
+	if overBudget(c, h.releaseWrite) {
+		return
+	}
+
 	// Apply to k8s BEFORE mutating DB. If apply fails we return 502 and DB is
 	// still consistent (reflects the old, still-deployed, state).
 	cli, err := h.deps.K8sFactory.NewWithToken(rel.ClusterApiUrl, rel.ClusterCaBundle.String, u.IDToken)
