@@ -278,11 +278,21 @@ jobs:
           # keeps a fresh clone green — and would quietly turn this gate back
           # into nothing if a variable above ever stopped resolving. Same
           # reasoning as KBP_REQUIRE_DEX in ci.yml: here they must actually run.
-          if grep -qE '^\s*--- SKIP' /tmp/go-kind-test.log; then
-            echo "kind-backed Go tests skipped despite a live cluster:" >&2
-            grep -E '^\s*--- SKIP' /tmp/go-kind-test.log >&2
-            exit 1
-          fi
+          #
+          # Named, and asserted positively. "No SKIP anywhere" would fail the
+          # day someone adds a legitimate skip (platform-only, known-unsupported
+          # case), and the tempting fix then is to delete the gate rather than
+          # the skip. Requiring a PASS per name also catches the quieter
+          # failure: a rename or deletion shrinking the gate to nothing while
+          # the step stays green.
+          for t in TestOpenAPI_ListGroupVersions TestOpenAPI_Refresh_ClearsCache TestApplyAll_IntegrationWithKind; do
+            grep -qE "^[[:space:]]*--- PASS: $t\b" /tmp/go-kind-test.log || {
+              echo "$t did not pass against the cluster — skipped, renamed or removed:" >&2
+              grep -E "^[[:space:]]*--- (PASS|SKIP|FAIL): $t\b" /tmp/go-kind-test.log >&2 \
+                || echo "  (no result line for $t at all)" >&2
+              exit 1
+            }
+          done
 
       - name: Seed demo data
         env:
