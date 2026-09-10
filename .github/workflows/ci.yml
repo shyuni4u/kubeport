@@ -71,16 +71,22 @@ jobs:
         run: cd backend/migrations && atlas schema apply --env local --auto-approve
 
       - name: go vet
-        # The second pass is what keeps build-tagged tests honest. A tag hides a
-        # file from the compiler, so a tagged suite rots silently and does not
-        # even show up as a skip — backend/e2e and openapi_proxy sat outside CI
-        # this way (#121). openapi_proxy lost its tag; backend/e2e keeps `e2e`
+        # The second pass keeps build-tagged tests honest. A tag hides a file
+        # from the compiler, so a tagged suite rots silently and does not even
+        # show up as a skip — backend/e2e and openapi_proxy sat outside CI this
+        # way (#121). openapi_proxy lost its tag; backend/e2e keeps `e2e`
         # because its TestMain starts compose and a server, which must not
         # happen inside `go test ./...`. Vet compiles it without running it.
-        # Adding a new build tag means adding it here too.
+        #
+        # The tags are discovered, not listed. A list here would be one more
+        # hand-kept allowlist drifting away from the code — the exact shape of
+        # #121 — so a new tag is covered the day it is written.
         run: |
-          cd backend && go vet ./...
-          go vet -tags=e2e ./...
+          cd backend
+          go vet ./...
+          TAGS=$(grep -rho '^//go:build [a-z0-9_]*' --include='*.go' . | awk '{print $2}' | sort -u | paste -sd,)
+          echo "build tags found: ${TAGS:-none}"
+          if [ -n "$TAGS" ]; then go vet -tags="$TAGS" ./...; fi
 
       - name: go test
         env:
