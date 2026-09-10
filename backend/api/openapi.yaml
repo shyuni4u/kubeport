@@ -2035,9 +2035,13 @@ components:
             the one case written with `'` instead — and a key containing both
             cannot be addressed at all.
 
-        A path is checked when the template is written (400), not when a
-        release is deployed, so `path` is safe to treat as valid once
-        `POST /v1/templates` has accepted it.
+        A path, a blank `label` and a `type` outside the enum are refused when
+        the template is written (400), so a template `POST /v1/templates` has
+        accepted is safe to build a form from. `type` is also checked when a
+        release is deployed or rendered: a version saved before that save-time
+        check existed, with an unknown `type`, fails `POST /v1/releases`,
+        `PUT /v1/releases/{id}` and `/render` with 400 whenever that field has
+        a value or a `default` (#136).
       properties:
         fields:
           type: array

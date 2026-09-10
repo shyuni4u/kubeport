@@ -45,8 +45,10 @@ func ValidateSpec(resourcesYAML, uiSpecYAML string) error {
 			// The documented contract (openapi UiSpec) is this closed list.
 			// Field.Validate refuses anything else at deploy as well, but saving
 			// is where the author can still fix it (#136).
-			return fmt.Errorf("fields[%d] (label %q) has an unknown type %q; use string, integer, boolean, enum or autocomplete",
-				i, f.Label, f.Type)
+			// Named by path, not label: this runs before the label check, so a
+			// field wrong on both counts would otherwise read (label "").
+			return fmt.Errorf("fields[%d] (path `%s`) has an unknown type %q; use string, integer, boolean, enum or autocomplete",
+				i, f.Path, f.Type)
 		}
 		if strings.TrimSpace(f.Label) == "" {
 			// The contract marks label required, and it is what the deploy form

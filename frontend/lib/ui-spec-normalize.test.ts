@@ -21,6 +21,25 @@ describe("normalizeUISpec — a blank label (#152)", () => {
     expect(spec.fields.map((f) => f.label)).toEqual(["labels", "image", "nginx.conf", "args"]);
   });
 
+  // The rest of the grammar (openapi UiSpec): a key containing `"` is written
+  // with `'`, a path may be a bare Kind[selector], and a quoted key may be empty.
+  it("covers single-quoted keys, bare resources and empty quoted keys", () => {
+    const { spec } = normalizeUISpec(
+      raw([
+        { path: `ConfigMap[conf].data['say "hi"']`, label: "", type: "string" },
+        { path: "Deployment[web]", label: "", type: "string" },
+        { path: 'ConfigMap[conf].data[""]', label: "", type: "string" },
+      ]),
+    );
+
+    expect(spec.fields.map((f) => f.label)).toEqual([
+      'say "hi"',
+      "Deployment[web]",
+      // An empty key is no name at all, so the whole path stands in for it.
+      'ConfigMap[conf].data[""]',
+    ]);
+  });
+
   it("keeps a label that was written", () => {
     const { spec } = normalizeUISpec(
       raw([{ path: "Deployment[web].spec.replicas", label: "동시에 띄울 개수", type: "integer" }]),

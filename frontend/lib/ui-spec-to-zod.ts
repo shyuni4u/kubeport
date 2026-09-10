@@ -163,7 +163,9 @@ export function uiSpecProblems(spec: UISpec): string[] {
  */
 function labelFromPath(path: string): string {
   const m = /(?:\.([A-Za-z_][A-Za-z0-9_]*)|\["([^"]*)"\]|\['([^']*)'\])(?:\[\d+\])*$/.exec(path);
-  return m?.[1] ?? m?.[2] ?? m?.[3] ?? path;
+  // `||`, not `??`: the grammar allows an empty quoted key (`data[""]`), and
+  // falling back to "" would leave the field as blank as it started.
+  return m?.[1] || m?.[2] || m?.[3] || path;
 }
 
 /**

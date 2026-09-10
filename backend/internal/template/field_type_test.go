@@ -38,9 +38,39 @@ func TestField_ValidateRefusesAnUnknownType(t *testing.T) {
 	}
 }
 
-// A version saved before ValidateSpec checked types still renders, so Render
-// is where that version is stopped. This is the defence that matters for data
-// already in the database.
+// The path the deploy form actually takes. The form leaves an unknown-type
+// field out and sends no value for it, so the server applies the default —
+// and that default is refused too, which is why such a version cannot be
+// deployed from the UI either (master review).
+func TestRender_RefusesTheDefaultOfAnUnknownTypeField(t *testing.T) {
+	spec := `fields:
+  - path: Deployment[web].spec.replicas
+    label: replicas
+    type: int
+    default: 3
+`
+	_, err := template.Render(fieldTypeResources, spec, json.RawMessage(`{}`), template.Labels{ReleaseName: "r"})
+
+	require.ErrorContains(t, err, `unsupported field type "int"`)
+}
+
+// The other edge, pinned so a later change cannot move the check earlier
+// without meaning to: a field with no value and no default is skipped before
+// Validate, so a version like that still deploys.
+func TestRender_SkipsAnUnknownTypeFieldWithNothingToWrite(t *testing.T) {
+	spec := `fields:
+  - path: Deployment[web].spec.replicas
+    label: replicas
+    type: int
+`
+	_, err := template.Render(fieldTypeResources, spec, json.RawMessage(`{}`), template.Labels{ReleaseName: "r"})
+
+	require.NoError(t, err)
+}
+
+// An API client that sends a value for such a field. Named "stored" because a
+// version saved before ValidateSpec checked types still renders, so Render is
+// where that version is stopped.
 func TestRender_RefusesAStoredSpecWithAnUnknownType(t *testing.T) {
 	spec := `fields:
   - path: Deployment[web].spec.template.spec.containers[0]
