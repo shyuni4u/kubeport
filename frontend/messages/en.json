@@ -57,6 +57,7 @@
   },
   "demo": {
     "banner": "Demo session. Next reset: {time}",
+    "bannerNoTime": "Demo session. A reset is coming.",
     "dismiss": "Dismiss",
     "restricted": "Not available for demo accounts."
   },

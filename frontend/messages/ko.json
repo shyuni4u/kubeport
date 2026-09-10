@@ -57,6 +57,7 @@
   },
   "demo": {
     "banner": "데모 세션입니다. 다음 초기화: {time}",
+    "bannerNoTime": "데모 세션입니다. 곧 초기화됩니다.",
     "dismiss": "닫기",
     "restricted": "데모 계정에서는 사용할 수 없습니다."
   },

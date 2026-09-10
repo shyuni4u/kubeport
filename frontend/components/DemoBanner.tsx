@@ -37,7 +37,7 @@ function dismiss() {
   for (const onChange of listeners) onChange();
 }
 
-export function DemoBanner({ resetAtIso }: { resetAtIso: string }) {
+export function DemoBanner({ resetAtIso }: { resetAtIso: string | null }) {
   const t = useTranslations("demo");
   const format = useFormatter();
   // Server snapshot is "dismissed" so the markup matches the pre-hydration DOM.
@@ -45,13 +45,16 @@ export function DemoBanner({ resetAtIso }: { resetAtIso: string }) {
   if (hidden) return null;
   // Formatted through next-intl, not `toLocaleTimeString([])`: the latter
   // follows the *browser's* locale, so an English UI showed "오후 03:00" (#40).
-  const time = format.dateTime(new Date(resetAtIso), {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  //
+  // resetAtIso is null when the configured schedule is not a shape we read.
+  // The banner still warns that a reset is coming; it just does not claim to
+  // know when, because a wrong hour is worse than no hour (#153).
+  const time = resetAtIso
+    ? format.dateTime(new Date(resetAtIso), { hour: "2-digit", minute: "2-digit" })
+    : null;
   return (
     <div role="status" className="flex items-center gap-3 border-b border-amber-300 bg-amber-50 px-6 py-2 text-sm text-amber-900">
-      <span className="flex-1">{t("banner", { time })}</span>
+      <span className="flex-1">{time ? t("banner", { time }) : t("bannerNoTime")}</span>
       <button
         type="button"
         className="rounded px-2 py-0.5 hover:bg-amber-100"
