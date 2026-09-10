@@ -61,6 +61,11 @@ echo "KEY=$KEY"
 ## 2. 스택 구성
 
 - **k3s** single-node (servicelb 켜짐 — klipper 가 호스트 80/443 → traefik LB).
+  **버전 고정 `v1.36.3+k3s1`** — `deploy/oci/bootstrap.sh` 의 `K3S_PINNED` (#194, 2026-09-10 운영 실측:
+  k3s `v1.36.3+k3s1`, Traefik `3.7.8`). k3s 가 Traefik 을 번들하므로 **k3s 버전이 곧 인그레스 버전**이다 — 로그
+  스트림 수명을 정하는 entrypoint 타임아웃 기본값도 따라 바뀐다. 올릴 때는 `K3S_PINNED` 와 이 줄을 **한 커밋으로**
+  바꾼다. 운영 VM 에 반영하는 것(k3s 재시작 동반)은 사용자 승인 사항이다 — `bootstrap.sh` 재실행은 이미 깔린 k3s 를
+  바꾸지 않고, 고정 버전과 다르면 경고만 한다.
 - **traefik** ingress (`traefik` class), **cert-manager** + `letsencrypt-prod` ClusterIssuer (HTTP-01).
 - **Postgres** in-cluster (`kubeport-postgres-0`, local-path PVC).
 - backend(Go) / frontend(Next.js standalone) — TLS 는 traefik 종료, 파드엔 HTTP.

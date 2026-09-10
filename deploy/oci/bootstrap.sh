@@ -20,6 +20,8 @@
 #   # 실제 배포까지 켜려면 (선택):
 #   sudo BOOTSTRAP_EMAIL=you@example.com \
 #        BOOTSTRAP_OIDC_CLIENT_ID=<google-client-id> bash bootstrap.sh
+#   # k3s 는 고정 버전(K3S_PINNED, Step 2)으로 깔린다 (#194). 복구 등으로 다른 버전이 필요할 때만:
+#   sudo BOOTSTRAP_EMAIL=you@example.com BOOTSTRAP_K3S_VERSION=v1.xx.y+k3s1 bash bootstrap.sh
 #
 # After this completes, run helm install separately (deploy/oci/README.md).
 
@@ -111,6 +113,24 @@ YAML
   echo "  Dex demo IdP trust is added later via deploy/oci/k3s-auth-config.sh (needs Dex ingress up first)"
 fi
 
+# Pinned rather than whatever get.k3s.io calls stable on the day this runs (#194).
+# k3s bundles Traefik, so an unpinned install silently changes the ingress in
+# front of kubeport as well — including the entrypoint timeout defaults that
+# bound how long a log stream can stay open. A VM rebuilt during recovery would
+# otherwise come up on a k3s/Traefik pair nobody has run. The structured
+# AuthenticationConfiguration above also needs k8s >= 1.34 for its default
+# apiserver.config.k8s.io/v1.
+#
+# This is what production runs (measured 2026-09-10: v1.36.3+k3s1, Traefik
+# 3.7.8). Bump it in a commit of its own, together with docs/oci-prod-runbook.md
+# §2. BOOTSTRAP_K3S_VERSION overrides it — say, to rebuild at a known older
+# version — and an override is announced, never silent.
+K3S_PINNED="v1.36.3+k3s1"
+K3S_VERSION="${BOOTSTRAP_K3S_VERSION:-${K3S_PINNED}}"
+if [[ "${K3S_VERSION}" != "${K3S_PINNED}" ]]; then
+  echo "  NOTE: BOOTSTRAP_K3S_VERSION=${K3S_VERSION} overrides the pinned ${K3S_PINNED}"
+fi
+
 if ! command -v k3s >/dev/null 2>&1; then
   # Keep the bundled klipper servicelb ENABLED: it is what binds host ports
   # 80/443 and forwards them to the traefik LoadBalancer Service. Disabling it
@@ -118,10 +138,20 @@ if ! command -v k3s >/dev/null 2>&1; then
   # and nothing listening on the host — traefik does NOT self-bind hostPorts.
   # traefik is the only LB Service here, so there is no port contention.
   # --write-kubeconfig-mode 644: lets non-root user read kubeconfig.
-  curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" sh -s -
-  echo "  k3s installed"
+  curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${K3S_VERSION}" INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" sh -s -
+  echo "  k3s ${K3S_VERSION} installed"
 else
-  echo "  k3s already installed, skipping"
+  # An existing install is left as it is. Changing the k3s version restarts
+  # the control plane, which is a decision for a person (CLAUDE.md "사용자에게
+  # 먼저 묻는 것"), not a side effect of re-running bootstrap. Say when it
+  # differs from the pin, so a re-run on an old VM does not read as "on the
+  # pinned version".
+  installed="$(k3s --version 2>/dev/null | awk 'NR==1 {print $3}' || true)"
+  if [[ "${installed}" == "${K3S_VERSION}" ]]; then
+    echo "  k3s ${installed} already installed (matches the pin), skipping"
+  else
+    echo "  WARNING: k3s ${installed:-of unknown version} is installed, but this script pins ${K3S_VERSION}; leaving it unchanged" >&2
+  fi
 fi
 
 # Wait for the node to be Ready (90s cap — k3s normally needs 10–30s on A1)
