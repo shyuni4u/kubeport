@@ -92,6 +92,18 @@ openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
 chmod 644 dex.key        # dex container needs read access
 ```
 
+On **Windows Git Bash** prefix `openssl` with `MSYS_NO_PATHCONV=1`. MSYS rewrites
+the leading slash of `-subj` into a filesystem path, and openssl then refuses the
+argument it was handed:
+
+```
+req: subject name is expected to be in the format /type0=value0/...
+  This name is not in that format: 'C:/Program Files/Git/CN=host.docker.internal'
+```
+
+The `-keyout`/`-out` files are still created, so the failure looks partial: you
+get `dex.key` and no `dex.crt`, and dex keeps reporting the missing crt.
+
 Files are gitignored.
 
 ### 3. DB schema

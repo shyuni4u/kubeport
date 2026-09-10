@@ -97,14 +97,41 @@ The "Quick start" below is for local development only.
 ## Quick start
 
 ```bash
+# 0. Generate the cert dex serves TLS with. Once per clone — the files are
+#    gitignored, so a fresh clone has none and dex exits with
+#    "open /config/certs/dex.crt: no such file or directory".
+#    (k8s 1.30+ rejects http:// OIDC issuers, so dex runs over TLS even locally.)
+cd deploy/docker/certs
+openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+  -keyout dex.key -out dex.crt -subj "/CN=host.docker.internal" \
+  -addext "subjectAltName=DNS:host.docker.internal,DNS:localhost,IP:127.0.0.1"
+chmod 644 dex.key      # the dex container reads it as a non-root user
+cd -
+# On Windows Git Bash, prefix that openssl line with MSYS_NO_PATHCONV=1 — MSYS
+# rewrites the leading slash of -subj into a filesystem path and openssl then
+# rejects it ("This name is not in that format: 'C:/Program Files/Git/CN=...'").
+
 # 1. Boot local Postgres + dex (OIDC)
 docker compose -f deploy/docker/docker-compose.yml up -d
+docker compose -f deploy/docker/docker-compose.yml ps    # both must be Up (healthy)
 
 # 2. Apply DB schema (atlas.hcl lives under backend/migrations)
 cd backend/migrations && atlas schema apply --env local --auto-approve && cd ..
 
-# 3. Run the Go API
-go run ./cmd/server
+# 3. Run the Go API. It needs env — with none it exits immediately on
+#    "OIDC config: set KBP_OIDC_ISSUERS or both OIDC_ISSUER and OIDC_AUDIENCE".
+#    Full set and what each knob does: docs/local-e2e.md §7.
+LISTEN_ADDR=:8080 \
+  DATABASE_URL='postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable' \
+  OIDC_ISSUER=https://host.docker.internal:5556 \
+  OIDC_AUDIENCE=kubeport \
+  OIDC_CA_FILE="$PWD/../deploy/docker/certs/dex.crt" \
+  APP_ENCRYPTION_KEY_B64="$(openssl rand -base64 32)" \
+  KBP_DEV_ADMIN_EMAILS=admin@example.com \
+  go run ./cmd/server
+# A "discovery failed ... context deadline exceeded (will retry on first use)"
+# line at startup is not fatal — it only means host.docker.internal does not
+# resolve from this shell yet. `curl localhost:8080/healthz` should return 200.
 
 # 4. Run the web app (another terminal)
 cd ../frontend
@@ -133,7 +160,20 @@ make e2e
 - Go 1.26+
 - Node 20+, pnpm 10+
 - [`atlas`](https://atlasgo.io) CLI (DB migrations), `sqlc`
-- (e2e only) a kind cluster and `kubectl`
+- `openssl` (the dex cert in step 0; also generates the install secrets above)
+- (install only) [`helm`](https://helm.sh) 3.x — pin **v3.20.2** if you will
+  regenerate the chart snapshot, which is the version CI runs. Helm 4 renders an
+  extra blank line before each document separator, so a snapshot refreshed with
+  it fails CI on a diff you did not make.
+- (e2e only) [`kind`](https://kind.sigs.k8s.io) and `kubectl` — `scripts/e2e/up.sh`
+  drives kind, and `scripts/e2e/doctor.sh` checks for it
+
+"Install on your cluster" additionally needs an Ingress controller and
+cert-manager on the target cluster. To try kubeport without either, use the
+no-Ingress path in [the chart README](deploy/helm/kubeport/README.md#try-it-first-any-cluster-no-ingress-no-cert-manager).
+
+Setup per OS, and the traps that come with Windows paths, are in
+[docs/dev-setup.md](docs/dev-setup.md).
 
 ## Roadmap
 

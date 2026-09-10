@@ -97,14 +97,41 @@ helm install kubeport deploy/helm/kubeport --namespace kubeport --create-namespa
 ## 빠른 시작
 
 ```bash
+# 0. dex 가 TLS 로 쓸 인증서 생성. 클론당 한 번 — 이 파일들은 gitignore 대상이라
+#    새로 클론하면 없고, 없으면 dex 가
+#    "open /config/certs/dex.crt: no such file or directory" 로 죽는다.
+#    (k8s 1.30+ 가 http:// OIDC issuer 를 거부해서 로컬에서도 dex 는 TLS 로 뜬다.)
+cd deploy/docker/certs
+openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+  -keyout dex.key -out dex.crt -subj "/CN=host.docker.internal" \
+  -addext "subjectAltName=DNS:host.docker.internal,DNS:localhost,IP:127.0.0.1"
+chmod 644 dex.key      # dex 컨테이너가 비루트로 읽는다
+cd -
+# Windows Git Bash 라면 위 openssl 줄 앞에 MSYS_NO_PATHCONV=1 을 붙인다. MSYS 가
+# -subj 의 맨 앞 슬래시를 파일 경로로 바꿔 버려서 openssl 이 거부한다
+# ("This name is not in that format: 'C:/Program Files/Git/CN=...'").
+
 # 1. 로컬 Postgres + dex (OIDC) 띄우기
 docker compose -f deploy/docker/docker-compose.yml up -d
+docker compose -f deploy/docker/docker-compose.yml ps    # 둘 다 Up (healthy) 여야 한다
 
 # 2. DB 스키마 적용 (atlas.hcl 은 backend/migrations 에 있음)
 cd backend/migrations && atlas schema apply --env local --auto-approve && cd ..
 
-# 3. Go API 실행
-go run ./cmd/server
+# 3. Go API 실행. env 가 필요하다 — 아무것도 안 주면
+#    "OIDC config: set KBP_OIDC_ISSUERS or both OIDC_ISSUER and OIDC_AUDIENCE" 로
+#    즉시 종료한다. 전체 목록과 각 값의 의미는 docs/local-e2e.md §7.
+LISTEN_ADDR=:8080 \
+  DATABASE_URL='postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable' \
+  OIDC_ISSUER=https://host.docker.internal:5556 \
+  OIDC_AUDIENCE=kubeport \
+  OIDC_CA_FILE="$PWD/../deploy/docker/certs/dex.crt" \
+  APP_ENCRYPTION_KEY_B64="$(openssl rand -base64 32)" \
+  KBP_DEV_ADMIN_EMAILS=admin@example.com \
+  go run ./cmd/server
+# 기동 로그의 "discovery failed ... context deadline exceeded (will retry on
+# first use)" 는 치명적이지 않다 — 이 셸에서 host.docker.internal 이 아직 안 풀린다는
+# 뜻일 뿐이다. `curl localhost:8080/healthz` 가 200 이면 정상이다.
 
 # 4. 웹 앱 실행 (다른 터미널에서)
 cd ../frontend
@@ -133,7 +160,18 @@ make e2e
 - Go 1.26+
 - Node 20+, pnpm 10+
 - [`atlas`](https://atlasgo.io) CLI, `sqlc`
-- (e2e 전용) kind 클러스터 + `kubectl`
+- `openssl` (0단계 dex 인증서 + 위 설치 명령의 시크릿 생성)
+- (설치 전용) [`helm`](https://helm.sh) 3.x — 차트 스냅샷을 재생성할 거라면 CI 와
+  같은 **v3.20.2** 로 고정한다. helm 4 는 문서 구분자 앞에 빈 줄을 하나 더 넣어서,
+  helm 4 로 갱신한 스냅샷은 내가 만들지도 않은 diff 로 CI 를 깨뜨린다.
+- (e2e 전용) [`kind`](https://kind.sigs.k8s.io) + `kubectl` — `scripts/e2e/up.sh` 가
+  kind 를 쓰고 `scripts/e2e/doctor.sh` 도 kind 를 검사한다
+
+"클러스터에 설치하기" 는 대상 클러스터에 Ingress 컨트롤러와 cert-manager 가 추가로
+필요하다. 둘 다 없이 그냥 띄워 보고 싶으면 차트 README 의
+[Ingress·cert-manager 없는 경로](deploy/helm/kubeport/README.md#try-it-first-any-cluster-no-ingress-no-cert-manager)를 쓴다.
+
+OS 별 설치 절차와 Windows 경로 함정은 [docs/dev-setup.md](docs/dev-setup.md).
 
 ## 로드맵
 

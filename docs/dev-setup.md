@@ -87,7 +87,17 @@ curl -sSf https://atlasgo.sh | sh
 curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
 sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && rm kubectl
 
-# (선택) k3d — 로컬 k3s 클러스터
+# helm — 차트 렌더·설치. 버전을 고정한다: CI(.github/workflows/helm.yml)가 v3.20.2 를
+# 핀하는데, helm 4 는 문서 구분자(---) 앞에 빈 줄을 하나 더 넣는다. helm 4 로
+# `make helm-snapshot-update` 를 돌리면 골든 스냅샷 전체가 바뀌어 CI 가 깨진다.
+curl -fsSL https://get.helm.sh/helm-v3.20.2-linux-amd64.tar.gz | tar xz
+sudo install -o root -g root -m 0755 linux-amd64/helm /usr/local/bin/helm && rm -rf linux-amd64
+
+# kind — 로컬 e2e 클러스터. scripts/e2e/up.sh 의 표준 경로이고
+# scripts/e2e/doctor.sh 도 이걸 검사한다.
+go install sigs.k8s.io/kind@v0.31.0     # $(go env GOPATH)/bin 이 PATH 에 있어야 한다
+
+# (선택) k3d — 로컬 k3s 클러스터. e2e 는 kind 를 쓰므로 필수는 아니다.
 curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
 ```
 
@@ -114,8 +124,12 @@ curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
 
 ```bash
 # macOS (Homebrew)
-brew install go node pnpm atlas-go kubectl
+brew install go node pnpm atlas-go kubectl kind
 brew install --cask docker   # Docker Desktop
+
+# helm 은 버전을 고정한다 — `brew install helm` 은 helm 4 를 준다. 이유는 §2 Step 3.
+curl -fsSL https://get.helm.sh/helm-v3.20.2-darwin-arm64.tar.gz | tar xz
+sudo install -m 0755 darwin-arm64/helm /usr/local/bin/helm && rm -rf darwin-arm64
 
 # Ubuntu/Debian (상기 WSL 설치 스크립트 그대로)
 ```
@@ -137,6 +151,8 @@ node -v             # LTS (현재 Plan 기준 20.x 이상)
 pnpm -v
 atlas version
 kubectl version --client
+helm version --short    # v3.20.2 여야 한다 — helm 4 는 차트 스냅샷 CI 를 깨뜨린다
+kind version            # scripts/e2e/up.sh · doctor.sh 가 요구한다
 
 # 2. 로컬 의존 서비스 기동 (postgres + dex — 이 둘뿐이다)
 #    ⚠️ dex 는 deploy/docker/certs/dex.{crt,key} 가 없으면 뜨지 않는다
@@ -145,6 +161,10 @@ kubectl version --client
 #      cd deploy/docker/certs && openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
 #        -keyout dex.key -out dex.crt -subj "/CN=host.docker.internal" \
 #        -addext "subjectAltName=DNS:host.docker.internal,DNS:localhost,IP:127.0.0.1"
+#      chmod 644 dex.key
+#    Windows Git Bash 라면 openssl 앞에 MSYS_NO_PATHCONV=1 을 붙인다 — MSYS 가 -subj 의
+#    맨 앞 슬래시를 경로로 바꿔 openssl 이 거부한다
+#    ("This name is not in that format: 'C:/Program Files/Git/CN=...'").
 #    kind 까지 포함한 e2e 스택 전체가 필요하면 scripts/e2e/up.sh 를 쓴다.
 docker compose -f deploy/docker/docker-compose.yml up -d
 docker compose -f deploy/docker/docker-compose.yml ps   # postgres, dex 가 Up (healthy)
