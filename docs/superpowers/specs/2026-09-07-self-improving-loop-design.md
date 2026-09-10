@@ -205,5 +205,5 @@
 ## 9. 열린 항목
 
 - 월 예산 상한 확정(§2 가정).
-- Dex 데모 비밀번호 노출 방식: 랜딩 버튼이 `login_hint` 만 넘기고 비밀번호는 사용자가 입력(화면에 표기) vs dex `mockCallback` 류 자동 로그인. 초안은 **표기+입력**(정직하고 봇 남용 완화) — **구현됨**: 표기+입력 (`DEMO_PASSWORD_HINT` 로 랜딩에 표기, Dex 폼에 `login_hint` 프리필).
+- Dex 데모 비밀번호 노출 방식: 랜딩 버튼이 `login_hint` 만 넘기고 비밀번호는 사용자가 입력(화면에 표기) vs dex `mockCallback` 류 자동 로그인. 초안은 **표기+입력**(정직하고 봇 남용 완화) — **구현됨**: 표기+입력. 랜딩이 버튼마다 계정 이메일(`DEMO_ADMIN_EMAIL`/`DEMO_USER_EMAIL`)과 비밀번호(`DEMO_PASSWORD_HINT`)를 표기한다. 버튼은 `login_hint` 를 넘기지만 Dex local 커넥터는 이를 무시해 폼이 비어 열린다(#29).
 - `/blog` 를 Next.js 라우트로 둘지 GitHub Pages 로 분리할지 — 초안은 Next.js(단일 배포).
