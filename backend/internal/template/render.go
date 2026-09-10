@@ -291,5 +291,10 @@ func stampLabelsOnto(meta map[string]any, l Labels, withID bool) {
 	lbls["kubeport.io/template-version"] = fmt.Sprintf("%d", l.TemplateVersion)
 	if withID && l.ReleaseID != "" {
 		lbls["kubeport.io/release-uid"] = l.ReleaseID
+	} else {
+		// Where no id is stamped — a Job's pod template, a preview — one the
+		// template wrote itself would otherwise survive, claiming to be some
+		// release's. Reserved like the other kubeport.io/ keys.
+		delete(lbls, "kubeport.io/release-uid")
 	}
 }

@@ -178,6 +178,36 @@ spec:
 	require.Equal(t, uid, labelsAt(cron, "spec", "jobTemplate", "spec", "template", "metadata")["kubeport.io/release-uid"])
 }
 
+// The id label is reserved: a template cannot claim to be another release by
+// writing it — on an object, on a Job's pod template where no id is stamped,
+// or in a preview.
+func TestRender_ATemplateCannotSetTheReleaseIDLabel(t *testing.T) {
+	const res = `apiVersion: batch/v1
+kind: Job
+metadata:
+  name: once
+  labels:
+    kubeport.io/release-uid: 99999999-9999-9999-9999-999999999999
+spec:
+  template:
+    metadata:
+      labels:
+        kubeport.io/release-uid: 99999999-9999-9999-9999-999999999999
+    spec:
+      containers:
+        - name: once
+          image: busybox
+      restartPolicy: Never
+`
+	for _, id := range []string{"11111111-1111-1111-1111-111111111111", ""} {
+		out, err := template.Render(res, "fields: []\n", json.RawMessage(`{}`), template.Labels{
+			ReleaseName: "r", TemplateName: "t", TemplateVersion: 1, ReleaseID: id,
+		})
+		require.NoError(t, err)
+		require.NotContains(t, string(out), "99999999-9999-9999-9999-999999999999", "id=%q", id)
+	}
+}
+
 // A preview renders for no release, so there is no id to stamp — and an empty
 // label would match every unstamped object a selector on it was meant to skip.
 func TestRender_WithoutAReleaseIDStampsNoIDLabel(t *testing.T) {
