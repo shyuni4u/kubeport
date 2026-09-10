@@ -32,6 +32,21 @@ demo domain here and still hand ops@example.org kubeport-admin there.
 {{- range .Values.dex.staticPasswords -}}
 {{- $dexEmails = append $dexEmails (.email | default "") -}}
 {{- end -}}
+{{- /*
+For the mismatch message: name only the Dex accounts under the demo domain,
+which the landing page shows anyway, and count the rest. A failed deploy's
+render error lands in the public Actions log, and other static accounts may be
+personal addresses.
+*/ -}}
+{{- $dexInDomain := list -}}
+{{- $dexWithoutEmail := 0 -}}
+{{- range $dexEmails -}}
+{{- if eq . "" -}}
+{{- $dexWithoutEmail = add1 $dexWithoutEmail -}}
+{{- else if hasSuffix $suffix (lower .) -}}
+{{- $dexInDomain = append $dexInDomain . -}}
+{{- end -}}
+{{- end -}}
 {{- range $key, $email := dict "demo.adminEmail" .Values.demo.adminEmail "demo.userEmail" .Values.demo.userEmail -}}
 {{- $email = $email | default "" -}}
 {{- if not (hasSuffix $suffix (lower $email)) -}}
@@ -39,7 +54,7 @@ demo domain here and still hand ops@example.org kubeport-admin there.
 {{- fail (printf "%s (%s) must end in %s: an account outside the demo domain %s, while the landing page prints its password" $key $email $suffix $why) -}}
 {{- end -}}
 {{- if not (has $email $dexEmails) -}}
-{{- fail (printf "%s (%s) must match one of dex.staticPasswords[].email exactly (Dex has: %s): the landing page tells visitors to sign in with it. A --set of only dex.staticPasswords[N].hash replaces the whole entry and drops its email — set email, username, userID and hash together" $key $email (join ", " $dexEmails)) -}}
+{{- fail (printf "%s (%s) must match one of dex.staticPasswords[].email exactly (Dex has %d account(s), %d without an email; under the demo domain: %s): the landing page tells visitors to sign in with it. A --set of only dex.staticPasswords[N].hash replaces the whole entry and drops its email — set email, username, userID and hash together" $key $email (len $dexEmails) $dexWithoutEmail (default "none" (join ", " $dexInDomain))) -}}
 {{- end -}}
 {{- end -}}
 apiVersion: v1
