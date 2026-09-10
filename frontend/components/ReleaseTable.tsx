@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { StatusChip, statusChipVariantFromRelease } from "@/components/StatusChip";
+import { termLabel } from "@/lib/kube-term-map";
+import { useKubeTermsStore } from "@/stores/kube-terms-store";
 
 interface ReleaseRow {
   id: string;
@@ -87,6 +89,9 @@ export function ReleaseTable({ rows }: { rows: ReleaseRow[] }) {
   const t = useTranslations("releases.table");
   const tStatus = useTranslations("releases.status");
   const statuses = useReleaseStatuses(rows.map((r) => r.id));
+  // The deploy form calls it 구역; this column said 네임스페이스 (#250).
+  const kube = useKubeTermsStore((s) => s.showKubeTerms);
+  const tTerms = useTranslations("releases.terms");
 
   if (rows.length === 0) {
     return (
@@ -108,7 +113,9 @@ export function ReleaseTable({ rows }: { rows: ReleaseRow[] }) {
           <tr>
             <th className="px-4 py-3 text-left font-medium">{t("name")}</th>
             <th className="px-4 py-3 text-left font-medium">{t("template")}</th>
-            <th className="px-4 py-3 text-left font-medium">{t("namespace")}</th>
+            <th className="px-4 py-3 text-left font-medium">
+              {termLabel("namespace", kube, (k) => tTerms(k))}
+            </th>
           </tr>
         </thead>
         <tbody>

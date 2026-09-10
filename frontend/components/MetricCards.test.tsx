@@ -25,21 +25,23 @@ describe("MetricCards", () => {
     );
     expect(screen.queryByText("—")).not.toBeInTheDocument();
     expect(screen.queryByText("메모리")).not.toBeInTheDocument();
-    expect(screen.queryByText("접근 URL")).not.toBeInTheDocument();
+    expect(screen.queryByText("외부 주소")).not.toBeInTheDocument();
     expect(screen.getByText(/이 템플릿은 외부 주소를 열지 않습니다/)).toBeInTheDocument();
   });
 
-  it("renders memory and accessURL when provided, without the hint", () => {
+  // #250 — the card said "접근 URL" while the hint under it said "외부 주소".
+  it("renders memory and accessURL when provided, in the hint's words, without the hint", () => {
     render(
       <MetricCards
         readyTotal={[1, 1]}
         restarts={0}
         memory="128Mi"
-        accessURL="my-svc.default.svc.cluster.local"
+        accessURL="https://web.example.com"
       />,
     );
     expect(screen.getByText("128Mi")).toBeInTheDocument();
-    expect(screen.getByText("my-svc.default.svc.cluster.local")).toBeInTheDocument();
+    expect(screen.getByText("외부 주소")).toBeInTheDocument();
+    expect(screen.getByText("https://web.example.com")).toBeInTheDocument();
     expect(screen.queryByText(/외부 주소를 열지 않습니다/)).not.toBeInTheDocument();
   });
 
@@ -47,7 +49,7 @@ describe("MetricCards", () => {
     useKubeTermsStore.setState({ showKubeTerms: true });
     render(<MetricCards readyTotal={[1, 1]} restarts={0} memory="128Mi" accessURL="svc" />);
     expect(screen.getByText("Ready Pods")).toBeInTheDocument();
-    expect(screen.getByText("Service DNS")).toBeInTheDocument();
+    expect(screen.getByText("Ingress URL")).toBeInTheDocument();
     expect(screen.queryByText("준비된 인스턴스")).not.toBeInTheDocument();
   });
 });

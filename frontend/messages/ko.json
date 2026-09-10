@@ -130,7 +130,6 @@
     "table": {
       "name": "이름",
       "template": "템플릿",
-      "namespace": "네임스페이스",
       "empty": "아직 배포된 릴리스가 없습니다.",
       "emptyCta": "카탈로그에서 배포하기 →"
     },
@@ -142,15 +141,17 @@
       "overview": "개요",
       "logs": "로그"
     },
-    "kubeTermsToggle": "원본 k8s 용어 보기",
+    "kubeTermsToggle": "Kubernetes 원래 이름으로 보기",
+    "kubeTermsHelp": "관리자가 쓰는 원래 이름(Kubernetes 용어)으로 바꿔 보여 줍니다. 배포 폼과 릴리스 화면에 모두 적용됩니다.",
     "terms": {
       "readyInstances": "준비된 인스턴스",
       "restarts": "재시작",
       "memory": "메모리",
-      "accessURL": "접근 URL",
+      "accessURL": "외부 주소",
       "instances": "인스턴스",
       "instanceId": "인스턴스 ID",
-      "status": "상태"
+      "status": "상태",
+      "namespace": "구역"
     },
     "delete": {
       "button": "삭제",

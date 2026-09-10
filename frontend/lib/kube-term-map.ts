@@ -7,10 +7,13 @@ const KUBE = {
   readyInstances: "Ready Pods",
   restarts: "Restart Count",
   memory: "Memory Usage",
-  accessURL: "Service DNS",
+  // The friendly label is "외부 주소" — a public address, which in k8s terms
+  // is an Ingress, not a Service's in-cluster DNS name (#250).
+  accessURL: "Ingress URL",
   instances: "Pods",
   instanceId: "Pod Name",
   status: "Phase",
+  namespace: "Namespace",
 } as const;
 
 export type TermKey = keyof typeof KUBE;

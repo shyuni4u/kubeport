@@ -1,7 +1,7 @@
 import { apiFetch } from "@/lib/api-server";
 import { releaseReadFailed } from "@/lib/release-read";
-import { getTranslations } from "next-intl/server";
 import { MetricCards } from "@/components/MetricCards";
+import { InstancesHeading } from "@/components/InstancesHeading";
 import { InstancesTable, type Instance } from "@/components/InstancesTable";
 import { isStaleStatus } from "@/components/ReleaseStaleBanner";
 import { ReleaseProblems } from "@/components/ReleaseProblems";
@@ -21,7 +21,6 @@ export default async function ReleaseOverviewPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const t = await getTranslations("releases.overview");
   const res = await apiFetch(`/v1/releases/${id}`);
   if (!res.ok) releaseReadFailed(res.status, id);
   const d = (await res.json()) as ReleaseOverview;
@@ -51,9 +50,7 @@ export default async function ReleaseOverviewPage({
         accessURL={null}
       />
       <section>
-        <h2 className="mb-2 text-sm font-medium">
-          {t("instancesHeading", { count: d.instances.length })}
-        </h2>
+        <InstancesHeading count={d.instances.length} />
         <InstancesTable
           releaseId={d.id}
           instances={d.instances}

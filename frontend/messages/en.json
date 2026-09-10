@@ -130,7 +130,6 @@
     "table": {
       "name": "Name",
       "template": "Template",
-      "namespace": "Namespace",
       "empty": "No releases yet.",
       "emptyCta": "Deploy from the catalog →"
     },
@@ -142,15 +141,17 @@
       "overview": "Overview",
       "logs": "Logs"
     },
-    "kubeTermsToggle": "Show raw k8s terms",
+    "kubeTermsToggle": "Show Kubernetes names",
+    "kubeTermsHelp": "Shows the names admins use in Kubernetes. Applies to the deploy form and release pages alike.",
     "terms": {
       "readyInstances": "Ready instances",
       "restarts": "Restarts",
       "memory": "Memory",
-      "accessURL": "Access URL",
+      "accessURL": "Public address",
       "instances": "Instances",
       "instanceId": "Instance ID",
-      "status": "Status"
+      "status": "Status",
+      "namespace": "Area"
     },
     "delete": {
       "button": "Delete",
