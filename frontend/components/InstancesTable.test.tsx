@@ -9,6 +9,28 @@ describe("InstancesTable", () => {
     useKubeTermsStore.setState({ showKubeTerms: false });
   });
 
+  /**
+   * #130 was reported against *this* table, and #106 fixed a different one.
+   *
+   * The two release tables are built differently — ReleaseTable writes its own
+   * `<tr>`, this one goes through `ui/table`'s TableRow — so raising the hover
+   * on the release *list* left the release *detail* on `hover:bg-muted/50`
+   * (1.064:1) for another release cycle. Asserting the rendered class here, in
+   * the component the issue names, is what closes that gap: a hover token that
+   * stops reaching this table fails in the file it was reported against.
+   */
+  it("gives its rows a visible hover, through ui/table (#130)", () => {
+    render(
+      <InstancesTable
+        releaseId="abc"
+        instances={[{ name: "pod-1", phase: "Running", ready: true, restarts: 0 }]}
+      />,
+    );
+    const row = screen.getByText("pod-1").closest("tr");
+    expect(row?.className).toContain("hover:bg-hover");
+    expect(row?.className).not.toMatch(/hover:bg-muted/);
+  });
+
   it("renders instance rows with logs link", () => {
     render(
       <InstancesTable

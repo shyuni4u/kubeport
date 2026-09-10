@@ -27,6 +27,9 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-slider-track: var(--slider-track);
+  --color-hover: var(--hover);
+  --color-selected: var(--selected);
+  --color-selected-foreground: var(--selected-foreground);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
@@ -81,7 +84,42 @@
   --muted-foreground: oklch(0.5 0 0);
   --accent: oklch(0.95 0.03 275);
   --accent-foreground: oklch(0.35 0.2 275);
-  --destructive: oklch(0.577 0.245 27.325);
+  /*
+    Interaction state, kept out of --muted on purpose (#110 #130).
+
+    --muted is a *surface*: the table header, the resource panel, the editor
+    meta row are all drawn on it, so it cannot be darkened to the weight a
+    hover needs without making those surfaces heavy. #71 darkened it as far as
+    a surface allows and the row hover still only reached 1.124:1 — the ceiling
+    is the token, not the opacity, and no `/50` or `/80` on a surface token
+    escapes it.
+
+    0.84 (rgb 202) is 1.50:1 on --background and 1.64:1 on --card, with 1.34:1
+    left over against --muted for the items that hover on a muted panel.
+    Deliberately darker than --border (0.922): a hover fill lighter than the
+    divider it crosses is the state this replaces. globals.test.ts holds the
+    floor at 1.35 / 1.25 so the margin cannot be spent later.
+  */
+  --hover: oklch(0.84 0 0);
+  /*
+    Selection is tinted rather than darker, because it appears *under* a hover —
+    you hover the row that is already selected — and two greys a few percent
+    apart would be indistinguishable at that moment. The hue is --primary's.
+
+    The fill is never the only cue: every call site pairs it with a border, a
+    ring or a label colour (interaction-states.test.ts enforces that), because
+    a tint alone is exactly what a colour-blind viewer loses.
+  */
+  --selected: oklch(0.86 0.07 275);
+  --selected-foreground: oklch(0.35 0.2 275);
+  /*
+    Darkened from shadcn's 0.577 (#111). The binding constraint is not the page
+    but the chip: destructive buttons and badges draw `bg-destructive/10` and
+    then put `text-destructive` on it, so the red is always read against a tint
+    of itself — 3.97:1 at the old value, and 4.38:1 even on the bare page.
+    0.505 gives 5.35:1 on the chip over a card, 4.92:1 over the page background.
+  */
+  --destructive: oklch(0.505 0.213 27.5);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   /*
@@ -135,6 +173,20 @@
   --muted-foreground: oklch(0.708 0 0);
   --accent: oklch(0.3 0.08 275);
   --accent-foreground: oklch(0.985 0 0);
+  /*
+    Same roles as light mode, lifted instead of recessed. 0.36 is 1.82:1 on
+    --background and 1.65:1 on --card; selection keeps --primary's hue so the
+    two stay apart when they land on the same element.
+  */
+  --hover: oklch(0.36 0 0);
+  --selected: oklch(0.35 0.08 275);
+  --selected-foreground: oklch(0.9 0.05 275);
+  /*
+    Left at shadcn's dark value. The light red had to move because its chip was
+    3.97:1; this one is already 4.66:1 on `bg-destructive/20` over a card and
+    6.21:1 on the card itself. Darkening it in sympathy with light mode would
+    have cost contrast, not gained it — the surfaces run the other way here.
+  */
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
@@ -163,8 +215,14 @@
 }
 
 @layer base {
+  /*
+    outline-ring, not outline-ring/50 (#111). A focus indicator is a non-text
+    UI component under WCAG 1.4.11, so it owes 3:1; at half alpha the ring
+    composited to 2.13:1 on white. --ring itself was never weak — it is 4.8:1
+    solid — the alpha was doing all the damage.
+  */
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-ring;
   }
   body {
     @apply bg-background text-foreground;

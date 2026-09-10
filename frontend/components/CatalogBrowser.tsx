@@ -8,6 +8,13 @@ import { CatalogCard, type CatalogCardTemplate } from "./CatalogCard";
 
 type Props = { templates: CatalogCardTemplate[] };
 
+/**
+ * The value the "전체" chip carries. Tags are k8s-ish label values from template
+ * metadata, which cannot contain `_` at either end, so this cannot collide with
+ * a real tag.
+ */
+const ALL_TAGS = "__all__";
+
 export function CatalogBrowser({ templates }: Props) {
   const t = useTranslations("catalog");
   const [q, setQ] = useState("");
@@ -56,13 +63,24 @@ export function CatalogBrowser({ templates }: Props) {
         />
       </div>
       {allTags.length > 0 && (
+        // `ALL_TAGS` rather than `""`: base-ui treats an empty string as "no
+        // value", so an item carrying it can never read as pressed — and a
+        // filter whose "off" state looks the same as its "on" state is the bug
+        // this is fixing (#110). The sentinel is mapped back to "" on the way
+        // into `tag`, so the filter itself still works on a plain tag string.
         <ToggleGroup
-          value={tag ? [tag] : []}
-          onValueChange={(v) => setTag(v[0] ?? "")}
+          value={[tag || ALL_TAGS]}
+          onValueChange={(v) => setTag(v[0] === ALL_TAGS ? "" : (v[0] ?? ""))}
           className="flex-wrap justify-start"
+          aria-label={t("tagFilterLabel")}
         >
+          <ToggleGroupItem value={ALL_TAGS} variant="outline">
+            {t("allTags")}
+          </ToggleGroupItem>
           {allTags.map((t) => (
-            <ToggleGroupItem key={t} value={t}>{t}</ToggleGroupItem>
+            <ToggleGroupItem key={t} value={t} variant="outline">
+              {t}
+            </ToggleGroupItem>
           ))}
         </ToggleGroup>
       )}
@@ -71,7 +89,7 @@ export function CatalogBrowser({ templates }: Props) {
           {t("emptyNoMatch")}
         </div>
       ) : (
-        <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(190px,1fr))]">
+        <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(190px,1fr))]">
           {filtered.map((t) => (
             <CatalogCard key={t.name} template={t} />
           ))}

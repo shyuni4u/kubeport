@@ -38,8 +38,8 @@ export default async function Home({
         <div className="flex flex-col items-center gap-3">
           {demo && (
             <div className="flex gap-3">
-              <a href={`/api/auth/login?provider=demo&hint=${encodeURIComponent(adminEmail)}`} className="rounded-md border px-4 py-2 hover:bg-accent">{t("tryAdmin")}</a>
-              <a href={`/api/auth/login?provider=demo&hint=${encodeURIComponent(userEmail)}`} className="rounded-md border px-4 py-2 hover:bg-accent">{t("tryUser")}</a>
+              <a href={`/api/auth/login?provider=demo&hint=${encodeURIComponent(adminEmail)}`} className="rounded-md border px-4 py-2 hover:bg-hover">{t("tryAdmin")}</a>
+              <a href={`/api/auth/login?provider=demo&hint=${encodeURIComponent(userEmail)}`} className="rounded-md border px-4 py-2 hover:bg-hover">{t("tryUser")}</a>
             </div>
           )}
           {demo && (

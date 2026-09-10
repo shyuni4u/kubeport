@@ -1,16 +1,27 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import {
+  compositeOver,
+  contrastRatio,
+  oklchToSrgb,
+  parseOklch,
+  type Oklch,
+} from "@/lib/color-contrast";
 
 /**
- * #71. `--muted` and `--secondary` were byte-identical to `--background` in
- * light mode, so every `bg-muted` surface on a page background was invisible:
- * tree and menu hovers gave no feedback, the release table header merged into
- * its rows, and the slider track disappeared (#43, worked around at the time
- * with a dedicated `--slider-track`).
+ * #71 started this file: `--muted` and `--secondary` were byte-identical to
+ * `--background` in light mode, so every `bg-muted` surface on a page
+ * background was invisible. The assertions live here rather than in any one
+ * component because the bug was in the token file and reached ~30 call sites
+ * from there.
  *
- * These assertions are about the token file rather than any one component,
- * because the bug was in the token file and reached ~30 call sites from there.
+ * #110 #111 #112 #130 are the same shape one level up. Repairing `--muted`
+ * moved the row hover from 1.064:1 to 1.124:1 — an invisible surface is still
+ * invisible — because `--muted` is a *surface* token (table headers, the
+ * resource panel, the editor meta row) and cannot be darkened to interaction
+ * weight without making those surfaces heavy. So interaction state got tokens
+ * of its own, and this file is where their floors are written down.
  */
 
 const css = readFileSync(path.resolve(__dirname, "globals.css"), "utf8");
@@ -24,41 +35,27 @@ function block(selector: string): string {
   return css.slice(start, end);
 }
 
-/**
- * Oklch lightness of a token, e.g. `--muted: oklch(0.93 0 0)` -> 0.93.
- *
- * Rejects anything with chroma, because `contrast()` below is only valid for
- * greys. Without the guard, pointing any of these assertions at a tinted token
- * like `--accent: oklch(0.95 0.03 275)` would not fail — it would quietly
- * assert a wrong number.
- */
-function lightness(scope: string, token: string): number {
-  const m = new RegExp(`${token}:\\s*oklch\\(([\\d.]+)\\s+([\\d.]+)`).exec(block(scope));
-  if (!m) throw new Error(`${token} is not a plain oklch() value in ${scope}`);
-  if (Number(m[2]) !== 0) {
-    throw new Error(
-      `${token} has chroma ${m[2]}; the L = Y^(1/3) identity holds only for greys`,
-    );
-  }
-  return Number(m[1]);
+function token(scope: string, name: string): Oklch {
+  const m = new RegExp(`${name}:\\s*(oklch\\([^)]*\\))`).exec(block(scope));
+  if (!m) throw new Error(`${name} is not an oklch() value in ${scope}`);
+  return parseOklch(m[1]);
 }
 
-/**
- * WCAG relative-luminance contrast, for achromatic colours only — `lightness()`
- * enforces that.
- *
- * Oklab's linear-sRGB→LMS rows each sum to 1, so a grey has l = m = s = Y and
- * L = Y^(1/3); WCAG's luminance coefficients also sum to 1, so its Y is the
- * same number. That identity is what lets this compare tokens straight out of
- * the CSS without a colour library.
- */
-function contrast(a: number, b: number): number {
-  const [hi, lo] = a > b ? [a, b] : [b, a];
-  return (hi ** 3 + 0.05) / (lo ** 3 + 0.05);
+function rgb(scope: string, name: string): [number, number, number] {
+  return oklchToSrgb(token(scope, name));
+}
+
+function ratio(scope: string, a: string, b: string): number {
+  return contrastRatio(rgb(scope, a), rgb(scope, b));
 }
 
 /** Every surface a component can be drawn on, per theme. */
 const SURFACES = ["--background", "--card"] as const;
+
+const THEMES = [
+  { name: "light", scope: ":root" },
+  { name: "dark", scope: ".dark" },
+] as const;
 
 /**
  * WCAG 1.4.11 asks 3:1 of a non-text UI component. The bar here is 3.3 so the
@@ -69,36 +66,57 @@ const SURFACES = ["--background", "--card"] as const;
  */
 const SLIDER_TRACK_MIN_CONTRAST = 3.3;
 
+/**
+ * Interaction fills are held to 1.35:1 on the page surfaces.
+ *
+ * Not 3:1. A hover fill is not a component boundary — it is feedback on a
+ * component that is already outlined — and no fill at 3:1 on a light page
+ * reads as "hovered" rather than "selected"; it would swamp the row it is
+ * meant to highlight. 1.35 is instead set from the failures: the reviewer
+ * measured 1.064 and 1.124 as invisible and called 1.23 "only visible when
+ * magnified", so the floor sits above all three by a margin no rounding can
+ * eat. Selection does not lean on the fill alone — see
+ * `interaction-states.test.ts`, which requires a second cue at every call site.
+ */
+const INTERACTION_MIN_CONTRAST = 1.35;
+
+/**
+ * Against `--muted` the bar drops to 1.25. A hovered item can sit on a muted
+ * panel, but `--muted` is itself a near-background surface, so demanding the
+ * full 1.35 there would force the hover darker than any hover should be. The
+ * call sites that hover on muted are few and all carry a border of their own.
+ */
+const INTERACTION_MIN_CONTRAST_ON_MUTED = 1.25;
+
 describe("light-mode surface tokens", () => {
   const surfaces = ["--muted", "--secondary"] as const;
 
-  it.each(surfaces)("%s is not the page background", (token) => {
-    expect(lightness(":root", token)).not.toBe(lightness(":root", "--background"));
+  it.each(surfaces)("%s is not the page background", (name) => {
+    expect(ratio(":root", name, "--background")).not.toBe(1);
   });
 
   // 1.1:1 is roughly where a filled surface stops reading as "the same colour"
-  // on a light page. It is far below the 3:1 that WCAG 1.4.11 asks of a real UI
-  // component boundary — a muted fill is decoration, and the components that do
-  // carry a boundary use --border or --slider-track instead.
-  it.each(surfaces)("%s is far enough from the background to be seen", (token) => {
-    expect(
-      contrast(lightness(":root", token), lightness(":root", "--background")),
-    ).toBeGreaterThan(1.1);
+  // on a light page. Deliberately far below the interaction floor above: a
+  // muted fill is a surface, and the things that must be *noticed* — hover,
+  // selection, a slider track — have their own tokens precisely so this one
+  // does not have to carry them.
+  it.each(surfaces)("%s is far enough from the background to be seen", (name) => {
+    expect(ratio(":root", name, "--background")).toBeGreaterThan(1.1);
   });
 
   // --border sits between the two. A muted fill darker than its own border
   // would swallow the border on `border bg-muted` surfaces (MetaRow, the
   // dialog footers).
-  it.each(surfaces)("%s stays lighter than --border", (token) => {
-    expect(lightness(":root", token)).toBeGreaterThan(lightness(":root", "--border"));
+  it.each(surfaces)("%s stays lighter than --border", (name) => {
+    expect(token(":root", name).l).toBeGreaterThan(token(":root", "--border").l);
   });
 });
 
 describe("dark-mode surface tokens", () => {
   // Dark mode was never broken; this keeps a later edit from levelling it the
   // way light mode was levelled.
-  it.each(["--muted", "--secondary"])("%s is not the page background", (token) => {
-    expect(lightness(".dark", token)).not.toBe(lightness(".dark", "--background"));
+  it.each(["--muted", "--secondary"])("%s is not the page background", (name) => {
+    expect(ratio(".dark", name, "--background")).not.toBe(1);
   });
 });
 
@@ -106,10 +124,119 @@ describe("--muted-foreground", () => {
   // The label colour has to survive the surface moving under it. shadcn's
   // default sat at 4.34:1 on the old --background and would have dropped to
   // 3.85:1 once --muted darkened — on the very surfaces #71 makes solid.
-  it.each([...SURFACES, "--muted"] as const)("clears 4.5:1 on %s", (surface) => {
-    expect(
-      contrast(lightness(":root", "--muted-foreground"), lightness(":root", surface)),
-    ).toBeGreaterThanOrEqual(4.5);
+  //
+  // It carries a second job since #112: a disabled control is now drawn as
+  // `bg-muted text-muted-foreground` instead of `opacity-50`, so this pair is
+  // what a disabled button's label is made of. That is why --muted is in the
+  // list and why the bar is the text bar rather than a decorative one.
+  it.each(THEMES)("clears 4.5:1 on every surface in $name mode", ({ scope }) => {
+    for (const surface of [...SURFACES, "--muted"] as const) {
+      expect(ratio(scope, "--muted-foreground", surface), surface).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
+
+describe("--hover", () => {
+  // #130. `hover:bg-muted/50` on the release-detail instance table measured
+  // 1.064:1 — the reviewer's point was that no opacity and no surface fixes
+  // it, because --muted is 13 steps of 255 from --background and everything
+  // built on it tops out at 1.23:1.
+  it.each(THEMES)("clears the interaction floor on every surface in $name mode", ({ scope }) => {
+    for (const surface of SURFACES) {
+      expect(ratio(scope, "--hover", surface), surface).toBeGreaterThanOrEqual(
+        INTERACTION_MIN_CONTRAST,
+      );
+    }
+    expect(ratio(scope, "--hover", "--muted")).toBeGreaterThanOrEqual(
+      INTERACTION_MIN_CONTRAST_ON_MUTED,
+    );
+  });
+
+  // The whole reason this token exists. Written as an assertion so "can we
+  // just use bg-muted for hover?" has an answer in the repo.
+  it.each(THEMES)("is not reachable from --muted in $name mode", ({ scope }) => {
+    expect(ratio(scope, "--hover", "--muted")).toBeGreaterThan(1.15);
+  });
+
+  // Grey on purpose: hover is transient and must not be mistaken for the
+  // persistent, tinted selection state it can appear next to.
+  it.each(THEMES)("stays achromatic in $name mode", ({ scope }) => {
+    expect(token(scope, "--hover").c).toBe(0);
+  });
+});
+
+describe("--selected", () => {
+  // #110. ToggleGroup, tabs and the catalog tag filter used `bg-muted` — or
+  // nothing at all — as the only cue, measuring 1.00:1 against the page.
+  it.each(THEMES)("clears the interaction floor on every surface in $name mode", ({ scope }) => {
+    for (const surface of SURFACES) {
+      expect(ratio(scope, "--selected", surface), surface).toBeGreaterThanOrEqual(
+        INTERACTION_MIN_CONTRAST,
+      );
+    }
+    expect(ratio(scope, "--selected", "--muted")).toBeGreaterThanOrEqual(
+      INTERACTION_MIN_CONTRAST_ON_MUTED,
+    );
+  });
+
+  // Selection and hover meet on the same element — you hover the row that is
+  // already selected. Separating them by lightness alone would put them a few
+  // percent apart; the tint is what keeps them distinct, so it is required
+  // rather than left to taste.
+  it.each(THEMES)("is tinted, unlike --hover, in $name mode", ({ scope }) => {
+    expect(token(scope, "--selected").c).toBeGreaterThan(0);
+  });
+
+  it.each(THEMES)("carries a label colour that clears 4.5:1 on it in $name mode", ({ scope }) => {
+    expect(ratio(scope, "--selected-foreground", "--selected")).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe("--destructive", () => {
+  /**
+   * #111 measured the Delete button's label at 3.97:1 and the same red on the
+   * page at 4.38:1 — both under AA.
+   *
+   * The chip fill is the binding constraint, and it moves with the token: both
+   * `Badge variant="destructive"` and `Button variant="destructive"` draw
+   * `bg-destructive/10` (`/20` in dark mode) and then put `text-destructive` on
+   * top, so the red is always read against a 10%-tint of itself. Darkening the
+   * text darkens the fill under it too, which is why picking this value by eye
+   * against the page alone is what left it at 3.97:1.
+   */
+  const CHIP_ALPHA = { ":root": 0.1, ".dark": 0.2 } as const;
+
+  it.each(THEMES)("clears 4.5:1 on both surfaces and its own chip in $name mode", ({ scope }) => {
+    const fg = rgb(scope, "--destructive");
+    for (const surface of SURFACES) {
+      const chip = compositeOver(fg, CHIP_ALPHA[scope], rgb(scope, surface));
+      expect(contrastRatio(fg, rgb(scope, surface)), `${surface} plain`).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(fg, chip), `${surface} chip`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
+
+describe("--ring", () => {
+  // #111 measured the focus ring at 2.13:1 — not because --ring is a weak
+  // colour (it is 4.8:1 solid) but because every call site drew it through
+  // `ring-ring/50`. A focus indicator is a non-text UI component under
+  // WCAG 1.4.11, so 3:1 is the bar, and half of it is not.
+  it.each(THEMES)("clears 3:1 on every surface in $name mode", ({ scope }) => {
+    for (const surface of SURFACES) {
+      expect(ratio(scope, "--ring", surface), surface).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  // The token was never the problem; the alpha at the call sites was. Guard the
+  // base layer here and the components in `interaction-states.test.ts`.
+  //
+  // Scoped to the `*` rule rather than the whole file, so the comment above it
+  // can still name the value it replaced.
+  it("is applied without alpha in the base layer", () => {
+    const m = /\*\s*\{([^}]*)\}/.exec(css);
+    expect(m, "no `* { … }` rule in globals.css").not.toBeNull();
+    expect(m![1]).toContain("outline-ring");
+    expect(m![1]).not.toMatch(/outline-ring\/\d/);
   });
 });
 
@@ -122,19 +249,38 @@ describe("--slider-track", () => {
   // Every surface, both themes. Checking only --card is what let 0.66 stand at
   // 2.85:1 against --background — and the deploy form, the one screen with a
   // slider, draws it on --background.
-  it.each(SURFACES)("clears 3:1 against %s in light mode", (surface) => {
-    expect(
-      contrast(lightness(":root", "--slider-track"), lightness(":root", surface)),
-    ).toBeGreaterThanOrEqual(SLIDER_TRACK_MIN_CONTRAST);
-  });
-
-  it.each(SURFACES)("clears 3:1 against %s in dark mode", (surface) => {
-    expect(
-      contrast(lightness(".dark", "--slider-track"), lightness(".dark", surface)),
-    ).toBeGreaterThanOrEqual(SLIDER_TRACK_MIN_CONTRAST);
+  it.each(THEMES)("clears 3:1 against every surface in $name mode", ({ scope }) => {
+    for (const surface of SURFACES) {
+      expect(ratio(scope, "--slider-track", surface), surface).toBeGreaterThanOrEqual(
+        SLIDER_TRACK_MIN_CONTRAST,
+      );
+    }
   });
 
   it("is darker than any muted-weight fill, so bg-muted cannot replace it", () => {
-    expect(lightness(":root", "--slider-track")).toBeLessThan(lightness(":root", "--muted"));
+    expect(token(":root", "--slider-track").l).toBeLessThan(token(":root", "--muted").l);
   });
+});
+
+describe("token blocks", () => {
+  // A token defined in one theme and forgotten in the other falls back to the
+  // light value on a dark page. `--hover` and `--selected` are new, so this is
+  // the moment the habit is cheapest to establish.
+  it.each(["--hover", "--selected", "--selected-foreground"])(
+    "%s is defined in both themes",
+    (name) => {
+      expect(() => token(":root", name)).not.toThrow();
+      expect(() => token(".dark", name)).not.toThrow();
+    },
+  );
+
+  // Tailwind only emits `bg-hover` / `bg-selected` / `text-selected-foreground`
+  // if the token is mapped in @theme. Without this the classes compile to
+  // nothing and every fix in this PR silently reverts to a transparent fill.
+  it.each(["--color-hover", "--color-selected", "--color-selected-foreground"])(
+    "%s is exposed to Tailwind via @theme",
+    (name) => {
+      expect(css).toContain(`${name}:`);
+    },
+  );
 });

@@ -30,7 +30,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
           ) : (
             <a
               href="/api/auth/login"
-              className="rounded-md px-3 py-1 text-sm font-medium hover:bg-accent"
+              className="rounded-md px-3 py-1 text-sm font-medium hover:bg-hover"
             >
               {t("login")}
             </a>

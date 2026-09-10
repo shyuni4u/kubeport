@@ -88,6 +88,8 @@
     "searchPlaceholder": "템플릿 검색…",
     "emptyNoTemplates": "관리자가 아직 템플릿을 만들지 않았습니다.",
     "emptyNoMatch": "일치하는 템플릿이 없습니다. 검색어나 태그 필터를 바꿔보세요.",
+    "allTags": "전체",
+    "tagFilterLabel": "태그 필터",
     "card": {
       "deploy": "배포하기 →"
     }

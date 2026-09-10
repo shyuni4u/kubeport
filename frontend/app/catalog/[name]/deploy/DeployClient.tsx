@@ -408,9 +408,17 @@ export function DeployClient({
           onSubmit={submit}
         />
         {rbacBlocked && (
-          <p role="status" className="mt-2 text-sm text-red-700">
-            {t("blockedByRbac")}
-          </p>
+          // Right-aligned under the button it explains (#112). The submit sits
+          // at the right edge of the form (`justify-end` in DynamicForm) while
+          // this ran the full width from the left margin, so the reviewer
+          // measured them 584px apart on one line of sight: the button read as
+          // "disabled for no stated reason" and the sentence as an unrelated
+          // notice. Nothing about the wording changes — only where it sits.
+          <div className="mt-2 flex justify-end">
+            <p role="status" className="max-w-sm text-right text-sm text-red-700">
+              {t("blockedByRbac")}
+            </p>
+          </div>
         )}
         {err && (
           <p

@@ -116,7 +116,7 @@ export function ReleaseTable({ rows }: { rows: ReleaseRow[] }) {
             const status = statuses[r.id];
             const marked = status && MARKED.has(status) ? status : null;
             return (
-              <tr key={r.id} className="border-t border-border transition hover:bg-muted">
+              <tr key={r.id} className="border-t border-border transition hover:bg-hover">
                 {/*
                   The chip sits beside the name rather than in a column of its
                   own: healthy rows then look exactly as they do today, and a
