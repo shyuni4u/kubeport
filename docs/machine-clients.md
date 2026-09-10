@@ -466,6 +466,13 @@ k8s authorizer 는 `RBAC: allowed by ClusterRoleBinding "..." of ClusterRole "..
 클러스터 왕복도 N번이다 ([#57](https://github.com/shyuni4u/kubeport/issues/57),
 [#58](https://github.com/shyuni4u/kubeport/issues/58)).
 
+**웹 UI 도 같은 방식으로 폴링한다**([#183](https://github.com/shyuni4u/kubeport/issues/183)). 릴리스 상세
+화면은 `status` 가 `unknown`·`warning` 인 동안 `GET /v1/releases/{id}` 를 3·5·8·13초 뒤, 이후 15초 간격으로
+다시 부르고 5분이 지나면 멈춘다(탭이 숨겨져 있으면 그 회차를 건너뛴다). 한 번 다시 읽을 때마다 백엔드가
+해당 네임스페이스의 파드를 조회하므로, 열린 탭 하나가 5분 동안 apiserver 에 수십 번의 LIST 를 보낸다. 이
+경로는 위 토큰버킷 대상이 아니다. 파드가 없는 동안 `unknown` 에 머무는 CronJob 릴리스는 상세를 열 때마다
+5분 전체를 소비한다.
+
 **목록은 페이지네이션 메타가 없다.** `total` 도 `next` 도 없어서 "다음 페이지가 있나"는 한 페이지가 꽉
 찼는지로 추측해야 한다. 템플릿 목록은 아예 페이지네이션이 없다(#58).
 

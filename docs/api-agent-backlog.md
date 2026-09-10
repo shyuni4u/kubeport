@@ -101,8 +101,11 @@ SSE 는 `GET /v1/releases/{id}/logs` 하나뿐이고 상태 전이 스트림이 
 - 최소안: `GET /v1/releases/{id}` 응답에 `terminal: true|false` + `retry_after_seconds`
 - 완전안: `GET /v1/releases/{id}/events` (SSE, status 변경 시에만)
 
-사람 UI 의 "릴리스 상세 자동 갱신 없음"([#8](https://github.com/shyuni4u/kubeport/issues/8))과 같은 뿌리라
-사람 쪽을 고칠 때 같이 나온다.
+사람 UI 는 [#183](https://github.com/shyuni4u/kubeport/issues/183) 에서 API 변경 없이 먼저 고쳤다 —
+릴리스 상세가 `status` 가 `unknown`·`warning` 인 동안 `router.refresh()` 로 스스로 다시 읽는다
+(3·5·8·13초 뒤 15초 간격, 5분 뒤 포기). 종료 상태 판정(`healthy`·`error`·stale 이면 멈춤)이
+`frontend/components/ReleaseAutoRefresh.tsx` 의 `SETTLING` 상수에만 있으므로, 이 항목의 `terminal`
+필드를 만들면 그 상수를 응답값으로 대체해 판정을 한 곳으로 모은다.
 
 ### 3. 삭제의 사전 확인 — `?dry_run=` / 확인 토큰 (구 #76, #139 중복)
 
