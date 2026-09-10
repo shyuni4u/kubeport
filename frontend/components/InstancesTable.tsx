@@ -76,8 +76,11 @@ export function InstancesTable({
     "Terminating",
     "Completed",
   ]);
+  // Raw terms show k8s's own word, as `kubectl get pods` would: a "Phase"
+  // header over "반복 재시작 중" was half of each (#39 made raw the admin
+  // default here).
   const phaseLabel = (phase: string): string =>
-    KNOWN_PHASES.has(phase) ? tPhase(phase) : phase;
+    kube || !KNOWN_PHASES.has(phase) ? phase : tPhase(phase);
   return (
     <Table>
       <TableHeader>

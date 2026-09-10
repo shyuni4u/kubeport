@@ -12,7 +12,7 @@ type Props = {
   pending: boolean;
 };
 
-type Resource = { kind: string; name: string };
+type Resource = { apiVersion: string; kind: string; name: string | null };
 
 export function ResourcesPreview({ renderedYaml, pending }: Props) {
   const t = useTranslations("deploy.preview");
@@ -23,12 +23,23 @@ export function ResourcesPreview({ renderedYaml, pending }: Props) {
     try {
       const docs = YAML.parseAllDocuments(renderedYaml);
       return docs
-        .map((d) => d.toJS() as { kind?: string; metadata?: { name?: string } } | null)
+        .map(
+          (d) =>
+            d.toJS() as {
+              apiVersion?: string;
+              kind?: string;
+              metadata?: { name?: string };
+            } | null,
+        )
         .filter(
-          (x): x is { kind: string; metadata?: { name?: string } } =>
+          (x): x is { apiVersion?: string; kind: string; metadata?: { name?: string } } =>
             !!x && typeof x.kind === "string",
         )
-        .map((x) => ({ kind: x.kind, name: x.metadata?.name ?? "(unnamed)" }));
+        .map((x) => ({
+          apiVersion: typeof x.apiVersion === "string" ? x.apiVersion : "",
+          kind: x.kind,
+          name: x.metadata?.name ?? null,
+        }));
     } catch {
       return [];
     }
@@ -53,19 +64,34 @@ export function ResourcesPreview({ renderedYaml, pending }: Props) {
         <ul className="flex flex-col gap-1">
           {resources.map((r, idx) => (
             <li
-              key={`${r.kind}-${r.name}-${idx}`}
-              className="flex items-center justify-between text-sm"
+              key={`${r.apiVersion}-${r.kind}-${r.name}-${idx}`}
+              // The plain labels have spaces ("저장 공간이 붙은 앱"), so with no
+              // gap they wrapped first and ran into the name. The label stays
+              // on one line; only a long name wraps, against the right edge.
+              className="flex items-baseline justify-between gap-3 text-sm"
             >
               <span
                 className={
                   kube
-                    ? "font-mono text-xs text-muted-foreground"
-                    : "text-xs text-muted-foreground"
+                    ? "shrink-0 whitespace-nowrap font-mono text-xs text-muted-foreground"
+                    : "shrink-0 whitespace-nowrap text-xs text-muted-foreground"
                 }
               >
-                {kindLabel(r.kind, kube, (k) => tKinds(k))}
+                {/* Raw terms show what the manifest says, apiVersion included:
+                    a kind name alone cannot tell batch/v1 from a CRD. */}
+                {kube && r.apiVersion
+                  ? `${r.apiVersion} ${r.kind}`
+                  : kindLabel(r.kind, kube, (k) => tKinds(k), r.apiVersion)}
               </span>
-              <span>{r.name}</span>
+              <span
+                className={
+                  kube
+                    ? "min-w-0 break-words text-right font-mono text-xs"
+                    : "min-w-0 break-words text-right"
+                }
+              >
+                {r.name ?? t("unnamed")}
+              </span>
             </li>
           ))}
         </ul>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useLayoutEffect } from "react";
 import { useKubeTermsStore } from "@/stores/kube-terms-store";
 
 /**
@@ -9,13 +9,14 @@ import { useKubeTermsStore } from "@/stores/kube-terms-store";
  * who never see them anywhere else. Once the viewer flips the toggle, their
  * choice wins for the rest of the visit — this only sets the starting point.
  *
- * Renders nothing. The server knows the role; the store lives on the client,
- * so the first paint uses the store's default and an admin sees the raw terms
- * one effect later.
+ * Renders nothing. The server knows the role; the store lives on the client.
+ * A layout effect applies the default before the browser paints, so moving to
+ * a page inside the app never shows the other side first. A full reload still
+ * paints the server's render (the store's default) until hydration.
  */
 export function KubeTermsDefault({ isAdmin }: { isAdmin: boolean }) {
   const applyDefault = useKubeTermsStore((s) => s.applyDefault);
-  useEffect(() => {
+  useLayoutEffect(() => {
     applyDefault(isAdmin);
   }, [applyDefault, isAdmin]);
   return null;

@@ -1,11 +1,11 @@
 {
   "kinds": {
-    "Deployment": "App server",
+    "Deployment": "App",
     "Service": "Internal address",
     "Ingress": "Public address",
     "ConfigMap": "Settings",
     "Secret": "Secret values",
-    "StatefulSet": "Server with storage",
+    "StatefulSet": "App with storage",
     "DaemonSet": "Program on every machine",
     "Job": "One-off task",
     "CronJob": "Scheduled task",
@@ -252,7 +252,7 @@
     "submit": "Deploy",
     "submitting": "Working…",
     "namePlaceholder": "Release name",
-    "namespacePlaceholder": "Namespace",
+    "namespacePlaceholder": "e.g. demo",
     "noClusterPlaceholder": "No clusters registered — ask an admin",
     "clusterPlaceholder": "Select a cluster",
     "noClusterWarning": "No clusters are registered, so nothing can be deployed. Ask an admin to register a cluster.",
@@ -282,7 +282,8 @@
     "preview": {
       "heading": "What will be created",
       "rendering": "Preparing preview…",
-      "empty": "Fill in the form and a preview will appear here."
+      "empty": "Fill in the form and a preview will appear here.",
+      "unnamed": "(unnamed)"
     },
     "teamSuffix": "{team} team"
   },
@@ -476,14 +477,14 @@
     "rbac": {
       "title": "Permission check",
       "checking": "Checking…",
-      "hint": "Enter a cluster and namespace to check permissions.",
-      "allAllowed": "All resource create permissions confirmed.",
-      "denied": "Permission denied.",
+      "hint": "Pick a cluster and area to check you can create these.",
+      "allAllowed": "You can create everything listed above.",
+      "denied": "You can't create this here.",
       "httpError": "Permission check failed (HTTP {status}).",
       "skipped": "Not checked: {kinds} — these may still be denied at deploy time.",
-      "deniedRow": "{resource}: {message}",
+      "deniedRow": "{resource} — {message}",
       "deniedNext": "The deploy will fail like this. Ask an admin for permission to deploy into this cluster and area.",
-      "scope": "Create in {namespace}"
+      "scope": "Create in area {namespace}"
     }
   },
   "admin": {

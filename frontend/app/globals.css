@@ -27,6 +27,7 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-slider-track: var(--slider-track);
+  --color-switch-track: var(--switch-track);
   --color-hover: var(--hover);
   --color-selected: var(--selected);
   --color-selected-foreground: var(--selected-foreground);
@@ -186,6 +187,15 @@
     this margin cannot be spent by a later edit that still "passes".
   */
   --slider-track: oklch(0.62 0 0);
+  /*
+    Switch tracks in the off state, for the same WCAG 1.4.11 reason as
+    --slider-track. The unchecked track was --input (0.922): 1.15:1 on
+    --background, and 1.02:1 on the --muted card where the deploy form's
+    raw-terms switch sits (#39) — the state users start in had no visible
+    shape. 0.58 is 3.49:1 on --muted and 3.93:1 on --background, and the 0.97
+    thumb reads 3.93:1 on it.
+  */
+  --switch-track: oklch(0.58 0 0);
   --ring: oklch(0.55 0.22 275);
   --chart-1: oklch(0.55 0.22 275);
   --chart-2: oklch(0.68 0.16 50);
@@ -250,6 +260,9 @@
     for, so it gets the same treatment. 0.53 is 3.39:1 there.
   */
   --slider-track: oklch(0.53 0 0);
+  /* Defined for token-block parity; dark mode's Switch keeps shadcn's
+     `dark:data-unchecked:bg-input/80` until dark mode is reachable (#155). */
+  --switch-track: oklch(0.53 0 0);
   --ring: oklch(0.65 0.22 275);
   --chart-1: oklch(0.65 0.22 275);
   --chart-2: oklch(0.7 0.16 50);

@@ -46,7 +46,7 @@ metadata:
   name: web-svc
 `;
     render(<ResourcesPreview renderedYaml={yaml} pending={false} />);
-    expect(screen.getByText("서버")).toBeInTheDocument();
+    expect(screen.getByText("앱")).toBeInTheDocument();
     expect(screen.getByText("web")).toBeInTheDocument();
     expect(screen.getByText("내부 주소")).toBeInTheDocument();
     expect(screen.getByText("web-svc")).toBeInTheDocument();
@@ -54,7 +54,9 @@ metadata:
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
 
-  it("shows the raw kinds once the raw-terms switch is on", () => {
+  // An admin reading raw terms wants what the manifest says: a kind name alone
+  // cannot tell batch/v1 from a CRD.
+  it("shows apiVersion and kind once the raw-terms switch is on", () => {
     const yaml = `apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -62,8 +64,8 @@ metadata:
 `;
     render(<ResourcesPreview renderedYaml={yaml} pending={false} />);
     fireEvent.click(screen.getByRole("switch", { name: "원본 k8s 용어 보기" }));
-    expect(screen.getByText("Deployment")).toBeInTheDocument();
-    expect(screen.queryByText("서버")).not.toBeInTheDocument();
+    expect(screen.getByText("apps/v1 Deployment")).toBeInTheDocument();
+    expect(screen.queryByText("앱")).not.toBeInTheDocument();
     expect(useKubeTermsStore.getState().touched).toBe(true);
   });
 
@@ -77,7 +79,20 @@ metadata:
     expect(screen.getByText("Widget")).toBeInTheDocument();
   });
 
-  it("shows (unnamed) when metadata.name is missing", () => {
+  // Knative's Service is not a core Service; "내부 주소" would describe
+  // something it is not.
+  it("keeps a CRD that reuses a core kind name as written", () => {
+    const yaml = `apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: hello
+`;
+    render(<ResourcesPreview renderedYaml={yaml} pending={false} />);
+    expect(screen.getByText("Service")).toBeInTheDocument();
+    expect(screen.queryByText("내부 주소")).not.toBeInTheDocument();
+  });
+
+  it("says the resource has no name, in the page's language, when metadata.name is missing", () => {
     const yaml = `apiVersion: v1
 kind: ConfigMap
 data:
@@ -85,7 +100,7 @@ data:
 `;
     render(<ResourcesPreview renderedYaml={yaml} pending={false} />);
     expect(screen.getByText("설정")).toBeInTheDocument();
-    expect(screen.getByText("(unnamed)")).toBeInTheDocument();
+    expect(screen.getByText("(이름 없음)")).toBeInTheDocument();
   });
 
   it("skips docs without kind", () => {

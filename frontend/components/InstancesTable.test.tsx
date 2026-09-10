@@ -131,4 +131,21 @@ describe("InstancesTable", () => {
     expect(screen.getByText("자리 대기 중")).toBeInTheDocument();
     expect(screen.queryByText("대기 중")).toBeNull();
   });
+
+  // #39 made raw terms the admin default here: under a "Phase" header the cell
+  // says what `kubectl get pods` would, not the Korean sentence.
+  it("shows k8s's own status word when raw terms are on", () => {
+    useKubeTermsStore.setState({ showKubeTerms: true });
+    render(
+      <InstancesTable
+        releaseId="abc"
+        instances={[
+          { name: "pod-1", phase: "Running", ready: false, restarts: 7, reason: "CrashLoopBackOff" },
+        ]}
+      />,
+    );
+    expect(screen.getByText("Phase")).toBeInTheDocument();
+    expect(screen.getByText("CrashLoopBackOff")).toBeInTheDocument();
+    expect(screen.queryByText("반복 재시작 중 (실행 실패)")).toBeNull();
+  });
 });

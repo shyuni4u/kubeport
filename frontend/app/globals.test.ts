@@ -306,6 +306,27 @@ describe("--slider-track", () => {
   });
 });
 
+describe("--switch-track", () => {
+  // #39 put a Switch on the --muted preview card, where the unchecked track
+  // (--input, 0.922) read 1.02:1 — users, who start with it off, saw no
+  // control at all. Same WCAG 1.4.11 floor as --slider-track. Light mode only:
+  // dark mode keeps shadcn's `dark:data-unchecked:bg-input/80` (#155).
+  it("clears 3:1 against every light surface, --muted included", () => {
+    // SURFACES is page and card; the switch that failed sat on a bg-muted card.
+    for (const surface of [...SURFACES, "--muted"] as const) {
+      expect(ratio(":root", "--switch-track", surface), surface).toBeGreaterThanOrEqual(
+        SLIDER_TRACK_MIN_CONTRAST,
+      );
+    }
+  });
+
+  it("leaves the thumb (--background) readable on the track", () => {
+    expect(ratio(":root", "--background", "--switch-track")).toBeGreaterThanOrEqual(
+      SLIDER_TRACK_MIN_CONTRAST,
+    );
+  });
+});
+
 describe("token blocks", () => {
   // A token defined in one theme and forgotten in the other falls back to the
   // light value on a dark page. `--hover` and `--selected` are new, so this is

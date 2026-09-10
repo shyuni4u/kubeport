@@ -128,7 +128,7 @@ describe("DeployClient", () => {
       ).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/권한이 거부되었습니다/)).toBeInTheDocument();
+    expect(screen.getAllByText(/만들 권한이 없습니다/).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /배포하기/ })).toBeDisabled();
   });
 
@@ -140,7 +140,7 @@ describe("DeployClient", () => {
     await fillMeta(user);
 
     await waitFor(() => {
-      expect(screen.getByText("모든 리소스 생성 권한 확인됨.")).toBeInTheDocument();
+      expect(screen.getByText("위 목록을 모두 만들 수 있습니다.")).toBeInTheDocument();
     });
     expect(screen.getByRole("button", { name: /배포하기/ })).toBeEnabled();
   });

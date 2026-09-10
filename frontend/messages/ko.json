@@ -1,12 +1,12 @@
 {
   "kinds": {
-    "Deployment": "서버",
+    "Deployment": "앱",
     "Service": "내부 주소",
     "Ingress": "외부 주소",
     "ConfigMap": "설정",
     "Secret": "비밀값",
-    "StatefulSet": "저장 공간이 붙은 서버",
-    "DaemonSet": "서버마다 도는 프로그램",
+    "StatefulSet": "저장 공간이 붙은 앱",
+    "DaemonSet": "서버마다 하나씩 도는 앱",
     "Job": "일회성 작업",
     "CronJob": "예약 작업",
     "PersistentVolumeClaim": "저장 공간"
@@ -252,7 +252,7 @@
     "submit": "배포하기",
     "submitting": "처리 중…",
     "namePlaceholder": "릴리스 이름",
-    "namespacePlaceholder": "네임스페이스",
+    "namespacePlaceholder": "예: demo",
     "noClusterPlaceholder": "등록된 클러스터가 없습니다 — 관리자에게 요청하세요",
     "clusterPlaceholder": "클러스터 선택",
     "noClusterWarning": "등록된 클러스터가 없어 배포할 수 없습니다. 관리자에게 클러스터 등록을 요청하세요.",
@@ -282,7 +282,8 @@
     "preview": {
       "heading": "만들어질 것",
       "rendering": "미리보기 준비 중…",
-      "empty": "폼을 채우면 여기에 미리보기가 표시됩니다."
+      "empty": "폼을 채우면 여기에 미리보기가 표시됩니다.",
+      "unnamed": "(이름 없음)"
     },
     "teamSuffix": "{team} 팀"
   },
@@ -476,12 +477,12 @@
     "rbac": {
       "title": "권한 확인",
       "checking": "확인 중…",
-      "hint": "클러스터/네임스페이스를 입력하면 권한을 확인합니다.",
-      "allAllowed": "모든 리소스 생성 권한 확인됨.",
-      "denied": "권한이 거부되었습니다.",
+      "hint": "클러스터와 구역을 정하면 여기에 만들 수 있는지 확인합니다.",
+      "allAllowed": "위 목록을 모두 만들 수 있습니다.",
+      "denied": "만들 권한이 없습니다.",
       "httpError": "권한 확인에 실패했습니다 (HTTP {status}).",
-      "skipped": "확인하지 못한 종류: {kinds} — 이 리소스는 배포 시점에 권한 오류가 날 수 있습니다.",
-      "deniedRow": "{resource}: {message}",
+      "skipped": "확인하지 못한 항목: {kinds} — 배포할 때 권한 오류가 날 수 있습니다.",
+      "deniedRow": "{resource} — {message}",
       "deniedNext": "이 상태로는 배포가 실패합니다. 관리자에게 '이 클러스터·구역에 배포 권한' 을 요청하세요.",
       "scope": "{namespace} 구역에 만들기"
     }

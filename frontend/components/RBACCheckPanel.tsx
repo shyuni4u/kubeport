@@ -227,6 +227,13 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
                 const message = isHttpError
                   ? t("httpError", { status: r.httpStatus ?? 0 })
                   : t("denied");
+                // Raw terms name what the review asked k8s about, the way an
+                // admin fixes a RoleBinding: verb and group/resource, with
+                // k8s's own reason under it instead of only on hover (#39).
+                const map = KIND_TO_RESOURCE[r.resource];
+                const label = kube
+                  ? `create ${map?.group ? `${map.group}/` : ""}${map?.resource ?? r.resource}`
+                  : kind(r.resource);
                 return (
                   <li
                     key={r.resource}
@@ -237,8 +244,13 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
                       className="mt-0.5 h-3.5 w-3.5 shrink-0"
                       aria-hidden="true"
                     />
-                    <span>
-                      {t("deniedRow", { resource: kind(r.resource), message })}
+                    <span className="min-w-0">
+                      <span>{t("deniedRow", { resource: label, message })}</span>
+                      {kube && r.reason && (
+                        <span className="block break-all font-mono text-muted-foreground">
+                          {r.reason}
+                        </span>
+                      )}
                     </span>
                   </li>
                 );
