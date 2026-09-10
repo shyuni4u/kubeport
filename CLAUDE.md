@@ -158,9 +158,9 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
 
 ## 코드 리뷰
 
-- **리뷰 강도 (2026-09-09 결정)**: `/codex:review` 는 **PR 마다**, `/pr-review` 7 페르소나는
+- **리뷰 강도 (2026-09-09 결정)**: `/codex:review` 는 **PR 마다**, `/pr-review` 페르소나는
   **main 머지 체크포인트마다**. 근거: 09-09 하루에 이슈가 56건 생성·26건 종료로 **순증 +30** 이었다.
-  PR 마다 7 페르소나를 돌리면 닫는 것보다 여는 게 많아 백로그가 수렴하지 않는다. codex 는 싸고
+  PR 마다 전 페르소나를 돌리면 닫는 것보다 여는 게 많아 백로그가 수렴하지 않는다. codex 는 싸고
   신호가 좋아(그날 단 1건 지적이 전체에서 가장 날카로웠다) 매번 유지한다.
 - **PR 본문에 `Closes #NN` 을 반드시 쓴다.** 제목이나 표에 번호만 적으면 GitHub 이 링크를 잡지
   않아 **고쳐진 이슈가 계속 열려 있다.** 실제로 PR #106 은 제목이 `(#71 #44 #45 #46)` 인데 #71 만
@@ -174,7 +174,7 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
   닫히지 않고 숫자만 부풀린다.
 - **묶음은 milestone 으로 고정한다**: A(라이브 데모 복구) · B(클론→설치 경로) · C(대비·반응형).
 
-- **PR 은 `/pr-review` 로 올린다**: 7개 페르소나(user/admin/design/master/security/ai + manager)가
+- **PR 은 `/pr-review` 로 올린다**: 6개 페르소나(user/admin/design/master/security + manager)가
   diff 와 라이브 데모를 리뷰 → `.claude/reviews/<branch>.md` 기록 (브랜치의 `/` 는 `__` 로 치환) → `gh pr create`(P0 시 draft) →
   PR 코멘트 → 기존 문제는 `reviewer:<persona>` 라벨 이슈. 기록 없이 `gh pr create` 는 훅이 막는다
   (실수 방지용 소프트 가드; 우회 `PR_REVIEW_SKIP=1` 은 긴급 시만). 설치 관련 변경은 `--deep`.
@@ -183,13 +183,15 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
   새로 만든 `.claude/agents/*` 는 세션 재시작 후에만 `subagent_type` 으로 보이며, 스킬에 파일 본문
   폴백이 있다. 스펙: [pr-reviewers-design](docs/superpowers/specs/2026-09-08-pr-reviewers-design.md).
 - **리뷰 결과의 트리아지 규칙 (2026-09-09 도입)** — 리뷰어를 많이 돌릴수록 이슈가 줄지 않고 늘던 문제의 대응.
-  하루에 PR 23건을 머지하면 페르소나 7명 × 23회가 돌아 이슈 83건이 생기는데, 해소는 PR 단위 직렬이라
+  하루에 PR 23건을 머지하면 페르소나 7명 × 23회가 돌아 이슈 83건이 생겼는데, 해소는 PR 단위 직렬이라
   **생산이 소비보다 구조적으로 빠르다.** 그래서 세 가지를 건다:
   - **`sev:*` 라벨** (`blocks-visitor` / `normal` / `polish`) — 심각도가 아니라 **"누가 실제로 겪는가"**.
     기준과 예시는 [finding-schema.md](.claude/skills/pr-review/references/finding-schema.md) "영향도".
     한 실행에서 `blocks-visitor` 가 3건을 넘으면 기준을 잘못 잡은 것이다.
   - **신규 API 표면 요구는 이슈가 아니라 [docs/api-agent-backlog.md](docs/api-agent-backlog.md)** — 실제 호출자가
     없는 상태의 `ai-reviewer` 제안은 문서로 접는다. 단 **이미 문서화된 계약 위반은 이슈**다(그건 버그).
+    이 규칙으로도 소음이 절반밖에 안 줄어 **`ai-reviewer` 자체를 2026-09-10 에 껐다** — 적중률
+    22건 중 7건. 끈 이유·재개 조건·그동안 비는 표면은 [api-agent-backlog §비활성화](docs/api-agent-backlog.md#ai-reviewer-비활성화-2026-09-10).
   - **기본은 diff 범위**. 전면 감사(전 화면 전수 실측)는 `/pr-review --full` 로 따로. `scope: existing` 은
     페르소나당 최대 3건, 같은 근본 원인의 측정값 N개는 finding 1건으로 묶는다.
 - **푸시 전 셀프 리뷰 필수**: 커밋 전에 변경된 코드를 직접 리뷰한다.

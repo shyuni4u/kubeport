@@ -1,7 +1,7 @@
 ---
 name: pr-review
 description: >
-  PR 을 올리기 전 7개 페르소나(user/admin/design/master/security/ai + manager)로 리뷰하고,
+  PR 을 올리기 전 6개 페르소나(user/admin/design/master/security + manager)로 리뷰하고,
   결과를 기록한 뒤 PR 생성(P0 시 draft) → PR 코멘트 → 기존 문제는 GitHub Issue 로 등록한다.
   `gh pr create` 는 이 스킬의 기록 없이는 훅이 막는다. "PR 올려", "/pr-review", "리뷰하고 PR" 에 사용.
 ---
@@ -59,7 +59,9 @@ DIFF:
 **에이전트 호출 규칙**: `Agent(subagent_type="<name>-reviewer")` 를 먼저 시도한다. "Agent type ... not found" 로 실패하면(세션 시작 후 추가된 에이전트) `.claude/agents/<name>.md` 를 읽어 frontmatter 이후 본문을 프롬프트 맨 앞에 "아래를 당신의 역할과 지시로 삼아라" 와 함께 붙이고 `subagent_type="general-purpose"` 로 호출한다. 브라우저 리뷰어의 경우 프롬프트에 Chrome MCP 툴 로드 안내(`ToolSearch` 로 `select:mcp__claude-in-chrome__tabs_context_mcp,...` 한 번에)를 추가한다.
 
 ## 2. 1차 — 코드 리뷰어 병렬
-`Agent` 3개를 **한 메시지에서** 동시에 띄운다(호출 규칙 참조): `security-reviewer`, `master-reviewer`, `ai-reviewer`. 각 결과를 그대로 보관. 실패(에러/타임아웃)는 `FAILED: <사유>` 로 보관.
+`Agent` 2개를 **한 메시지에서** 동시에 띄운다(호출 규칙 참조): `security-reviewer`, `master-reviewer`. 각 결과를 그대로 보관. 실패(에러/타임아웃)는 `FAILED: <사유>` 로 보관.
+
+> **`ai-reviewer` 는 2026-09-10 부터 돌리지 않는다.** 에이전트 파일(`.claude/agents/ai-reviewer.md`)은 남겨 둔다 — 재개는 이 줄에 이름을 다시 넣는 한 줄이다. 끈 이유와 재개 조건: [docs/api-agent-backlog.md](../../../docs/api-agent-backlog.md#ai-reviewer-비활성화-2026-09-10).
 
 ## 3. 2차 — 브라우저 리뷰어 순차
 LIVE_OK=false 면 셋 다 `FAILED: 대상 URL 응답 없음` 으로 건너뛴다.
@@ -74,7 +76,7 @@ find "$TEMP" -path '*claude-chrome-screenshots-*' -name 'screenshot-*.jpg' -newe
 (`$SHOT_DIR/.run-start` 는 §1 에서 `touch` 해 둔 마커. Windows Git Bash 에선 `$TEMP` 가 이미 설정돼 있다.) 리뷰어 YAML 의 임시 경로는 기록 파일(§5)에 쓸 때 `SHOT_DIR/<persona>/<파일명>` 으로 치환한다. `ss_xxxx` ID 만 있는 항목은 치환하지 않고 그대로 둔다 — 파일이 없다는 뜻이며, finding-schema.md 규칙대로 설명 + DOM 값이 근거를 대신한다.
 
 ## 4. 매니저
-`Agent(subagent_type="reviewer-manager")` 로 띄운다 (호출 규칙 참조). `BRANCH`, `HEAD`, `BASE_URL`, `DIFF_FILES`(이 필드에 `CHANGED_FILES` 값을 그대로 넣어 전달)와 6개 블록을 `--- <persona> ---` 구분자로 이어 전달. 응답을 `## PR_COMMENT` / `## ISSUES` / `## BACKLOG` / `## VERDICT` 로 자른다.
+`Agent(subagent_type="reviewer-manager")` 로 띄운다 (호출 규칙 참조). `BRANCH`, `HEAD`, `BASE_URL`, `DIFF_FILES`(이 필드에 `CHANGED_FILES` 값을 그대로 넣어 전달)와 5개 블록을 `--- <persona> ---` 구분자로 이어 전달. 응답을 `## PR_COMMENT` / `## ISSUES` / `## BACKLOG` / `## VERDICT` 로 자른다.
 `## PR_COMMENT` 본문이 통째로 코드 펜스(세 개의 백틱)로 감싸져 있으면 바깥 펜스 한 쌍을 벗긴다. `## VERDICT` 도 마찬가지. `## ISSUES` 와 `## BACKLOG` 는 각각 `yaml` 코드 펜스 안의 YAML 을 파싱한다.
 
 ## 5. 기록
