@@ -225,22 +225,46 @@ func (h *Handlers) scopeTemplatesToDemo(c *gin.Context, rc *reqCache, rows []sto
 	if domain == "" {
 		return rows, nil
 	}
-	demoCaller := h.isDemoCaller(c)
-	if !demoCaller && isAdmin(c) {
+	if !h.isDemoCaller(c) && isAdmin(c) {
 		return rows, nil
 	}
-	ctx := c.Request.Context()
 	scoped := make([]store.ListTemplatesRow, 0, len(rows))
 	for _, row := range rows {
-		email, err := h.ownerEmail(ctx, rc, row.OwnerUserID)
+		ok, err := h.inDemoScope(c, rc, row.OwnerUserID)
 		if err != nil {
 			return nil, err
 		}
-		if auth.IsDemoEmail(email, domain) == demoCaller {
+		if ok {
 			scoped = append(scoped, row)
 		}
 	}
 	return scoped, nil
+}
+
+// inDemoScope is scopeTemplatesToDemo's rule for one template owner: whether
+// the caller may see — and so deploy — a template ownerID owns. With no demo
+// domain everything is in scope, and so is everything for the real operator
+// (admin, not demo); otherwise a demo caller's scope is the demo-owned
+// templates and everyone else's is the rest.
+//
+// CreateRelease asks the same question (#226). Deploying by name used to skip
+// it, so a caller who knew a name could cross the line the catalog draws — and
+// one real user's release on a demo template keeps seed-demo's reset from
+// deleting any demo template.
+func (h *Handlers) inDemoScope(c *gin.Context, rc *reqCache, ownerID pgtype.UUID) (bool, error) {
+	domain := h.deps.DemoEmailDomain
+	if domain == "" {
+		return true, nil
+	}
+	demoCaller := h.isDemoCaller(c)
+	if !demoCaller && isAdmin(c) {
+		return true, nil
+	}
+	email, err := h.ownerEmail(c.Request.Context(), rc, ownerID)
+	if err != nil {
+		return false, err
+	}
+	return auth.IsDemoEmail(email, domain) == demoCaller, nil
 }
 
 func (h *Handlers) GetTemplate(c *gin.Context) {

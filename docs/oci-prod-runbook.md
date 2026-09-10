@@ -509,8 +509,9 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
   데모 계정은 `kubeport-admin` 을 갖지만, 저작은 결과물이 방문자의 세션보다 오래 남고 남에게 보이는
   유일한 관리자 권한이라서다. 저작 체험까지 보여주려면 `--set demo.allowTemplateCreate=true`
   (backend `KBP_DEMO_ALLOW_TEMPLATE_CREATE`). 켜도 데모가 만든 템플릿은 실제 사용자 카탈로그에
-  안 보이지만, 데모가 아닌 계정이 그걸로 배포하면 리셋이 **데모 템플릿 삭제를 통째로** 건너뛴다(`tolerateFK` —
-  DELETE 가 문장 단위라 그 템플릿만이 아니다. `last_seed` 경보가 이걸로 뜬다, §3-2).
+  안 보이고, 관리자가 아닌 실사용자는 이름을 알아도 그걸로 배포할 수 없다(404, #226). 다만 데모가 아닌
+  **admin** 이 그걸로 배포하면(또는 #226 이전에 만들어진 그런 릴리스가 남아 있으면) 리셋이 **데모 템플릿 삭제를
+  통째로** 건너뛴다(`tolerateFK` — DELETE 가 문장 단위라 그 템플릿만이 아니다. `last_seed` 경보가 이걸로 뜬다, §3-2).
   결정 근거: [brainstorming-summary §14](brainstorming-summary.md).
   **리셋 CronJob 은 이 플래그와 무관하다** — 시드는 API 가 아니라 DB 로 직접 쓴다
   (`cmd/seed-demo/templates.go`). 한때 API 를 타서, 게이트가 닫힌 상태로 배포하자 리셋마다

@@ -546,7 +546,17 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
 - Demo accounts get the `kubeport-admin` UX, but the backend refuses them with
   403 `demo-restricted` on cluster registration, OpenAPI refresh, team and
   member changes, force-delete, and any template or release no demo account
-  owns — the UI says so on those screens. Creating *new* templates is also
+  owns — the UI says so on those screens. Deploying from such a template is a
+  404, like a missing version, and the line holds the other way too: a real
+  user who is not an admin cannot deploy a demo template. A real operator
+  (admin, not demo) still can — and that release keeps the demo reset from
+  deleting the demo catalog until it is removed. Releases a non-admin created
+  from a demo template before this check existed block it the same way. When
+  that happens the reset Job still succeeds, but its `seed` container logs
+  `WARN: reset: … skipped — referenced by non-demo releases`; delete that
+  release (from its detail page or `DELETE /v1/releases/:id`) and the next
+  reset clears the demo catalog again — re-running the reset before that
+  changes nothing. Creating *new* templates is also
   refused unless you set `demo.allowTemplateCreate=true`
   (`KBP_DEMO_ALLOW_TEMPLATE_CREATE`); leave it off for a public demo, since
   templates demo visitors author outlive a reset once someone deploys from

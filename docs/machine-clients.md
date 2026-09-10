@@ -128,7 +128,11 @@ curl -ks -X POST https://host.docker.internal:5556/token \
 - 얻은 신원은 데모 도메인이라 다음에서 **403 `demo-restricted`** 다: 항상 막히는 관리 쓰기(`POST /v1/clusters`,
   `POST /v1/clusters/:name/openapi/refresh`, `POST /v1/teams`, 팀 멤버 추가·삭제, `DELETE /v1/releases/:id?force=true`),
   설치가 `demo.allowTemplateCreate=true` 를 켜지 않았을 때의 `POST /v1/templates`, 그리고 데모 계정이 만들지 않은
-  템플릿·릴리스의 읽기·변경.
+  템플릿의 초안 버전 읽기(`GET /v1/templates/:name/versions/:v`)·변경과 릴리스의 읽기·변경. 한 번도 게시되지 않은
+  템플릿은 `GET /v1/templates/:name`·`/versions` 에서 403 이 아니라 404 `not-found` 다. 그런 템플릿으로 **배포**(`POST /v1/releases`)하면 403 이 아니라
+  없는 버전과 같은 **404 `not-found`**(`detail: template version`)다 — 템플릿 목록이 숨기는 것과 같은 선이고, 배포
+  경로가 이름 확인 수단이 되지 않게 한다.
+  반대 방향도 같다: 관리자가 아닌 실사용자는 데모 템플릿으로 배포할 수 없다([#226](https://github.com/shyuni4u/kubeport/issues/226)).
 - k8s 쪽 권한도 `demo` 네임스페이스로 묶여 있다(`templates/demo-rbac.yaml`).
 
 그래서 **데모 범위의 스모크 자동화는 가능하고, 실사용자 권한으로 운영을 자동화하는 경로는 여전히
