@@ -27,6 +27,8 @@ func cluster(objs ...runtime.Object) *dynamicfake.FakeDynamicClient {
 			{Version: "v1", Resource: "configmaps"}:                 "ConfigMapList",
 			{Version: "v1", Resource: "services"}:                   "ServiceList",
 			{Version: "v1", Resource: "secrets"}:                    "SecretList",
+			{Version: "v1", Resource: "pods"}:                       "PodList",
+			{Group: "batch", Version: "v1", Resource: "cronjobs"}:   "CronJobList",
 		}, objs...)
 }
 

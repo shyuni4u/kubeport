@@ -115,4 +115,20 @@ describe("InstancesTable", () => {
     expect(screen.getByText("pod-2")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
   });
+
+  // #33 — "Pending" says nothing about a pod that will never pull its image.
+  it("shows the reason instead of the phase when there is one", () => {
+    render(
+      <InstancesTable
+        releaseId="abc"
+        instances={[
+          { name: "pod-1", phase: "Pending", ready: false, restarts: 0, reason: "ImagePullBackOff" },
+          { name: "pod-2", phase: "Pending", ready: false, restarts: 0, reason: "Unschedulable" },
+        ]}
+      />,
+    );
+    expect(screen.getByText("이미지를 가져올 수 없음")).toBeInTheDocument();
+    expect(screen.getByText("자리 대기 중")).toBeInTheDocument();
+    expect(screen.queryByText("대기 중")).toBeNull();
+  });
 });

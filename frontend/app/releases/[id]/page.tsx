@@ -4,10 +4,12 @@ import { getTranslations } from "next-intl/server";
 import { MetricCards } from "@/components/MetricCards";
 import { InstancesTable, type Instance } from "@/components/InstancesTable";
 import { isStaleStatus } from "@/components/ReleaseStaleBanner";
+import { ReleaseProblems } from "@/components/ReleaseProblems";
 
 type ReleaseOverview = {
   id: string;
   status: string;
+  template: { name: string };
   instances_total: number;
   instances_ready: number;
   instances: Instance[];
@@ -27,6 +29,14 @@ export default async function ReleaseOverviewPage({
 
   return (
     <div className="flex flex-col gap-6">
+      {/* First, because it is the answer to the question a failing release
+          raises: what went wrong, and what to do about it (#33). Renders
+          nothing while every instance is fine. */}
+      <ReleaseProblems
+        releaseId={d.id}
+        template={d.template.name}
+        instances={d.instances}
+      />
       {/* The backend does not report memory usage or a public address yet.
           `null` hides those cards and shows the "no public address" hint
           instead of an empty "—" that reads as broken. */}

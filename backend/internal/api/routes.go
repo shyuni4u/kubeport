@@ -25,6 +25,9 @@ type K8sApplier interface {
 	// another release, or to nothing kubeport created, before anything is
 	// applied (#161). creating is false for an update.
 	CheckApply(ctx context.Context, namespace, release string, yaml []byte, creating bool) (k8s.ApplyCheck, error)
+	// ReleasePresence reports whether a release's rendered objects are still
+	// in the cluster, for a release that has no pods (#33).
+	ReleasePresence(ctx context.Context, namespace, release string, yaml []byte) (k8s.Presence, error)
 }
 
 // K8sClientFactory creates per-request k8s clients using the caller's token.
