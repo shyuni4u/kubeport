@@ -24,6 +24,12 @@ concurrency:
   group: playwright-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Read-only token (#174). Nothing here writes to the repository — artifacts go
+# up through the runner's own token — and without this a push to main runs with
+# whatever the repository's default permissions are. Matches ci.yml.
+permissions:
+  contents: read
+
 jobs:
   playwright:
     runs-on: ubuntu-24.04
@@ -41,7 +47,7 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with: { version: 10 }
 
       - uses: actions/setup-node@v7
@@ -78,7 +84,7 @@ jobs:
           done
           echo "dex failed to start"; exit 1
 
-      - uses: ariga/setup-atlas@v0
+      - uses: ariga/setup-atlas@2f3c785c89a15e1c0d07bcae3900fb5feb969eea # v0.3
 
       - name: Apply DB schema
         # atlas.hcl lives in backend/migrations/ — matches docs/local-e2e.md §3.
@@ -112,7 +118,7 @@ jobs:
                       oidc-ca-file: /etc/kubernetes/pki/dex-ca.crt
           EOF
 
-      - uses: helm/kind-action@v1
+      - uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:
           cluster_name: kubeport
           config: /tmp/kind-config.yaml

@@ -30,6 +30,12 @@ concurrency:
   group: helm-${{ github.ref }}
   cancel-in-progress: true
 
+# Read-only token (#174). Linting, rendering and a throwaway kind install need
+# nothing more, and without this a push to main runs with whatever the
+# repository's default permissions are. Matches ci.yml.
+permissions:
+  contents: read
+
 jobs:
   lint-and-snapshot:
     runs-on: ubuntu-latest
@@ -37,7 +43,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install Helm
-        uses: azure/setup-helm@v5
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.20.2
 
@@ -63,12 +69,12 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install Helm
-        uses: azure/setup-helm@v5
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.20.2
 
       - name: Create kind cluster
-        uses: helm/kind-action@v1
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:
           version: v0.23.0
           cluster_name: kubeport-smoke
