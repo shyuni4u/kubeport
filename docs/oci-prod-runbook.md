@@ -257,6 +257,24 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
 
   회전 후 확인: 랜딩의 표기 값이 바뀌었는지, **옛 비밀번호로 로그인이 거부되는지**(거부돼야
   Dex 까지 실제로 도달한 것이다), 그리고 릴리스 상세가 인스턴스를 읽는지.
+- **`demo.resetHostAliasIP` 는 OCI 에서 필수다.** 시더는 Dex 의 **공인** issuer URL 로 토큰을
+  받는데, **파드는 이 인스턴스의 공인 주소로 나갈 수 없다.** 공인 IP 는 인터페이스에 없고
+  (`ip addr` 에 `10.0.0.239` 만 보인다) OCI 엣지가 NAT 하므로, 파드 CIDR 에서 출발한 패킷은
+  돌아오지 않는다 — `connect: no route to host`. **노드 자신은 같은 URL 에 200 으로 닿는다**
+  (그래서 노드에서 `curl` 해 보고 정상이라 판단하면 오진한다).
+
+  ```bash
+  # 인그레스 주소 — 단일 노드면 노드 사설 IP
+  kubectl get svc traefik -n kube-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+  # → helm upgrade ... --set demo.resetHostAliasIP=10.0.0.239
+  ```
+
+  호스트명은 그대로 두고 **해석만** 바꾸는 것이 요점이다. 요청이 같은 Host·SNI 를 들고 가니
+  인증서가 맞고, `DEMO_OIDC_ISSUER` 도 안 바뀐다 — issuer 는 토큰의 `iss` 클레임과 대조되므로
+  서비스 DNS 이름으로 바꾸면 그 대조가 깨진다.
+
+  빠뜨렸을 때의 증상: 리셋 Job 이 `preflight` 에서 exit 1, `wipe-k8s` 는 실행되지 않음(#105 덕에
+  아무것도 지워지지 않는다), 데모는 앞 상태 그대로 남고 **`/healthz` 는 초록**이다.
 - **리셋**: CronJob `kubeport-demo-reset`, **하루 한 번 21:00 UTC = 06:00 KST**
   (`demo.resetSchedule`). 한국 시간 새벽이라 방문자 작업을 뺏을 확률이 가장 낮다. 6시간
   주기였을 때와 달리 **실패해도 몇 시간 뒤 자동 재시도가 없다** — 한 번 건너뛰면 이틀 공백이다
@@ -347,6 +365,7 @@ port-forward 로 밖에서 잡는다.
 
 | 증상 | 확인 |
 |---|---|
+| 리셋 Job 이 `preflight: admin token: … no route to host` 로 실패 | 파드가 공인 주소로 못 나간다(OCI 엣지 NAT). `demo.resetHostAliasIP` 를 인그레스 주소로 설정 (§5). **노드에서 `curl` 하면 200 이라 정상으로 보인다** — 파드에서 확인할 것 |
 | **로그인은 되는데** 릴리스가 전부 `cluster-unreachable` / 로그 탭이 `cluster-auth-denied` | Dex 를 재시작해 서명 키가 바뀌었고 apiserver 가 옛 JWKS 를 캐싱 중이다. `journalctl -u k3s | grep 'failed to verify id token signature'` 로 확인 → `sudo systemctl restart k3s` (§5). **`/healthz` 는 DB 만 보므로 이때도 초록이다** |
 | `Identity file ... not accessible` → `Permission denied (publickey)` | 키 경로가 이 머신 것이 아니거나, **이 머신엔 아직 키 자체가 없다.** §1 "SSH 키 위치" 의 `ls` 로 둘 다 없으면 먼저 gpg 번들을 풀어야 한다 — 만든 머신은 `~/.ssh/oci_kuberport`, 번들로 복원한 머신은 `~/.ssh/kuberport-oci/oci_kuberport` |
 | `helm`/`kubectl` 이 `Kubernetes cluster unreachable: ... localhost:8080` | ssh 명령에 `export KUBECONFIG=/etc/rancher/k3s/k3s.yaml` 을 안 넣었다 (§3-2). `ssh <host> "<cmd>"` 는 프로필을 안 읽는다 |

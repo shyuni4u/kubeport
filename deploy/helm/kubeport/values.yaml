@@ -267,6 +267,15 @@ demo:
   # whichever zone kube-controller-manager runs in; the banner always assumes
   # UTC, so the two must be pinned together.
   resetTimeZone: "Etc/UTC"
+  # Resolve the Dex hostname to this address inside the reset Job, instead of
+  # whatever public DNS says. Needed where a Pod cannot reach the cluster's own
+  # public address — on OCI that address lives on the edge, not on the node, so
+  # a pod-sourced packet to it is never answered while the node reaches the same
+  # URL fine. Set it to the ingress address (the node's private IP on a
+  # single-node install; `kubectl get svc traefik -n kube-system` shows it).
+  #
+  # Empty means "use DNS", which is right anywhere the hairpin works.
+  resetHostAliasIP: ""
   # bitnami/kubectl tags were pulled from Docker Hub (2025); alpine/k8s ships
   # sh + kubectl for amd64/arm64. The init container needs a shell (sh -c).
   kubectlImage: alpine/k8s:1.31.9
