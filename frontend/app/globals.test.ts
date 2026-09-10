@@ -125,14 +125,26 @@ describe("dark-mode surface tokens", () => {
  * `SURFACES`: a hovered or selected row is a surface for the duration of the
  * hover, and the text on it does not change.
  *
- * That distinction is the one this PR's cross-review caught. `--hover` was
- * chosen by measuring the fill against the page and nothing else, which took
- * a release row's `text-muted-foreground` cells from 4.90:1 to 3.67:1 — the
- * fill got visible by making the text fail. Adding a surface obliges you to
- * re-check every foreground that can land on it, so the list is written down
- * once and both foregrounds are held to it.
+ * That distinction is the one this PR's cross-review caught, twice. `--hover`
+ * was chosen by measuring the fill against the page and nothing else, which
+ * took a release row's `text-muted-foreground` cells from 4.90:1 to 3.67:1 and
+ * its `text-primary` links to 3.20:1 — the fill got visible by making the text
+ * fail. Adding a surface obliges you to re-check every foreground that can land
+ * on it, so the list is written down once and every foreground is held to it.
+ *
+ * `--accent` is in the list although this PR did not touch it: it is a tinted
+ * decorative surface (the catalog card's icon tile, the schema tree's exposed
+ * badge) that text sits on, and leaving it out would repeat the omission in a
+ * quieter place.
  */
-const TEXT_SURFACES = ["--background", "--card", "--muted", "--hover", "--selected"] as const;
+const TEXT_SURFACES = [
+  "--background",
+  "--card",
+  "--muted",
+  "--hover",
+  "--selected",
+  "--accent",
+] as const;
 
 describe.each(["--foreground", "--muted-foreground", "--link"] as const)("%s", (fg) => {
   // The label colour has to survive the surface moving under it. shadcn's
