@@ -199,11 +199,13 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
   const [lines, setLines] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<Status>("connecting");
   const [failure, setFailure] = useState<Failure | null>(null);
-  // The kind carried by the last in-stream error frame, once the stream has
-  // actually ended. Separate from `failure`, which is a refusal read back off
-  // the wire before the stream ever opened: this one has already been rendered
-  // as a row, so the footer must not say it a second time.
-  const [terminated, setTerminated] = useState<string | null>(null);
+  // Set once the server has said the stream is over. Carries the last error
+  // frame's kind and request id when there was one, so the Reconnect button can
+  // be gated on it; an empty object means the stream simply finished.
+  //
+  // Separate from `failure`, which is a refusal read back off the wire before
+  // the stream ever opened.
+  const [terminated, setTerminated] = useState<Failure | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   // Monotonic id for stable React keys. Sliced lines (LINE_CAP) keep
   // their original id, so reconciliation only re-renders the new row.
@@ -216,10 +218,11 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     // down by a remount (instance change, [Reconnect]).
     const probe = new AbortController();
     let live = true;
-    // Set by the error-frame listener, read by onerror. A ref rather than
-    // state because the two fire in the same task and onerror has to see the
-    // frame that just arrived, not the previous render's value.
-    let endedWith: string | null = null;
+    // The last error frame seen on this stream, if any. Read when the `end`
+    // frame arrives, to say why it ended. A closure variable rather than state
+    // because the two frames can land in the same task and the second must see
+    // what the first wrote, not the previous render's value.
+    let lastError: Failure | null = null;
     const append = (entry: Omit<LogEntry, "id">) => {
       seqRef.current += 1;
       const next: LogEntry = { id: seqRef.current, ...entry };
@@ -249,10 +252,11 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     es.addEventListener("error", (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data) as { title?: string; request_id?: string };
-        // The backend closes the stream immediately after this frame (#82).
-        // Remember that, because the close itself is indistinguishable from a
-        // dropped connection by the time it reaches onerror.
-        endedWith = data.title ?? "unknown";
+        // Remembered, not acted on: an error frame ends one pod, not the
+        // stream. With ?instance=all the handler goes on following the healthy
+        // ones. The `end` frame below is what says the stream is over, and this
+        // is what it will report as the reason.
+        lastError = { title: data.title ?? "unknown", requestId: data.request_id };
         append({
           time: Date.now(),
           pod: "kubeport",
@@ -267,6 +271,16 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
         /* connection-level error — handled by onerror below */
       }
     });
+    // The server saying it is done. This is the only way to know: WHATWG gives
+    // EventSource no way to tell a finished stream from a dropped one, so
+    // without this frame the browser reopens on its own 3s timer and — this
+    // endpoint has no resume point — is served the whole container log again,
+    // forever, with the pane never clearing between rounds (#157, #162).
+    es.addEventListener("end", () => {
+      es.close();
+      setTerminated(lastError ?? {});
+      setStatus("failed");
+    });
     es.onopen = () => setStatus("connected");
     // Two very different failures arrive here, and WHATWG is what tells them
     // apart. A non-2xx response or a wrong MIME type "fails the connection":
@@ -280,28 +294,13 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     // wrong cause and pointed at a button that could not succeed (#134).
     es.onerror = (e: Event) => {
       // A server-sent `error` frame is dispatched here too — same event type,
-      // so onerror and the listener above both see it — but it is NOT the end
-      // of the stream. With ?instance=all the handler follows every pod at
-      // once and returns true after writing the frame, so the healthy pods
-      // keep sending. Only the connection-level event means the stream is over,
-      // and the absence of `data` is what separates the two.
+      // so onerror and the listener above both see it — but it is not a
+      // connection failure and must not be treated as one. The absence of
+      // `data` is what separates the two.
       if (e && "data" in e) return;
-      // The stream has ended and an error frame came down it, so this is the
-      // server hanging up on purpose rather than the network. Close the socket:
-      // EventSource has no other off switch, and left alone the browser
-      // re-opens every 3 seconds forever — including for the two kinds a retry
-      // can never clear (#157).
-      //
-      // No readRefusal here. It re-requests the same URL to read a Problem
-      // body, and we already have the reason: the frame said it, and the row
-      // is on screen. Probing would open another stream against whatever just
-      // failed, which is the load this branch exists to stop.
-      if (endedWith !== null) {
-        es.close();
-        setTerminated(endedWith);
-        setStatus("failed");
-        return;
-      }
+      // Past this point the connection really did go. If `end` had arrived we
+      // would already have closed, so anything here is a drop: let the browser
+      // retry, which is what its automatic reconnect is for.
       if (es.readyState !== ES_CLOSED) {
         setStatus("disconnected");
         return;
@@ -380,8 +379,17 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
           the reason in exactly that case, leaving stale logs under a bare
           "Not connected".
         */}
-        {status === "failed" && terminated === null && (
-          <p className="whitespace-pre-wrap text-red-300">{openErrorText(t, failure)}</p>
+        {/*
+          Suppressed only while the error row that says the same thing is still
+          in the buffer — not merely because the stream ended in one. [Clear]
+          removes that row, and so does LINE_CAP once healthy pods have written
+          2000 lines past it; tying the footer to "did it end with an error"
+          left both cases with a red status dot, an empty pane and no reason.
+        */}
+        {status === "failed" && !lines.some((l) => l.kind === "error") && (
+          <p className="whitespace-pre-wrap text-red-300">
+            {openErrorText(t, terminated ?? failure)}
+          </p>
         )}
       </div>
     </>
@@ -442,15 +450,19 @@ function openErrorText(
 function canReconnect(
   status: Status,
   failure: Failure | null,
-  terminated: string | null,
+  terminated: Failure | null,
 ): boolean {
   if (status === "disconnected") return true;
   if (status !== "failed") return false;
-  // A stream that ended mid-flight is judged by its own vocabulary: the kinds
-  // an error frame can carry are not the kinds a pre-stream refusal can, and
-  // only one of the three is worth another attempt.
+  // A stream the server ended is judged by its own vocabulary: the kinds an
+  // error frame can carry are not the kinds a pre-stream refusal can, and only
+  // one of the three is worth another attempt. No kind at all means it simply
+  // finished — a completed Job, a container that exited — and re-opening is a
+  // reasonable thing to want, since the pod may run again.
   if (terminated !== null) {
-    return !KNOWN_STREAM_ERRORS.has(terminated) || RETRYABLE_STREAM_ERRORS.has(terminated);
+    const kind = terminated.title;
+    if (!kind) return true;
+    return !KNOWN_STREAM_ERRORS.has(kind) || RETRYABLE_STREAM_ERRORS.has(kind);
   }
   const title = failure?.title;
   // Only a kind we recognise as a verdict withholds the button. A kind we have

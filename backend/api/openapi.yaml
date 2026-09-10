@@ -1032,6 +1032,7 @@ paths:
         | `log`   | `{"time": <unix ms>, "pod": "<name>", "text": "<line>"}` |
         | `ping`  | unix seconds, every 15s to keep the connection open |
         | `error` | a `Problem`, same schema and same `ErrorKind` vocabulary as any other error. `title` is `rbac-denied` (403, the caller may read the release but not its pods' logs — permanent), `cluster-auth-denied` (502, the cluster refused the forwarded token — permanent), or `k8s-error` (502, transport or anything else — retryable) |
+        | `end`   | `{"reason": "<why>"}`. The stream is over; the server closes immediately after. Always the last frame |
 
         Authentication failures before the stream opens are ordinary JSON
         Problems; once it is open, failures arrive as `error` events — and
@@ -1046,10 +1047,23 @@ paths:
         apiserver's address, the namespace and the pod, and this frame is
         rendered verbatim in the log pane (#108).
 
-        An `error` frame does not by itself mean the stream is over. It ends
-        when the server closes the connection, which happens once every pod has
-        stopped emitting. Errors buffered at that moment are flushed before the
-        close — they used to race it and were dropped about half the time.
+        An `error` frame does not by itself mean the stream is over — with
+        `instance=all` the handler keeps following the healthy pods after
+        writing one. The stream ends when every pod has stopped emitting, and
+        the `end` frame is what says so. Errors buffered at that moment are
+        flushed first — they used to race the close and were dropped about half
+        the time.
+
+        **Treat `end` as the signal to stop, not the connection closing.**
+        Nothing else distinguishes a finished stream from a dropped one:
+        WHATWG gives `EventSource` no way to tell them apart, so a client that
+        waits for the close instead reconnects on the browser's own 3s timer
+        and — since this endpoint has no resume point — is served the whole
+        container log again, indefinitely (#162). Close the connection yourself
+        when `end` arrives.
+
+        This endpoint has no way to tell a client that a *pod* is done while
+        others continue; `end` is about the whole stream.
       parameters:
         - $ref: "#/components/parameters/ReleaseID"
         - name: instance

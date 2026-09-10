@@ -33,6 +33,13 @@ type fakeK8sApplier struct {
 	// goroutine has returned. That ordering is what ends the SSE loop.
 	logStreamErr error
 
+	// logLines makes StreamLogs emit these and then close, which is what a pod
+	// that has finished does — a completed Job, a container that exited. The
+	// zero-value behaviour below (block until the client leaves) cannot express
+	// that, so nothing could test what the server does when a stream ends on
+	// its own rather than because the reader closed the tab (#162).
+	logLines []string
+
 	// accessChecks records every CheckAccess call for assertions.
 	// accessResult is the stub response; accessErr overrides it when non-nil.
 	accessChecks []k8s.AccessCheck
@@ -70,9 +77,21 @@ func (f *fakeK8sApplier) StreamLogs(ctx context.Context, _ string, _ []string) (
 		return ch, errCh
 	}
 	go func() {
+		defer close(ch)
+		defer close(errCh)
+		for _, text := range f.logLines {
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- k8s.LogLine{Pod: "web-7d9f8-x2k4l", Text: text}:
+			}
+		}
+		if len(f.logLines) > 0 {
+			// The pod is done. Closing here is the point: it is the only way to
+			// reach the handler's terminal branch without the client hanging up.
+			return
+		}
 		<-ctx.Done()
-		close(ch)
-		close(errCh)
 	}()
 	return ch, errCh
 }

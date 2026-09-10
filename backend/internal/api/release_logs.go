@@ -80,9 +80,27 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	ping := time.NewTicker(15 * time.Second)
 	defer ping.Stop()
 
+	// end announces that the stream is over, and returns false to stop it.
+	//
+	// Without this the stream just stopped, and the client could not tell that
+	// from a dropped connection — WHATWG gives EventSource no way to, so the
+	// browser reopened three seconds later and, since we open with no
+	// SinceTime, replayed the whole container log. A browser-initiated
+	// reconnect does not clear the pane either, so the same lines accumulated
+	// until they filled it. A finished Job's pod was enough (#162).
+	//
+	// The reason is ours, generic, and names nothing about the cluster — same
+	// rule as sseError (#108).
+	end := func() bool {
+		c.SSEvent("end", `{"reason":"all pods stopped emitting"}`)
+		return false
+	}
+
 	c.Stream(func(w io.Writer) bool {
 		select {
 		case <-streamCtx.Done():
+			// The reader is gone. There is no one to tell, and gin has already
+			// given up on the connection.
 			return false
 		case <-ping.C:
 			c.SSEvent("ping", time.Now().Unix())
@@ -92,7 +110,10 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 				// A closed channel is always ready, so leaving it in the
 				// select would spin. Drop it and keep serving the other one.
 				errCh = nil
-				return ch != nil
+				if ch != nil {
+					return true
+				}
+				return end()
 			}
 			if err != nil {
 				// client-go's text names the apiserver's address, the
@@ -119,7 +140,10 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 				// cases, and the error frame was being dropped about half the
 				// time. Give up this channel and let errCh drain first.
 				ch = nil
-				return errCh != nil
+				if errCh != nil {
+					return true
+				}
+				return end()
 			}
 			body, _ := json.Marshal(map[string]any{
 				"time": time.Now().UnixMilli(),
