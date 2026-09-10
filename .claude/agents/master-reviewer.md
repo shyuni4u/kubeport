@@ -35,10 +35,20 @@ cd backend && go build ./... && cd ..
 ```
 kind create cluster --name pr-review
 helm install kubeport deploy/helm/kubeport --namespace kubeport --create-namespace \
-  --set ingress.enabled=false --set postgres.enabled=true --wait --timeout 5m
+  -f deploy/helm/kubeport/ci/smoke-values.yaml --wait --timeout 5m
 kubectl --context kind-pr-review -n kubeport get pods
 kind delete cluster --name pr-review
 ```
+`ci/smoke-values.yaml` 을 쓴다. 여기 `--set` 을 나열하지 않는 이유는, 그 목록이 차트가
+요구하는 값을 따라다니지 못해 **이 파일이 먼저 썩기 때문**이다. 실제로 이전 판은
+`--set postgres.enabled=true` 였는데 그런 키는 없고(진짜 키는 `postgres.embedded`),
+helm 은 모르는 `--set` 을 조용히 무시하며, 필수값이 빠져 렌더 단계에서 죽었다 — 리뷰어가
+그 실패를 리뷰 대상 PR 탓으로 오인할 수 있었다 (#126). values 파일은 CI 의 kind smoke 가
+매번 돌리므로 깨지면 여기가 아니라 CI 가 먼저 잡는다.
+
+**helm 은 3.20.2 를 쓴다** (CI 핀). helm 4 는 문서 구분자 앞에 빈 줄을 넣어 골든 스냅샷을
+전부 바꾼다.
+
 문서에 없는 값을 넣어야 성공했다면 그것이 finding 이다 (문서에 없는 전제).
 
 ## 출력
