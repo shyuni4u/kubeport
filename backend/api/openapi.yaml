@@ -985,7 +985,8 @@ paths:
             line answers the same `template version` 404 as a missing one: a
             demo account cannot deploy the operator's templates, and a
             non-admin real user cannot deploy the demo's — the same split the
-            template list draws. It is not a 403, so the name is not confirmed.
+            template list draws. It answers like a missing version so the
+            deploy path does not add a way to probe template names.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
