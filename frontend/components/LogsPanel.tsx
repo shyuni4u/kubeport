@@ -311,9 +311,16 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     es.onerror = (e: Event) => {
       // A server-sent `error` frame is dispatched here too — same event type,
       // so onerror and the listener above both see it — but it is not a
-      // connection failure and must not be treated as one. The absence of
-      // `data` is what separates the two.
-      if (e && "data" in e) return;
+      // connection failure and must not be treated as one.
+      //
+      // Tested on the payload's type, not on the property existing: `in` walks
+      // the prototype chain, so any MessageEvent passes it, `data: null`
+      // included. A runtime that reports a lost connection as a MessageEvent
+      // (a polyfill, a proxy shim) would then be silently swallowed here — the
+      // dot would stay green over a stream that had stopped. Since `end` closes
+      // the socket itself, this branch is now the only place a drop is noticed,
+      // so it has to fail towards "assume it dropped".
+      if (e && typeof (e as MessageEvent).data === "string") return;
       // Past this point the connection really did go. If `end` had arrived we
       // would already have closed, so anything here is a drop: let the browser
       // retry, which is what its automatic reconnect is for.

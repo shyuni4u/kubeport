@@ -259,6 +259,22 @@ describe("LogsPanel in-stream termination", () => {
     expect(screen.getByRole("button", { name: "다시 연결" })).toBeInTheDocument();
   });
 
+  // The guard separating a server frame from a lost connection reads the
+  // payload's type rather than asking whether the property exists, because
+  // `in` walks the prototype chain and any MessageEvent would satisfy it. A
+  // runtime that reports a drop as a data-less MessageEvent must still be heard:
+  // `end` closes the socket itself now, so this is the only place a drop is
+  // noticed, and swallowing one leaves a green dot over a dead stream.
+  it("treats a data-less MessageEvent as a drop, not as a frame", () => {
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+
+    act(() => {
+      socket().onerror?.({ data: null } as unknown as Event);
+    });
+
+    expect(screen.getByText("끊김")).toBeInTheDocument();
+  });
+
   it("keeps retrying a drop that carried no end frame", () => {
     render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
 

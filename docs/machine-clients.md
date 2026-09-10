@@ -307,9 +307,30 @@ data:{"type":"...","title":"k8s-error","status":502,"detail":"...","request_id":
 | `cluster-auth-denied` | 502 | 클러스터가 전달된 토큰을 거부 | ✗ 재로그인으로 안 풀린다 |
 | `k8s-error` | 502 | 전송 실패 등 그 외 | ○ |
 
-`error` 프레임이 왔다고 스트림이 끝난 건 아니다; 끝은 서버가 연결을 닫는 것으로 알린다. 표준
-`EventSource` 는 연결이 닫히면 **자동 재연결**하므로, 위 표에서 재시도 ✗ 인 kind 를 받으면
-클라이언트가 직접 `close()` 해야 무한 재연결을 피한다.
+`error` 프레임이 왔다고 스트림이 끝난 건 아니다 — `instance=all` 이면 핸들러는 나머지 정상 파드를
+계속 따라간다. **끝은 `end` 프레임이 알린다**([#162](https://github.com/shyuni4u/kubeport/issues/162)):
+
+```
+event:end
+data:{"reason":"all pods stopped emitting"}
+```
+
+`end` 가 마지막 프레임이고 서버는 곧바로 연결을 닫는다. **`end` 를 받으면 클라이언트가 직접
+`close()` 한다.** 표준 `EventSource` 는 닫히면 3초 뒤 자동 재연결하는데, 이 엔드포인트에는 재개
+지점이 없어(`Last-Event-ID`·`since` 없음) **컨테이너 로그 전체가 다시 흐른다.** 로그가 다 나온
+파드 — 끝난 Job 이 그렇다 — 를 열어 두면 그 재생이 3초마다 영원히 반복된다.
+
+`end` 없이 닫힌 것은 정말로 끊긴 것이라 재연결이 맞다(단 전체 재생은 감수해야 한다). 위 표에서
+재시도 ✗ 인 kind 를 받았다면 `end` 를 기다리지 않고 바로 닫아도 된다.
+
+`reason` 은 **분기 키가 아니다** — 닫힌 어휘도 빌드 가드도 없는 사람용 문장이고, 지금은 항상
+`all pods stopped emitting` 하나다. 실패로 끝난 이유를 알아야 하면 직전 `error` 프레임의 `title`
+을 본다.
+
+**`end` 는 순증이라 기존 클라이언트를 깨뜨리지 않는다.** 이름 붙은 이벤트는 리스너를 등록하지
+않은 `EventSource` 에 전달되지 않는다(`onmessage` 는 이름 없는 이벤트만 받는다). 다만 `data:` 줄을
+전부 로그 본문으로 찍는 소박한 파서는 이 페이로드를 한 줄로 출력한다 — **페이로드가 아니라 이벤트
+이름으로 분기하라.**
 
 **429 를 만나면 `Retry-After` 를 지킨다.** `POST /v1/selfsubjectaccessreview` 와 클러스터 openapi 읽기
 두 라우트가 호출자(OIDC subject)별 토큰버킷 하나를 공유한다 — 분당 60회, 버스트 동일

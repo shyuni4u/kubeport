@@ -64,7 +64,9 @@ func TestStreamReleaseLogs_EndFrameCarriesNoClusterDetail(t *testing.T) {
 	end := events[len(events)-1]
 
 	require.Equal(t, "end", end[0])
-	for _, leak := range []string{"10.43.0.1", "6443", "web-7d9f8-x2k4l", "connection refused"} {
-		require.NotContains(t, end[1], leak, "the end frame exposed %q", leak)
-	}
+	// Pinned whole rather than screened against a list of known leaks: the
+	// payload is a constant, so anything else in it is wrong by construction —
+	// including a leak nobody thought to add to the list. #108 was client-go's
+	// text reaching this pane, and a new frame is a new way for it to.
+	require.JSONEq(t, `{"reason":"all pods stopped emitting"}`, end[1])
 }

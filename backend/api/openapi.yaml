@@ -1032,7 +1032,7 @@ paths:
         | `log`   | `{"time": <unix ms>, "pod": "<name>", "text": "<line>"}` |
         | `ping`  | unix seconds, every 15s to keep the connection open |
         | `error` | a `Problem`, same schema and same `ErrorKind` vocabulary as any other error. `title` is `rbac-denied` (403, the caller may read the release but not its pods' logs — permanent), `cluster-auth-denied` (502, the cluster refused the forwarded token — permanent), or `k8s-error` (502, transport or anything else — retryable) |
-        | `end`   | `{"reason": "<why>"}`. The stream is over; the server closes immediately after. Always the last frame |
+        | `end`   | `{"reason": "all pods stopped emitting"}` — a fixed string. The stream is over; the server closes immediately after. Always the last frame a client receives |
 
         Authentication failures before the stream opens are ordinary JSON
         Problems; once it is open, failures arrive as `error` events — and
@@ -1061,6 +1061,27 @@ paths:
         and — since this endpoint has no resume point — is served the whole
         container log again, indefinitely (#162). Close the connection yourself
         when `end` arrives.
+
+        A connection that closes **without** `end` was dropped, not finished,
+        and reopening is the right response. The only paths that omit the frame
+        are the ones where the client has already gone, so its absence never
+        means "finished, quietly". Note that reopening replays everything:
+        there is no `Last-Event-ID` and no `since` parameter, so the caller
+        either deduplicates or accepts duplicates (#107).
+
+        `reason` is human-readable text, not a branch key — it carries no closed
+        vocabulary and may be reworded, and like an `error` frame's `detail` it
+        must never carry the cluster's own words (#108). When a stream ended
+        because of a failure, the thing to branch on is the `title` of the
+        preceding `error` frame. If `reason` ever needs to vary by meaning, give
+        it an enum beside `ErrorKind` with the same build-time guard rather than
+        changing this prose.
+
+        `end` is additive: a client that registers no listener for it never sees
+        the frame — `onmessage` receives only unnamed events — and behaves
+        exactly as it did before, so nothing that worked breaks. Parsers that
+        render every `data:` line verbatim will print the payload, so branch on
+        the event name rather than on the payload.
 
         This endpoint has no way to tell a client that a *pod* is done while
         others continue; `end` is about the whole stream.
