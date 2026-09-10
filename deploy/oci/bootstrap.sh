@@ -482,8 +482,11 @@ if [[ -n "${HELM_ARCH}" ]]; then
     "${HELM_SHA256}" "${WORK}/helm.tar.gz"
 fi
 # Only when Step 4 will apply it: a re-run on a node that already has
-# cert-manager must not fail here because GitHub is unreachable.
-if [[ -z "${k3s_present}" ]] || ! k3s kubectl get ns cert-manager >/dev/null 2>&1; then
+# cert-manager must not fail here because GitHub is unreachable. The local
+# kubeconfig, as Step 4 uses: an inherited KUBECONFIG (sudo -E) would ask
+# another cluster, skip the download, and leave Step 4 without the file
+# (codex review).
+if [[ -z "${k3s_present}" ]] || ! KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s kubectl get ns cert-manager >/dev/null 2>&1; then
   fetch_verified "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml" \
     "${CERT_MANAGER_SHA256}" "${WORK}/cert-manager.yaml"
 fi
@@ -580,17 +583,22 @@ if ! command -v k3s >/dev/null 2>&1; then
   # --write-kubeconfig-mode 644: lets non-root user read kubeconfig.
   # The binary and installer verified in Step 0 — not https://get.k3s.io (#221).
   # The binary goes in first and the installer only sets up the service around
-  # it (INSTALL_K3S_SKIP_DOWNLOAD=binary): left to itself, install.sh would fetch
-  # the binary again and check it against the release's own sha256sum file.
+  # it. INSTALL_K3S_SKIP_DOWNLOAD=true, not =binary: left to itself install.sh
+  # fetches the binary again (checked only against the release's own sha256sum),
+  # and with =binary it still asks api.github.com for k3s-selinux and, on a
+  # RHEL-family host, installs an unpinned rpm. With =true it downloads nothing
+  # and only checks that /usr/local/bin/k3s runs.
   #
-  # env -u: install.sh reads INSTALL_K3S_PR/COMMIT before VERSION, and
-  # ARTIFACT_URL/GITHUB_URL move where it downloads from. Inherited from the
-  # operator's environment (sudo -E), they would silently replace what Step 0
-  # verified.
+  # env -i with an allowlist, not a list of variables to drop: install.sh reads
+  # INSTALL_K3S_PR/COMMIT before VERSION, ARTIFACT_URL/GITHUB_URL move its
+  # downloads, and it copies every inherited K3S_*, CONTAINERD_* and proxy
+  # variable into the service's env file — K3S_URL + K3S_TOKEN would even turn
+  # this server into an agent of another cluster. Inherited through sudo -E,
+  # any of these would silently replace what this script verified and writes.
+  # A host that needs a proxy puts it in /etc/default/k3s (runbook §2).
   install -m 0755 -o root -g root "${WORK}/k3s" /usr/local/bin/k3s
-  env -u INSTALL_K3S_PR -u INSTALL_K3S_COMMIT -u INSTALL_K3S_CHANNEL -u INSTALL_K3S_CHANNEL_URL \
-      -u INSTALL_K3S_ARTIFACT_URL -u INSTALL_K3S_BIN_DIR -u INSTALL_K3S_BIN_DIR_READ_ONLY -u GITHUB_URL \
-      INSTALL_K3S_SKIP_DOWNLOAD=binary INSTALL_K3S_VERSION="${K3S_VERSION}" \
+  env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" HOME=/root \
+      INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_VERSION="${K3S_VERSION}" \
       INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" \
       sh "${WORK}/k3s-install.sh"
   echo "  k3s ${K3S_VERSION} installed"

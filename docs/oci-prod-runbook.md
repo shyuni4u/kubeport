@@ -82,7 +82,9 @@ echo "KEY=$KEY"
   세 줄**(install.sh, 바이너리 두 arch)을 같은 커밋에서 바꾼다 — 바이너리 해시는 릴리스의 `sha256sum-<arch>.txt` 와 GitHub 자산
   digest 두 곳을 대조해 적는다(명령은 스크립트의 핀 블록 주석). 재구성 중 `... is not the pinned file` 로 멈추면 upstream 이
   파일을 바꾼 것이다 — 새 파일을 읽고 확인한 뒤 핀을 올리는 PR 로 해결하고, 해시 검사를 우회하지 않는다. 컨테이너 이미지는
-  이 핀의 범위 밖이다(매니페스트·k3s 번들이 태그로 받는다).
+  이 핀의 범위 밖이다(매니페스트·k3s 번들이 태그로 받는다). k3s 설치 스크립트는 **빈 환경(allowlist)** 으로 실행되므로
+  `sudo -E` 로 넘긴 `K3S_*`·프록시 변수는 서비스에 들어가지 않는다 — 프록시가 필요한 호스트는 `/etc/default/k3s` 에
+  `HTTP_PROXY`·`HTTPS_PROXY`·`NO_PROXY` 를 적는다.
 - **traefik** ingress (`traefik` class), **cert-manager** + `letsencrypt-prod` ClusterIssuer (HTTP-01).
 - **Postgres** in-cluster (`kubeport-postgres-0`, local-path PVC).
 - backend(Go) / frontend(Next.js standalone) — TLS 는 traefik 종료, 파드엔 HTTP.
