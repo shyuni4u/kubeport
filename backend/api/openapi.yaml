@@ -661,8 +661,10 @@ paths:
       summary: Get one template
       description: |
         A template the list does not show the caller answers 404, as if it did
-        not exist: one never published that the caller cannot author, and on an
-        install with a demo, one on the other side of the demo line (#238).
+        not exist: one never published whose drafts the caller may not read
+        (kubeport-admin for a global template, a member of the owning team
+        otherwise), and on an install with a demo, one on the other side of the
+        demo line (#238).
       parameters: [{ $ref: "#/components/parameters/TemplateName" }]
       responses:
         "200":
@@ -711,7 +713,8 @@ paths:
       description: |
         Drafts are listed only for the template's owners. A template the list
         does not show the caller — never published and not theirs, or on the
-        other side of the demo line (#238) — answers 404.
+        other side of the demo line (#238) — answers 404, and so does a name
+        that matches no template, with the same body.
       parameters: [{ $ref: "#/components/parameters/TemplateName" }]
       responses:
         "200":

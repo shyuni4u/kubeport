@@ -140,6 +140,19 @@ func (h *Handlers) resolveTemplateVersion(c *gin.Context, name, versionQuery str
 		return store.TemplateVersion{}, false
 	}
 	if !tpl.CurrentVersionID.Valid {
+		// Never published: only those who may read its drafts learn that it
+		// exists. Everyone else gets the answer for a name that matches
+		// nothing, as the catalog and GET /v1/templates/:name already give
+		// them (#238).
+		canRead, err := h.canReadTemplate(ctx, nil, ownershipOf(tpl))
+		if err != nil {
+			internalError(c, "resolveTemplateVersion", err)
+			return store.TemplateVersion{}, false
+		}
+		if !canRead {
+			writeError(c, http.StatusNotFound, "not-found", "template")
+			return store.TemplateVersion{}, false
+		}
 		writeError(c, http.StatusNotFound, "not-found", "template has no published version; pass ?version=N")
 		return store.TemplateVersion{}, false
 	}

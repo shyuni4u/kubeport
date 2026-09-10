@@ -335,13 +335,20 @@ func (h *Handlers) GetTemplate(c *gin.Context) {
 func (h *Handlers) ListTemplateVersions(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
-	// A name that matches no template keeps its old answer (an empty list);
-	// only an existing template on the other side of the demo line is hidden.
-	if h.deps.DemoEmailDomain != "" {
-		if tpl, err := h.deps.Store.GetTemplateByName(ctx, name); err == nil &&
-			h.templateHiddenByDemoScope(c, tpl.OwnerUserID, "template") {
-			return
-		}
+	// A name that matches no template answers exactly like a template the
+	// caller may not see — an empty 200 here would let anyone tell the two
+	// apart and confirm hidden names (#238). A lookup failure fails closed.
+	tpl, err := h.deps.Store.GetTemplateByName(ctx, name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(c, http.StatusNotFound, "not-found", "template")
+		return
+	}
+	if err != nil {
+		internalError(c, "ListTemplateVersions", err)
+		return
+	}
+	if h.templateHiddenByDemoScope(c, tpl.OwnerUserID, "template") {
+		return
 	}
 	vs, err := h.deps.Store.ListTemplateVersions(ctx, name)
 	if err != nil {

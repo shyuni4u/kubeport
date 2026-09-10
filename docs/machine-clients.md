@@ -132,8 +132,10 @@ curl -ks -X POST https://host.docker.internal:5556/token \
 - 데모 계정이 만들지 않은 템플릿은 **읽기도 배포도 403 이 아니라 404 `not-found`** 다 — `GET /v1/templates/:name`·
   `/versions`·`/versions/:v`, `POST /v1/templates/:name/render`, `POST /v1/releases` 모두 없는 템플릿·버전과 같은
   응답이다([#226](https://github.com/shyuni4u/kubeport/issues/226), [#238](https://github.com/shyuni4u/kubeport/issues/238)).
-  템플릿 목록이 숨기는 것과 같은 선이라, 이름을 알아도 내용을 받거나 존재를 확인할 수 없다. 반대 방향도 같다: 관리자가
-  아닌 실사용자에게 데모 템플릿은 없는 것으로 보인다. 선 밖에서도, **한 번도 게시되지 않은** 템플릿의 초안을 읽을 권한이
+  템플릿 목록이 숨기는 것과 같은 선이라, 이 **읽기·배포 경로에서는** 이름을 알아도 내용을 받거나 존재를 확인할 수
+  없다(아예 없는 이름과 status·title·detail 이 같다). 반대 방향도 같다: 관리자가 아닌 실사용자에게 데모 템플릿은 없는
+  것으로 보인다. **변경 경로**(`PATCH /v1/templates/:name`, 버전 생성·수정·삭제, publish·deprecate)는 아직 403 사유로
+  이름의 존재를 확인해 준다([#244](https://github.com/shyuni4u/kubeport/issues/244)). 선 밖에서도, **한 번도 게시되지 않은** 템플릿의 초안을 읽을 권한이
   없으면 403 이 아니라 404 다. 이미 게시된 템플릿의 이후 초안만 사유가 담긴 403 을 준다(이름은 이미 카탈로그에 공개돼 있어서).
 - k8s 쪽 권한도 `demo` 네임스페이스로 묶여 있다(`templates/demo-rbac.yaml`).
 
