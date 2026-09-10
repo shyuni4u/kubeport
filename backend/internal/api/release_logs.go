@@ -143,7 +143,7 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 		internalError(c, "StreamReleaseLogs: k8s client", err)
 		return
 	}
-	instances, err := cli.ListInstances(streamCtx, rel.Namespace, rel.Name)
+	instances, err := cli.ListInstances(streamCtx, rel.Namespace, rel.Name, releaseUID(rel.ID))
 	if err != nil {
 		clusterError(c, "StreamReleaseLogs: list instances", err)
 		return

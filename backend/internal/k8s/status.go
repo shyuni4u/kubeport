@@ -25,8 +25,10 @@ type Instance struct {
 	Message string `json:"message,omitempty"`
 }
 
-// ListInstances returns pod status for all pods matching the release label.
-func (c *Client) ListInstances(ctx context.Context, namespace, release string) ([]Instance, error) {
+// ListInstances returns pod status for the release's pods: those carrying its
+// name, except any that carry another release's id (#195). Pods from before
+// the id existed carry none and still count.
+func (c *Client) ListInstances(ctx context.Context, namespace, release, releaseUID string) ([]Instance, error) {
 	gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 	list, err := c.dyn.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: ReleaseLabel + "=" + release,
@@ -36,6 +38,9 @@ func (c *Client) ListInstances(ctx context.Context, namespace, release string) (
 	}
 	out := make([]Instance, 0, len(list.Items))
 	for _, p := range list.Items {
+		if !belongsTo(p.GetLabels(), release, releaseUID) {
+			continue
+		}
 		ins := Instance{Name: p.GetName()}
 		if status, ok := p.Object["status"].(map[string]any); ok {
 			if phase, ok := status["phase"].(string); ok {
@@ -211,7 +216,10 @@ const (
 //
 // Objects are looked up in the release's namespace: one that pins another is
 // refused before it is ever applied (#137).
-func (c *Client) ReleasePresence(ctx context.Context, namespace, release string, multiDoc []byte) (Presence, error) {
+//
+// An object with the release's name and another release's id is someone
+// else's (#195), so it does not count as present.
+func (c *Client) ReleasePresence(ctx context.Context, namespace, release, releaseUID string, multiDoc []byte) (Presence, error) {
 	objs, err := splitYAML(multiDoc)
 	if err != nil {
 		return PresenceUnknown, fmt.Errorf("split yaml: %w", err)
@@ -231,7 +239,7 @@ func (c *Client) ReleasePresence(ctx context.Context, namespace, release string,
 		switch {
 		case err == nil:
 			readable = true
-			if got.GetLabels()[ReleaseLabel] == release {
+			if belongsTo(got.GetLabels(), release, releaseUID) {
 				return PresenceFound, nil
 			}
 		case apierrors.IsNotFound(err):

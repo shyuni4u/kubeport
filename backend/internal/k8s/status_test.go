@@ -143,13 +143,36 @@ func TestListInstances_ReportsWhyAPodIsNotRunning(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			cli := k8s.NewForTest(cluster(pod("p-1", "rel", tc.status)))
-			got, err := cli.ListInstances(context.Background(), "demo", "rel")
+			got, err := cli.ListInstances(context.Background(), "demo", "rel", uidMine)
 			require.NoError(t, err)
 			require.Len(t, got, 1)
 			require.Equal(t, tc.wantReason, got[0].Reason)
 			require.Equal(t, tc.wantMessage, got[0].Message)
 		})
 	}
+}
+
+// #195: a pod carrying this release's name under another release's id belongs
+// to that release. Pods from before the id existed still count.
+func TestListInstances_LeavesOutPodsOfAnotherReleaseWithTheSameName(t *testing.T) {
+	running := map[string]any{"phase": "Running"}
+	mine := pod("p-mine", "rel", running)
+	theirs := pod("p-theirs", "rel", running)
+	for _, p := range []*unstructured.Unstructured{mine, theirs} {
+		labels := p.GetLabels()
+		labels[k8s.ReleaseUIDLabel] = map[*unstructured.Unstructured]string{mine: uidMine, theirs: uidOther}[p]
+		p.SetLabels(labels)
+	}
+	unstampedPod := pod("p-old", "rel", running)
+
+	got, err := k8s.NewForTest(cluster(mine, theirs, unstampedPod)).ListInstances(context.Background(), "demo", "rel", uidMine)
+
+	require.NoError(t, err)
+	names := make([]string, 0, len(got))
+	for _, ins := range got {
+		names = append(names, ins.Name)
+	}
+	require.ElementsMatch(t, []string{"p-mine", "p-old"}, names)
 }
 
 const nightly = `apiVersion: batch/v1
@@ -172,29 +195,43 @@ metadata:
 func TestReleasePresence(t *testing.T) {
 	t.Run("a cronjob between runs is still there", func(t *testing.T) {
 		cli := k8s.NewForTest(cluster(existing("batch/v1", "CronJob", "demo", "nightly", "nightly-job-demo")))
-		got, err := cli.ReleasePresence(context.Background(), "demo", "nightly-job-demo", []byte(nightly))
+		got, err := cli.ReleasePresence(context.Background(), "demo", "nightly-job-demo", uidMine, []byte(nightly))
 		require.NoError(t, err)
 		require.Equal(t, k8s.PresenceFound, got)
 	})
 
 	t.Run("gone", func(t *testing.T) {
 		cli := k8s.NewForTest(cluster())
-		got, err := cli.ReleasePresence(context.Background(), "demo", "nightly-job-demo", []byte(nightly))
+		got, err := cli.ReleasePresence(context.Background(), "demo", "nightly-job-demo", uidMine, []byte(nightly))
 		require.NoError(t, err)
 		require.Equal(t, k8s.PresenceMissing, got)
 	})
 
 	t.Run("an object now held by another release is not this one's", func(t *testing.T) {
 		cli := k8s.NewForTest(cluster(existing("batch/v1", "CronJob", "demo", "nightly", "someone-else")))
-		got, err := cli.ReleasePresence(context.Background(), "demo", "nightly-job-demo", []byte(nightly))
+		got, err := cli.ReleasePresence(context.Background(), "demo", "nightly-job-demo", uidMine, []byte(nightly))
 		require.NoError(t, err)
 		require.Equal(t, k8s.PresenceMissing, got)
+	})
+
+	t.Run("an object with this name and another release's id is not this one's (#195)", func(t *testing.T) {
+		cli := k8s.NewForTest(cluster(stamped("batch/v1", "CronJob", "demo", "nightly", "nightly-job-demo", uidOther)))
+		got, err := cli.ReleasePresence(context.Background(), "demo", "nightly-job-demo", uidMine, []byte(nightly))
+		require.NoError(t, err)
+		require.Equal(t, k8s.PresenceMissing, got)
+	})
+
+	t.Run("an object with this release's id is found", func(t *testing.T) {
+		cli := k8s.NewForTest(cluster(stamped("batch/v1", "CronJob", "demo", "nightly", "nightly-job-demo", uidMine)))
+		got, err := cli.ReleasePresence(context.Background(), "demo", "nightly-job-demo", uidMine, []byte(nightly))
+		require.NoError(t, err)
+		require.Equal(t, k8s.PresenceFound, got)
 	})
 
 	t.Run("nothing readable says nothing", func(t *testing.T) {
 		dyn := cluster()
 		forbidGet(dyn, "cronjobs")
-		got, err := k8s.NewForTest(dyn).ReleasePresence(context.Background(), "demo", "nightly-job-demo", []byte(nightly))
+		got, err := k8s.NewForTest(dyn).ReleasePresence(context.Background(), "demo", "nightly-job-demo", uidMine, []byte(nightly))
 		require.NoError(t, err)
 		require.Equal(t, k8s.PresenceUnknown, got)
 	})
@@ -202,7 +239,7 @@ func TestReleasePresence(t *testing.T) {
 	t.Run("an unreadable secret does not hide a readable absence", func(t *testing.T) {
 		dyn := cluster()
 		forbidGet(dyn, "secrets")
-		got, err := k8s.NewForTest(dyn).ReleasePresence(context.Background(), "demo", "cfg-demo", []byte(configAndSecret))
+		got, err := k8s.NewForTest(dyn).ReleasePresence(context.Background(), "demo", "cfg-demo", uidMine, []byte(configAndSecret))
 		require.NoError(t, err)
 		require.Equal(t, k8s.PresenceMissing, got)
 	})
@@ -210,7 +247,7 @@ func TestReleasePresence(t *testing.T) {
 	t.Run("an unreadable secret next to a present configmap is found", func(t *testing.T) {
 		dyn := cluster(existing("v1", "ConfigMap", "demo", "app-config", "cfg-demo"))
 		forbidGet(dyn, "secrets")
-		got, err := k8s.NewForTest(dyn).ReleasePresence(context.Background(), "demo", "cfg-demo", []byte(configAndSecret))
+		got, err := k8s.NewForTest(dyn).ReleasePresence(context.Background(), "demo", "cfg-demo", uidMine, []byte(configAndSecret))
 		require.NoError(t, err)
 		require.Equal(t, k8s.PresenceFound, got)
 	})
@@ -220,7 +257,7 @@ func TestReleasePresence(t *testing.T) {
 		dyn.PrependReactor("get", "cronjobs", func(clientgotesting.Action) (bool, runtime.Object, error) {
 			return true, nil, errors.New("connection reset")
 		})
-		got, err := k8s.NewForTest(dyn).ReleasePresence(context.Background(), "demo", "nightly-job-demo", []byte(nightly))
+		got, err := k8s.NewForTest(dyn).ReleasePresence(context.Background(), "demo", "nightly-job-demo", uidMine, []byte(nightly))
 		require.Error(t, err)
 		require.Equal(t, k8s.PresenceUnknown, got)
 	})

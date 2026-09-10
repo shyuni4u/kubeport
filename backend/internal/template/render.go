@@ -243,7 +243,7 @@ func marshalMultiDoc(docs []map[string]any) ([]byte, error) {
 
 func stampLabels(obj map[string]any, l Labels) {
 	meta := ensureMap(obj, "metadata")
-	stampLabelsOnto(meta, l)
+	stampLabelsOnto(meta, l, true)
 	anns := ensureMap(meta, "annotations")
 	anns["kubeport.io/release-id"] = l.ReleaseID
 	anns["kubeport.io/applied-by"] = l.AppliedBy
@@ -252,15 +252,24 @@ func stampLabels(obj map[string]any, l Labels) {
 	// Propagate labels to pod template metadata so runtime pods carry
 	// kubeport.io/release — otherwise release status (which queries pods by
 	// this label) returns 0 instances even when the Deployment is healthy.
+	//
+	// Only metadata.labels, never spec.selector: a workload's selector is
+	// immutable, and adding a key to it would refuse every update of an
+	// existing release.
 	if spec, ok := obj["spec"].(map[string]any); ok {
 		if tmpl, ok := spec["template"].(map[string]any); ok {
-			stampLabelsOnto(ensureMap(tmpl, "metadata"), l)
+			// A Job's pod template is immutable too, so a release with a Job
+			// applied before #195 could not be updated once the id appeared in
+			// it. The Job itself carries the id; its pods go without, and count
+			// by name the way every pod from before the id did.
+			stampLabelsOnto(ensureMap(tmpl, "metadata"), l, obj["kind"] != "Job")
 		}
-		// CronJob nests pod template under spec.jobTemplate.spec.template
+		// CronJob nests pod template under spec.jobTemplate.spec.template,
+		// which can change: it shapes the next Job, not a running one.
 		if jobTmpl, ok := spec["jobTemplate"].(map[string]any); ok {
 			if jobSpec, ok := jobTmpl["spec"].(map[string]any); ok {
 				if tmpl, ok := jobSpec["template"].(map[string]any); ok {
-					stampLabelsOnto(ensureMap(tmpl, "metadata"), l)
+					stampLabelsOnto(ensureMap(tmpl, "metadata"), l, true)
 				}
 			}
 		}
@@ -270,10 +279,17 @@ func stampLabels(obj map[string]any, l Labels) {
 // stampLabelsOnto writes kubeport-owned labels into meta. Reserved keys under
 // the kubeport.io/ prefix intentionally overwrite any user-provided values —
 // templates should not try to set these themselves.
-func stampLabelsOnto(meta map[string]any, l Labels) {
+//
+// withID adds the release's database id, which ownership, delete and status
+// select on alongside the name (#195). A preview renders with no release and
+// so without it.
+func stampLabelsOnto(meta map[string]any, l Labels, withID bool) {
 	lbls := ensureMap(meta, "labels")
 	lbls["kubeport.io/managed"] = "true"
 	lbls["kubeport.io/release"] = l.ReleaseName
 	lbls["kubeport.io/template"] = l.TemplateName
 	lbls["kubeport.io/template-version"] = fmt.Sprintf("%d", l.TemplateVersion)
+	if withID && l.ReleaseID != "" {
+		lbls["kubeport.io/release-uid"] = l.ReleaseID
+	}
 }

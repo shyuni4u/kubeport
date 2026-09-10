@@ -34,8 +34,9 @@ func registerCluster(t *testing.T, r http.Handler) string {
 	t.Helper()
 	name := "disc-" + randSuffix()
 	payload, err := json.Marshal(map[string]any{
-		"name":              name,
-		"api_url":           "https://secret-apiserver.internal",
+		"name": name,
+		// Per name: one apiserver is registered once (#195).
+		"api_url":           "https://secret-apiserver.internal/" + name,
 		"ca_bundle":         testCAPEM(),
 		"oidc_issuer_url":   "https://issuer.example",
 		"default_namespace": "default",
@@ -124,9 +125,10 @@ func TestCreateCluster_StillReturnsFullRecord(t *testing.T) {
 	admin := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: s})
 
 	name := "disc-full-" + randSuffix()
+	apiURL := "https://apiserver.internal/" + name
 	full, err := json.Marshal(map[string]any{
 		"name":            name,
-		"api_url":         "https://apiserver.internal",
+		"api_url":         apiURL,
 		"oidc_issuer_url": "https://issuer.example",
 		"ca_bundle":       testCAPEM(),
 	})
@@ -140,5 +142,5 @@ func TestCreateCluster_StillReturnsFullRecord(t *testing.T) {
 
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
-	require.Equal(t, "https://apiserver.internal", got["api_url"])
+	require.Equal(t, apiURL, got["api_url"])
 }

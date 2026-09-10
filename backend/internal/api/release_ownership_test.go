@@ -355,6 +355,92 @@ func TestCreateRelease_DoesNotGuessAnUnreadableHolder(t *testing.T) {
 	require.Empty(t, fk.applied)
 }
 
+// #195: a release's identity is its database id. The create checks ownership
+// with it, and every object it applies and stores carries it — the stored YAML
+// too, since an update's rollback re-applies that.
+func TestCreateRelease_StampsTheReleaseIDOnWhatItChecksAppliesAndStores(t *testing.T) {
+	r, fk := newTestRouterWithK8s(t)
+	clusterName := seedCluster(t, r)
+	tplName := seedPublishedTemplate(t, r)
+
+	w := do(t, r, http.MethodPost, "/v1/releases", createReleaseBody(t, clusterName, tplName, "default", "uid-"+randSuffix()))
+
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	var rel struct {
+		ID           string `json:"id"`
+		RenderedYaml string `json:"rendered_yaml"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &rel))
+	require.NotEmpty(t, rel.ID)
+	require.Equal(t, []string{rel.ID}, fk.checkedUIDs)
+	require.Len(t, fk.applied, 1)
+	require.Contains(t, string(fk.applied[0]), "kubeport.io/release-uid: "+rel.ID)
+	require.Contains(t, rel.RenderedYaml, "kubeport.io/release-uid: "+rel.ID)
+}
+
+// An update checks and applies with the release's id, which is how objects
+// from before #195 gain it.
+func TestUpdateRelease_StampsTheReleaseID(t *testing.T) {
+	r, fk := newTestRouterWithK8s(t)
+	clusterName := seedCluster(t, r)
+	tplName := seedPublishedTemplate(t, r)
+	id := createRelease(t, r, tplName, clusterName, "uidupd-"+randSuffix(), map[string]any{"Deployment[web].spec.replicas": 1})
+
+	body, err := json.Marshal(map[string]any{"version": 1, "values": map[string]any{"Deployment[web].spec.replicas": 2}})
+	require.NoError(t, err)
+	w := do(t, r, http.MethodPut, "/v1/releases/"+id, bytes.NewReader(body))
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, []string{id, id}, fk.checkedUIDs)
+	require.Contains(t, string(fk.applied[len(fk.applied)-1]), "kubeport.io/release-uid: "+id)
+}
+
+// Deleting a release removes its objects by id, and those from before #195 by
+// name — they carry no id and are this release's, the name being unique in its
+// cluster and namespace.
+func TestDeleteRelease_DeletesByIDAndUnstampedObjects(t *testing.T) {
+	r, fk := newTestRouterWithK8s(t)
+	clusterName := seedCluster(t, r)
+	tplName := seedPublishedTemplate(t, r)
+	id := createRelease(t, r, tplName, clusterName, "uiddel-"+randSuffix(), map[string]any{"Deployment[web].spec.replicas": 1})
+
+	w := do(t, r, http.MethodDelete, "/v1/releases/"+id, nil)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, []deleteCall{{UID: id, WithUnstamped: true}}, fk.deleteCalls)
+}
+
+// Objects with the release's own name under another release's id: naming the
+// release being deployed as their holder would read as nonsense, so the detail
+// says what they are and the structured list flags them.
+func TestCreateRelease_ExplainsObjectsHeldUnderTheSameName(t *testing.T) {
+	r, fk := newTestRouterWithK8s(t)
+	clusterName := seedCluster(t, r)
+	tplName := seedPublishedTemplate(t, r)
+	name := "reuse-" + randSuffix()
+	fk.applyCheck = k8s.ApplyCheck{Conflicts: []k8s.Conflict{
+		{ObjectRef: k8s.ObjectRef{Kind: "Secret", Name: "app-secret", Namespace: "default"}, Owner: name, SameName: true},
+	}}
+
+	w := do(t, r, http.MethodPost, "/v1/releases", createReleaseBody(t, clusterName, tplName, "default", name))
+
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	_, detail := problemOf(t, w.Body.Bytes())
+	require.Contains(t, detail, "left by an earlier release named")
+	var p struct {
+		Conflicts []struct {
+			Owner    string `json:"owner"`
+			SameName bool   `json:"same_name"`
+		} `json:"conflicts"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &p))
+	require.Len(t, p.Conflicts, 1)
+	require.True(t, p.Conflicts[0].SameName)
+	require.Equal(t, name, p.Conflicts[0].Owner)
+	require.Empty(t, fk.applied)
+	require.Empty(t, fk.deleteCalls, "a refused create applies nothing and cleans nothing up")
+}
+
 // Codex review: re-creating a release that already exists, as the demo seeder
 // does on every re-run, must be the plain name clash the seeder skips. With the
 // ownership check first, the release's own Secret — unreadable to a demo user,

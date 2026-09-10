@@ -3,8 +3,11 @@ package api
 import (
 	"crypto/x509"
 	"errors"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -88,6 +91,28 @@ func validateCABundle(pem string) error {
 	return nil
 }
 
+// normalizeAPIURL is an apiserver URL in one spelling: scheme and host
+// lowercased, a default port dropped, no trailing slash. A URL that does not
+// parse is compared as typed, trimmed.
+func normalizeAPIURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return strings.TrimSpace(raw)
+	}
+	scheme := strings.ToLower(u.Scheme)
+	host := strings.ToLower(u.Hostname())
+	port := u.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return scheme + "://" + host + strings.TrimRight(u.EscapedPath(), "/")
+}
+
 func (h *Handlers) CreateCluster(c *gin.Context) {
 	var r createClusterReq
 	if err := c.ShouldBindJSON(&r); err != nil {
@@ -103,6 +128,29 @@ func (h *Handlers) CreateCluster(c *gin.Context) {
 	if err := validateCABundle(r.CABundle); err != nil {
 		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
 		return
+	}
+	// One apiserver under two names let releases under each share a name and
+	// namespace — each other's objects — since the release name is unique only
+	// per registered cluster (#195). Objects now carry the release's id, so a
+	// takeover is refused either way; refusing the second registration keeps the
+	// catalog from offering two targets that are one cluster.
+	//
+	// Normalised, not compared as typed, so a trailing slash or an explicit
+	// default port is not a new cluster. A second DNS name or an IP for the same
+	// apiserver cannot be told apart from here.
+	existing, err := h.deps.Store.ListClusters(c.Request.Context())
+	if err != nil {
+		internalError(c, "CreateCluster: list clusters", err)
+		return
+	}
+	for _, other := range existing {
+		// The same name is the name clash the insert reports below, which is
+		// the clearer answer when both match.
+		if other.Name != r.Name && normalizeAPIURL(other.ApiUrl) == normalizeAPIURL(r.APIURL) {
+			writeError(c, http.StatusConflict, "conflict",
+				"api_url is already registered as cluster "+strconv.Quote(other.Name)+"; register each apiserver once")
+			return
+		}
 	}
 	cl, err := h.deps.Store.InsertCluster(c.Request.Context(), store.InsertClusterParams{
 		Name:             r.Name,

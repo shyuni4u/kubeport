@@ -155,27 +155,46 @@ func MVPResourceNames() []string {
 	return out
 }
 
-// DeleteByRelease deletes all MVP resources matching the kubeport.io/release label.
-func (c *Client) DeleteByRelease(ctx context.Context, namespace, release string) error {
-	sel := "kubeport.io/release=" + release
+// DeleteByRelease deletes the release's MVP resources: those carrying its name
+// and its id (#195). Selecting on the name alone also deleted objects of
+// another release that shares the name — one under another registration of
+// the same cluster, or one created after this release's delete left objects
+// behind.
+//
+// withUnstamped also deletes objects that carry the name and no id at all,
+// which is how every object applied before #195 looks. A release being deleted
+// needs it; the cleanup of a create that failed does not, since nothing applied
+// for a release that did not exist yet lacks the id.
+//
+// Still a delete-collection by label, not a list and a delete per object: the
+// demo Role may delete Secrets it may not list.
+func (c *Client) DeleteByRelease(ctx context.Context, namespace, release, releaseUID string, withUnstamped bool) error {
+	if releaseUID == "" {
+		return errors.New("delete by release: no release id")
+	}
+	selectors := []string{ReleaseLabel + "=" + release + "," + ReleaseUIDLabel + "=" + releaseUID}
+	if withUnstamped {
+		selectors = append(selectors, ReleaseLabel+"="+release+",!"+ReleaseUIDLabel)
+	}
 	errs := make([]error, 0, len(mvpResources))
 	for _, r := range mvpResources {
-		if err := ctx.Err(); err != nil {
-			errs = append(errs, err)
-			break
-		}
-		if err := c.dyn.Resource(r).Namespace(namespace).
-			DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: sel}); err != nil {
-			// RBAC-scoped callers (e.g. demo accounts, see
-			// deploy/helm/kubeport/templates/demo-rbac.yaml) may lack access
-			// to resource groups/kinds this release never actually used
-			// (no networking group, no daemonsets/pvc, ...). Skip those
-			// instead of failing the whole release delete; a resource that's
-			// simply already gone is likewise not an error here.
-			if apierrors.IsForbidden(err) || apierrors.IsNotFound(err) {
-				continue
+		for _, sel := range selectors {
+			if err := ctx.Err(); err != nil {
+				return errors.Join(append(errs, err)...)
 			}
-			errs = append(errs, fmt.Errorf("delete %s: %w", r.Resource, err))
+			if err := c.dyn.Resource(r).Namespace(namespace).
+				DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: sel}); err != nil {
+				// RBAC-scoped callers (e.g. demo accounts, see
+				// deploy/helm/kubeport/templates/demo-rbac.yaml) may lack access
+				// to resource groups/kinds this release never actually used
+				// (no networking group, no daemonsets/pvc, ...). Skip those
+				// instead of failing the whole release delete; a resource that's
+				// simply already gone is likewise not an error here.
+				if apierrors.IsForbidden(err) || apierrors.IsNotFound(err) {
+					continue
+				}
+				errs = append(errs, fmt.Errorf("delete %s: %w", r.Resource, err))
+			}
 		}
 	}
 	return errors.Join(errs...)

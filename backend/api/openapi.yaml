@@ -1765,6 +1765,14 @@ components:
                 description: |
                   The object exists but the caller may not read it, so its
                   holder could not be looked up. Omitted when false.
+              same_name:
+                type: boolean
+                description: |
+                  `owner` is the name of the release being deployed, but the
+                  object carries another release's id (#195): it was left by an
+                  earlier release of that name, or is held by a release of that
+                  name under another registration of the same cluster. Omitted
+                  when false.
         pinned_namespace:
           type: object
           description: |

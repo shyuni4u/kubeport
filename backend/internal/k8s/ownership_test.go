@@ -46,6 +46,21 @@ func existing(apiVersion, kind, namespace, name, owner string) *unstructured.Uns
 	return u
 }
 
+// stamped is existing with the release id label that releases applied since
+// #195 carry.
+func stamped(apiVersion, kind, namespace, name, owner, uid string) *unstructured.Unstructured {
+	u := existing(apiVersion, kind, namespace, name, owner)
+	labels := u.GetLabels()
+	labels[k8s.ReleaseUIDLabel] = uid
+	u.SetLabels(labels)
+	return u
+}
+
+const (
+	uidMine  = "11111111-1111-1111-1111-111111111111"
+	uidOther = "22222222-2222-2222-2222-222222222222"
+)
+
 // forbidGet makes reading resource fail the way the demo Role makes reading
 // Secrets fail: allowed to write, not to read.
 func forbidGet(dyn *dynamicfake.FakeDynamicClient, resource string) {
@@ -112,7 +127,7 @@ metadata:
 func TestCheckApply_NothingThereIsNoConflict(t *testing.T) {
 	cli := k8s.NewForTest(cluster())
 
-	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp), true)
+	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", uidMine, []byte(webApp), true)
 
 	require.NoError(t, err)
 	require.Empty(t, got.Conflicts)
@@ -127,7 +142,7 @@ func TestCheckApply_OwnObjectsAreNotAConflict(t *testing.T) {
 		existing("apps/v1", "Deployment", "demo", "web", "verify-autorefresh"),
 	))
 
-	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp), false)
+	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", uidMine, []byte(webApp), false)
 
 	require.NoError(t, err)
 	require.Empty(t, got.Conflicts)
@@ -143,13 +158,66 @@ func TestCheckApply_AnotherReleasesObjectsAreConflicts(t *testing.T) {
 		// Service/web absent: creating it takes nothing from anyone.
 	))
 
-	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp), true)
+	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", uidMine, []byte(webApp), true)
 
 	require.NoError(t, err)
 	require.Equal(t, []k8s.Conflict{
 		{ObjectRef: k8s.ObjectRef{Kind: "ConfigMap", Name: "web-config", Namespace: "demo"}, Owner: "web-app-demo"},
 		{ObjectRef: k8s.ObjectRef{Kind: "Deployment", Name: "web", Namespace: "demo"}, Owner: "web-app-demo"},
 	}, got.Conflicts)
+}
+
+// #195 (a): release web is deleted, a Kind it could not delete is left behind
+// with its name, and someone creates a new release called web. The objects are
+// not the new release's, whatever the name says.
+func TestCheckApply_LeftoversOfAnEarlierReleaseWithTheSameNameAreConflictsOnCreate(t *testing.T) {
+	for name, obj := range map[string]*unstructured.Unstructured{
+		"applied before the id existed": existing("apps/v1", "Deployment", "demo", "web", "verify-autorefresh"),
+		"applied with another id":       stamped("apps/v1", "Deployment", "demo", "web", "verify-autorefresh", uidOther),
+	} {
+		t.Run(name, func(t *testing.T) {
+			cli := k8s.NewForTest(cluster(obj))
+
+			got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", uidMine, []byte(webApp), true)
+
+			require.NoError(t, err)
+			require.Equal(t, []k8s.Conflict{
+				{ObjectRef: k8s.ObjectRef{Kind: "Deployment", Name: "web", Namespace: "demo"}, Owner: "verify-autorefresh", SameName: true},
+			}, got.Conflicts)
+		})
+	}
+}
+
+// #195 (b): the same apiserver registered under two cluster names. A release
+// under the second name shares the victim's name and namespace; on update as
+// well as create, its id is what tells them apart.
+func TestCheckApply_TheSameNameUnderAnotherIDIsAConflictOnUpdate(t *testing.T) {
+	cli := k8s.NewForTest(cluster(
+		stamped("apps/v1", "Deployment", "demo", "web", "verify-autorefresh", uidOther),
+	))
+
+	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", uidMine, []byte(webApp), false)
+
+	require.NoError(t, err)
+	require.Equal(t, []k8s.Conflict{
+		{ObjectRef: k8s.ObjectRef{Kind: "Deployment", Name: "web", Namespace: "demo"}, Owner: "verify-autorefresh", SameName: true},
+	}, got.Conflicts)
+}
+
+// The release's own stamped objects stay its own, on update and on a create
+// retried after a partial apply.
+func TestCheckApply_ObjectsWithTheReleasesIDAreItsOwn(t *testing.T) {
+	for _, creating := range []bool{false, true} {
+		cli := k8s.NewForTest(cluster(
+			stamped("v1", "ConfigMap", "demo", "web-config", "verify-autorefresh", uidMine),
+			stamped("apps/v1", "Deployment", "demo", "web", "verify-autorefresh", uidMine),
+		))
+
+		got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", uidMine, []byte(webApp), creating)
+
+		require.NoError(t, err)
+		require.Empty(t, got.Conflicts, "creating=%v", creating)
+	}
 }
 
 // Something kubeport did not create is not free to take either: applying with
@@ -159,7 +227,7 @@ func TestCheckApply_UnlabelledObjectIsAConflictWithNoOwner(t *testing.T) {
 		existing("apps/v1", "Deployment", "demo", "web", ""),
 	))
 
-	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp), true)
+	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", uidMine, []byte(webApp), true)
 
 	require.NoError(t, err)
 	require.Equal(t, []k8s.Conflict{
@@ -173,7 +241,7 @@ func TestCheckApply_SameNameInAnotherNamespaceIsNotAConflict(t *testing.T) {
 		existing("apps/v1", "Deployment", "other", "web", "web-app-demo"),
 	))
 
-	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp), true)
+	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", uidMine, []byte(webApp), true)
 
 	require.NoError(t, err)
 	require.Empty(t, got.Conflicts)
@@ -191,7 +259,7 @@ func TestCheckApply_OnCreateAnUnreadableObjectThatExistsIsAConflict(t *testing.T
 		apierrors.NewAlreadyExists(schema.GroupResource{Resource: "secrets"}, "app-secret"))
 	cli := k8s.NewForTest(dyn)
 
-	got, err := cli.CheckApply(context.Background(), "demo", "visitor-cfg", []byte(appSecret), true)
+	got, err := cli.CheckApply(context.Background(), "demo", "visitor-cfg", uidMine, []byte(appSecret), true)
 
 	require.NoError(t, err)
 	require.Equal(t, []k8s.Conflict{
@@ -207,7 +275,7 @@ func TestCheckApply_OnCreateAnUnreadableObjectThatIsAbsentIsFree(t *testing.T) {
 	creates := answerCreate(dyn, "secrets", nil)
 	cli := k8s.NewForTest(dyn)
 
-	got, err := cli.CheckApply(context.Background(), "demo", "visitor-cfg", []byte(appSecret), true)
+	got, err := cli.CheckApply(context.Background(), "demo", "visitor-cfg", uidMine, []byte(appSecret), true)
 
 	require.NoError(t, err)
 	require.Empty(t, got.Conflicts)
@@ -224,7 +292,7 @@ func TestCheckApply_OnCreateAnObjectTheProbeCannotAnswerIsUnverified(t *testing.
 		apierrors.NewForbidden(schema.GroupResource{Resource: "secrets"}, "app-secret", errors.New("no create either")))
 	cli := k8s.NewForTest(dyn)
 
-	got, err := cli.CheckApply(context.Background(), "demo", "visitor-cfg", []byte(appSecret), true)
+	got, err := cli.CheckApply(context.Background(), "demo", "visitor-cfg", uidMine, []byte(appSecret), true)
 
 	require.NoError(t, err)
 	require.Empty(t, got.Conflicts)
@@ -241,7 +309,7 @@ func TestCheckApply_OnUpdateAnUnreadableObjectIsUnverifiedAndNotProbed(t *testin
 	creates := answerCreate(dyn, "secrets", nil)
 	cli := k8s.NewForTest(dyn)
 
-	got, err := cli.CheckApply(context.Background(), "demo", "cfg-demo", []byte(appSecret), false)
+	got, err := cli.CheckApply(context.Background(), "demo", "cfg-demo", uidMine, []byte(appSecret), false)
 
 	require.NoError(t, err)
 	require.Empty(t, got.Conflicts)
@@ -266,7 +334,7 @@ kind: ConfigMap
 metadata:
   name: app-config
 `
-	got, err := cli.CheckApply(context.Background(), "demo", "visitor-cfg", []byte(doc), false)
+	got, err := cli.CheckApply(context.Background(), "demo", "visitor-cfg", uidMine, []byte(doc), false)
 
 	require.NoError(t, err)
 	require.Equal(t, []k8s.Conflict{
@@ -283,7 +351,7 @@ func TestCheckApply_OtherErrorsSurface(t *testing.T) {
 	})
 	cli := k8s.NewForTest(dyn)
 
-	_, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp), true)
+	_, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", uidMine, []byte(webApp), true)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "connection reset")
@@ -307,7 +375,7 @@ metadata:
   name: web
   namespace: kube-system
 `
-	_, err := cli.CheckApply(context.Background(), "demo", "rel", []byte(doc), true)
+	_, err := cli.CheckApply(context.Background(), "demo", "rel", uidMine, []byte(doc), true)
 
 	var mismatch *k8s.NamespaceMismatchError
 	require.ErrorAs(t, err, &mismatch)
@@ -327,7 +395,7 @@ metadata:
   name: web
   namespace: demo
 `
-	got, err := cli.CheckApply(context.Background(), "demo", "rel", []byte(doc), true)
+	got, err := cli.CheckApply(context.Background(), "demo", "rel", uidMine, []byte(doc), true)
 
 	require.NoError(t, err)
 	require.Empty(t, got.Conflicts)

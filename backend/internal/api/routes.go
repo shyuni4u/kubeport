@@ -15,8 +15,10 @@ import (
 // K8sApplier applies, deletes, or inspects resources on a k8s cluster.
 type K8sApplier interface {
 	ApplyAll(ctx context.Context, ns string, yaml []byte) error
-	DeleteByRelease(ctx context.Context, namespace, release string) error
-	ListInstances(ctx context.Context, namespace, release string) ([]k8s.Instance, error)
+	// Release methods take the release's name and its database id: the name
+	// alone is not an identity (#195). See k8s.ReleaseUIDLabel.
+	DeleteByRelease(ctx context.Context, namespace, release, releaseUID string, withUnstamped bool) error
+	ListInstances(ctx context.Context, namespace, release, releaseUID string) ([]k8s.Instance, error)
 	StreamLogs(ctx context.Context, namespace string, pods []string, since time.Time) (<-chan k8s.LogLine, <-chan error)
 	// CheckAccess proxies a SelfSubjectAccessReview so the caller can ask
 	// "can I do verb on resource?" before attempting an action.
@@ -24,10 +26,10 @@ type K8sApplier interface {
 	// CheckApply reports which objects in a rendered release already belong to
 	// another release, or to nothing kubeport created, before anything is
 	// applied (#161). creating is false for an update.
-	CheckApply(ctx context.Context, namespace, release string, yaml []byte, creating bool) (k8s.ApplyCheck, error)
+	CheckApply(ctx context.Context, namespace, release, releaseUID string, yaml []byte, creating bool) (k8s.ApplyCheck, error)
 	// ReleasePresence reports whether a release's rendered objects are still
 	// in the cluster, for a release that has no pods (#33).
-	ReleasePresence(ctx context.Context, namespace, release string, yaml []byte) (k8s.Presence, error)
+	ReleasePresence(ctx context.Context, namespace, release, releaseUID string, yaml []byte) (k8s.Presence, error)
 }
 
 // K8sClientFactory creates per-request k8s clients using the caller's token.

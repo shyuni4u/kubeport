@@ -183,16 +183,16 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		return
 	}
 
-	// ReleaseID uses r.Name rather than DB UUID because the UUID is not known
-	// until after INSERT. The release name is unique within (cluster, namespace)
-	// and is used as the kubeport.io/release label for k8s resource tracking.
-	rendered, err := template.Render(tv.ResourcesYaml, tv.UiSpecYaml, r.Values, template.Labels{
+	// Rendered here to refuse bad values before a row or a cluster call exists,
+	// and rendered again below once the row gives the release its id, which
+	// every object carries (#195).
+	labels := template.Labels{
 		ReleaseName:     r.Name,
 		TemplateName:    r.Template,
 		TemplateVersion: r.Version,
-		ReleaseID:       r.Name,
 		AppliedBy:       u.Email,
-	})
+	}
+	rendered, err := template.Render(tv.ResourcesYaml, tv.UiSpecYaml, r.Values, labels)
 	if err != nil {
 		renderProblem(c, err)
 		return
@@ -250,22 +250,52 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, "internal", "failed to create release")
 		return
 	}
-	if !h.checkOwnership(c, cli, "CreateRelease", r.Namespace, r.Name, rendered) {
-		// checkOwnership has answered. Remove the row it refused, so no release
-		// is left claiming objects that were never applied.
+	// dropRow removes the row of a create that stops before anything was
+	// applied, so no release is left claiming objects it never had.
+	dropRow := func() {
 		rollbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if delErr := h.deps.Store.DeleteRelease(rollbackCtx, rel.ID); delErr != nil {
-			log.Printf("rollback: failed to delete refused release %s from DB: %v", rel.Name, delErr)
+			log.Printf("rollback: failed to delete release %s from DB: %v", rel.Name, delErr)
 		}
+	}
+
+	// The release's identity from here on is its id, not its name (#195): a
+	// name frees up when a release is deleted, while objects it could not
+	// delete still carry it. The stored YAML carries the id too, since an
+	// update's rollback re-applies it.
+	uid := releaseUID(rel.ID)
+	labels.ReleaseID = uid
+	rendered, err = template.Render(tv.ResourcesYaml, tv.UiSpecYaml, r.Values, labels)
+	if err == nil {
+		err = h.deps.Store.UpdateReleaseValuesAndVersion(ctx, store.UpdateReleaseValuesAndVersionParams{
+			ID:                rel.ID,
+			TemplateVersionID: tv.ID,
+			ValuesJson:        r.Values,
+			RenderedYaml:      string(rendered),
+		})
+	}
+	if err != nil {
+		dropRow()
+		internalError(c, "CreateRelease: render with release id", err)
+		return
+	}
+	rel.RenderedYaml = string(rendered)
+
+	if !h.checkOwnership(c, cli, "CreateRelease", r.Namespace, r.Name, uid, rendered) {
+		// checkOwnership has answered.
+		dropRow()
 		return
 	}
 	if err := cli.ApplyAll(ctx, r.Namespace, rendered); err != nil {
 		// Clean up partially created k8s resources with an independent context
-		// and a timeout so cleanup doesn't hang indefinitely.
+		// and a timeout so cleanup doesn't hang indefinitely. Only objects with
+		// this release's id: nothing applied for a release that did not exist
+		// until now lacks it, and an unstamped object with the same name is an
+		// earlier release's.
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if delErr := cli.DeleteByRelease(cleanupCtx, r.Namespace, r.Name); delErr != nil {
+		if delErr := cli.DeleteByRelease(cleanupCtx, r.Namespace, r.Name, uid, false); delErr != nil {
 			log.Printf("rollback: failed to delete k8s resources for release %s: %v", r.Name, delErr)
 		}
 		if delErr := h.deps.Store.DeleteRelease(cleanupCtx, rel.ID); delErr != nil {
@@ -384,7 +414,8 @@ func (h *Handlers) GetRelease(c *gin.Context) {
 		return
 	}
 
-	instances, err := cli.ListInstances(ctx, rel.Namespace, rel.Name)
+	uid := releaseUID(rel.ID)
+	instances, err := cli.ListInstances(ctx, rel.Namespace, rel.Name, uid)
 	if err != nil {
 		respondReleaseOverview(c, rel, nil, "cluster-unreachable")
 		return
@@ -394,7 +425,7 @@ func (h *Handlers) GetRelease(c *gin.Context) {
 		// Deployment scaled to zero (#33). Only a cluster that shows the
 		// objects gone earns resources-missing, whose banner says they were
 		// deleted outside kubeport; a cluster that cannot tell leaves it unknown.
-		presence, err := cli.ReleasePresence(ctx, rel.Namespace, rel.Name, []byte(rel.RenderedYaml))
+		presence, err := cli.ReleasePresence(ctx, rel.Namespace, rel.Name, uid, []byte(rel.RenderedYaml))
 		if err == nil && presence == k8s.PresenceMissing {
 			respondReleaseOverview(c, rel, instances, "resources-missing")
 			return
@@ -527,7 +558,10 @@ func (h *Handlers) DeleteRelease(c *gin.Context) {
 			internalError(c, "DeleteRelease: k8s client", err)
 			return
 		}
-		if err := cli.DeleteByRelease(ctx, rel.Namespace, rel.Name); err != nil {
+		// withUnstamped: objects applied before #195 carry the name and no id,
+		// and are this release's — the name is unique in its cluster and
+		// namespace. Objects with the name and another release's id are not.
+		if err := cli.DeleteByRelease(ctx, rel.Namespace, rel.Name, releaseUID(rel.ID), true); err != nil {
 			upstreamError(c, "DeleteRelease: delete resources", err)
 			return
 		}
@@ -547,6 +581,13 @@ func (h *Handlers) DeleteRelease(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"deleted": true, "force": force})
+}
+
+// releaseUID is a release's id as the canonical UUID text its objects carry in
+// the kubeport.io/release-uid label (#195). pgtype.UUID has no String method.
+func releaseUID(id pgtype.UUID) string {
+	b := id.Bytes
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 func parseUUID(s string) (pgtype.UUID, error) {

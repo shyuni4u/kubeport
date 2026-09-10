@@ -331,6 +331,45 @@ describe("DeployClient", () => {
     expect(alert).not.toHaveTextContent(/입력한 값을 확인한 뒤/);
   });
 
+  // #195: objects carrying this release's own name under another release's id.
+  // "The release 'web' uses them" while deploying web would read as nonsense.
+  it("says objects are an earlier same-name release's, not this one's", async () => {
+    const alert = await submitAndReadAlert(() =>
+      jsonResponse(
+        {
+          title: "resource-conflict",
+          status: 409,
+          conflicts: [
+            { kind: "Secret", name: "app-secret", namespace: "demo", owner: "nightly", same_name: true },
+          ],
+        },
+        409,
+      ),
+    );
+
+    expect(alert).toHaveTextContent(/같은 이름의 예전 릴리스가 남긴 리소스/);
+    expect(alert).not.toHaveTextContent(/''nightly'' 릴리스가|'nightly' 릴리스가/);
+    expect(alert).not.toHaveTextContent(/kubeport 밖에서 만든 것/);
+  });
+
+  it("still names another release when one holds objects next to a same-name leftover", async () => {
+    const alert = await submitAndReadAlert(() =>
+      jsonResponse(
+        {
+          title: "resource-conflict",
+          status: 409,
+          conflicts: [
+            { kind: "Secret", name: "app-secret", namespace: "demo", owner: "nightly", same_name: true },
+            { kind: "CronJob", name: "nightly", namespace: "demo", owner: "nightly-job-demo" },
+          ],
+        },
+        409,
+      ),
+    );
+
+    expect(alert).toHaveTextContent("nightly-job-demo");
+  });
+
   it("does not claim kubeport did not create a holder it cannot see", async () => {
     const alert = await submitAndReadAlert(() =>
       jsonResponse(

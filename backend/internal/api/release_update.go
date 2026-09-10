@@ -112,13 +112,14 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 		return
 	}
 
-	// Render with new values. ReleaseID uses rel.Name for consistency with
-	// CreateRelease (labels use the stable human name, not the UUID).
+	// Render with new values, stamped with the release's id (#195). Objects
+	// applied before the id existed gain it on this apply.
+	uid := releaseUID(rel.ID)
 	rendered, err := template.Render(tv.ResourcesYaml, tv.UiSpecYaml, req.Values, template.Labels{
 		ReleaseName:     rel.Name,
 		TemplateName:    rel.TemplateName,
 		TemplateVersion: req.Version,
-		ReleaseID:       rel.Name,
+		ReleaseID:       uid,
 		AppliedBy:       u.Email,
 	})
 	if err != nil {
@@ -142,7 +143,7 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 	// A new version can add an object, and an exposed metadata.name can rename
 	// one, so an update can land on another release's objects as readily as a
 	// create can (#161).
-	if !h.checkOwnership(c, cli, "UpdateRelease", rel.Namespace, rel.Name, rendered) {
+	if !h.checkOwnership(c, cli, "UpdateRelease", rel.Namespace, rel.Name, uid, rendered) {
 		return
 	}
 	if err := cli.ApplyAll(ctx, rel.Namespace, rendered); err != nil {

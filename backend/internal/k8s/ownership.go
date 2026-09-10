@@ -12,9 +12,49 @@ import (
 
 // ReleaseLabel names the release that owns an object. template.stampLabels
 // writes it on every rendered object, and DeleteByRelease and ListInstances
-// select on it. Ownership is by release name, which is unique within a
-// cluster and namespace — the same scope an object lives in.
+// select on it.
 const ReleaseLabel = "kubeport.io/release"
+
+// ReleaseUIDLabel carries the owning release's database id. A name alone was
+// not an identity (#195): a deleted release frees its name while objects it
+// could not delete still carry it, and the same apiserver registered under two
+// cluster names lets two releases share one. The id is a label, not only an
+// annotation, because deleting has to select on it — the demo Role may
+// delete-collection Secrets it may not list.
+const ReleaseUIDLabel = "kubeport.io/release-uid"
+
+// heldBy reports whether labels mark an object as this release's own, and
+// whether it carries this release's name under another release's id.
+//
+// An object without an id was applied before #195. On an update it is the
+// release's own — the name is unique within the release's cluster and
+// namespace, and this apply stamps the id on it. On a create it cannot be:
+// the release has just been inserted, so an object already carrying its name
+// was left by an earlier release of that name.
+func heldBy(labels map[string]string, release, uid string, creating bool) (own, sameName bool) {
+	if labels[ReleaseLabel] != release {
+		return false, false
+	}
+	got := labels[ReleaseUIDLabel]
+	switch {
+	case uid != "" && got == uid:
+		return true, false
+	case got == "" && !creating:
+		return true, false
+	default:
+		return false, true
+	}
+}
+
+// belongsTo is heldBy for reading a release's state: an object with the
+// release's name counts unless it carries another release's id.
+func belongsTo(labels map[string]string, release, uid string) bool {
+	if labels[ReleaseLabel] != release {
+		return false
+	}
+	got := labels[ReleaseUIDLabel]
+	return got == "" || got == uid
+}
 
 // ObjectRef names one object a rendered release would apply.
 type ObjectRef struct {
@@ -34,6 +74,11 @@ type Conflict struct {
 	ObjectRef
 	Owner        string
 	OwnerUnknown bool
+	// SameName marks an object whose Owner is this release's own name under
+	// another release's id: left by an earlier release of that name, or held
+	// by a release of that name under another registration of this cluster
+	// (#195).
+	SameName bool
 }
 
 // ApplyCheck is what CheckApply found.
@@ -117,7 +162,10 @@ func placeInNamespace(o *unstructured.Unstructured, namespace string) error {
 // arbitrate — a field manager per release, with Force off — which every
 // existing release, applied under the single "kubeport" manager, would
 // conflict with on update.
-func (c *Client) CheckApply(ctx context.Context, namespace, release string, multiDoc []byte, creating bool) (ApplyCheck, error) {
+//
+// releaseUID is the release's database id; an object is the release's own only
+// when it carries that id, or — on an update — no id at all (see heldBy).
+func (c *Client) CheckApply(ctx context.Context, namespace, release, releaseUID string, multiDoc []byte, creating bool) (ApplyCheck, error) {
 	var out ApplyCheck
 	objs, err := splitYAML(multiDoc)
 	if err != nil {
@@ -142,8 +190,9 @@ func (c *Client) CheckApply(ctx context.Context, namespace, release string, mult
 		existing, err := c.dyn.Resource(gvr).Namespace(namespace).Get(ctx, o.GetName(), metav1.GetOptions{})
 		switch {
 		case err == nil:
-			if owner := existing.GetLabels()[ReleaseLabel]; owner != release {
-				out.Conflicts = append(out.Conflicts, Conflict{ObjectRef: ref, Owner: owner})
+			labels := existing.GetLabels()
+			if own, sameName := heldBy(labels, release, releaseUID, creating); !own {
+				out.Conflicts = append(out.Conflicts, Conflict{ObjectRef: ref, Owner: labels[ReleaseLabel], SameName: sameName})
 			}
 		case apierrors.IsNotFound(err):
 			// Free to create.
