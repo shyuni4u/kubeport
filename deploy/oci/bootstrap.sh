@@ -119,6 +119,34 @@ AUTH_API="${BOOTSTRAP_AUTH_API:-${auth_api_default}}"
 AUTH_FILE=/etc/rancher/k3s/auth.yaml
 CFG_FILE=/etc/rancher/k3s/config.yaml
 skip_auth_write=""
+
+# auth_entry <file> <issuer-url> — the jwt entry for that issuer, as
+# audiences, username claim, username prefix and any other keys it sets,
+# separated by \037. Nothing when the file has no such entry. It reads the
+# layout this script and k3s-auth-config.sh write (one key per line, username
+# as a flow map); a file in another shape has no entry here, so it is refused
+# rather than guessed at.
+auth_entry() {
+  awk -v want="$2" '
+    function flush() {
+      if (inblock && url == want && !done) { printf "%s\037%s\037%s\037%s\n", aud, claim, prefix, other; done = 1 }
+    }
+    /^[ \t]*-[ \t]*issuer:[ \t]*$/ { flush(); inblock = 1; url = ""; aud = ""; claim = ""; prefix = "<unset>"; other = ""; next }
+    /^[^ \t-]/ { flush(); inblock = 0; next }
+    !inblock { next }
+    /^[ \t]*url:/ { v = $0; sub(/^[ \t]*url:[ \t]*/, "", v); gsub(/["\t ]/, "", v); url = v; next }
+    /^[ \t]*audiences:/ { v = $0; sub(/^[ \t]*audiences:[ \t]*/, "", v); aud = v; next }
+    /^[ \t]*claimMappings:[ \t]*$/ { next }
+    /^[ \t]*username:/ {
+      v = $0
+      if (match(v, /claim:[ \t]*"?[^",} \t]*/)) { c = substr(v, RSTART, RLENGTH); sub(/claim:[ \t]*"?/, "", c); claim = c }
+      if (match(v, /prefix:[ \t]*"[^"]*"/)) { p = substr(v, RSTART, RLENGTH); sub(/prefix:[ \t]*"/, "", p); sub(/"$/, "", p); prefix = p }
+      next
+    }
+    /^[ \t]*[A-Za-z]+:/ { k = $0; sub(/^[ \t]*/, "", k); sub(/:.*/, "", k); other = other (other == "" ? "" : ",") k; next }
+    END { flush() }
+  ' "$1" 2>/dev/null
+}
 if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
   if (( auth_minor < 30 )); then
     echo "error: installed k3s ${installed} (k8s 1.${auth_minor}) predates structured authentication; upgrade k3s first (a restart, so ask first — runbook §2)" >&2
@@ -135,12 +163,35 @@ if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
     problems=()
     grep -qF "authentication-config=${AUTH_FILE}" "${CFG_FILE}" 2>/dev/null ||
       problems+=("${CFG_FILE} does not pass authentication-config=${AUTH_FILE}")
-    grep -qF "\"${BOOTSTRAP_OIDC_CLIENT_ID}\"" "${AUTH_FILE}" 2>/dev/null ||
-      problems+=("${AUTH_FILE} does not list BOOTSTRAP_OIDC_CLIENT_ID as an audience")
     # AUTH_API, not the default: an override this script accepted and wrote on
     # the first run must pass on the rerun (codex review).
     grep -qxF "apiVersion: ${AUTH_API}" "${AUTH_FILE}" 2>/dev/null ||
       problems+=("${AUTH_FILE} is not apiVersion ${AUTH_API}, which this run selects")
+    # Every field Step 2 would write for the requested issuer, compared in that
+    # issuer's own entry — not the whole file, where the Dex entry could supply
+    # a match. Keeping the file on a partial match dropped a changed issuer or
+    # username claim silently and still said the client was trusted (codex
+    # review). Entries for other issuers (Dex) are left out of the comparison
+    # and kept. The file carries no groups mapping from either script, so any
+    # mapping beyond username is a difference too.
+    want_issuer="${BOOTSTRAP_OIDC_ISSUER:-https://accounts.google.com}"
+    want_claim="${BOOTSTRAP_OIDC_USERNAME_CLAIM:-email}"
+    # `|| true`: with no auth.yaml awk fails, and under `set -eo pipefail` a
+    # failing substitution would end the script here without a word.
+    entry="$(auth_entry "${AUTH_FILE}" "${want_issuer}" | head -n1 || true)"
+    if [[ -z "${entry}" ]]; then
+      problems+=("${AUTH_FILE} has no jwt entry for issuer ${want_issuer} (BOOTSTRAP_OIDC_ISSUER)")
+    else
+      IFS=$'\037' read -r e_aud e_claim e_prefix e_other <<<"${entry}"
+      [[ "${e_aud}" == *"\"${BOOTSTRAP_OIDC_CLIENT_ID}\""* ]] ||
+        problems+=("the ${want_issuer} entry does not list BOOTSTRAP_OIDC_CLIENT_ID as an audience")
+      [[ "${e_claim}" == "${want_claim}" ]] ||
+        problems+=("the ${want_issuer} entry maps usernames from claim '${e_claim}', and this run asks for '${want_claim}' (BOOTSTRAP_OIDC_USERNAME_CLAIM)")
+      [[ -z "${e_prefix}" ]] ||
+        problems+=("the ${want_issuer} entry gives usernames the prefix '${e_prefix}', and bootstrap writes none")
+      [[ -z "${e_other}" ]] ||
+        problems+=("the ${want_issuer} entry also sets ${e_other}, which bootstrap does not write")
+    fi
     if (( ${#problems[@]} )); then
       echo "error: bootstrap keeps an existing k3s auth config as it is, and this one does not match the run:" >&2
       printf '  - %s\n' "${problems[@]}" >&2
