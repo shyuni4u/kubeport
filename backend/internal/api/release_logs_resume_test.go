@@ -28,8 +28,15 @@ import (
 // actually hurt.
 
 // resumeRelease opens the log stream with the given request tweak and returns
-// the SSE body plus the options the fake saw.
+// the SSE body. The fake records what the handler passed down.
 func resumeRelease(t *testing.T, applier *fakeK8sApplier, tweak func(*http.Request)) string {
+	t.Helper()
+	return resumeReleaseAt(t, applier, "", tweak)
+}
+
+// resumeReleaseAt is the same with a query string, for the cases that turn on
+// which instance was asked for.
+func resumeReleaseAt(t *testing.T, applier *fakeK8sApplier, query string, tweak func(*http.Request)) string {
 	t.Helper()
 	s := testStore(t)
 	r := api.NewRouter(config.Config{}, api.Deps{
@@ -50,7 +57,8 @@ func resumeRelease(t *testing.T, applier *fakeK8sApplier, tweak func(*http.Reque
 	var created map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/releases/"+created["id"].(string)+"/logs", nil)
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/releases/"+created["id"].(string)+"/logs"+query, nil)
 	req.Header.Set("Authorization", "Bearer x")
 	tweak(req)
 	rec := newStreamRecorder()
@@ -69,7 +77,7 @@ func TestStreamReleaseLogs_LogFramesCarryTheirTimeAsId(t *testing.T) {
 		logLineAt: wrote,
 	}
 
-	body := resumeRelease(t, applier, func(*http.Request) {})
+	body := resumeReleaseAt(t, applier, "?instance=web-7d9f8-x2k4l", func(*http.Request) {})
 
 	require.Contains(t, body, "id:"+wrote.Format(time.RFC3339Nano),
 		"the log frame carried no resumable id — got: %s", body)
@@ -85,7 +93,7 @@ func TestStreamReleaseLogs_ResumesFromLastEventID(t *testing.T) {
 	}
 	resume := time.Date(2026, 9, 9, 7, 36, 36, 123_456_789, time.UTC)
 
-	resumeRelease(t, applier, func(r *http.Request) {
+	resumeReleaseAt(t, applier, "?instance=web-7d9f8-x2k4l", func(r *http.Request) {
 		r.Header.Set("Last-Event-ID", resume.Format(time.RFC3339Nano))
 	})
 
@@ -104,8 +112,8 @@ func TestStreamReleaseLogs_ResumesFromSinceQuery(t *testing.T) {
 	}
 	resume := time.Date(2026, 9, 9, 7, 30, 0, 0, time.UTC)
 
-	resumeRelease(t, applier, func(r *http.Request) {
-		r.URL.RawQuery = "since=" + resume.Format(time.RFC3339Nano)
+	resumeReleaseAt(t, applier, "?instance=web-1", func(r *http.Request) {
+		r.URL.RawQuery += "&since=" + resume.Format(time.RFC3339Nano)
 	})
 
 	require.NotNil(t, applier.sinceSeen)
@@ -126,7 +134,7 @@ func TestStreamReleaseLogs_DropsLinesTheClientAlreadyHas(t *testing.T) {
 		logLineAts: []time.Time{resume.Add(-100 * time.Millisecond), resume.Add(100 * time.Millisecond)},
 	}
 
-	body := resumeRelease(t, applier, func(r *http.Request) {
+	body := resumeReleaseAt(t, applier, "?instance=web-1", func(r *http.Request) {
 		r.Header.Set("Last-Event-ID", resume.Format(time.RFC3339Nano))
 	})
 
@@ -256,9 +264,55 @@ func TestStreamReleaseLogs_AnUnstampedLineDoesNotAdvanceTheResumePoint(t *testin
 		logLineAts: []time.Time{stamped, {}},
 	}
 
-	body := resumeRelease(t, applier, func(*http.Request) {})
+	body := resumeReleaseAt(t, applier, "?instance=web-1", func(*http.Request) {})
 
 	require.Contains(t, body, "id:"+stamped.Format(time.RFC3339Nano))
 	require.Equal(t, 1, strings.Count(body, "id:"),
 		"the unstamped line carried an id, which would move the cursor to now — got: %s", body)
+}
+
+// `all` matching a single pod must still not resume.
+//
+// A one-replica release rolls over: the client was following pod A through
+// `instance=all`, A goes away, B takes its place. The reconnect matches one pod
+// either time, so a count-based gate stays on — and hands B the cursor A had
+// reached, dropping whatever B wrote before that instant. Which pods `all`
+// covers is not fixed, so nothing derived from one of them can be carried
+// across a reconnect (#172).
+func TestStreamReleaseLogs_AllDoesNotResumeEvenWithOnePod(t *testing.T) {
+	applier := &fakeK8sApplier{
+		instances: []k8s.Instance{{Name: "web-after-rollout"}},
+		logLines:  []string{"the replacement pod's startup"},
+		logLineAt: time.Date(2026, 9, 9, 7, 0, 0, 0, time.UTC),
+	}
+
+	body := resumeRelease(t, applier, func(r *http.Request) {
+		// The cursor the client reached on the pod that is now gone.
+		r.Header.Set("Last-Event-ID", "2026-09-09T12:00:00Z")
+	})
+
+	require.Nil(t, applier.sinceSeen,
+		"a cursor from one pod was applied to the pod that replaced it")
+	require.Contains(t, body, "the replacement pod's startup")
+	require.NotContains(t, body, "id:", "an `all` stream handed out a resume point")
+}
+
+// ...and naming the instance is what turns it on. The name is in the URL, so it
+// means the same pod on every reconnect — and if that pod is gone the request
+// is a 404, not a different pod inheriting its cursor.
+func TestStreamReleaseLogs_NamingAnInstanceResumes(t *testing.T) {
+	resume := time.Date(2026, 9, 9, 7, 36, 36, 0, time.UTC)
+	applier := &fakeK8sApplier{
+		instances: []k8s.Instance{{Name: "web-1"}, {Name: "web-2"}},
+		logLines:  []string{"only this pod"},
+		logLineAt: resume.Add(time.Minute),
+	}
+
+	body := resumeReleaseAt(t, applier, "?instance=web-1", func(r *http.Request) {
+		r.Header.Set("Last-Event-ID", resume.Format(time.RFC3339Nano))
+	})
+
+	require.NotNil(t, applier.sinceSeen, "a named instance did not resume")
+	require.True(t, applier.sinceSeen.Equal(resume))
+	require.Contains(t, body, "id:")
 }

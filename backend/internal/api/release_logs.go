@@ -92,10 +92,18 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	// 11:00, and B's hour is gone. Losing lines is worse than resending them,
 	// so a multi-pod stream emits no ids and the client replays, as before.
 	//
-	// Following one instance is how a reader watches one thing, and it is the
-	// case the resume is for. Doing it for `all` needs a cursor that keeps a
-	// position per pod, which is a different design (#172).
-	resumable := len(pods) == 1
+	// Gated on the request naming an instance, not on how many pods it happens
+	// to match right now. `all` matching one pod is not the same thing: it is a
+	// set, and its membership changes. A single-replica release that rolls over
+	// matches one pod before and one pod after, both times passing a count
+	// check — and the cursor from the pod that went away would be applied to
+	// the pod that replaced it, dropping the new one's startup logs. A named
+	// instance is a stable identity: it is in the URL, and if it is gone the
+	// request is a 404 rather than a different pod wearing its cursor.
+	//
+	// Doing this for `all` needs a cursor that keeps a position per pod, which
+	// is a different design (#172).
+	resumable := want != "all"
 	if !resumable {
 		resumeFrom = time.Time{}
 	}

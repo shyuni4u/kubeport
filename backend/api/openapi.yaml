@@ -1095,12 +1095,20 @@ paths:
         `?since=`, which wins if both are present.
 
         **`instance=all` emits no ids and ignores a resume point**, so it
-        replays from the beginning as it always did. One instant cannot stand
-        for progress through several pods: they are followed concurrently and
-        merged without ordering, so the newest id belongs to whichever pod wrote
-        last, and resuming every pod from it would skip — silently and for good
-        — whatever a slower pod had not reached yet. Resending lines is the
-        lesser cost. A per-pod cursor is tracked as #172.
+        replays from the beginning as it always did — including when it happens
+        to match a single pod, because which pods it covers is not fixed. One
+        instant cannot stand for progress through a set: pods are followed
+        concurrently and merged without ordering, so the newest id belongs to
+        whichever wrote last, and resuming every pod from it would skip —
+        silently and for good — whatever a slower one had not reached. Nor can
+        it survive the set changing: a single-replica release that rolls over
+        would hand the cursor of the pod that left to the pod that replaced it.
+        Resending lines is the lesser cost. A per-pod cursor is tracked as #172.
+
+        Naming an instance is what makes a stream resumable, because the name is
+        in the request: it means the same pod on every reconnect, and if that pod
+        is gone the answer is `404 no-pods` rather than a different pod
+        inheriting its position.
 
         A line the kubelet could not stamp carries no id either. Its `time` is
         the server's clock so the row has something to render, and letting that
