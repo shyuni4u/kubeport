@@ -1,11 +1,16 @@
 "use client";
 
-import { useFormatter } from "next-intl";
+import { useFormatter, useNow } from "next-intl";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 type Props = { iso: string; className?: string };
+
+// How often the phrase is recomputed. Relative phrases change by the minute at
+// the finest, and half that keeps a tab opened after a client-side navigation
+// from showing a stale phrase for long.
+export const RELATIVE_TIME_UPDATE_MS = 30_000;
 
 /**
  * "2시간 전" with the exact timestamp one hover, focus or tap away (spec §6.2).
@@ -30,9 +35,22 @@ type Props = { iso: string; className?: string };
  */
 export function RelativeTime({ iso, className }: Props) {
   const format = useFormatter();
+  // The provider's `now` is pinned per request so the server render and the
+  // hydrated render agree — but the root layout does not re-render on a
+  // client-side navigation, so that `now` froze at the last full page load.
+  // Seven minutes on the deploy form, then router.push to the new release:
+  // "7분 후 배포", and a phrase that never moved while the tab stayed open
+  // (#100). useNow starts from the same pinned value, so hydration still
+  // matches, and then keeps the clock running.
+  const now = useNow({ updateInterval: RELATIVE_TIME_UPDATE_MS });
   const date = new Date(iso);
   // A malformed timestamp from the backend should not take the page down.
   if (Number.isNaN(date.getTime())) return null;
+  // Until the first tick the clock can still be behind, and the app and the
+  // database clocks can disagree by seconds — either would show something that
+  // just happened as "in a few seconds". Nothing here is scheduled for the
+  // future, so a future timestamp reads as now.
+  const shown = date.getTime() > now.getTime() ? now : date;
   const absolute = format.dateTime(date, {
     dateStyle: "medium",
     timeStyle: "short",
@@ -54,7 +72,7 @@ export function RelativeTime({ iso, className }: Props) {
           />
         }
       >
-        <time dateTime={iso}>{format.relativeTime(date)}</time>
+        <time dateTime={iso}>{format.relativeTime(shown, now)}</time>
         <span className="sr-only"> ({absolute})</span>
       </TooltipTrigger>
       <TooltipContent>{absolute}</TooltipContent>

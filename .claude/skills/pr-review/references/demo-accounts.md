@@ -26,7 +26,7 @@
 
 - 허용: 데모 네임스페이스(`demo`) 안에서 UI 가 제공하는 모든 동작 — 템플릿 작성/발행, 배포, 삭제, 팀 페이지 열람. **만든 것은 직접 지운다** — 리셋은 하루 한 번(KST 06:00)뿐이라 남긴 것이 최대 하루,
   건너뛴 사이클이면 이틀 남는다. 삭제까지가 검증의 일부다.
-- **배포 폼의 네임스페이스는 `demo` 로 바꿔 넣는다.** 폼은 `default` 가 채워진 채로 열리지만(`DeployClient.tsx` 의 `meta` 초기값) 데모 계정 권한은 `demo` 에만 있다(`demo-rbac.yaml`). 그대로 두면 RBAC 사전 점검이 거부하고 제출이 막힌다(#69). **알려진 결함이고 [#179](https://github.com/shyuni4u/kubeport/issues/179) 로 추적한다 — 같은 내용으로 새 이슈를 올리지 말고 거기에 코멘트할 것.** 단 그 거부 문장이 방문자에게 다음에 뭘 해야 하는지 알려주는지는 여전히 볼 거리다. 네임스페이스 도움말(`namespaceHelp`)이 "관리자가 따로 알려주지 않았다면 그대로 두세요" 라고 안내해서, 도움말을 믿은 방문자가 정확히 막히는 쪽으로 간다.
+- **배포 폼의 구역은 데모 세션이면 `demo` 로 시작한다**([#179](https://github.com/shyuni4u/kubeport/issues/179) 에서 고침 — `DEMO_NAMESPACE`). 데모 계정 권한은 `demo` 에만 있으므로(`demo-rbac.yaml`) **폼이 `default` 로 열리거나 권한 확인이 거부하면 회귀다** — #179 에 코멘트하지 말고 새 이슈로 올린다. 구역을 다른 값으로 바꿨을 때 거부 문장이 방문자에게 다음에 뭘 해야 하는지 알려주는지는 여전히 볼 거리다.
 - 금지: 실제 Google 계정 로그인. 데모 계정으로 UI 밖의 API 를 직접 호출해 대량 생성. 같은 동작 반복 5회 이상(부하).
 - 시드 데이터: 템플릿 3개(`web-app`, `nightly-job`, `app-with-config`), 릴리스 2개(`web-app-demo` 정상, `nightly-job-demo` 는 존재하지 않는 이미지로 의도적 실패 — 실패 설명 배너가 정상). 근거: 템플릿은 `backend/cmd/seed-demo/templates.go` + `cmd/seed-demo/fixtures/`, 릴리스는 `backend/cmd/seed-demo/seed.go`.
 
