@@ -2,6 +2,30 @@
 {{- if not .Values.dex.enabled -}}
 {{- fail "demo.enabled requires dex.enabled=true" -}}
 {{- end -}}
+{{- /*
+The demo account emails are checked at render time, not first at the reset
+Job. An account outside demo.emailDomain is not a demo account to the backend:
+it skips demo scoping and is a full kubeport-admin whose password the landing
+page prints (#208). An account Dex does not know is one the landing page tells
+visitors to sign in with (#209). The domain is compared case-insensitively, as
+the backend's IsDemoEmail does; the Dex account must match exactly, because the
+same address is rendered into RBAC subjects and admin emails that are compared
+with the token's email as-is.
+*/ -}}
+{{- $suffix := printf "@%s" (lower (required "demo.emailDomain is required when demo.enabled=true" .Values.demo.emailDomain)) -}}
+{{- $dexEmails := list -}}
+{{- range .Values.dex.staticPasswords -}}
+{{- $dexEmails = append $dexEmails (.email | default "") -}}
+{{- end -}}
+{{- range $key, $email := dict "demo.adminEmail" .Values.demo.adminEmail "demo.userEmail" .Values.demo.userEmail -}}
+{{- $email = $email | default "" -}}
+{{- if not (hasSuffix $suffix (lower $email)) -}}
+{{- fail (printf "%s (%s) must end in %s: an account outside the demo domain skips demo scoping and is a full kubeport-admin" $key $email $suffix) -}}
+{{- end -}}
+{{- if not (has $email $dexEmails) -}}
+{{- fail (printf "%s (%s) must match one of dex.staticPasswords[].email exactly: the landing page tells visitors to sign in with it" $key $email) -}}
+{{- end -}}
+{{- end -}}
 apiVersion: v1
 kind: Namespace
 metadata:
