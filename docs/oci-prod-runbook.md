@@ -77,10 +77,12 @@ echo "KEY=$KEY"
   가장 오래된 지원 마이너와 그 종료일로 올린다. 날짜가 지나면 bootstrap 이 경고를 찍는다(멈추지는 않는다 — 복구 중에 달력 때문에 실패하지 않게).
   `BOOTSTRAP_K3S_VERSION` 오버라이드는 v1.30 이상만 받고, 지원 종료 마이너는 `BOOTSTRAP_K3S_ALLOW_EOL=1` 일 때만 깐다.
   재실행은 이미 있는 `auth.yaml`·`config.yaml` 을 덮어쓰지 않는다(Dex 신뢰 보존).
-  **설치물 해시 핀**(#221): `bootstrap.sh` 는 k3s `install.sh`·helm tarball·cert-manager 매니페스트를 버전 태그 URL 에서 받아
-  스크립트에 적힌 sha256 과 대조한 뒤에만 실행·적용한다. 버전을 올릴 때는 **해시도 같은 커밋에서** 바꾼다(명령은 스크립트의
-  핀 블록 주석). 재구성 중 `... is not the pinned file` 로 멈추면 upstream 이 파일을 바꾼 것이다 — 새 파일을 읽고 확인한 뒤 핀을
-  올리는 PR 로 해결하고, 해시 검사를 우회하지 않는다.
+  **설치물 해시 핀**(#221): `bootstrap.sh` 는 k3s `install.sh`·k3s 바이너리(arm64/amd64)·helm tarball·cert-manager 매니페스트를
+  버전 태그 URL 에서 받아 스크립트에 적힌 sha256 과 대조한 뒤에만 실행·적용한다. k3s 버전을 올릴 때는 `K3S_PINNED` 와 **해시
+  세 줄**(install.sh, 바이너리 두 arch)을 같은 커밋에서 바꾼다 — 바이너리 해시는 릴리스의 `sha256sum-<arch>.txt` 와 GitHub 자산
+  digest 두 곳을 대조해 적는다(명령은 스크립트의 핀 블록 주석). 재구성 중 `... is not the pinned file` 로 멈추면 upstream 이
+  파일을 바꾼 것이다 — 새 파일을 읽고 확인한 뒤 핀을 올리는 PR 로 해결하고, 해시 검사를 우회하지 않는다. 컨테이너 이미지는
+  이 핀의 범위 밖이다(매니페스트·k3s 번들이 태그로 받는다).
 - **traefik** ingress (`traefik` class), **cert-manager** + `letsencrypt-prod` ClusterIssuer (HTTP-01).
 - **Postgres** in-cluster (`kubeport-postgres-0`, local-path PVC).
 - backend(Go) / frontend(Next.js standalone) — TLS 는 traefik 종료, 파드엔 HTTP.

@@ -22,9 +22,10 @@
 #        BOOTSTRAP_OIDC_CLIENT_ID=<google-client-id> bash bootstrap.sh
 #   # k3s 는 고정 버전(K3S_PINNED)으로 깔린다 (#194). 복구 등으로 다른 버전이 필요할 때만:
 #   sudo BOOTSTRAP_EMAIL=you@example.com BOOTSTRAP_K3S_VERSION=v1.xx.y+k3s1 bash bootstrap.sh
-#   # 오버라이드 버전에는 그 태그의 install.sh sha256 을 함께 준다 (#221 — 설치 스크립트도 내용으로 고정):
+#   # 오버라이드 버전에는 그 태그의 install.sh 와 k3s 바이너리 sha256 을 함께 준다 (#221 — 내용으로 고정):
 #   #   BOOTSTRAP_K3S_INSTALL_SHA256=$(curl -fsSL https://raw.githubusercontent.com/k3s-io/k3s/v1.xx.y%2Bk3s1/install.sh | sha256sum | cut -d' ' -f1)
-#   #   (먼저 그 파일을 읽어 보고 나서.) 이미 k3s 가 깔린 노드에서는 설치하지 않으므로 필요 없다.
+#   #   BOOTSTRAP_K3S_BIN_SHA256=<릴리스 sha256sum-<arch>.txt 의 k3s(-arm64) 줄 — 자산 digest 와 대조>
+#   #   (먼저 그 파일들을 확인하고 나서.) 이미 k3s 가 깔린 노드에서는 설치하지 않으므로 필요 없다.
 #   # v1.30 미만은 거부, 지원 종료 마이너(K3S_MIN_SUPPORTED_MINOR 미만)는 BOOTSTRAP_K3S_ALLOW_EOL=1 일 때만.
 #   # AuthenticationConfiguration apiVersion 은 apiserver 버전에서 고른다 (BOOTSTRAP_AUTH_API 로 덮을 수 있음).
 #
@@ -57,20 +58,28 @@ K3S_MIN_SUPPORTED_MINOR=34
 K3S_MIN_SUPPORTED_UNTIL="2026-10-27"
 K3S_VERSION="${BOOTSTRAP_K3S_VERSION:-${K3S_PINNED}}"
 
-# The installers are pinned by content, not only by version (#221). The k3s
-# version above fixed the binary, but the script that downloads and verifies it
-# came from https://get.k3s.io, and helm from the get-helm-3 script on helm's
-# main branch — both whatever those URLs served on the day, run as root. Each
-# artifact below is now fetched from a release-tagged URL and checked against
-# the sha256 here before anything runs or is applied (Step 0). If upstream
-# changes one, the hash stops matching and bootstrap stops — it never falls back
-# to the old unpinned URL.
+# What bootstrap downloads and runs as root is pinned by content, not only by
+# version (#221). A version tag names a release; it does not fix what the
+# release serves. The script used to pipe https://get.k3s.io and helm's
+# get-helm-3 from its main branch into a root shell, and the k3s binary was
+# checked only against a sha256sum file from the same release — replace both
+# assets and the check still passes. Each file below is now fetched from a
+# release-tagged URL and checked against the sha256 written here before
+# anything runs or is applied (Step 0). If upstream changes one, the hash stops
+# matching and bootstrap stops — it never falls back to an unpinned URL.
 #
-# Bump a version and its hash in the same commit (docs/oci-prod-runbook.md §2):
-#   k3s:          curl -fsSL "https://raw.githubusercontent.com/k3s-io/k3s/<ver with + as %2B>/install.sh" | sha256sum
-#   helm:         https://get.helm.sh/helm-<ver>-linux-<arch>.tar.gz.sha256sum (published next to the tarball)
-#   cert-manager: curl -fsSL https://github.com/cert-manager/cert-manager/releases/download/<ver>/cert-manager.yaml | sha256sum
+# Not covered: container images. The cert-manager manifest and k3s's bundled
+# components (traefik, coredns, ...) pull their images by tag at run time.
+#
+# Bump a version and its hashes in the same commit (docs/oci-prod-runbook.md §2):
+#   k3s install.sh: curl -fsSL "https://raw.githubusercontent.com/k3s-io/k3s/<ver with + as %2B>/install.sh" | sha256sum
+#   k3s binary:     the k3s / k3s-arm64 lines of the release's sha256sum-<arch>.txt, cross-checked with the
+#                   asset digest: gh api repos/k3s-io/k3s/releases/tags/<ver> --jq '.assets[]|.name+" "+.digest'
+#   helm:           https://get.helm.sh/helm-<ver>-linux-<arch>.tar.gz.sha256sum (published next to the tarball)
+#   cert-manager:   curl -fsSL https://github.com/cert-manager/cert-manager/releases/download/<ver>/cert-manager.yaml | sha256sum
 K3S_INSTALL_SHA256_PINNED="46177d4c99440b4c0311b67233823a8e8a2fc09693f6c89af1a7161e152fbfad"  # install.sh @ v1.36.3+k3s1
+K3S_BIN_SHA256_ARM64_PINNED="c9a209103f480f163b7c6a56f00862b4481927b284dc29a3716bb70d886691a8"  # k3s-arm64 @ v1.36.3+k3s1
+K3S_BIN_SHA256_AMD64_PINNED="2f98a9f8fe5782479ee2d54e70a1b10a7f6fd4cae8d38ed3098452dc6eed76b5"  # k3s @ v1.36.3+k3s1
 HELM_VERSION="v3.20.2"  # CI's helm (.github/workflows/helm.yml)
 HELM_SHA256_ARM64="5ea2d6bc2cda3f8edf985e028809f5a9278f404fb8ab24044de9b7cb9b79a691"
 HELM_SHA256_AMD64="258e830a9e613c8a7a302d6059b4bb3b9758f2f3e1bb8ea0d707ce10a9a72fea"
@@ -122,39 +131,56 @@ if command -v k3s >/dev/null 2>&1; then
   installed="$(k3s --version 2>/dev/null | awk 'NR==1 {print $3}' || true)"
 fi
 
-# Which installer hash Step 0 checks. Only a node that will install k3s needs
-# one. The pin's hash comes with the pin; an override has no hash in this file,
-# so it must bring its own — otherwise it would run whatever the tag serves,
-# which is the unpinned install this replaced (#221).
-K3S_INSTALL_SHA256=""
+# The CPU architecture picks the k3s binary and the helm tarball. Only a node
+# that will install one of them needs a pinned build for it.
+helm_present=""
+command -v helm >/dev/null 2>&1 && helm_present=1
+ARCH=""
+if [[ -z "${k3s_present}" || -z "${helm_present}" ]]; then
+  case "$(uname -m)" in
+    aarch64|arm64) ARCH=arm64 ;;
+    x86_64|amd64)  ARCH=amd64 ;;
+    *)
+      echo "error: no pinned k3s/helm build for $(uname -m); add its downloads and sha256 to bootstrap.sh" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+# Which k3s hashes Step 0 checks — the installer script and the binary. Only a
+# node that will install k3s needs them. The pin's hashes come with the pin; an
+# override has none in this file, so it must bring both — otherwise it would run
+# whatever the tag serves, which is the unpinned install this replaced (#221).
+K3S_INSTALL_SHA256=""; K3S_BIN_SHA256=""; K3S_BIN_ASSET=""
 if [[ -z "${k3s_present}" ]]; then
+  if [[ "${ARCH}" == arm64 ]]; then K3S_BIN_ASSET=k3s-arm64; pinned_bin="${K3S_BIN_SHA256_ARM64_PINNED}"
+  else K3S_BIN_ASSET=k3s; pinned_bin="${K3S_BIN_SHA256_AMD64_PINNED}"; fi
   if [[ "${K3S_VERSION}" == "${K3S_PINNED}" ]]; then
     K3S_INSTALL_SHA256="${K3S_INSTALL_SHA256_PINNED}"
-    if [[ -n "${BOOTSTRAP_K3S_INSTALL_SHA256:-}" && "${BOOTSTRAP_K3S_INSTALL_SHA256}" != "${K3S_INSTALL_SHA256_PINNED}" ]]; then
-      echo "error: BOOTSTRAP_K3S_INSTALL_SHA256 differs from the pinned hash for ${K3S_PINNED}; leave it unset, or change the pin in bootstrap.sh" >&2
-      exit 1
-    fi
+    K3S_BIN_SHA256="${pinned_bin}"
+    for given in INSTALL:"${BOOTSTRAP_K3S_INSTALL_SHA256:-}":"${K3S_INSTALL_SHA256}" BIN:"${BOOTSTRAP_K3S_BIN_SHA256:-}":"${K3S_BIN_SHA256}"; do
+      IFS=: read -r which value pinned <<<"${given}"
+      if [[ -n "${value}" && "${value}" != "${pinned}" ]]; then
+        echo "error: BOOTSTRAP_K3S_${which}_SHA256 differs from the pinned hash for ${K3S_PINNED}; leave it unset, or change the pin in bootstrap.sh" >&2
+        exit 1
+      fi
+    done
   else
     K3S_INSTALL_SHA256="${BOOTSTRAP_K3S_INSTALL_SHA256:-}"
-    if [[ ! "${K3S_INSTALL_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
-      echo "error: BOOTSTRAP_K3S_VERSION=${K3S_VERSION} needs BOOTSTRAP_K3S_INSTALL_SHA256 — the sha256 (64 lowercase hex) of" >&2
-      echo "  https://raw.githubusercontent.com/k3s-io/k3s/${K3S_VERSION//+/%2B}/install.sh, after reading it" >&2
+    K3S_BIN_SHA256="${BOOTSTRAP_K3S_BIN_SHA256:-}"
+    if [[ ! "${K3S_INSTALL_SHA256}" =~ ^[0-9a-f]{64}$ || ! "${K3S_BIN_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+      echo "error: BOOTSTRAP_K3S_VERSION=${K3S_VERSION} needs BOOTSTRAP_K3S_INSTALL_SHA256 and BOOTSTRAP_K3S_BIN_SHA256 — the sha256 (64 lowercase hex) of" >&2
+      echo "  https://raw.githubusercontent.com/k3s-io/k3s/${K3S_VERSION//+/%2B}/install.sh (after reading it) and of" >&2
+      echo "  https://github.com/k3s-io/k3s/releases/download/${K3S_VERSION//+/%2B}/${K3S_BIN_ASSET} (check it against the release's asset digest)" >&2
       exit 1
     fi
   fi
 fi
 
-# helm's tarball is per CPU architecture; only needed when helm is not installed.
 HELM_ARCH=""; HELM_SHA256=""
-if ! command -v helm >/dev/null 2>&1; then
-  case "$(uname -m)" in
-    aarch64|arm64) HELM_ARCH=arm64; HELM_SHA256="${HELM_SHA256_ARM64}" ;;
-    x86_64|amd64)  HELM_ARCH=amd64; HELM_SHA256="${HELM_SHA256_AMD64}" ;;
-    *)
-      echo "error: no pinned helm for $(uname -m); add its tarball and sha256 to bootstrap.sh" >&2
-      exit 1
-      ;;
-  esac
+if [[ -z "${helm_present}" ]]; then
+  HELM_ARCH="${ARCH}"
+  if [[ "${ARCH}" == arm64 ]]; then HELM_SHA256="${HELM_SHA256_ARM64}"; else HELM_SHA256="${HELM_SHA256_AMD64}"; fi
 fi
 auth_minor="$(k3s_minor_of "${installed}" || true)"
 auth_minor="${auth_minor:-${k3s_minor}}"
@@ -448,13 +474,19 @@ fetch_verified() {
 if [[ -z "${k3s_present}" ]]; then
   fetch_verified "https://raw.githubusercontent.com/k3s-io/k3s/${K3S_VERSION//+/%2B}/install.sh" \
     "${K3S_INSTALL_SHA256}" "${WORK}/k3s-install.sh"
+  fetch_verified "https://github.com/k3s-io/k3s/releases/download/${K3S_VERSION//+/%2B}/${K3S_BIN_ASSET}" \
+    "${K3S_BIN_SHA256}" "${WORK}/k3s"
 fi
 if [[ -n "${HELM_ARCH}" ]]; then
   fetch_verified "https://get.helm.sh/helm-${HELM_VERSION}-linux-${HELM_ARCH}.tar.gz" \
     "${HELM_SHA256}" "${WORK}/helm.tar.gz"
 fi
-fetch_verified "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml" \
-  "${CERT_MANAGER_SHA256}" "${WORK}/cert-manager.yaml"
+# Only when Step 4 will apply it: a re-run on a node that already has
+# cert-manager must not fail here because GitHub is unreachable.
+if [[ -z "${k3s_present}" ]] || ! k3s kubectl get ns cert-manager >/dev/null 2>&1; then
+  fetch_verified "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml" \
+    "${CERT_MANAGER_SHA256}" "${WORK}/cert-manager.yaml"
+fi
 
 echo
 echo "== Step 1/4: OS firewall (iptables) — open 80/443 =="
@@ -546,9 +578,21 @@ if ! command -v k3s >/dev/null 2>&1; then
   # and nothing listening on the host — traefik does NOT self-bind hostPorts.
   # traefik is the only LB Service here, so there is no port contention.
   # --write-kubeconfig-mode 644: lets non-root user read kubeconfig.
-  # The installer verified in Step 0 — not https://get.k3s.io (#221). It still
-  # checks the k3s binary against the release's own sha256sum file.
-  INSTALL_K3S_VERSION="${K3S_VERSION}" INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" sh "${WORK}/k3s-install.sh"
+  # The binary and installer verified in Step 0 — not https://get.k3s.io (#221).
+  # The binary goes in first and the installer only sets up the service around
+  # it (INSTALL_K3S_SKIP_DOWNLOAD=binary): left to itself, install.sh would fetch
+  # the binary again and check it against the release's own sha256sum file.
+  #
+  # env -u: install.sh reads INSTALL_K3S_PR/COMMIT before VERSION, and
+  # ARTIFACT_URL/GITHUB_URL move where it downloads from. Inherited from the
+  # operator's environment (sudo -E), they would silently replace what Step 0
+  # verified.
+  install -m 0755 -o root -g root "${WORK}/k3s" /usr/local/bin/k3s
+  env -u INSTALL_K3S_PR -u INSTALL_K3S_COMMIT -u INSTALL_K3S_CHANNEL -u INSTALL_K3S_CHANNEL_URL \
+      -u INSTALL_K3S_ARTIFACT_URL -u INSTALL_K3S_BIN_DIR -u INSTALL_K3S_BIN_DIR_READ_ONLY -u GITHUB_URL \
+      INSTALL_K3S_SKIP_DOWNLOAD=binary INSTALL_K3S_VERSION="${K3S_VERSION}" \
+      INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" \
+      sh "${WORK}/k3s-install.sh"
   echo "  k3s ${K3S_VERSION} installed"
 else
   # An existing install is left as it is. Changing the k3s version restarts

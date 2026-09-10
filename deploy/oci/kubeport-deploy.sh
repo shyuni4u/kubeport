@@ -433,8 +433,9 @@ EOF
 
 # Helm 3 spells automatic rollback --atomic; Helm 4 renamed it
 # --rollback-on-failure (which also defaults --wait to "watcher"). bootstrap.sh
-# installs whatever get-helm-3 currently resolves to, and a later reinstall may
-# bring 4, so decide at run time instead of pinning one spelling.
+# installs the pinned HELM_VERSION (a 3.x), but a node whose helm was installed
+# or upgraded by hand may run 4, so decide at run time instead of pinning one
+# spelling.
 rollback_flag() {
   local v
   v=$(helm version --template '{{.Version}}' 2>/dev/null) || die 1 "helm is not runnable"
