@@ -313,6 +313,11 @@ func TestStreamReleaseLogs_FlushesTheErrorBeforeClosing(t *testing.T) {
 
 	events := sseEvents(t, body)
 	require.NotEmpty(t, events, "the stream closed without emitting anything")
-	require.Equal(t, "error", events[len(events)-1][0],
+	// The error is now second-to-last rather than last: #162 added an `end`
+	// frame so the client can tell a finished stream from a dropped one. The
+	// property under test is unchanged — the error must still be written before
+	// the stream stops, not raced by the close.
+	require.Equal(t, "error", events[len(events)-2][0],
 		"the buffered error must be flushed before the close, not raced by it")
+	require.Equal(t, "end", events[len(events)-1][0], "got: %v", events)
 }

@@ -31,6 +31,13 @@ type LogEntry = {
 // dead branch and a translation nobody reads.
 const KNOWN_STREAM_ERRORS = new Set(["k8s-error", "cluster-auth-denied", "rbac-denied"]);
 
+// Of those, the ones another attempt could clear. `k8s-error` is the default
+// branch of streamErrorKind — transport, a dropped apiserver connection — and
+// is worth one more try. The other two are the cluster's verdict on the token
+// this user is holding: nothing changes until someone edits RBAC or signs in
+// again, so retrying is only load.
+const RETRYABLE_STREAM_ERRORS = new Set(["k8s-error"]);
+
 // The kinds that can come back *before* the stream opens — every writeError in
 // StreamReleaseLogs and authorizeReleaseAccess, plus the three the BFF answers
 // itself when it never reaches the Go API (app/api/v1/[...path]/route.ts).
@@ -78,9 +85,15 @@ type Props = {
   initialInstance?: string;
 };
 
-// "disconnected" is a stream that was dropped and can be re-opened;
-// "failed" is one the server refused, with the refusal in `failure`.
-type Status = "connecting" | "connected" | "disconnected" | "failed";
+// "disconnected" is a stream that was dropped and can be re-opened; "failed" is
+// one the server refused, with the refusal in `failure`; "ended" is one that
+// ran to completion — every pod stopped emitting and the server said so.
+//
+// "ended" is its own state rather than a flavour of "failed" because a finished
+// Job is the ordinary outcome, not a fault: reusing "failed" put a red dot and
+// "Something went wrong with the log stream." over a container that had simply
+// done its work.
+type Status = "connecting" | "connected" | "disconnected" | "failed" | "ended";
 
 // The Problem the server answered with before the SSE handshake. Only `title`
 // and `request_id` are kept, for the reason spelled out at the error-frame
@@ -192,6 +205,13 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
   const [lines, setLines] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<Status>("connecting");
   const [failure, setFailure] = useState<Failure | null>(null);
+  // Set once the server has said the stream is over. Carries the last error
+  // frame's kind and request id when there was one, so the Reconnect button can
+  // be gated on it; an empty object means the stream simply finished.
+  //
+  // Separate from `failure`, which is a refusal read back off the wire before
+  // the stream ever opened.
+  const [terminated, setTerminated] = useState<Failure | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   // Monotonic id for stable React keys. Sliced lines (LINE_CAP) keep
   // their original id, so reconciliation only re-renders the new row.
@@ -204,6 +224,11 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     // down by a remount (instance change, [Reconnect]).
     const probe = new AbortController();
     let live = true;
+    // The last error frame seen on this stream, if any. Read when the `end`
+    // frame arrives, to say why it ended. A closure variable rather than state
+    // because the two frames can land in the same task and the second must see
+    // what the first wrote, not the previous render's value.
+    let lastError: Failure | null = null;
     const append = (entry: Omit<LogEntry, "id">) => {
       seqRef.current += 1;
       const next: LogEntry = { id: seqRef.current, ...entry };
@@ -233,6 +258,11 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     es.addEventListener("error", (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data) as { title?: string; request_id?: string };
+        // Remembered, not acted on: an error frame ends one pod, not the
+        // stream. With ?instance=all the handler goes on following the healthy
+        // ones. The `end` frame below is what says the stream is over, and this
+        // is what it will report as the reason.
+        lastError = { title: data.title ?? "unknown", requestId: data.request_id };
         append({
           time: Date.now(),
           pod: "kubeport",
@@ -247,7 +277,27 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
         /* connection-level error — handled by onerror below */
       }
     });
-    es.onopen = () => setStatus("connected");
+    // The server saying it is done. This is the only way to know: WHATWG gives
+    // EventSource no way to tell a finished stream from a dropped one, so
+    // without this frame the browser reopens on its own 3s timer and — this
+    // endpoint has no resume point — is served the whole container log again,
+    // forever, with the pane never clearing between rounds (#157, #162).
+    es.addEventListener("end", () => {
+      es.close();
+      setTerminated(lastError ?? {});
+      // A stream that carried an error ends in failure; one that did not simply
+      // finished, and calling that "failed" would be a lie about a completed Job.
+      setStatus(lastError ? "failed" : "ended");
+    });
+    es.onopen = () => {
+      // A new HTTP stream on the same EventSource — the browser reconnected by
+      // itself after a drop. `lastError` belongs to the stream that just ended,
+      // so carrying it over would let an old pod failure describe this one: a
+      // clean finish reported as a failure, and an rbac-denied that has since
+      // been granted still hiding the Reconnect button.
+      lastError = null;
+      setStatus("connected");
+    };
     // Two very different failures arrive here, and WHATWG is what tells them
     // apart. A non-2xx response or a wrong MIME type "fails the connection":
     // readyState goes to CLOSED and the browser will never retry. A drop on an
@@ -258,7 +308,22 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     // endpoint refuses with (no-pods, not-found, demo-restricted, ...) used to
     // collapse into "the connection dropped, press Reconnect", which named the
     // wrong cause and pointed at a button that could not succeed (#134).
-    es.onerror = () => {
+    es.onerror = (e: Event) => {
+      // A server-sent `error` frame is dispatched here too — same event type,
+      // so onerror and the listener above both see it — but it is not a
+      // connection failure and must not be treated as one.
+      //
+      // Tested on the payload's type, not on the property existing: `in` walks
+      // the prototype chain, so any MessageEvent passes it, `data: null`
+      // included. A runtime that reports a lost connection as a MessageEvent
+      // (a polyfill, a proxy shim) would then be silently swallowed here — the
+      // dot would stay green over a stream that had stopped. Since `end` closes
+      // the socket itself, this branch is now the only place a drop is noticed,
+      // so it has to fail towards "assume it dropped".
+      if (e && typeof (e as MessageEvent).data === "string") return;
+      // Past this point the connection really did go. If `end` had arrived we
+      // would already have closed, so anything here is a drop: let the browser
+      // retry, which is what its automatic reconnect is for.
       if (es.readyState !== ES_CLOSED) {
         setStatus("disconnected");
         return;
@@ -290,11 +355,32 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     }
   }, [lines, status, autoscroll]);
 
+  // Which refusal, if any, the pane spells out under the log rows.
+  //
+  // A pre-stream refusal always speaks for itself. It is the newest thing that
+  // happened and nothing else on screen says it — and it can arrive with an
+  // older pod error still sitting in the buffer, in which case letting that row
+  // stand in for it would show yesterday's cluster error to someone whose
+  // session has just expired, request id and all.
+  //
+  // A terminal error is the other way round: the error row already printed it,
+  // so repeating it in the footer reads as two separate failures. The footer
+  // takes over only once that row is gone — [Clear] removes it, and so does
+  // LINE_CAP after healthy pods write 2000 lines past it.
+  const footer =
+    status !== "failed"
+      ? null
+      : (failure ??
+        (terminated?.title &&
+        !lines.some((l) => l.kind === "error" && l.requestId === terminated.requestId)
+          ? terminated
+          : null));
+
   return (
     <>
       <div className="flex items-center gap-3 text-xs">
         <ConnectionDot status={status} />
-        {canReconnect(status, failure) && (
+        {canReconnect(status, failure, terminated) && (
           <Button size="sm" variant="outline" onClick={onReconnect}>
             {t("reconnect")}
           </Button>
@@ -312,7 +398,13 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
         ref={boxRef}
         className="h-[60vh] overflow-auto rounded bg-slate-950 p-3 font-mono text-[12px] leading-relaxed text-slate-100"
       >
-        {lines.length === 0 && status !== "failed" && (
+        {/*
+          "ended" is excluded alongside "failed": the completion notice below
+          says what happened, and "No output yet" under it would contradict it.
+          A pod that produced nothing at all and then finished is a real case —
+          a Job that exits silently — and it reads as one sentence, not two.
+        */}
+        {lines.length === 0 && status !== "failed" && status !== "ended" && (
           <p className="text-slate-400">
             {status === "disconnected" ? t("emptyDisconnected") : t("emptyWaiting")}
           </p>
@@ -337,8 +429,11 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
           the reason in exactly that case, leaving stale logs under a bare
           "Not connected".
         */}
-        {status === "failed" && (
-          <p className="whitespace-pre-wrap text-red-300">{openErrorText(t, failure)}</p>
+        {footer && (
+          <p className="whitespace-pre-wrap text-red-300">{openErrorText(t, footer)}</p>
+        )}
+        {status === "ended" && (
+          <p className="whitespace-pre-wrap text-slate-400">{t("ended")}</p>
         )}
       </div>
     </>
@@ -396,9 +491,23 @@ function openErrorText(
 // A refused stream only gets a [Reconnect] button when a retry could plausibly
 // succeed. "No pods", "not yours" and "signed out" are verdicts, and the button
 // under them was an invitation to retry forever (#134, point 3).
-function canReconnect(status: Status, failure: Failure | null): boolean {
+function canReconnect(
+  status: Status,
+  failure: Failure | null,
+  terminated: Failure | null,
+): boolean {
   if (status === "disconnected") return true;
+  // A stream that finished cleanly: the pod may run again — a CronJob will —
+  // and re-opening is the only way to find out.
+  if (status === "ended") return true;
   if (status !== "failed") return false;
+  // A stream the server ended is judged by its own vocabulary: the kinds an
+  // error frame can carry are not the kinds a pre-stream refusal can, and only
+  // one of the three is worth another attempt.
+  if (terminated?.title) {
+    const kind = terminated.title;
+    return !KNOWN_STREAM_ERRORS.has(kind) || RETRYABLE_STREAM_ERRORS.has(kind);
+  }
   const title = failure?.title;
   // Only a kind we recognise as a verdict withholds the button. A kind we have
   // no mapping for is a backend that moved ahead of this file — one wasted
@@ -408,12 +517,16 @@ function canReconnect(status: Status, failure: Failure | null): boolean {
 
 function ConnectionDot({ status }: { status: Status }) {
   const t = useTranslations("logs.status");
+  // "ended" is grey, not red: the stream finished, which is what a completed
+  // Job is supposed to do. Red is reserved for something having gone wrong.
   const color =
     status === "connected"
       ? "bg-green-500"
       : status === "connecting"
         ? "bg-amber-500"
-        : "bg-red-500";
+        : status === "ended"
+          ? "bg-slate-400"
+          : "bg-red-500";
   const label = t(status);
   return (
     <span className="inline-flex items-center gap-1.5">

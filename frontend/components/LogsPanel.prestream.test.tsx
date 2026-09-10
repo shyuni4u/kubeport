@@ -271,4 +271,30 @@ describe("LogsPanel pre-stream refusals", () => {
     await screen.findByText(/실행 중인 인스턴스가 없습니다/);
     expect(sockets.at(-1)!.closed).toBe(true);
   });
+
+  // The footer is suppressed while an error row already says the same thing
+  // (#157), and that suppression must not reach a refusal the row does not
+  // speak for. One pod fails, the connection later drops, the browser's own
+  // reconnect is refused because the session expired — and the reader was shown
+  // the old cluster error, with its request id, instead of being told to sign
+  // in again.
+  it("does not let a buffered pod error stand in for a fresh refusal", async () => {
+    fetchMock.mockResolvedValue(problem("unauthenticated", 401, "req-expired"));
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }, { name: "p2" }]} />);
+
+    act(() => {
+      for (const fn of sockets.at(-1)!.listeners.error ?? []) {
+        fn({
+          data: JSON.stringify({ title: "k8s-error", status: 502, request_id: "req-old" }),
+        } as MessageEvent);
+      }
+    });
+    expect(screen.getByText(/req-old/)).toBeInTheDocument();
+
+    drop();
+    refuse();
+
+    expect(await screen.findByText(/로그인이 만료/)).toBeInTheDocument();
+    expect(screen.getByText(/req-expired/)).toBeInTheDocument();
+  });
 });
