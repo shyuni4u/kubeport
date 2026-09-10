@@ -59,8 +59,11 @@ export function sanitizeNext(raw: string | null | undefined): string | null {
   if (url.pathname.startsWith("/api/")) return null;
 
   // Landing is every caller's fallback already, so returning it would be a
-  // no-op whose only effect is to keep `?next=` in the address bar.
-  if (url.pathname === "/") return null;
+  // no-op whose only effect is to keep `?next=` in the address bar. /logout is
+  // an action screen rather than a destination — the proxy never generates it,
+  // so a `next` naming it came from outside, and landing on "sign out?" is a
+  // poor thing to hand someone who just signed in.
+  if (url.pathname === "/" || url.pathname === "/logout") return null;
 
   // Check the string we are about to RETURN, not the one we were given.
   //
@@ -72,7 +75,19 @@ export function sanitizeNext(raw: string | null | undefined): string | null {
   // and returning the normalized form meant checking a different value than
   // the one that gets used. Found by codex review of this change.
   const path = `${url.pathname}${url.search}`;
-  if (new URL(path, FALLBACK_BASE).origin !== FALLBACK_BASE) return null;
+  // The shape this function promises to return: rooted, and not
+  // protocol-relative. Stated directly rather than inferred from a reparse,
+  // because it is the property callers depend on.
+  if (!path.startsWith("/") || path.startsWith("//")) return null;
+  try {
+    if (new URL(path, FALLBACK_BASE).origin !== FALLBACK_BASE) return null;
+  } catch {
+    // Normalization can leave something that will not parse at all — `/..//`
+    // collapses to `//`, which has no host. Returning null keeps the contract
+    // "a safe path or nothing"; letting it throw turned one crafted link into
+    // a 500 on landing and on the login route. Found by security review.
+    return null;
+  }
 
   return path;
 }

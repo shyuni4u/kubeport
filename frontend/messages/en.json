@@ -5,6 +5,7 @@
     "confirm": "Sign out",
     "pending": "Signing out…",
     "cancel": "Cancel and go to catalog",
+    "failed": "Couldn't sign out. You are still signed in — please try again.",
     "alreadyTitle": "You're already signed out",
     "alreadyBody": "There's no active session right now.",
     "home": "Go to the home page"
