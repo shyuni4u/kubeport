@@ -37,10 +37,18 @@ F9CdrgIhAKjSL1EsIT5z4XDuAN4x4j0EPHTMWtIJLE1v9NN7MBb1
 
 // TestApplyAll_IntegrationWithKind is opt-in: skipped unless KIND_API is set.
 // Point KIND_API at a kind cluster's API URL and DEX_TOKEN at a bearer token
-// with permission to create ConfigMaps in the default namespace.
+// allowed to create and patch ConfigMaps in the default namespace.
+//
+// KBP_REQUIRE_KIND turns the skip into a failure, for where a cluster is
+// supposed to exist (playwright.yml). A test that skips itself is green
+// whether or not the harness still works, which is how this one went years
+// without running anywhere at all (#121).
 func TestApplyAll_IntegrationWithKind(t *testing.T) {
 	apiURL := os.Getenv("KIND_API")
 	if apiURL == "" {
+		if os.Getenv("KBP_REQUIRE_KIND") != "" {
+			t.Fatal("KBP_REQUIRE_KIND is set but KIND_API is not — the kind harness did not wire up")
+		}
 		t.Skip("KIND_API not set; skipping kind integration test")
 	}
 
@@ -61,4 +69,40 @@ data:
 	ctx := context.Background()
 	require.NoError(t, cli.ApplyAll(ctx, "default", yaml), "first apply")
 	require.NoError(t, cli.ApplyAll(ctx, "default", yaml), "second apply (SSA idempotency)")
+}
+
+// The test above deploys through NewInsecureWithToken, which skips certificate
+// verification — so on its own it would leave the deploy path's verifying
+// constructor with no cluster-backed coverage at all, which is the shape of
+// bug #101 (an unusable ca_bundle silently disabling TLS on the deploy path
+// only). This runs the same apply through NewWithToken and a real CA.
+func TestApplyAll_VerifiesTLSWithKind(t *testing.T) {
+	apiURL := os.Getenv("KIND_API")
+	ca := os.Getenv("KIND_CA")
+	if apiURL == "" || ca == "" {
+		missing := "KIND_API"
+		if apiURL != "" {
+			missing = "KIND_CA"
+		}
+		if os.Getenv("KBP_REQUIRE_KIND") != "" {
+			t.Fatalf("KBP_REQUIRE_KIND is set but %s is not — the kind harness did not wire up", missing)
+		}
+		t.Skip(missing + " not set; skipping kind integration test")
+	}
+
+	cli, err := k8s.NewWithToken(apiURL, ca, os.Getenv("DEX_TOKEN"))
+	require.NoError(t, err)
+
+	name := "kubeport-tls-" + time.Now().Format("150405.000000")
+	yaml := []byte(fmt.Sprintf(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s
+  namespace: default
+data:
+  hello: world
+`, name))
+
+	require.NoError(t, cli.ApplyAll(context.Background(), "default", yaml),
+		"apply with a verified TLS connection")
 }

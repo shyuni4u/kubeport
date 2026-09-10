@@ -1,5 +1,9 @@
-//go:build integration
-// +build integration
+// No build tag. kindAvail() below already skips when KIND_API / KIND_CA /
+// DEX_TOKEN are unset, so a fresh clone stays green without one — and a tag
+// costs what a skip does not: the file becomes invisible to the compiler, so
+// it rots unnoticed and never reaches the "Skipped Go tests" summary that is
+// supposed to make uncovered k8s paths visible (#121). playwright.yml sets
+// those three variables and runs these tests against its kind cluster.
 
 package api_test
 
@@ -17,18 +21,33 @@ import (
 	"kubeport/internal/config"
 )
 
+// skipUnlessKind skips when the kind harness is not wired up, which is what
+// keeps `go test ./...` green on a fresh clone. KBP_REQUIRE_KIND inverts it:
+// set it where a cluster IS supposed to be there, and a skip becomes a
+// failure. Same bargain as KBP_REQUIRE_DEX — a suite that skips itself is
+// green whether or not the wiring still works, so it gates nothing.
+//
+// This lives in the test, not in a list of test names in a workflow file, on
+// purpose: a hand-kept list is what let these tests fall out of CI in the
+// first place (#121). A new kind-backed test picks the gate up by calling
+// kindAvail, and one that is renamed or deleted takes itself out honestly.
+func skipUnlessKind(t *testing.T, missing string) {
+	t.Helper()
+	if os.Getenv("KBP_REQUIRE_KIND") != "" {
+		t.Fatalf("KBP_REQUIRE_KIND is set but %s is not — the kind harness did not wire up", missing)
+	}
+	t.Skip(missing + " not set")
+}
+
 func kindAvail(t *testing.T) (apiURL, caBundle, token string) {
-	apiURL = os.Getenv("KIND_API")
-	if apiURL == "" {
-		t.Skip("KIND_API not set")
-	}
-	ca := os.Getenv("KIND_CA")
-	if ca == "" {
-		t.Skip("KIND_CA not set")
-	}
-	tok := os.Getenv("DEX_TOKEN")
-	if tok == "" {
-		t.Skip("DEX_TOKEN not set")
+	t.Helper()
+	apiURL, ca, tok := os.Getenv("KIND_API"), os.Getenv("KIND_CA"), os.Getenv("DEX_TOKEN")
+	for _, v := range []struct{ name, val string }{
+		{"KIND_API", apiURL}, {"KIND_CA", ca}, {"DEX_TOKEN", tok},
+	} {
+		if v.val == "" {
+			skipUnlessKind(t, v.name)
+		}
 	}
 	return apiURL, ca, tok
 }
@@ -66,10 +85,10 @@ func TestOpenAPI_Refresh_ClearsCache(t *testing.T) {
 		api.Deps{Verifier: adminVerifier{}, Store: s})
 
 	regBody, _ := json.Marshal(map[string]any{
-		"name":               "kind-" + randSuffix(),
-		"api_url":            apiURL,
-		"ca_bundle":          ca,
-		"oidc_issuer_url":    "https://host.docker.internal:5556",
+		"name":            "kind-" + randSuffix(),
+		"api_url":         apiURL,
+		"ca_bundle":       ca,
+		"oidc_issuer_url": "https://host.docker.internal:5556",
 	})
 	w := do(t, r, http.MethodPost, "/v1/clusters", bytes.NewReader(regBody))
 	require.Equal(t, http.StatusCreated, w.Code)
