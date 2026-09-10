@@ -219,7 +219,7 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
 ### 기다리는 법
 - `gh pr checks --watch`·`sleep` 루프로 턴을 붙잡지 않는다. 리뷰(셀프·`/codex:review`·`/pr-review`)를 끝내고 PR 을 올리면
   `gh pr merge --auto --squash` 를 걸고 다음 일로 간다(아래 비필수 체크 경로는 예외). 결과를 꼭 봐야 하면 `run_in_background` 로 띄운다.
-- **머지가 곧 배포다** (#199, 2026-09-10). main 머지 → `build-images` 성공 → `deploy.yml` 이 라이브(`kubeport.enzo.kr`)에
+- **머지가 곧 배포다** (#199, 2026-09-10). main 머지 → 같은 sha 의 `build-images` 와 `CI` 가 둘 다 성공(#202) → `deploy.yml` 이 라이브(`kubeport.enzo.kr`)에
   올리고 `/api/healthz` 의 `version` 이 바뀔 때까지 확인한다. 머지 버튼(= `--auto` 가 초록에 누르는 것)이 프로덕션 배포 버튼이다.
 - **auto-merge 의 필수 체크는 `ci.yml` 4개(`audit` `backend` `frontend` `hooks`)뿐이다** (ruleset `protect-main`, 2026-09-10).
   `playwright`(워크플로 Playwright E2E)와 `lint-and-snapshot`·`kind-smoke`(워크플로 `helm`)는 kind 플레이크로 머지를 막지 않게

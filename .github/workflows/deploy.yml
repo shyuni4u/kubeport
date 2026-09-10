@@ -1,6 +1,7 @@
 name: deploy
 
-# Deploys main to production (https://kubeport.enzo.kr) once its images exist.
+# Deploys main to production (https://kubeport.enzo.kr) once its images exist
+# and its main CI is green (#202).
 #
 # The workflow holds no cluster credentials. It holds an SSH key that the VM
 # pins to one program — deploy/oci/kubeport-deploy.sh, via
@@ -18,8 +19,10 @@ name: deploy
 # Operating it, and the manual path: docs/oci-prod-runbook.md §3.
 
 on:
+  # Either run finishing may be the last thing a commit is waiting for, so both
+  # trigger; the Resolve step deploys only when both are green for the sha (#202).
   workflow_run:
-    workflows: [build-images]
+    workflows: [build-images, CI]
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -35,32 +38,62 @@ on:
         default: true
 
 # contents: read — nothing is checked out; it is the floor.
-# actions: read — ask whether build-images succeeded for a dispatched sha.
+# actions: read — ask whether build-images and CI are green for the sha (#202).
 permissions:
   contents: read
   actions: read
-
-# One deploy at a time, and a running deploy is never cancelled: killing the
-# ssh session mid-`helm upgrade` would leave the release in pending-upgrade,
-# which blocks every later upgrade until someone runs `helm rollback` by hand.
-# GitHub keeps only the newest *pending* run per group, so a burst of merges
-# collapses to "the one running" + "the newest waiting" — which is what we want.
-concurrency:
-  group: deploy-prod
-  cancel-in-progress: false
 
 env:
   REPO: ${{ github.repository }}
   HEALTH_URL: https://kubeport.enzo.kr/api/healthz
 
 jobs:
+  # A red build-images or CI run on the main HEAD commit means that commit is not
+  # deployed. `deploy` below ignores unsuccessful runs so they cannot take its
+  # single pending concurrency slot, which would leave no trace in this
+  # workflow when the LATER of the two runs is the one that failed (the earlier
+  # green one only left a "has not finished" skip). This job makes that a red
+  # run here. It holds no secrets, uses no environment and joins no concurrency
+  # group, so it cannot delay or cancel a deploy.
+  report-failure:
+    if: >-
+      github.repository == 'shyuni4u/kubeport' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion != 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report an unsuccessful run on main HEAD
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          NAME: ${{ github.event.workflow_run.name }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+          head=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          if [ "$SHA" != "$head" ]; then
+            echo "::notice title=Superseded::$NAME ended '$CONCLUSION' for ${SHA:0:7}, but main is at ${head:0:7}; that commit decides the next deploy."
+            exit 0
+          fi
+          echo "::error title=$NAME not green, not deployed::$NAME ended '$CONCLUSION' for main HEAD ${SHA:0:7} ($RUN_URL). Live stays on the previous commit. Fix main, or re-run $NAME if it was a flake; its green completion deploys it."
+          exit 1
+
   deploy:
-    # workflow_run fires for every completed build-images run. Only a
-    # successful build of a push to main in this repository publishes the
-    # `sha-<7>` images a deploy needs: a PR run builds without pushing, a tag
-    # build is a release rather than main, and a dispatched build may be of any
-    # branch. `branches: [main]` above already filters head_branch; it is
-    # repeated here so the condition reads completely in one place.
+    # workflow_run fires for every completed build-images or CI run. Only a
+    # successful run of a push to main in this repository counts: a PR run is
+    # the PR branch (and builds without pushing images), a tag build is a
+    # release rather than main, and a dispatched run may be of any branch.
+    # `branches: [main]` above already filters head_branch; it is repeated
+    # here so the condition reads completely in one place. An unsuccessful run
+    # does not start this job — so it cannot take the deploy-prod pending slot
+    # from a real deploy — and `report-failure` above makes it a red run here
+    # instead. Whether the OTHER workflow is green for the same sha is checked
+    # in Resolve.
     #
     # The repository check comes first: in a fork every clause after it would
     # pass, and the job would fail on the missing secrets (see the header).
@@ -75,6 +108,20 @@ jobs:
     # deployment-branch policy allows main only — a workflow run on any other
     # ref cannot read the deploy key even if this file is edited on a branch.
     environment: production
+    # One deploy at a time, and a running deploy is never cancelled: killing the
+    # ssh session mid-`helm upgrade` would leave the release in pending-upgrade,
+    # which blocks every later upgrade until someone runs `helm rollback` by hand.
+    # GitHub keeps only the newest *pending* run per group, so a burst of merges
+    # collapses to "the one running" + "the newest waiting".
+    #
+    # Job level, not workflow level: every build-images/CI completion creates a
+    # run of this workflow — PR runs, fork runs, cancelled main CI — and a
+    # workflow-level group would let those runs, which the `if` above then
+    # skips, take the single pending slot and cancel a real deploy waiting
+    # behind a running one. A job the `if` skips never enters this group.
+    concurrency:
+      group: deploy-prod
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     # Deploy step 45m + health wait 5m + resolve.
     timeout-minutes: 60
@@ -98,44 +145,86 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "short=${sha:0:7}" >> "$GITHUB_OUTPUT"
 
+          skip() {
+            echo "::notice title=Skipped::$1"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
           head=$(gh api "repos/$REPO/commits/main" --jq .sha)
           echo "origin/main is $head"
 
           if [ "$EVENT" = workflow_run ] && [ "$sha" != "$head" ]; then
             # Skip when main has already moved past this commit.
             #
-            # A newer commit means a newer build-images run, and its completion
-            # triggers its own deploy, which carries this commit's changes too.
-            # Deploying this one first would roll out twice for nothing — and
-            # because builds finish in any order, a slow build of an OLDER
-            # commit finishing after a newer deploy would roll production
+            # A newer commit means newer build-images and CI runs, and their
+            # completion triggers its own deploy, which carries this commit's
+            # changes too. Deploying this one first would roll out twice for
+            # nothing — and because runs finish in any order, a slow build of an
+            # OLDER commit finishing after a newer deploy would roll production
             # backwards. Checking at run time (not trigger time) also covers a
             # run that waited in the concurrency queue while main moved.
             #
-            # The cost: if the newer build fails, nothing deploys until it is
-            # fixed. That build's red run is the signal, and this sha can still
-            # be shipped with workflow_dispatch, which never skips.
-            echo "::notice title=Skipped::main is at ${head:0:7}, newer than ${sha:0:7}; that commit's build will deploy both."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
+            # The cost: if the newer commit's build or CI fails, nothing deploys
+            # until it is fixed. That red run is the signal, and this sha can
+            # still be shipped with workflow_dispatch, which never skips.
+            skip "main is at ${head:0:7}, newer than ${sha:0:7}; that commit's runs will deploy both."
           fi
-          echo "skip=false" >> "$GITHUB_OUTPUT"
 
           if [ "$EVENT" = workflow_dispatch ]; then
-            # workflow_run already proves the images exist. A dispatched sha
-            # proves nothing, and a missing tag ends in ImagePullBackOff, a
-            # 10-minute helm timeout and a rollback. Ask first.
             status=$(gh api "repos/$REPO/compare/main...$sha" --jq .status)
             case $status in
               behind|identical) ;;
               *) echo "::error title=Not on main::$sha is not a main commit (compare: $status)."; exit 1 ;;
             esac
-            ok=$(gh api "repos/$REPO/actions/workflows/build-images.yml/runs?head_sha=$sha&event=push&status=success&per_page=1" --jq .total_count)
-            if [ "$ok" = 0 ]; then
-              echo "::error title=No images::No successful push build of build-images for $sha, so sha-${sha:0:7} may not exist in ghcr."
-              exit 1
+          fi
+
+          # Deploy only a commit whose images exist AND whose main CI is green
+          # (#202). The PR's required checks ran on the PR branch, not on the
+          # squash-merged commit, and the ruleset does not require branches to
+          # be up to date — so two PRs that are each green can merge into a
+          # main commit whose CI is red. That commit must not reach production.
+          #
+          # This workflow is triggered by the completion of either run, so one
+          # of them may still be going. On workflow_run that is a skip: the
+          # other run's completion triggers this workflow again. A dispatch has
+          # no second trigger, so there it is an error.
+          #
+          # "Latest run for the sha" rather than "any successful run": a failed
+          # run re-run to green is the latest, and a green run followed by a
+          # failed re-run is not deployable.
+          gate() {
+            local wf=$1 label=$2 state
+            state=$(gh api "repos/$REPO/actions/workflows/$wf/runs?head_sha=$sha&event=push&per_page=1" \
+              --jq '.workflow_runs[0] | if . == null then "none" else .status + " " + (.conclusion // "") end')
+            echo "$label for ${sha:0:7}: $state"
+            case $state in
+              "completed success") return 0 ;;
+              "none"|queued*|in_progress*|waiting*|requested*|pending*)
+                if [ "$EVENT" = workflow_run ]; then
+                  skip "$label for ${sha:0:7} has not finished ($state). If it succeeds, its completion starts this deploy again; if it fails, report-failure turns this workflow red."
+                fi
+                echo "::error title=$label not finished::$label for $sha is '$state'. Dispatch again once it is green."
+                exit 1 ;;
+              *)
+                echo "::error title=$label not green::$label for $sha ended '$state', so it is not deployed. Fix main (or re-run $label if it was a flake); its green completion deploys it."
+                exit 1 ;;
+            esac
+          }
+          gate build-images.yml build-images
+          gate ci.yml CI
+
+          if [ "$EVENT" = workflow_run ]; then
+            # Both runs completing fires this workflow twice for the same sha.
+            # The second one waits behind the first in the concurrency group
+            # and would redeploy what is already live — skip it. A dispatch is
+            # an explicit redeploy and is not skipped.
+            live=$(curl -sS --max-time 10 "$HEALTH_URL" | jq -r '.version // empty' 2>/dev/null || true)
+            if [ "$live" = "${sha:0:7}" ]; then
+              skip "${sha:0:7} is already live ($HEALTH_URL); the other run's trigger already deployed it."
             fi
           fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Deploy over SSH
         if: steps.target.outputs.skip != 'true'
