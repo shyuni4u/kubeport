@@ -189,7 +189,7 @@ Plan 0–5 로 구현된 기능을 **직접 클릭하면서 확인**하기 위�
 
 - `KBP_DEV_ADMIN_EMAILS` 로 관리자 판정 → 로컬 한정. 프로덕션은 IdP groups claim 사용.
 - `system:authenticated → edit` 바인딩 → 로컬 한정. 프로덕션은 그룹별 RBAC.
-- **k8s 용어 토글 미구현** — Plan 2 스펙엔 있었으나 구현 누락. 릴리스 상세는 현재 "인스턴스" 하드코드.
+- **k8s 용어 토글은 역할별 기본값으로 시작한다** (#39) — `kubeport-admin`(또는 `auth.devAdminEmails`) 계정은 원본 용어(`ConfigMap`, `create · <ns>`), 일반 사용자는 쉬운 말(`설정`, `<ns> 구역에 만들기`)로 시작한다. 릴리스 상세 헤더와 배포 폼 미리보기에 같은 토글이 있고, 방문 중에 한 번 바꾸면 그 선택이 유지된다(새로고침 시 역할 기본값으로). `frontend/lib/kube-kinds.ts` 의 `KNOWN_KINDS` 밖의 kind·CRD 는 토글과 무관하게 원본 이름으로 보인다.
 - **클러스터 DELETE API 미구현** — `backend/internal/api/routes.go` 에 핸들러 없음. 제거 시 DB 에서 직접 삭제해야 함.
 - Helm chart 미구현 (다음 단계)
 - 풀스택 e2e runner (Task 22) 미구현
