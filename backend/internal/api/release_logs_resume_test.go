@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -201,4 +202,63 @@ func TestStreamReleaseLogs_NoResumePointStillSendsEverything(t *testing.T) {
 
 	require.Nil(t, applier.sinceSeen, "a plain open must not ask the cluster for a window")
 	require.Contains(t, body, "from the very beginning")
+}
+
+// A stream following several pods emits no ids at all.
+//
+// StreamPodLogs fans the pods into one channel with no ordering, so the last id
+// a client saw is whichever pod wrote last — not a watermark across all of
+// them. Handing that back would resume every pod from it, and a pod that was
+// still replaying older history would have the rest of it skipped: silently,
+// permanently, and invisibly to the reader. No id means the client keeps
+// replaying, which is what it did before and costs only bandwidth (#107, #172).
+func TestStreamReleaseLogs_NoResumeIdsWhenFollowingSeveralPods(t *testing.T) {
+	applier := &fakeK8sApplier{
+		instances: []k8s.Instance{{Name: "web-1"}, {Name: "web-2"}},
+		logLines:  []string{"a line"},
+		logLineAt: time.Date(2026, 9, 9, 7, 36, 36, 0, time.UTC),
+	}
+
+	body := resumeRelease(t, applier, func(*http.Request) {})
+
+	require.Contains(t, body, "a line")
+	require.NotContains(t, body, "id:",
+		"a multi-pod stream handed out a resume point one pod's clock cannot stand for")
+}
+
+// ...and it ignores one if a client sends it anyway. The header survives across
+// a reconnect on the same EventSource, so a reader who switches from a single
+// instance to "all" carries the old id with them.
+func TestStreamReleaseLogs_IgnoresAResumePointForSeveralPods(t *testing.T) {
+	applier := &fakeK8sApplier{
+		instances: []k8s.Instance{{Name: "web-1"}, {Name: "web-2"}},
+		logLines:  []string{"older history"},
+		logLineAt: time.Date(2026, 9, 9, 7, 0, 0, 0, time.UTC),
+	}
+
+	body := resumeRelease(t, applier, func(r *http.Request) {
+		r.Header.Set("Last-Event-ID", "2026-09-09T12:00:00Z")
+	})
+
+	require.Nil(t, applier.sinceSeen, "asked the cluster for a window it cannot honour per-pod")
+	require.Contains(t, body, "older history", "history a slower pod had not reached was dropped")
+}
+
+// An unstamped line must not advance the cursor. `at` falls back to now so the
+// row has something to render, but putting that in the id would tell the browser
+// it had read up to the present — and a drop right after would skip whatever
+// history was still on its way.
+func TestStreamReleaseLogs_AnUnstampedLineDoesNotAdvanceTheResumePoint(t *testing.T) {
+	stamped := time.Date(2026, 9, 9, 7, 36, 36, 0, time.UTC)
+	applier := &fakeK8sApplier{
+		instances:  []k8s.Instance{{Name: "web-1"}},
+		logLines:   []string{"stamped", "not stamped"},
+		logLineAts: []time.Time{stamped, {}},
+	}
+
+	body := resumeRelease(t, applier, func(*http.Request) {})
+
+	require.Contains(t, body, "id:"+stamped.Format(time.RFC3339Nano))
+	require.Equal(t, 1, strings.Count(body, "id:"),
+		"the unstamped line carried an id, which would move the cursor to now — got: %s", body)
 }

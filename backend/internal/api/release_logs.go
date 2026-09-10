@@ -82,6 +82,23 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 			"since must be an RFC3339 timestamp")
 		return
 	}
+	// A single instant can only stand for progress through a single pod.
+	//
+	// With instance=all, StreamPodLogs fans several pods into one channel with
+	// no ordering between them, so the last id the client saw is whichever pod
+	// happened to write last — not a watermark across all of them. Resuming
+	// every pod from it would skip, permanently and silently, whatever a slower
+	// pod had not reached yet: pod A emits 12:00 while pod B is still replaying
+	// 11:00, and B's hour is gone. Losing lines is worse than resending them,
+	// so a multi-pod stream emits no ids and the client replays, as before.
+	//
+	// Following one instance is how a reader watches one thing, and it is the
+	// case the resume is for. Doing it for `all` needs a cursor that keeps a
+	// position per pod, which is a different design (#172).
+	resumable := len(pods) == 1
+	if !resumable {
+		resumeFrom = time.Time{}
+	}
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
@@ -168,6 +185,15 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 			//
 			// A line with no stamp cannot be compared, so it goes through. A
 			// possible duplicate beats a line that silently disappears.
+			//
+			// At-or-before treats an equal stamp as already delivered, which is
+			// not strictly provable: two lines written in the same nanosecond
+			// would share an id and the second would be dropped unread. The
+			// alternative, strictly-before, resends the boundary line on every
+			// reconnect — a duplicate the reader sees at each network hiccup, to
+			// insure against a tie at nanosecond resolution on per-line stamps.
+			// Chosen this way deliberately. If ties turn out to happen, the fix
+			// is a position beside the time in the id, not flipping this.
 			if !resumeFrom.IsZero() && !line.At.IsZero() && !line.At.After(resumeFrom) {
 				return true
 			}
@@ -189,11 +215,24 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 				"pod":  line.Pod,
 				"text": line.Text,
 			})
-			// The id is what makes the resume above possible: the browser
-			// stores the last one it saw and hands it back on reconnect. Full
+			// The id is what makes the resume above possible: the browser stores
+			// the last one it saw and hands it back on reconnect. Full
 			// nanosecond precision, because whole seconds would make the trim
 			// either drop real lines or keep duplicates.
-			c.Render(-1, sse.Event{Id: at.Format(time.RFC3339Nano), Event: "log", Data: string(body)})
+			//
+			// Only a line the kubelet actually stamped gets one. `at` may be a
+			// display fallback of time.Now(), and putting that in the id would
+			// tell the browser it had read up to *now* — so a drop right after
+			// an unstamped line would skip whatever history was still coming.
+			// A frame with no id leaves the browser's cursor where it was,
+			// which is exactly right.
+			//
+			// And only when this stream follows one pod. See resumable().
+			ev := sse.Event{Event: "log", Data: string(body)}
+			if resumable && !line.At.IsZero() {
+				ev.Id = line.At.Format(time.RFC3339Nano)
+			}
+			c.Render(-1, ev)
 			return true
 		}
 	})

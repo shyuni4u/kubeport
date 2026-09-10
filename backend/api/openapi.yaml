@@ -1086,12 +1086,25 @@ paths:
         are the ones where the client has already gone, so its absence never
         means "finished, quietly".
 
-        **Reopening resumes rather than replays.** Each `log` frame carries an
-        SSE `id:`, so a standard `EventSource` sends the last one back as
-        `Last-Event-ID` on its automatic reconnect and picks up where it left
-        off — no client code, and no duplicates in a pane the browser does not
-        clear (#107). A caller with no `EventSource` keeping track for it can
-        pass the same instant as `?since=`, which wins if both are present.
+        **Reopening resumes rather than replays — when following one instance.**
+        On a single-instance stream each `log` frame carries an SSE `id:`, so a
+        standard `EventSource` sends the last one back as `Last-Event-ID` on its
+        automatic reconnect and picks up where it left off: no client code, and
+        no duplicates in a pane the browser does not clear (#107). A caller with
+        no `EventSource` keeping track for it can pass the same instant as
+        `?since=`, which wins if both are present.
+
+        **`instance=all` emits no ids and ignores a resume point**, so it
+        replays from the beginning as it always did. One instant cannot stand
+        for progress through several pods: they are followed concurrently and
+        merged without ordering, so the newest id belongs to whichever pod wrote
+        last, and resuming every pod from it would skip — silently and for good
+        — whatever a slower pod had not reached yet. Resending lines is the
+        lesser cost. A per-pod cursor is tracked as #172.
+
+        A line the kubelet could not stamp carries no id either. Its `time` is
+        the server's clock so the row has something to render, and letting that
+        into the cursor would claim the client had read up to *now*.
 
         The cluster's own filter is whole seconds, so it returns everything
         from the second you asked about; the server trims that overlap against
