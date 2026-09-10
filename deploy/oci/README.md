@@ -25,7 +25,9 @@ sudo BOOTSTRAP_EMAIL=you@example.com bash bootstrap.sh
 
 이게 처리하는 것:
 - iptables 80/443 열기 + persist
-- k3s single-node 설치
+- k3s single-node 설치 — **버전 고정**(`v1.36.3+k3s1`, 스크립트의 `K3S_PINNED`). k3s 가 Traefik 을 번들하므로
+  고정하지 않으면 설치한 날에 따라 인그레스까지 달라진다(#194). 이미 깔린 k3s 는 바꾸지 않고, 고정 버전과 다르면
+  경고만 한다. 복구 등으로 다른 버전이 필요하면 `BOOTSTRAP_K3S_VERSION=<버전>` (적용 시 로그에 표시)
 - helm CLI
 - cert-manager + Let's Encrypt ClusterIssuer (`letsencrypt-prod`)
 
