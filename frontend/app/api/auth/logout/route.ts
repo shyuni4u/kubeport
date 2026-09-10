@@ -1,6 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
-import { destroySession } from "@/lib/session";
+import { destroySession, getSession } from "@/lib/session";
 import { allowedOrigins, externalOrigin } from "@/lib/request-origin";
+
+/**
+ * Typing the logout URL into the address bar, or opening a bookmarked one,
+ * used to produce a 405 and leave the session intact — "logout does nothing"
+ * (#28).
+ *
+ * It does NOT log out here. A GET is something any other site can cause —
+ * an <img>, a link, a redirect — so logging out on GET would let one log this
+ * user out of kubeport, and the POST handler below deliberately checks Origin
+ * to prevent exactly that. Instead this hands over to a confirmation screen
+ * whose button issues the same POST the user menu does, which is the route the
+ * issue itself suggested.
+ *
+ * With no session there is nothing to confirm, so it just says so on landing.
+ */
+export async function GET(req: NextRequest) {
+  const session = await getSession();
+  const dest = session ? "/logout" : "/";
+  // 303: whatever verb got here, follow it with a GET.
+  return NextResponse.redirect(new URL(dest, externalOrigin(req)), 303);
+}
 
 export async function POST(req: NextRequest) {
   // Second line of defence behind the session cookie's SameSite=lax. Compare

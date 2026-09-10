@@ -1,4 +1,15 @@
 {
+  "logout": {
+    "title": "Sign out?",
+    "body": "You reached this by URL. Signing out takes a confirmation — that's what stops another site from signing you out with nothing but a link.",
+    "confirm": "Sign out",
+    "pending": "Signing out…",
+    "cancel": "Cancel and go to catalog",
+    "failed": "Couldn't sign out. You are still signed in — please try again.",
+    "alreadyTitle": "You're already signed out",
+    "alreadyBody": "There's no active session right now.",
+    "home": "Go to the home page"
+  },
   "shell": {
     "nav": {
       "catalog": "Catalog",
@@ -69,6 +80,8 @@
     "demoNote": "Deploys to a real cluster · resets daily · don't leave personal data",
     "demoCreds": "Demo password: {password}",
     "goCatalog": "Go to catalog",
+    "goBack": "Go to the page you wanted",
+    "loginRequired": "That page needs you to be signed in. Sign in below and you'll be taken back to it.",
     "compare": {
       "heading": "The admin writes it once. The user fills in {count} fields.",
       "subheading": "Change a value on the right — the line it edits on the left lights up.",

@@ -35,4 +35,14 @@ describe("middleware matcher", () => {
     expect(intercepts("/favicon.ico")).toBe(false);
     expect(intercepts("/")).toBe(false);
   });
+
+  // #28: /logout is the confirmation screen behind GET /api/auth/logout. Gating
+  // it would send a logged-out visitor into a login flow to reach the page
+  // whose only job is to end a session — and, with #41's `next` in place, back
+  // to the logout screen immediately after signing in.
+  it("leaves the logout confirmation open", () => {
+    expect(intercepts("/logout")).toBe(false);
+    // Only that exact path, though — nothing is meant to hide underneath it.
+    expect(intercepts("/logout/anything")).toBe(true);
+  });
 });

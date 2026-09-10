@@ -4,6 +4,7 @@ import { getConfig, client, parseProvider } from "@/lib/oidc";
 import { createSession } from "@/lib/session";
 import { externalOrigin } from "@/lib/request-origin";
 import { loginErrorFromIdp, type LoginErrorCode } from "@/lib/login-error";
+import { sanitizeNext } from "@/lib/safe-next";
 import { pool } from "@/lib/db";
 
 /**
@@ -36,7 +37,13 @@ export async function GET(req: NextRequest) {
   // open, or this callback was reached without going through /api/auth/login.
   if (!raw) return backToLanding(req, "expired");
 
-  let parsed: { state: string; nonce: string; verifier: string; provider?: string };
+  let parsed: {
+    state: string;
+    nonce: string;
+    verifier: string;
+    provider?: string;
+    next?: string | null;
+  };
   try {
     parsed = JSON.parse(raw);
   } catch {
@@ -104,5 +111,11 @@ export async function GET(req: NextRequest) {
   }
 
   cookieStore.delete("kbp_oidc_state");
-  return NextResponse.redirect(new URL("/catalog", externalOrigin(req)));
+  // Back to whatever they were trying to reach when the proxy sent them to
+  // log in, or the catalog if they just logged in from landing. Sanitized
+  // again on the way out: /login checked it too, but this is the value that
+  // actually becomes a Location header, and it should not depend on a cookie
+  // written by an older deploy having checked it the same way.
+  const dest = sanitizeNext(parsed.next) ?? "/catalog";
+  return NextResponse.redirect(new URL(dest, externalOrigin(req)));
 }

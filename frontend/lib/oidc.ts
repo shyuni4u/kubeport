@@ -1,18 +1,17 @@
 import * as client from "openid-client";
 
+import { demoConfigured } from "./demo-config";
+
 export type Provider = "primary" | "demo";
 
 export function parseProvider(v: string | null | undefined): Provider {
   return v === "demo" ? "demo" : "primary";
 }
 
-export function demoEnabled(): boolean {
-  return Boolean(
-    process.env.DEMO_OIDC_ISSUER &&
-      process.env.DEMO_OIDC_CLIENT_ID &&
-      process.env.DEMO_OIDC_CLIENT_SECRET,
-  );
-}
+// Lives in its own import-free module so the proxy can use the same check
+// without pulling openid-client in with it. Re-exported under the old name
+// because this is where every existing caller looks for it.
+export const demoEnabled = demoConfigured;
 
 export function providerEnv(p: Provider): {
   issuer: string;
