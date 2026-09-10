@@ -333,7 +333,20 @@ function UIModeEdit({ onDirty }: ModeProps) {
   );
 
   const inspector = active ? (
+    <div className="space-y-2">
+    {isYamlDraft && (
+      // The page-top banner says this too, but it is a screen height away from
+      // the inspector on a long draft — the reader editing a field never sees
+      // it, and meets a save button that stays off with no reason given (#184).
+      <div role="note" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        {t("convert.yamlDraftInspector")}{" "}
+        <a href={`/templates/${name}/versions/${v}/edit?mode=yaml`} className="underline">
+          {t("convert.editInYaml")}
+        </a>
+      </div>
+    )}
     <FieldInspector
+      readOnly={isYamlDraft}
       path={active.path}
       node={active.node}
       kind={state.resources[active.resIdx].kind}
@@ -361,6 +374,7 @@ function UIModeEdit({ onDirty }: ModeProps) {
         touch();
       }}
     />
+    </div>
   ) : (
     <div className="text-muted-foreground text-sm">{t("pickFieldHint")}</div>
   );
@@ -384,7 +398,9 @@ function UIModeEdit({ onDirty }: ModeProps) {
 
   return (
     <div className="space-y-3">
-      <MetaRow meta={meta} onChange={(m) => { setMeta(m); touch(); }} nameLocked hideTeam />
+      {/* Same reason as the inspector's readOnly: nothing here can be saved on a
+          YAML draft, and an edit would also arm the leave-page guard (#184). */}
+      <MetaRow meta={meta} onChange={(m) => { setMeta(m); touch(); }} nameLocked hideTeam readOnly={isYamlDraft} />
       {sourceAuthoringMode !== "ui" && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 space-y-1">
           <div>
