@@ -414,7 +414,14 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
             key={l.id}
             className={`whitespace-pre ${l.kind === "error" ? "text-red-300" : ""}`}
           >
-            <span className="text-slate-500">
+            {/*
+              slate-400, not slate-500: the timestamp is meant to recede, but
+              500 on this ground is 4.24:1 and 12px is ordinary text, so it was
+              under the 4.5:1 bar (#131). 400 is 7.87:1 and still well below the
+              log text's 18.41:1, which is the distinction that was wanted.
+              LogsPanel.contrast.test.ts holds both ends.
+            */}
+            <span className="text-slate-400">
               [{new Date(l.time).toLocaleTimeString()}]
             </span>{" "}
             <span className="text-cyan-300">[{l.pod}]</span>{" "}

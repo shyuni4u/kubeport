@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -39,6 +40,11 @@ type fakeK8sApplier struct {
 	// that, so nothing could test what the server does when a stream ends on
 	// its own rather than because the reader closed the tab (#162).
 	logLines []string
+
+	// logLineAt is the emission time StreamPodLogs would have read off the
+	// kubelet's timestamp prefix. Zero means "the line carried no usable
+	// stamp", which is the branch that falls back to the server's clock.
+	logLineAt time.Time
 
 	// accessChecks records every CheckAccess call for assertions.
 	// accessResult is the stub response; accessErr overrides it when non-nil.
@@ -83,7 +89,7 @@ func (f *fakeK8sApplier) StreamLogs(ctx context.Context, _ string, _ []string) (
 			select {
 			case <-ctx.Done():
 				return
-			case ch <- k8s.LogLine{Pod: "web-7d9f8-x2k4l", Text: text}:
+			case ch <- k8s.LogLine{Pod: "web-7d9f8-x2k4l", Text: text, At: f.logLineAt}:
 			}
 		}
 		if len(f.logLines) > 0 {

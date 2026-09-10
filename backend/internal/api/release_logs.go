@@ -145,8 +145,21 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 				}
 				return end()
 			}
+			// The container's own clock, not ours. Stamping with time.Now()
+			// here dated every line to the moment we forwarded it, so opening
+			// a pod's logs replayed its whole history as having happened just
+			// now — 16 minutes of startup all reading the same second (#131).
+			//
+			// Falling back to now for a line the kubelet could not stamp: the
+			// alternative is a line with no time, and the pane renders one per
+			// row. "Roughly now" is wrong by the age of the stream; nothing at
+			// all is wrong by more, and looks like a rendering bug.
+			at := line.At
+			if at.IsZero() {
+				at = time.Now()
+			}
 			body, _ := json.Marshal(map[string]any{
-				"time": time.Now().UnixMilli(),
+				"time": at.UnixMilli(),
 				"pod":  line.Pod,
 				"text": line.Text,
 			})
