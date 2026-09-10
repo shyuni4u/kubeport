@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gin-contrib/sse"
 	"github.com/gin-gonic/gin"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
@@ -68,6 +69,20 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 		return
 	}
 
+	// Where to pick up from. `Last-Event-ID` is the browser's own doing — it
+	// remembers the id of the last frame it saw and sends it back on its
+	// automatic reconnect, which is the reconnect nobody chooses and the one
+	// that used to replay the whole container log into a pane it does not
+	// clear (#107). `?since=` is the explicit form, for callers that have no
+	// EventSource keeping track for them; it wins, because it was asked for.
+	resumeFrom, err := parseResumePoint(
+		c.Query("since"), c.GetHeader("Last-Event-ID"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "validation-error",
+			"since must be an RFC3339 timestamp")
+		return
+	}
+
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
@@ -76,7 +91,7 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	ch, errCh := cli.StreamLogs(streamCtx, rel.Namespace, pods)
+	ch, errCh := cli.StreamLogs(streamCtx, rel.Namespace, pods, resumeFrom)
 	ping := time.NewTicker(15 * time.Second)
 	defer ping.Stop()
 
@@ -145,10 +160,21 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 				}
 				return end()
 			}
-			// The container's own clock, not ours. Stamping with time.Now()
-			// here dated every line to the moment we forwarded it, so opening
-			// a pod's logs replayed its whole history as having happened just
-			// now — 16 minutes of startup all reading the same second (#131).
+			// SinceTime is whole seconds, so a resume gets back everything from
+			// the second the caller already had. Trim that overlap here: the
+			// exact instant asked for and the line's own nanoseconds are both
+			// known on this side, and doing it anywhere else would make every
+			// client responsible for deduplicating to be correct.
+			//
+			// A line with no stamp cannot be compared, so it goes through. A
+			// possible duplicate beats a line that silently disappears.
+			if !resumeFrom.IsZero() && !line.At.IsZero() && !line.At.After(resumeFrom) {
+				return true
+			}
+			// The container's own clock, not ours. Stamping with time.Now() here
+			// dated every line to the moment we forwarded it, so opening a pod's
+			// logs replayed its whole history as having happened just now — 16
+			// minutes of startup all reading the same second (#131).
 			//
 			// Falling back to now for a line the kubelet could not stamp: the
 			// alternative is a line with no time, and the pane renders one per
@@ -163,10 +189,35 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 				"pod":  line.Pod,
 				"text": line.Text,
 			})
-			c.SSEvent("log", string(body))
+			// The id is what makes the resume above possible: the browser
+			// stores the last one it saw and hands it back on reconnect. Full
+			// nanosecond precision, because whole seconds would make the trim
+			// either drop real lines or keep duplicates.
+			c.Render(-1, sse.Event{Id: at.Format(time.RFC3339Nano), Event: "log", Data: string(body)})
 			return true
 		}
 	})
+}
+
+// parseResumePoint reads the point a caller wants to pick up from.
+//
+// An empty result means "from the beginning", which is what a first open wants
+// and what any caller gets by saying nothing. An unparseable value is an error
+// rather than a shrug: answering it with the whole log would look like it
+// worked, and the caller would go on sending something we ignore.
+//
+// `Last-Event-ID` can hold a value from before this endpoint emitted ids —
+// a browser that reconnects across a deploy — so it is allowed to be absent or
+// empty, but not to be malformed.
+func parseResumePoint(since, lastEventID string) (time.Time, error) {
+	raw := since
+	if raw == "" {
+		raw = lastEventID
+	}
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339Nano, raw)
 }
 
 // clusterError answers a cluster call that failed *before* the stream opened,

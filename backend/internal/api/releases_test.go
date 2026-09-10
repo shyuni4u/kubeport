@@ -44,7 +44,15 @@ type fakeK8sApplier struct {
 	// logLineAt is the emission time StreamPodLogs would have read off the
 	// kubelet's timestamp prefix. Zero means "the line carried no usable
 	// stamp", which is the branch that falls back to the server's clock.
-	logLineAt time.Time
+	// logLineAts gives each line its own time instead, for the boundary cases
+	// around a resume point; it wins over logLineAt when set.
+	logLineAt  time.Time
+	logLineAts []time.Time
+
+	// sinceSeen records the resume point the handler passed down, so a test can
+	// tell "asked the cluster for a window" from "asked for everything". nil
+	// means StreamLogs was called with a zero time.
+	sinceSeen *time.Time
 
 	// accessChecks records every CheckAccess call for assertions.
 	// accessResult is the stub response; accessErr overrides it when non-nil.
@@ -73,7 +81,11 @@ func (f *fakeK8sApplier) ListInstances(_ context.Context, _, _ string) ([]k8s.In
 	return f.instances, nil
 }
 
-func (f *fakeK8sApplier) StreamLogs(ctx context.Context, _ string, _ []string) (<-chan k8s.LogLine, <-chan error) {
+func (f *fakeK8sApplier) StreamLogs(ctx context.Context, _ string, _ []string, since time.Time) (<-chan k8s.LogLine, <-chan error) {
+	if !since.IsZero() {
+		s := since
+		f.sinceSeen = &s
+	}
 	ch := make(chan k8s.LogLine)
 	errCh := make(chan error, 1)
 	if f.logStreamErr != nil {
@@ -85,11 +97,15 @@ func (f *fakeK8sApplier) StreamLogs(ctx context.Context, _ string, _ []string) (
 	go func() {
 		defer close(ch)
 		defer close(errCh)
-		for _, text := range f.logLines {
+		for i, text := range f.logLines {
+			at := f.logLineAt
+			if i < len(f.logLineAts) {
+				at = f.logLineAts[i]
+			}
 			select {
 			case <-ctx.Done():
 				return
-			case ch <- k8s.LogLine{Pod: "web-7d9f8-x2k4l", Text: text, At: f.logLineAt}:
+			case ch <- k8s.LogLine{Pod: "web-7d9f8-x2k4l", Text: text, At: at}:
 			}
 		}
 		if len(f.logLines) > 0 {

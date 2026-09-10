@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -16,7 +17,7 @@ type K8sApplier interface {
 	ApplyAll(ctx context.Context, ns string, yaml []byte) error
 	DeleteByRelease(ctx context.Context, namespace, release string) error
 	ListInstances(ctx context.Context, namespace, release string) ([]k8s.Instance, error)
-	StreamLogs(ctx context.Context, namespace string, pods []string) (<-chan k8s.LogLine, <-chan error)
+	StreamLogs(ctx context.Context, namespace string, pods []string, since time.Time) (<-chan k8s.LogLine, <-chan error)
 	// CheckAccess proxies a SelfSubjectAccessReview so the caller can ask
 	// "can I do verb on resource?" before attempting an action.
 	CheckAccess(ctx context.Context, spec k8s.AccessCheck) (k8s.AccessResult, error)

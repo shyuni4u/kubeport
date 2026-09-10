@@ -27,7 +27,15 @@ import (
 // leaves every backend test green while the spec quietly becomes false, and the
 // first person to notice is someone writing a client against it.
 
-var sseEventCall = regexp.MustCompile(`SSEvent\(\s*"([a-z0-9-]+)"`)
+// Both ways a frame gets written. c.SSEvent is the short form; sse.Event is
+// what you drop to when the frame needs an `id:`, which log frames now do
+// (#107). Matching only the first is how this guard caught its own blind spot:
+// switching the log frame to the second form made `log` vanish from the emitted
+// set and the test failed loudly, rather than quietly checking three of four.
+var sseEventCalls = []*regexp.Regexp{
+	regexp.MustCompile(`SSEvent\(\s*"([a-z0-9-]+)"`),
+	regexp.MustCompile(`sse\.Event\{[^}]*Event:\s*"([a-z0-9-]+)"`),
+}
 
 // sseEventsEmitted reads the names straight out of the c.SSEvent calls, so the
 // comparison is against what the server actually sends rather than a second
@@ -44,11 +52,13 @@ func sseEventsEmitted(t *testing.T) []string {
 		}
 		b, err := os.ReadFile(f)
 		require.NoError(t, err)
-		for _, m := range sseEventCall.FindAllStringSubmatch(string(b), -1) {
-			seen[m[1]] = true
+		for _, re := range sseEventCalls {
+			for _, m := range re.FindAllStringSubmatch(string(b), -1) {
+				seen[m[1]] = true
+			}
 		}
 	}
-	require.NotEmpty(t, seen, "found no c.SSEvent calls — the regex has stopped matching")
+	require.NotEmpty(t, seen, "found no SSE frame writes — the regexes have stopped matching")
 	return sortedKeys(seen)
 }
 

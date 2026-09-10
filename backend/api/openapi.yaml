@@ -1048,7 +1048,7 @@ paths:
 
         | event | data |
         |---|---|
-        | `log`   | `{"time": <unix ms>, "pod": "<name>", "text": "<line>"}` |
+        | `log`   | `{"time": <unix ms>, "pod": "<name>", "text": "<line>"}`. `time` is when the container wrote the line, from the kubelet's own stamp — not when the server forwarded it (#131). Carries an SSE `id:` holding the same instant at nanosecond precision; that is the resume point below |
         | `ping`  | unix seconds, every 15s to keep the connection open |
         | `error` | a `Problem`, same schema and same `ErrorKind` vocabulary as any other error. `title` is `rbac-denied` (403, the caller may read the release but not its pods' logs — permanent), `cluster-auth-denied` (502, the cluster refused the forwarded token — permanent), or `k8s-error` (502, transport or anything else — retryable) |
         | `end`   | `{"reason": "all pods stopped emitting"}` — a fixed string. The stream is over; the server closes immediately after. Always the last frame a client receives |
@@ -1084,9 +1084,24 @@ paths:
         A connection that closes **without** `end` was dropped, not finished,
         and reopening is the right response. The only paths that omit the frame
         are the ones where the client has already gone, so its absence never
-        means "finished, quietly". Note that reopening replays everything:
-        there is no `Last-Event-ID` and no `since` parameter, so the caller
-        either deduplicates or accepts duplicates (#107).
+        means "finished, quietly".
+
+        **Reopening resumes rather than replays.** Each `log` frame carries an
+        SSE `id:`, so a standard `EventSource` sends the last one back as
+        `Last-Event-ID` on its automatic reconnect and picks up where it left
+        off — no client code, and no duplicates in a pane the browser does not
+        clear (#107). A caller with no `EventSource` keeping track for it can
+        pass the same instant as `?since=`, which wins if both are present.
+
+        The cluster's own filter is whole seconds, so it returns everything
+        from the second you asked about; the server trims that overlap against
+        the exact instant before sending, so a resume is duplicate-free without
+        the caller deduplicating. A line the kubelet could not stamp is always
+        sent — a possible duplicate beats a line that silently disappears.
+
+        Sending no resume point gets the container log from the beginning,
+        which is what a first open wants and what the Reconnect button in the
+        web UI does, since it empties the pane at the same time.
 
         `reason` is human-readable text, not a branch key — it carries no closed
         vocabulary and may be reworded, and like an `error` frame's `detail` it
@@ -1110,6 +1125,18 @@ paths:
           in: query
           description: Pod name, or `all` (default) to follow every pod.
           schema: { type: string, default: all }
+        - name: since
+          in: query
+          required: false
+          description: |
+            Resume point: an RFC3339 instant, normally the `id:` of the last
+            `log` frame received. Lines at or before it are not sent. Omit to
+            get the container log from the beginning.
+
+            A browser does not need this — its `EventSource` sends
+            `Last-Event-ID` by itself. This parameter is for callers that do
+            not, and it takes precedence over that header when both are given.
+          schema: { type: string, format: date-time }
       responses:
         "200":
           description: Stream opened.
