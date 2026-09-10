@@ -115,6 +115,36 @@ describe("CatalogBrowser", () => {
       expect(pressed()).toEqual(["전체"]);
     });
 
+    /**
+     * The '전체' chip needs a value of its own, and the first version spelled
+     * it `__all__` on the reasoning that a real tag could not look like that.
+     * Cross-review checked instead of reasoning: `CreateTemplate` and
+     * `UpdateTemplate` store `tags` as arbitrary strings with no validation at
+     * all, so a template really can be tagged `__all__` — and it would have
+     * shared a pressed state with '전체' and been unfilterable.
+     *
+     * The chips now carry `all` and `t:<tag>`, which cannot collide because
+     * the prefix is added by this component and not by the data.
+     */
+    it("filters a tag that collides with the reset chip's own name", async () => {
+      const withCollision = [
+        ...sample,
+        {
+          name: "odd",
+          display_name: "Odd One",
+          description: "",
+          tags: ["__all__"],
+          current_version: 1,
+          owning_team_name: "platform",
+        },
+      ];
+      render(<CatalogBrowser templates={withCollision} />);
+      await userEvent.click(screen.getByRole("button", { name: "__all__" }));
+      expect(screen.getByText("Odd One")).toBeInTheDocument();
+      expect(screen.queryByText("Web Service")).not.toBeInTheDocument();
+      expect(pressed()).toEqual(["__all__"]);
+    });
+
     it("clicking the pressed tag again also clears it", async () => {
       // ToggleGroup's own deselect path. Without '전체' this was the *only* way
       // back and it is undiscoverable; with '전체' it still has to keep working,

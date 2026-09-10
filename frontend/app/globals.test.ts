@@ -120,18 +120,32 @@ describe("dark-mode surface tokens", () => {
   });
 });
 
-describe("--muted-foreground", () => {
+/**
+ * Every surface text can be painted on, which is not the same list as
+ * `SURFACES`: a hovered or selected row is a surface for the duration of the
+ * hover, and the text on it does not change.
+ *
+ * That distinction is the one this PR's cross-review caught. `--hover` was
+ * chosen by measuring the fill against the page and nothing else, which took
+ * a release row's `text-muted-foreground` cells from 4.90:1 to 3.67:1 — the
+ * fill got visible by making the text fail. Adding a surface obliges you to
+ * re-check every foreground that can land on it, so the list is written down
+ * once and both foregrounds are held to it.
+ */
+const TEXT_SURFACES = ["--background", "--card", "--muted", "--hover", "--selected"] as const;
+
+describe.each(["--foreground", "--muted-foreground"] as const)("%s", (fg) => {
   // The label colour has to survive the surface moving under it. shadcn's
   // default sat at 4.34:1 on the old --background and would have dropped to
   // 3.85:1 once --muted darkened — on the very surfaces #71 makes solid.
   //
-  // It carries a second job since #112: a disabled control is now drawn as
-  // `bg-muted text-muted-foreground` instead of `opacity-50`, so this pair is
-  // what a disabled button's label is made of. That is why --muted is in the
-  // list and why the bar is the text bar rather than a decorative one.
-  it.each(THEMES)("clears 4.5:1 on every surface in $name mode", ({ scope }) => {
-    for (const surface of [...SURFACES, "--muted"] as const) {
-      expect(ratio(scope, "--muted-foreground", surface), surface).toBeGreaterThanOrEqual(4.5);
+  // --muted-foreground carries a second job since #112: a disabled control is
+  // drawn as `bg-muted text-muted-foreground` instead of `opacity-50`, so this
+  // pair is what a disabled button's label is made of. That is why --muted is
+  // in the list and why the bar is the text bar rather than a decorative one.
+  it.each(THEMES)("clears 4.5:1 on every text surface in $name mode", ({ scope }) => {
+    for (const surface of TEXT_SURFACES) {
+      expect(ratio(scope, fg, surface), `${fg} on ${surface}`).toBeGreaterThanOrEqual(4.5);
     }
   });
 });

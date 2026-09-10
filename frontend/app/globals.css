@@ -75,13 +75,21 @@
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.93 0 0);
   /*
-    Darkened with --muted. shadcn's 0.556 was 4.34:1 on the old 0.97 surface —
-    already under WCAG 1.4.3 AA — and would have fallen to 3.85:1 once --muted
-    moved, on exactly the surfaces this change makes solid (the release table
-    header, the editor meta row). 0.50 clears 4.5:1 on --muted, --background
-    and --card alike.
+    Darkened with --muted (#71). shadcn's 0.556 was 4.34:1 on the old 0.97
+    surface — already under WCAG 1.4.3 AA — and would have fallen to 3.85:1
+    once --muted moved, on exactly the surfaces that change makes solid (the
+    release table header, the editor meta row).
+
+    0.50 was enough for those. It is not enough now: --hover is a *new surface*
+    this text lands on, and a release row's template and namespace cells are
+    `text-muted-foreground`, so hovering the row put 0.50 on rgb(202) at
+    3.67:1 — the darker hover would have bought fill visibility with an AA
+    text regression. Found in cross-review; the mistake was checking the new
+    fill against the page and not checking what sits on top of it.
+
+    0.43 clears 4.5:1 on all five surfaces, worst case 4.92:1 on --hover.
   */
-  --muted-foreground: oklch(0.5 0 0);
+  --muted-foreground: oklch(0.43 0 0);
   --accent: oklch(0.95 0.03 275);
   --accent-foreground: oklch(0.35 0.2 275);
   /*
@@ -170,7 +178,9 @@
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
+  /* Lifted from shadcn's 0.708 for the same reason light mode was darkened:
+     0.708 is 4.20:1 on the new --hover. 0.76 is 5.07:1. */
+  --muted-foreground: oklch(0.76 0 0);
   --accent: oklch(0.3 0.08 275);
   --accent-foreground: oklch(0.985 0 0);
   /*

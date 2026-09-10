@@ -9,11 +9,18 @@ import { CatalogCard, type CatalogCardTemplate } from "./CatalogCard";
 type Props = { templates: CatalogCardTemplate[] };
 
 /**
- * The value the "전체" chip carries. Tags are k8s-ish label values from template
- * metadata, which cannot contain `_` at either end, so this cannot collide with
- * a real tag.
+ * The chips carry encoded values, not raw tags.
+ *
+ * The "전체" chip needs a value of its own, and any sentinel picked out of the
+ * tag namespace is a tag some template can legitimately carry — `tags` reaches
+ * the API as an unvalidated `[]string`, so there is no shape a real tag cannot
+ * take. Prefixing the real ones instead makes the collision impossible rather
+ * than unlikely: the prefix is added here and never comes from the data.
  */
-const ALL_TAGS = "__all__";
+const ALL_TAGS = "all";
+const tagValue = (tag: string) => `t:${tag}`;
+const tagFromValue = (value: string | undefined) =>
+  value?.startsWith("t:") ? value.slice(2) : "";
 
 export function CatalogBrowser({ templates }: Props) {
   const t = useTranslations("catalog");
@@ -63,14 +70,13 @@ export function CatalogBrowser({ templates }: Props) {
         />
       </div>
       {allTags.length > 0 && (
-        // `ALL_TAGS` rather than `""`: base-ui treats an empty string as "no
-        // value", so an item carrying it can never read as pressed — and a
-        // filter whose "off" state looks the same as its "on" state is the bug
-        // this is fixing (#110). The sentinel is mapped back to "" on the way
-        // into `tag`, so the filter itself still works on a plain tag string.
+        // A value is always selected — `ALL_TAGS` when nothing is filtered.
+        // base-ui treats an empty string as "no value", so an item carrying it
+        // could never read as pressed, and a filter whose off state looks like
+        // its on state is the bug being fixed here (#110).
         <ToggleGroup
-          value={[tag || ALL_TAGS]}
-          onValueChange={(v) => setTag(v[0] === ALL_TAGS ? "" : (v[0] ?? ""))}
+          value={[tag ? tagValue(tag) : ALL_TAGS]}
+          onValueChange={(v) => setTag(tagFromValue(v[0]))}
           className="flex-wrap justify-start"
           aria-label={t("tagFilterLabel")}
         >
@@ -78,7 +84,7 @@ export function CatalogBrowser({ templates }: Props) {
             {t("allTags")}
           </ToggleGroupItem>
           {allTags.map((t) => (
-            <ToggleGroupItem key={t} value={t} variant="outline">
+            <ToggleGroupItem key={t} value={tagValue(t)} variant="outline">
               {t}
             </ToggleGroupItem>
           ))}
