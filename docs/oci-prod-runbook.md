@@ -217,19 +217,46 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
    - `oidc_issuer_url`: `https://accounts.google.com`, `default_namespace`: `default`
    현재 `oci-a1` 이 이렇게 등록돼 있다.
 
-> **Dex 서명 키 회전 주의**: 데모 Dex chart 는 `storage: memory` — Dex pod 가 재시작하면 서명 키가
-> 바뀐다. apiserver 는 issuer 의 JWKS 를 캐싱하므로 재시작 직후 짧은 창 동안 기존 발급 토큰이
-> 아니라도 **새로 발급된** 토큰이 401 로 거부될 수 있다(캐시가 아직 새 키를 못 받아옴). 보통
-> k8s 가 자동으로 짧은 주기 뒤 JWKS 를 다시 받아오며 해결된다. 안 풀리면 `sudo systemctl restart k3s`
-> 로 캐시를 강제로 비운다.
+> **Dex 를 재시작했으면 k3s 도 재시작한다 — 선택이 아니다.**
+>
+> 데모 Dex chart 는 `storage: memory` 다. **Dex pod 가 재시작하면 서명 키가 새로 생긴다.**
+> apiserver 는 issuer 의 JWKS 를 캐싱하므로, 새로 발급된 토큰조차 옛 키로 검증하려다 실패한다:
+>
+> ```
+> k3s: "Unable to authenticate the request"
+>   err="[invalid bearer token, oidc: verify token: failed to verify signature:
+>        failed to verify id token signature]"
+> backend: StreamReleaseLogs: list instances: Unauthorized
+> ```
+>
+> **로그인은 되는데(Dex 가 발급) 클러스터 호출만 죽는다** — 릴리스가 전부 `cluster-unreachable`,
+> 로그 탭이 `cluster-auth-denied`. `/healthz` 는 DB 만 보므로 **초록으로 남는다.**
+>
+> ```bash
+> sudo systemctl restart k3s
+> # 확인: 재시작 시각 이후로 잘라서 센다. "최근 N분" 은 재시작 전 로그가 섞인다.
+> START=$(systemctl show k3s -p ActiveEnterTimestamp --value)
+> sudo journalctl -u k3s --since "$START" --no-pager | grep -c 'failed to verify id token signature'
+> ```
+>
+> 예전 이 문단은 "보통 자동으로 짧은 주기 뒤 해결된다" 고 적혀 있었다. **2026-09-10 에 50분
+> 동안 해결되지 않았고, 그 문장이 조치를 미루게 만들었다.** 노드에서 JWKS 는 200 으로 잘
+> 닿고 있었다 — 자동 갱신을 기다릴 근거로 삼지 말 것.
 
 ### 데모 모드 운영 (Plan 13, 2026-09-08 롤아웃 완료)
 
 - **구성**: Helm revision ≥ 4 에 `dex.enabled=true` / `demo.enabled=true`, `demo.kubectlImage=alpine/k8s:1.31.9`.
   k3s 는 `/etc/rancher/k3s/auth.yaml` 로 Google + Dex 를 신뢰(`config.yaml.bak` 이 전환 전 백업).
-- **데모 비밀번호 회전**: [deploy/oci/README.md §7.6](../deploy/oci/README.md) 의 `--set` 목록을
-  새 `DEMO_PW`/`HASH` 로 다시 실행 (`staticPasswords[N]` 네 필드 전부, `--reset-then-reuse-values`).
-  `DEX_SECRET` 은 유지해도 된다. Dex 는 `storage: memory` 라 재시작 시 서명 키가 바뀐다 (§5 주의 참조).
+- **데모 비밀번호 회전** — **2단계다. 두 번째를 빼면 데모가 멈춘다.**
+  1. [deploy/oci/README.md §7.6](../deploy/oci/README.md) 의 `--set` 목록을 새 `DEMO_PW`/`HASH` 로
+     다시 실행 (`staticPasswords[N]` 네 필드 전부, `--reset-then-reuse-values`).
+     `DEX_SECRET` 은 유지해도 된다.
+  2. **`sudo systemctl restart k3s`.** 1 단계가 Dex pod 를 재시작시키고, Dex 는 `storage: memory`
+     라 서명 키가 새로 생긴다. apiserver 의 JWKS 캐시를 비우지 않으면 **새 비밀번호로 로그인은
+     되는데 클러스터 호출이 전부 401** 이다 (§5 위 주의 참조).
+
+  회전 후 확인: 랜딩의 표기 값이 바뀌었는지, **옛 비밀번호로 로그인이 거부되는지**(거부돼야
+  Dex 까지 실제로 도달한 것이다), 그리고 릴리스 상세가 인스턴스를 읽는지.
 - **리셋**: CronJob `kubeport-demo-reset`, **하루 한 번 21:00 UTC = 06:00 KST**
   (`demo.resetSchedule`). 한국 시간 새벽이라 방문자 작업을 뺏을 확률이 가장 낮다. 6시간
   주기였을 때와 달리 **실패해도 몇 시간 뒤 자동 재시도가 없다** — 한 번 건너뛰면 이틀 공백이다
@@ -320,6 +347,7 @@ port-forward 로 밖에서 잡는다.
 
 | 증상 | 확인 |
 |---|---|
+| **로그인은 되는데** 릴리스가 전부 `cluster-unreachable` / 로그 탭이 `cluster-auth-denied` | Dex 를 재시작해 서명 키가 바뀌었고 apiserver 가 옛 JWKS 를 캐싱 중이다. `journalctl -u k3s | grep 'failed to verify id token signature'` 로 확인 → `sudo systemctl restart k3s` (§5). **`/healthz` 는 DB 만 보므로 이때도 초록이다** |
 | `Identity file ... not accessible` → `Permission denied (publickey)` | 키 경로가 이 머신 것이 아니거나, **이 머신엔 아직 키 자체가 없다.** §1 "SSH 키 위치" 의 `ls` 로 둘 다 없으면 먼저 gpg 번들을 풀어야 한다 — 만든 머신은 `~/.ssh/oci_kuberport`, 번들로 복원한 머신은 `~/.ssh/kuberport-oci/oci_kuberport` |
 | `helm`/`kubectl` 이 `Kubernetes cluster unreachable: ... localhost:8080` | ssh 명령에 `export KUBECONFIG=/etc/rancher/k3s/k3s.yaml` 을 안 넣었다 (§3-2). `ssh <host> "<cmd>"` 는 프로필을 안 읽는다 |
 | 배포할 `sha-<7>` 태그가 없다 | #122 이전 커밋이면 `push:` 쪽 `paths:` 필터에 걸려 이미지가 아예 안 만들어졌을 수 있다. `gh run list --workflow build-images.yml --branch main` 으로 확인 (§3-1). `--commit <sha>` 는 조용히 0건을 주고, `--limit` 이 작아도 0건이 된다 |

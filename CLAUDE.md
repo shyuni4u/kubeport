@@ -7,8 +7,8 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 
 **🟢 라이브 배포 완료 — https://kubeport.enzo.kr** (OCI Always Free A1, Phase 2 직행). Plan 0~10 실행 완료: 프론트 재설계(0~7) + drift 회수(8) + Helm chart(9) + **OCI 부트스트랩·helm install·Google OIDC·실제 k8s 배포 인프라(10)**. 운영 지식은 반드시 [docs/oci-prod-runbook.md](docs/oci-prod-runbook.md) 참조.
 
-> **▶ 현재 상태 (2026-09-09)** — 데모 가능 상태. 완료 삭제하며 갱신할 것.
-> - **라이브 = `sha-269a198`, Helm rev 10** (2026-09-09 08:19 UTC **기준 — 재배포마다 썩는 값이다**. 지금 라이브가 뭔지는 [runbook §3-3](docs/oci-prod-runbook.md#3-3-배포-확인) 의 `helm history` 로 직접 본다). 재배포 절차·함정은 [runbook §3](docs/oci-prod-runbook.md#3-재배포-이미지-갱신).
+> **▶ 현재 상태 (2026-09-10)** — 데모 가능 상태. 완료 삭제하며 갱신할 것.
+> - **라이브 = `sha-c9b1404`, Helm rev 15** (2026-09-10 02:03 UTC **기준 — 재배포마다 썩는 값이다**. 지금 라이브가 뭔지는 [runbook §3-3](docs/oci-prod-runbook.md#3-3-배포-확인) 의 `helm history` 로 직접 본다). 재배포 절차·함정은 [runbook §3](docs/oci-prod-runbook.md#3-재배포-이미지-갱신).
 > - **실제 k8s 배포까지 동작**: k3s 가 Google OIDC 신뢰 + RBAC 바인딩 + 클러스터 `oci-a1` 등록 (runbook §5). backend 가 사용자 Google 토큰을 k8s API 로 포워딩.
 > - **로그인/로그아웃 정상**, admin 부트스트랩(`auth.devAdminEmails`). **운영 하드닝**: idle-reclaim ping(GHA 10분) + 주간 백업 정책 + 만료 세션 자동 정리.
 > - **데모 모드(Plan 13) 라이브** — `/` 에서 관리자/사용자 체험 버튼(Dex 로그인, 비밀번호 화면 표기), `demo` 네임스페이스 격리, **하루 1회 리셋(21:00 UTC = 06:00 KST)**, k3s 가 Google+Dex 구조화 인증. 운영: runbook §5.
@@ -19,7 +19,10 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 >   - **UI/UX** (#69 #87 #106 #109): 배포 폼(RBAC 거부 시 제출 차단·중복 제출·잔존 에러·슬라이더 트랙), 카탈로그 이름 검색 + 날짜·시각 로케일, **라이트 모드 `--muted`/`--secondary` 를 `--background` 에서 분리**(둘이 같은 값이라 `bg-muted` 표면이 전부 안 보이던 근본 원인), 릴리스 목록에서 비정상만 칩으로 표시.
 >   - **CI** (#67 #122): CI 가 `go test`·vitest·eslint 를 실제로 돌리게 됨, next RCE 패치, dependabot. `build-images` 는 **PR 에서 이미지를 push 하지 않고**(빌드만), main 쪽 `paths:` 필터가 없어져 **모든 main 커밋에 `sha-<7>` 태그가 생긴다** — 배포할 태그가 없는 상황이 사라졌다.
 >   - **PR 리뷰어 시스템** (#22 #59 #65): `/pr-review` 스킬 + `.claude/agents/*-reviewer.md` 7개 + `gh pr create` 훅. 훅은 **세션 cwd 기준**으로 판정하므로 워크트리에서 작업하면 기록도 그 워크트리에 쓰인다.
-> - **남은 것**: (a) **[issue #20](https://github.com/shyuni4u/kubeport/issues/20)** 다른 PC 에서 `scripts/e2e/up.sh` 생성 경로(인증서·kind) 첫 검증, (b) Plan 11 후속 — 라이브 OCI smoke(프로덕션에 릴리스 생성/삭제 여부 결정 필요)·클러스터 끊김/drift 케이스, (c) **리뷰어 이슈 백로그 ~50건** — 특히 디자인 대비 미달군(#110~#115, #130)과 데모 리셋 실패 감시(#105 #119), (d) **인스트림 에러 3종(`rbac-denied`·`cluster-auth-denied`·`k8s-error`)은 백엔드 테스트가 유일한 근거** — 라이브에서 열린 스트림의 RBAC 을 뺏을 수단이 없어 브라우저 검증 불가. kind e2e 로 넓힐 때 들어갈 자리.
+> - **남은 것**: (a) **[issue #20](https://github.com/shyuni4u/kubeport/issues/20)** 다른 PC 에서 `scripts/e2e/up.sh` 생성 경로(인증서·kind) 첫 검증, (b) Plan 11 후속 — 라이브 OCI smoke(프로덕션에 릴리스 생성/삭제 여부 결정 필요)·클러스터 끊김/drift 케이스, (c) **리뷰어 이슈 백로그 ~50건** — 특히 디자인 대비 미달군(#110~#115, #130)과 데모 리셋 실패 감시(#105 #119), (d) **인스트림 에러 2종(`rbac-denied`·`k8s-error`)은 백엔드 테스트가 유일한 근거** — 라이브에서 열린 스트림의 RBAC 을 뺏을 수단이 없어 브라우저 검증 불가. kind e2e 로 넓힐 때 들어갈 자리. `cluster-auth-denied` 는 2026-09-10 Dex 키 회전 사고 때 **자연 발생해 화면까지 확인됨** — 문구가 `no-pods` 와 갈리고, client-go 원문 누출 0, 눌러도 안 풀리는 종류라 `다시 연결` 버튼이 없다.
+> - **2026-09-09 늦게 (PR #144 #145 #140)** — 문서·리뷰 트리아지 규칙, 그리고 **#140: 데모 리셋이 지우기 전에 재시드 가능 여부를 검증한다**(#105 #119 #132). 이 순서 뒤집기가 2026-09-10 에 실제로 값을 했다 — 일시적 Dex 장애로 preflight 가 실패했고, 예전 순서였으면 데모가 비워진 채 방치됐을 것을 아무것도 지우지 않고 멈췄다.
+> - **2026-09-10 머지분 (PR 5건)** — #147(#134 로그 탭이 왜 거절됐는지 말한다) · #141(#129 경로 문법 — k8s 라벨 키를 가리킬 수 있게) · #154(#153 리셋 하루 1회 + 배너가 차트 값을 읽게) · #151(미리보기 실패를 Problem 원문 대신 `detail` 로) · #149(#110 #111 #112 #130 상호작용 상태 전용 토큰). **마일스톤 A 종료 — 열린 PR 0건.**
+> - **데모 비밀번호 회전은 2단계다** — `helm upgrade` 로 끝나지 않는다. Dex 가 `storage: memory` 라 재시작 시 서명 키가 바뀌고, apiserver 의 JWKS 캐시를 비우지 않으면 **로그인은 되는데 클러스터 호출이 전부 401** 이다. 2026-09-10 에 이걸로 데모가 5분간 멈췄고, 그때 `/healthz` 는 초록이었다. [runbook §5 "데모 모드 운영"](docs/oci-prod-runbook.md#데모-모드-운영-plan-13-2026-09-08-롤아웃-완료).
 > - **주의**: 공인 IP `168.107.55.95` 는 ephemeral(stop/start 시 변경). **SSH 키 경로는 머신마다 다르다** — 키를 만든 머신은 `~/.ssh/oci_kuberport`, gpg 번들로 복원한 머신은 `~/.ssh/kuberport-oci/oci_kuberport`. 둘 다 정상이니 통일하지 말고 [runbook §1 "SSH 키 위치"](docs/oci-prod-runbook.md#ssh-키-위치--두-곳-다-정상이다-68) 로 확인할 것 (`kuberport` 표기 자체는 아래 "확정된 결정" 표 — 고치지 말 것). 재배포·RBAC·롤백은 runbook.
 
 스펙: [docs/superpowers/specs/2026-04-19-frontend-design-spec.md](docs/superpowers/specs/2026-04-19-frontend-design-spec.md) (4 화면: Admin UI 에디터 / 카탈로그 / 배포 폼 / 릴리스 상세)
