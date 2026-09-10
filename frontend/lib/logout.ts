@@ -9,7 +9,10 @@
  *   and report ITS status — "did the logout work?" would depend on whether
  *   landing rendered, and `Response.ok` is false for a 303 anyway.
  * - Under "manual" a browser turns that 303 into an opaque redirect (type
- *   "opaqueredirect", status 0). That, a plain 3xx, or a 2xx is success.
+ *   "opaqueredirect", status 0). That, or a plain 3xx, is success. A 2xx is
+ *   not: the route never answers a POST with one, so a 200 can only come from
+ *   something in front of it — an SSO gateway or captive portal serving its
+ *   own login page — while the session is still alive.
  * - Anything else — a 403 from the route's Origin check, which is what every
  *   logout gets once the domain changes without PUBLIC_ORIGIN following, or a
  *   request that never landed — is failure, and the caller must not navigate
@@ -20,8 +23,7 @@
 export async function requestLogout(): Promise<boolean> {
   try {
     const res = await fetch("/api/auth/logout", { method: "POST", redirect: "manual" });
-    const redirected = res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400);
-    return res.ok || redirected;
+    return res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400);
   } catch {
     return false;
   }

@@ -39,6 +39,16 @@ describe("requestLogout", () => {
     expect(await requestLogout()).toBe(false);
   });
 
+  // The route never answers a POST with 2xx — it redirects on success and
+  // refuses otherwise. A 200 can only come from something in front of it (an
+  // SSO gateway or captive portal serving its own login page), and the session
+  // is still alive when that happens.
+  it("does not take a plain 200 for a logout", async () => {
+    stubFetch(async () => new Response("<html>please sign in</html>", { status: 200 }));
+
+    expect(await requestLogout()).toBe(false);
+  });
+
   it("reports a request that never landed as a failure", async () => {
     stubFetch(async () => {
       throw new Error("offline");

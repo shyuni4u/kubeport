@@ -127,6 +127,14 @@ managed cluster leaves the PVC `Pending` and the Ingress unassigned.
 `oidc.audience` must equal your client ID, and `auth.devAdminEmails` is what
 makes you an admin — see "After install" step 0 for why both matter.
 
+If the browser reaches kubeport on more than one domain, or TLS is terminated
+outside the cluster (Cloudflare, an external load balancer) with
+`tls.enabled=false`, list every https origin the browser actually sees in
+`frontend.publicOrigins`, e.g. `--set 'frontend.publicOrigins={https://kubeport.example.com}'`.
+Logout checks the request's Origin against this list (falling back to the
+origin of `oidc.redirectUri`); an origin missing from it makes every logout
+fail with "Couldn't sign out. You are still signed in".
+
 `values-gcp-phase1.yaml` and `values-oci-phase2.yaml` are presets for this
 project's own single-node k3s hosts. Read them for reference, but don't pass them
 with `-f` on a different cluster.
@@ -250,6 +258,8 @@ OCI-specific.
 catalog → real Pods show up in the release detail. If `POST /v1/clusters` returns
 `403 admin group required`, step 0 is missing; if the cluster dropdown is empty,
 step 3; if a deploy fails with 401, step 1; with 403 from the cluster, step 2.
+Finally, sign out from the top-bar menu — if it says you are still signed in,
+see `frontend.publicOrigins` above.
 
 ## Upgrade
 
