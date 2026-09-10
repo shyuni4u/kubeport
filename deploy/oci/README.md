@@ -278,9 +278,10 @@ admin UI 에 클러스터 등록 화면이 아직 없으므로, admin 토큰으�
   DEMO_PW=$(LC_ALL=C tr -dc '23456789ABCDEFGHJKLMNPQRSTUVWXYZ' < /dev/urandom | head -c 10)
   DEX_SECRET=$(openssl rand -hex 24)                             # 비밀번호 관리자에 저장
   HASH=$(htpasswd -bnBC 10 "" "$DEMO_PW" | tr -d ':\n')
+  # 자동 배포와 같은 락을 잡는다. 이미지 태그는 여기서 올리지 않는다 — 태그는 kubeport-deploy 만 올린다.
+  flock -w 600 /run/lock/kubeport-deploy.lock \
   helm upgrade kubeport ~/kubeport-chart/kubeport \
     --namespace kubeport --reset-then-reuse-values \
-    --set images.backend.tag=$NEW_SHA --set images.frontend.tag=$NEW_SHA \
     --set dex.enabled=true --set dex.host=dex.kubeport.enzo.kr \
     --set dex.clientSecret="$DEX_SECRET" \
     --set "dex.staticPasswords[0].email=demo-admin@demo.kubeport,dex.staticPasswords[0].username=demo-admin,dex.staticPasswords[0].userID=demo-admin-000,dex.staticPasswords[0].hash=$HASH" \
@@ -290,6 +291,11 @@ admin UI 에 클러스터 등록 화면이 아직 없으므로, admin 토큰으�
     --set demo.adminPassword="$DEMO_PW" \
     --set demo.userPassword="$DEMO_PW"
   ```
+
+  **먼저 `kubeport-deploy status` 로 락이 `free` 인지 본다.** `HELD` 면 배포가 진행 중이니 끝날 때까지
+  기다린다 — 위 `flock -w 600` 도 최대 10분 기다린 뒤 실패한다. 비밀번호 회전(이 명령의 재실행)이면
+  [runbook §5 "데모 비밀번호 회전"](../../docs/oci-prod-runbook.md#데모-모드-운영-plan-13-2026-09-08-롤아웃-완료)
+  0단계대로 자동 배포를 잠시 끈다. 이 명령은 Dex 를 재시작시키므로 끝나면 **`sudo systemctl restart k3s`** 까지 한다.
 
   ⚠️ 2026-09-08 실제 롤아웃에서 걸린 세 가지 (모두 위 명령에 반영됨):
   - **`-f values-oci-phase2.yaml` 을 같이 주면 안 된다.** 그 파일은 `host`·시크릿을 빈 값/플레이스홀더로
@@ -350,10 +356,16 @@ main 머지 → build-images → `.github/workflows/deploy.yml` → VM 의 `kube
 [runbook §3](../../docs/oci-prod-runbook.md#3-재배포-이미지-갱신). 설계 원칙은 둘이다:
 
 - **관리자 키를 GitHub 에 올리지 않는다.** 배포 전용 키를 새로 만들고, VM 이 그 키를
-  `restrict,command="/usr/local/bin/kubeport-deploy"` 로 묶는다. 이 키로 할 수 있는 일은 그
-  스크립트가 받아 주는 `deploy <main sha>` 와 `status` 뿐이다(셸·포워딩·pty 없음).
-- **이 PR 의 main 머지 전에 1~6 을 끝낸다.** `deploy.yml` 은 main 에 들어오는 순간부터 매 빌드 뒤에
-  돈다. 시크릿이 없으면 `Missing secret` 으로 실패할 뿐 해는 없지만, 순서대로 하면 머지 커밋이 곧 첫 자동 배포다.
+  `restrict,command="/usr/local/bin/kubeport-deploy --forced"` 로 묶는다. 이 키로 할 수 있는 일은 그
+  스크립트가 받아 주는 `deploy <main sha>` 와 `status` 뿐이다(셸·포워딩·pty 없음). 그리고 **앞으로만** 간다 —
+  지금 라이브 이미지보다 옛 커밋은 main 에 있어도 거절한다(#47·#101 같은 보안 수정 이전으로 되돌리지 못하게).
+  롤백은 관리자 키로만 한다(아래 8).
+- **배포 키도 `ubuntu` 계정에 둔다 — 전용 사용자를 만들지 않는 이유.** k3s kubeconfig 가 0644 라 노드의
+  어떤 로컬 사용자든 cluster-admin 이고, single-node 에서 cluster-admin 은 곧 노드 root 다. 계정을 나눠도
+  막히는 것이 없다. 방어의 핵심은 `restrict`(셸·포워딩 없음)와, 스크립트가 authorized_keys 의 명시 인자
+  `--forced` 로만 배포 키 경로를 판정하는 것이다.
+- **순서: 1~5 를 먼저, 6 은 첫 자동 배포 확인.** 1~5 가 끝나기 전의 main push 에서는 deploy 가 시크릿이 없어
+  `Missing secret` 으로 실패할 뿐 해는 없다. 포크·자가호스팅 리포에서는 잡 자체가 건너뛰어진다.
 
 아래 `$KEY` 는 **관리자** 키([runbook §1 "SSH 키 위치"](../../docs/oci-prod-runbook.md#ssh-키-위치--두-곳-다-정상이다-68)),
 `$IP` 는 현재 공인 IP 다.
@@ -366,10 +378,15 @@ main 머지 → build-images → `.github/workflows/deploy.yml` → VM 의 `kube
 
    개인키는 4단계에서 GitHub 시크릿으로 올린 뒤 로컬에서 지워도 된다(재발급이 더 간단하다).
 
-2. **VM 에 스크립트 설치** — root 소유 0755. 배포 키를 쓰는 사용자(`ubuntu`)가 스크립트를 고칠 수 없게:
+2. **VM 에 스크립트 설치** — root 소유 0755. 배포 키를 쓰는 사용자(`ubuntu`)가 스크립트를 고칠 수 없게.
+   **스크립트는 main 의 것을 쓴다** — 작업 중인 브랜치의 파일을 올리면 리뷰·머지되지 않은 코드가 배포 키의
+   권한을 정한다. `git fetch origin main && git checkout origin/main -- deploy/oci/kubeport-deploy.sh` 로
+   작업 트리에 꺼내거나, 아래처럼 `git show` 로 바로 파일을 만든다:
 
    ```bash
-   scp -i "$KEY" deploy/oci/kubeport-deploy.sh ubuntu@$IP:/tmp/kubeport-deploy.sh
+   git fetch origin main
+   git show origin/main:deploy/oci/kubeport-deploy.sh > /tmp/kubeport-deploy.sh
+   scp -i "$KEY" /tmp/kubeport-deploy.sh ubuntu@$IP:/tmp/kubeport-deploy.sh
    ssh -i "$KEY" ubuntu@$IP 'sudo install -o root -g root -m 0755 /tmp/kubeport-deploy.sh /usr/local/bin/kubeport-deploy \
      && rm /tmp/kubeport-deploy.sh \
      && sudo apt-get install -y jq curl util-linux \
@@ -382,23 +399,30 @@ main 머지 → build-images → `.github/workflows/deploy.yml` → VM 의 `kube
    `bootstrap.sh` 기본), 노드에서 `api.github.com`·`codeload.github.com` 로의 아웃바운드.
    **main 의 스크립트가 바뀌면 이 단계를 다시 실행한다** — 자동으로 갱신되지 않는 것이 의도다.
 
-3. **`authorized_keys` 에 제한된 한 줄 추가** — 형식:
+3. **`authorized_keys` 에 제한된 한 줄 추가** — 형식 (`--forced` 까지가 command 다):
 
    ```
-   restrict,command="/usr/local/bin/kubeport-deploy" ssh-ed25519 AAAA...(공개키)... kubeport-gha-deploy
+   restrict,command="/usr/local/bin/kubeport-deploy --forced" ssh-ed25519 AAAA...(공개키)... kubeport-gha-deploy
    ```
 
    ```bash
    ssh -i "$KEY" ubuntu@$IP \
-     "umask 077; printf 'restrict,command=\"/usr/local/bin/kubeport-deploy\" %s\n' '$(cat ~/.ssh/kubeport-gha-deploy.pub)' >> ~/.ssh/authorized_keys"
+     "umask 077; printf 'restrict,command=\"/usr/local/bin/kubeport-deploy --forced\" %s\n' '$(cat ~/.ssh/kubeport-gha-deploy.pub)' >> ~/.ssh/authorized_keys"
    ```
 
-   검증 — 셋 다 기대대로여야 한다:
+   `--forced` 가 빠진 줄(예전 형식)은 스크립트가 빈 요청으로 보고 **모든 요청을 거절한다**(exit 2,
+   `rejected`) — 조용히 관리자 경로로 새지 않는다. 예전 줄을 넣었었다면 이 줄로 교체한다.
+
+   검증 — 넷 다 기대대로여야 한다:
 
    ```bash
-   ssh -i ~/.ssh/kubeport-gha-deploy -o IdentitiesOnly=yes ubuntu@$IP status        # → status 출력, exit 0
-   ssh -i ~/.ssh/kubeport-gha-deploy -o IdentitiesOnly=yes ubuntu@$IP 'id'; echo $?  # → rejected request, 2
-   ssh -i ~/.ssh/kubeport-gha-deploy -o IdentitiesOnly=yes -t ubuntu@$IP; echo $?    # → 셸 없이 rejected, 2
+   DK=(-i ~/.ssh/kubeport-gha-deploy -o IdentitiesOnly=yes)
+   ssh "${DK[@]}" ubuntu@$IP status        # → status 출력, exit 0
+   ssh "${DK[@]}" ubuntu@$IP 'id'; echo $?  # → rejected request, 2
+   ssh "${DK[@]}" -t ubuntu@$IP; echo $?    # → 셸 없이 rejected, 2
+   # 되돌리기 거절: 리포의 첫 커밋은 main 에 있지만 라이브보다 옛것이다. 클러스터를 건드리기 전에 멈춘다.
+   ssh "${DK[@]}" ubuntu@$IP "deploy $(git rev-list --max-parents=0 origin/main)"; echo $?
+   #   → "rollback needs the admin key", KUBEPORT_DEPLOY_RESULT=refused-not-forward, 2
    ```
 
    `-o IdentitiesOnly=yes` 를 빼면 ssh-agent 의 관리자 키가 먼저 쓰여 **제한이 안 걸린 것처럼 보인다.**
@@ -412,20 +436,34 @@ main 머지 → build-images → `.github/workflows/deploy.yml` → VM 의 `kube
    ssh -i "$KEY" ubuntu@$IP 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub'   # 두 SHA256 지문이 같아야 한다
    ```
 
-5. **GitHub 시크릿 3개** (리포 `shyuni4u/kubeport`):
+5. **GitHub Environment `production` 과 environment 시크릿 3개** (리포 `shyuni4u/kubeport`). 리포 레벨
+   시크릿이 아니라 environment 시크릿이다 — 배포 브랜치를 main 으로 제한해, 다른 브랜치에서 돈 워크플로는
+   배포 키를 읽지 못한다. `deploy.yml` 의 잡이 `environment: production` 을 선언한다.
 
    ```bash
-   gh secret set OCI_DEPLOY_SSH_KEY      < ~/.ssh/kubeport-gha-deploy
-   gh secret set OCI_DEPLOY_KNOWN_HOSTS  < /tmp/kubeport-known-hosts
-   gh secret set OCI_DEPLOY_HOST         --body "$IP"
+   # Environment 생성 + 배포 브랜치를 main 하나로 제한 (Settings → Environments 에서 해도 같다)
+   gh api -X PUT repos/shyuni4u/kubeport/environments/production \
+     -F 'deployment_branch_policy[protected_branches]=false' \
+     -F 'deployment_branch_policy[custom_branch_policies]=true'
+   gh api -X POST repos/shyuni4u/kubeport/environments/production/deployment-branch-policies \
+     -f name=main -f type=branch
+
+   gh secret set OCI_DEPLOY_SSH_KEY      --env production < ~/.ssh/kubeport-gha-deploy
+   gh secret set OCI_DEPLOY_KNOWN_HOSTS  --env production < /tmp/kubeport-known-hosts
+   gh secret set OCI_DEPLOY_HOST         --env production --body "$IP"
+   gh secret list --env production        # 셋이 보여야 한다
    ```
 
-6. **이 변경(`deploy.yml`·`/healthz` version)을 main 에 머지.** `workflow_dispatch`·`workflow_run` 은
-   기본 브랜치에 있는 워크플로 파일만 쓰므로 머지 전에는 돌려볼 수 없다. 머지 커밋의 build-images 가
-   끝나면 deploy 가 자동으로 한 번 돈다 — 그 런이 첫 검증이다. Actions → deploy 에서 세 단계가 초록인지,
-   특히 마지막 `Wait for /api/healthz` 가 `reports <sha7>` 로 끝나는지 본다.
+   같은 이름을 예전에 리포 레벨로 올렸다면 지운다(`gh secret delete OCI_DEPLOY_SSH_KEY` 등) — 남겨 두면
+   environment 제한 밖에서도 읽힌다.
 
-7. **수동 dispatch 로 한 번 더 검증** (같은 sha 재배포 — 변경 없는 upgrade 라 파드는 그대로다):
+6. **첫 자동 배포 확인.** 1~5 뒤의 첫 main push 에서 build-images 가 끝나면 deploy 가 자동으로 돈다 —
+   그 런이 첫 검증이다. Actions → deploy 에서 세 단계가 초록인지, 특히 마지막 `Wait for /api/healthz` 가
+   `reports <sha7>` 로 끝나는지 본다. 기다릴 main push 가 없으면 7 의 dispatch 로 바로 확인한다.
+   (`workflow_dispatch`·`workflow_run` 은 기본 브랜치의 워크플로 파일만 쓰므로, `deploy.yml` 이 main 에
+   없는 동안에는 둘 다 돌지 않는다.)
+
+7. **수동 dispatch 로 검증** (같은 sha 재배포 — 변경 없는 upgrade 라 파드는 그대로다):
 
    ```bash
    git fetch origin main
@@ -434,18 +472,20 @@ main 머지 → build-images → `.github/workflows/deploy.yml` → VM 의 `kube
    curl -s https://kubeport.enzo.kr/api/healthz | jq -r .version
    ```
 
-8. **롤백 방법** (셋 중 위에서부터):
-   - `gh workflow run deploy.yml -f sha=<이전 main 커밋 40자리>` — 이미지·템플릿이 함께 되돌아간다.
-     `version` 필드 이전 빌드면 `-f verify_version=false`.
-   - Actions 가 안 될 때: `ssh -i "$KEY" ubuntu@$IP kubeport-deploy deploy <40자리 sha>`.
+8. **롤백 방법** — **관리자 키로만** 한다. 배포 키(=Actions dispatch)는 앞으로만 가므로 옛 sha 를
+   주면 `refused-not-forward` 로 거절된다. 둘 중 위에서부터:
+   - `gh workflow disable deploy.yml` 로 자동 배포를 먼저 멈춘다(안 그러면 다음 main 커밋이 다시 앞으로 간다).
+     그다음 `ssh -i "$KEY" ubuntu@$IP kubeport-deploy deploy <이전 main 커밋 40자리>` — 이미지·템플릿이 함께
+     되돌아가고, 락·main 검증·Dex 가드·자동 롤백을 그대로 탄다. 고친 커밋이 main 에 들어가면 `enable`.
+     (롤백 뒤 dispatch 로 다시 앞으로 가는 것은 된다.)
    - 스크립트도 안 될 때: `ssh -i "$KEY" ubuntu@$IP "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; flock -w 600 /run/lock/kubeport-deploy.lock helm rollback kubeport <rev> -n kubeport"`.
-     단 다음 main 커밋의 자동 배포가 다시 앞으로 간다 — 멈추려면 `gh workflow disable deploy.yml`.
    - DB 스키마는 어느 방법으로도 되돌아가지 않는다(runbook §3-0).
 
-9. **공인 IP 가 바뀌면** (stop/start): 4·5 의 `OCI_DEPLOY_KNOWN_HOSTS`·`OCI_DEPLOY_HOST` 를 다시 올린다.
-   호스트 키 자체는 그대로이므로 지문 대조 결과는 같아야 한다.
+9. **공인 IP 가 바뀌면** (stop/start): 4·5 의 `OCI_DEPLOY_KNOWN_HOSTS`·`OCI_DEPLOY_HOST` 를
+   `--env production` 으로 다시 올린다. 호스트 키 자체는 그대로이므로 지문 대조 결과는 같아야 한다.
 
-**키 회수**: VM `~/.ssh/authorized_keys` 에서 `kubeport-gha-deploy` 줄 삭제 → `gh secret delete OCI_DEPLOY_SSH_KEY`.
+**키 회수**: VM `~/.ssh/authorized_keys` 에서 `kubeport-gha-deploy` 줄 삭제 →
+`gh secret delete OCI_DEPLOY_SSH_KEY --env production`.
 
 ## Upgrade
 
