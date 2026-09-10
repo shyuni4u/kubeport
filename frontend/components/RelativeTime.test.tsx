@@ -1,7 +1,7 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { act, render, screen, cleanup } from "@testing-library/react";
 import { NextIntlClientProvider, useTranslations } from "next-intl";
-import { RelativeTime } from "./RelativeTime";
+import { RelativeTime, RELATIVE_TIME_UPDATE_MS } from "./RelativeTime";
 import { TIME_ZONE } from "@/i18n/request";
 import ko from "@/messages/ko.json";
 import en from "@/messages/en.json";
@@ -79,6 +79,38 @@ describe("RelativeTime", () => {
   it("renders nothing for an unparseable timestamp", () => {
     renderAt("not-a-date");
     expect(screen.queryByRole("time")).toBeNull();
+  });
+
+  // #100 — the provider's `now` froze at the last full page load, so a release
+  // created seven minutes into a client-side session read "7분 후 배포".
+  // Nothing this renders is scheduled; a future stamp is clock disagreement.
+  it("never shows a timestamp as being in the future", () => {
+    renderAt("2026-09-09T12:07:00.000Z"); // seven minutes after the pinned now
+    const future = screen.getByRole("time").textContent;
+    cleanup();
+    renderAt(NOW.toISOString());
+    expect(future).toBe(screen.getByRole("time").textContent);
+  });
+
+  // The other half of #100: with a pinned `now` the phrase never moved while
+  // the tab stayed open.
+  it("keeps counting after it was rendered", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-09-09T12:30:00.000Z"));
+      renderAt("2026-09-09T11:59:00.000Z"); // one minute before the pinned now
+      const first = screen.getByRole("time").textContent;
+
+      act(() => {
+        vi.advanceTimersByTime(RELATIVE_TIME_UPDATE_MS);
+      });
+
+      // Now reads against the running clock (12:30:30), not the pinned 12:00.
+      expect(screen.getByRole("time").textContent).not.toBe(first);
+      expect(screen.getByRole("time")).toHaveAttribute("dateTime", "2026-09-09T11:59:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
