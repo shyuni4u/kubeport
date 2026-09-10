@@ -423,13 +423,15 @@ kubelet 스탬프가 없는 줄도 `id` 를 안 받는다. 그 줄의 `time` 은
 
 **429 를 만나면 `Retry-After` 를 지킨다.** `POST /v1/selfsubjectaccessreview`, 클러스터 openapi 읽기,
 로그 스트림 열기가 호출자(OIDC subject)별 토큰버킷 하나를 공유한다 — 분당 60회, 버스트 동일
-([#73](https://github.com/shyuni4u/kubeport/issues/73)). 응답에 `Retry-After`(초)와 `X-RateLimit-Limit`·
+([#73](https://github.com/shyuni4u/kubeport/issues/73)). 429 응답에 `Retry-After`(초)와 `X-RateLimit-Limit`·
 `X-RateLimit-Remaining` 이 붙는다. 즉시 재시도하면 제한만 다시 맞는다. 데모의 Dex 계정 2개는 정적이라
 동시 접속자들이 **한 버킷을 공유**한다는 점도 감안할 것.
 `GET /v1/releases/{id}` 도 요청마다 클러스터에 파드 목록을 묻지만 **별도 버킷**(분당 240회)을 쓴다
 ([#212](https://github.com/shyuni4u/kubeport/issues/212)) — 화면이 목록의 행마다, 자리 잡는 중인 상세를 주기적으로
-읽는 경로라 위 버킷과 합치면 SSAR·로그 열기가 굶는다. 상태를 폴링하는 클라이언트는 이 한도 안에서 도는지,
-`X-RateLimit-Limit` 으로 어느 버킷에 걸렸는지 본다.
+읽는 경로라 위 버킷과 합치면 SSAR·로그 열기가 굶는다. 상태를 폴링하는 클라이언트는 호출자당 분당 240회 안에서
+돈다 — 성공 응답에는 남은 양 헤더가 붙지 않으니 스스로 간격을 둔다. 버킷은 헤더가 아니라 **호출한 라우트**가
+정한다(분당 60회인 버킷이 둘이라 `X-RateLimit-Limit` 값으로는 구분되지 않는다). 데모 계정은 이 240회도 방문자 전원이
+나눠 쓴다. 릴리스 생성·수정·삭제는 아직 제한이 없다([#232](https://github.com/shyuni4u/kubeport/issues/232)).
 
 **로그 스트림은 동시에 열어 둘 수 있는 개수에도 상한이 있다**([#169](https://github.com/shyuni4u/kubeport/issues/169)).
 위 버킷은 스트림을 **여는** 횟수만 센다 — 한 번 열린 스트림은 몇 시간을 붙들고 있어도 토큰을 더 쓰지

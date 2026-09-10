@@ -88,11 +88,15 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	}
 	noDemo := denyDemo(deps.DemoEmailDomain)
 
-	// One budget shared by every route that makes kubeport call the target
-	// apiserver on the caller's behalf. Gating only the refresh (#97) would
-	// have left the reads that actually do the fetching unmetered: a cache
-	// miss pulls up to 10MiB, and a caller can manufacture misses at will by
-	// varying the group/version.
+	// One budget shared by the control-plane reads the deploy form and log
+	// tab fan out to: SSAR, the cluster OpenAPI reads and opening a log
+	// stream. Gating only the refresh (#97) would have left the reads that
+	// actually do the fetching unmetered: a cache miss pulls up to 10MiB, and
+	// a caller can manufacture misses at will by varying the group/version.
+	//
+	// Not every route that calls the apiserver is on a budget. Release reads
+	// have their own below, and creating, updating and deleting a release are
+	// still unmetered (#232).
 	upstream := newRateLimiter(60, 4096)
 	// Two buckets for the routes that run SerializeUIMode, split by who fires
 	// them rather than by what they compute.
