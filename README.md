@@ -113,9 +113,12 @@ chart at what you have:
 - a TLS Secret you already have: `--set tls.certManager.enabled=false --set tls.existingSecret=<secret>`
 - no TLS inside the cluster: `--set tls.enabled=false --set tls.certManager.enabled=false`.
   The login and logout URLs the chart derives then become `http://`. If TLS is
-  terminated in front of the cluster (a load balancer, Cloudflare), also put the
-  `https://` origin browsers see in `frontend.publicOrigins`, or logout is
-  refused with 403.
+  terminated in front of the cluster (a load balancer, Cloudflare), give the
+  chart the `https://` address browsers see:
+  `--set oidc.redirectUri=https://<host>/api/auth/callback`. It must match the
+  redirect URI registered with the IdP, or the IdP refuses the login; and when
+  `frontend.publicOrigins` is empty, its origin is also the one logout checks,
+  so an `http://` one gets logout refused with 403.
 
 Read [deploy/helm/kubeport/README.md](deploy/helm/kubeport/README.md) first —
 especially **"After install — required on every cluster"**. Without those steps
