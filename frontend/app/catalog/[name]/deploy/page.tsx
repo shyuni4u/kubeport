@@ -1,5 +1,5 @@
 import { apiFetch } from "@/lib/api-server";
-import { isDemoEmail, withDemoSuffix } from "@/lib/demo";
+import { demoNamespaceFor, isDemoEmail, withDemoSuffix } from "@/lib/demo";
 import { notFound } from "next/navigation";
 import YAML from "yaml";
 
@@ -45,6 +45,8 @@ export default async function DeployPage({
   // Computed on the server so SSR and hydration render the same value.
   const defaultName =
     isDemoEmail(me?.email) && !updateReleaseId ? withDemoSuffix(name, true) : "";
+  // Only a new release has a namespace field; an update cannot move one.
+  const demoNamespace = updateReleaseId ? undefined : demoNamespaceFor(me?.email);
 
   return (
     <DeployClient
@@ -54,6 +56,7 @@ export default async function DeployPage({
       spec={spec}
       updateReleaseId={updateReleaseId}
       defaultName={defaultName}
+      demoNamespace={demoNamespace}
     />
   );
 }

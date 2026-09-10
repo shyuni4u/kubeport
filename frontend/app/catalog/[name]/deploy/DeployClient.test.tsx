@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { screen, waitFor, cleanup } from "@testing-library/react";
+import { act, screen, waitFor, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithIntl as render } from "@/tests/intl-test-utils";
+
+import { CLUSTER_CHANGED_EVENT } from "@/components/ClusterPicker";
 
 import { DeployClient } from "./DeployClient";
 import type { UISpec } from "@/lib/ui-spec-to-zod";
@@ -50,10 +52,11 @@ function jsonResponse(body: unknown, status = 200): Response {
 function routedFetch(overrides: {
   ssar?: (body: Record<string, unknown>) => Response;
   releases?: () => Response;
+  clusters?: Array<{ name: string; default_namespace?: string | null }>;
 }) {
   return vi.fn(async (url: string, init?: RequestInit) => {
     if (url === "/api/v1/clusters") {
-      return jsonResponse({ clusters: [{ name: "dev" }] });
+      return jsonResponse({ clusters: overrides.clusters ?? [{ name: "dev" }] });
     }
     if (url.includes("/render")) {
       return jsonResponse({
@@ -80,6 +83,10 @@ function routedFetch(overrides: {
 
 async function fillMeta(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText("배포 이름"), "my-app");
+  // The namespace no longer starts on a hard-coded "default" (#179), so fill
+  // it the way a user would.
+  await user.clear(screen.getByLabelText("구역"));
+  await user.type(screen.getByLabelText("구역"), "default");
 }
 
 describe("DeployClient", () => {
@@ -228,5 +235,118 @@ describe("DeployClient", () => {
       ([url]) => url === "/api/v1/releases",
     );
     expect(releaseCalls).toHaveLength(1);
+  });
+});
+
+// #179 — the namespace field started on a hard-coded "default". The chart
+// README promises the cluster's registered default_namespace, and demo
+// accounts cannot write to "default" at all, so the demo's main path opened on
+// a permission denial.
+describe("DeployClient namespace default", () => {
+  beforeEach(() => {
+    pushMock.mockReset();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  const namespaceInput = () => screen.getByLabelText("구역") as HTMLInputElement;
+
+  it("starts on the selected cluster's registered default namespace", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({ clusters: [{ name: "dev", default_namespace: "team-a" }] }),
+    );
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={spec} />);
+
+    await waitFor(() => expect(namespaceInput().value).toBe("team-a"));
+  });
+
+  it("starts empty, not on default, when the cluster registered none, and will not submit", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({ clusters: [{ name: "dev", default_namespace: null }] }),
+    );
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={spec} />);
+
+    await screen.findByText("dev");
+    expect(namespaceInput().value).toBe("");
+    await user.type(screen.getByLabelText("배포 이름"), "my-app");
+    // The API requires a namespace; an empty one is not worth a round trip.
+    expect(screen.getByRole("button", { name: /배포하기/ })).toBeDisabled();
+  });
+
+  it("starts a demo session on the demo namespace, whatever the cluster says", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({ clusters: [{ name: "dev", default_namespace: "default" }] }),
+    );
+    render(
+      <DeployClient
+        templateName="web-app"
+        version={1}
+        team={null}
+        spec={spec}
+        demoNamespace="demo"
+      />,
+    );
+
+    expect(namespaceInput().value).toBe("demo");
+    await screen.findByText("dev");
+    expect(namespaceInput().value).toBe("demo");
+  });
+
+  it("follows a cluster change until the reader types a namespace", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({
+        clusters: [
+          { name: "dev", default_namespace: "team-a" },
+          { name: "prod", default_namespace: "team-b" },
+        ],
+      }),
+    );
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={spec} />);
+    await waitFor(() => expect(namespaceInput().value).toBe("team-a"));
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent(CLUSTER_CHANGED_EVENT, { detail: "prod" }));
+    });
+    await waitFor(() => expect(namespaceInput().value).toBe("team-b"));
+
+    await user.clear(namespaceInput());
+    await user.type(namespaceInput(), "mine");
+    act(() => {
+      window.dispatchEvent(new CustomEvent(CLUSTER_CHANGED_EVENT, { detail: "dev" }));
+    });
+    await screen.findByText("dev");
+    expect(namespaceInput().value).toBe("mine");
+  });
+
+  // An update has no namespace field — the release's namespace cannot move —
+  // so the empty-namespace guard must not reach it, or the button never
+  // unlocks.
+  it("still lets an update be submitted", async () => {
+    vi.stubGlobal("fetch", routedFetch({}));
+    const { container } = render(
+      <DeployClient
+        templateName="web-app"
+        version={2}
+        team={null}
+        spec={spec}
+        updateReleaseId="rel-9"
+        initialValues={{ "spec.replicas": 1, "metadata.name": "nginx" }}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(container.querySelector('button[type="submit"]')).toBeEnabled(),
+    );
   });
 });

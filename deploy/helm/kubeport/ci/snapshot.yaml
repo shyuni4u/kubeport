@@ -269,6 +269,11 @@ data:
   DEMO_RESET_SCHEDULE: "0 21 * * *"
   DEMO_ADMIN_EMAIL: "demo-admin@demo.kubeport"
   DEMO_USER_EMAIL: "demo-user@demo.kubeport"
+  # The deploy form starts demo sessions in this namespace, because demo
+  # accounts' RBAC covers it alone — the cluster's own default_namespace would
+  # open the form on a permission denial (#179). Same value demo-rbac.yaml and
+  # the reset job use.
+  DEMO_NAMESPACE: "demo"
 ---
 # Source: kubeport/templates/migration-configmap.yaml
 apiVersion: v1
@@ -1232,7 +1237,7 @@ spec:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/component: frontend
       annotations:
-        checksum/config: 3635fda3f2d9116f8222001f11a471631786fc294b12066a5f808a438af0d61b
+        checksum/config: e92441590a94b04b36200941c32f84c53608bf8ce54eefc9647e3a8943990f78
         checksum/secret: e7dde2c9f0d9e6ff324c1fe9ec29e374b1dfb55ceb2fe06c296a8b108aa27451
     spec:
       securityContext:

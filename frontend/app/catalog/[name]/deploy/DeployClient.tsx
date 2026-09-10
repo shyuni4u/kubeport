@@ -34,6 +34,12 @@ type Props = {
    * here with Math.random() caused a hydration mismatch.
    */
   defaultName?: string;
+  /**
+   * Where a demo session's namespace starts, whatever the cluster says.
+   * Computed on the server from DEMO_NAMESPACE, which the chart renders only
+   * with demo mode on; undefined for everyone else (#179).
+   */
+  demoNamespace?: string;
 };
 
 type Meta = { name: string; cluster: string; namespace: string };
@@ -46,6 +52,7 @@ export function DeployClient({
   updateReleaseId,
   initialValues,
   defaultName = "",
+  demoNamespace,
 }: Props) {
   const router = useRouter();
   const t = useTranslations("deploy");
@@ -64,12 +71,24 @@ export function DeployClient({
     [t],
   );
 
+  // Where the namespace field starts (#179): a demo session's own namespace,
+  // otherwise the selected cluster's registered default_namespace, otherwise
+  // empty — what the chart README promises. It used to be a hard-coded
+  // "default", which demo accounts cannot write to, so the demo's main path
+  // opened on a permission denial.
   const [meta, setMeta] = useState<Meta>({
     name: defaultName,
     cluster: "",
-    namespace: "default",
+    namespace: demoNamespace ?? "",
   });
   const [clusters, setClusters] = useState<string[]>([]);
+  // Each cluster's registered default_namespace, by name. A ref: only the
+  // handlers that pick a cluster read it, and nothing renders from it.
+  const clusterNamespaces = useRef<Map<string, string>>(new Map());
+  // Set once the reader types in the namespace field. From then on a cluster
+  // change leaves it alone — overwriting what someone chose is worse than a
+  // suggestion that no longer matches.
+  const namespaceTouched = useRef(false);
   const [rendered, setRendered] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -100,6 +119,16 @@ export function DeployClient({
   // form still look broken (#42).
   const clearErr = useCallback(() => setErr(null), []);
 
+  // Points the form at a cluster, moving the namespace with it while the
+  // reader has not chosen one and no demo namespace applies.
+  const selectCluster = useCallback(
+    (m: Meta, cluster: string): Meta =>
+      namespaceTouched.current || demoNamespace
+        ? { ...m, cluster }
+        : { ...m, cluster, namespace: clusterNamespaces.current.get(cluster) ?? "" },
+    [demoNamespace],
+  );
+
   // Load cluster list and hydrate meta.cluster on mount. Skipped for update
   // flows: cluster is immutable on PUT (backend ignores it) and the meta
   // inputs aren't rendered in update mode.
@@ -114,9 +143,16 @@ export function DeployClient({
       try {
         const res = await fetch("/api/v1/clusters");
         if (!res.ok) return;
-        const body = (await res.json()) as { clusters: Array<{ name: string }> };
+        const body = (await res.json()) as {
+          clusters: Array<{ name: string; default_namespace?: string | null }>;
+        };
         const names = body.clusters.map((c) => c.name);
         if (cancelled) return;
+        clusterNamespaces.current = new Map(
+          body.clusters
+            .filter((c) => c.default_namespace)
+            .map((c) => [c.name, c.default_namespace as string]),
+        );
         setClusters(names);
 
         const cached =
@@ -128,7 +164,7 @@ export function DeployClient({
         // without an extra click.
         const preselect =
           cached && names.includes(cached) ? cached : (names[0] ?? "");
-        if (preselect) setMeta((m) => ({ ...m, cluster: preselect }));
+        if (preselect) setMeta((m) => selectCluster(m, preselect));
       } catch {
         // Network/parse failure: clusters stays []. The Select below
         // renders an admin-contact placeholder and blocks submission.
@@ -137,7 +173,7 @@ export function DeployClient({
     return () => {
       cancelled = true;
     };
-  }, [isUpdate]);
+  }, [isUpdate, selectCluster]);
 
   // The sidebar ClusterPicker no longer reloads the page, so follow its
   // choice live (only if the cluster is one we can offer).
@@ -146,12 +182,12 @@ export function DeployClient({
     const onChanged = (e: Event) => {
       const name = (e as CustomEvent<string>).detail;
       if (typeof name === "string" && clusters.includes(name)) {
-        setMeta((m) => ({ ...m, cluster: name }));
+        setMeta((m) => selectCluster(m, name));
       }
     };
     window.addEventListener(CLUSTER_CHANGED_EVENT, onChanged);
     return () => window.removeEventListener(CLUSTER_CHANGED_EVENT, onChanged);
-  }, [isUpdate, clusters]);
+  }, [isUpdate, clusters, selectCluster]);
 
   // Debounced preview render. 300ms matches the ResourcesPreview ergonomics —
   // fast enough to feel live while a user is typing but not spamming the
@@ -333,7 +369,7 @@ export function DeployClient({
                 onValueChange={(v) => {
                   const next = v ?? "";
                   clearErr();
-                  setMeta((m) => ({ ...m, cluster: next }));
+                  setMeta((m) => selectCluster(m, next));
                   if (
                     next &&
                     typeof window !== "undefined"
@@ -373,8 +409,10 @@ export function DeployClient({
                 id="deploy-namespace"
                 placeholder={t("namespacePlaceholder")}
                 value={meta.namespace}
+                required
                 onChange={(e) => {
                   clearErr();
+                  namespaceTouched.current = true;
                   setMeta({ ...meta, namespace: e.target.value });
                 }}
               />
@@ -402,7 +440,8 @@ export function DeployClient({
           disabled={
             submitting ||
             rbacBlocked ||
-            (!isUpdate && (!meta.cluster || !meta.name.trim()))
+            // The namespace can now start empty (#179), and the API requires one.
+            (!isUpdate && (!meta.cluster || !meta.name.trim() || !meta.namespace.trim()))
           }
           onChange={handleValuesChange}
           onSubmit={submit}

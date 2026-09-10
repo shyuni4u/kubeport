@@ -51,6 +51,9 @@ DEMO_EMAIL_DOMAIN=demo.kubeport
 DEMO_ADMIN_EMAIL=demo-admin@demo.kubeport
 DEMO_USER_EMAIL=demo-user@demo.kubeport
 DEMO_PASSWORD_HINT=demo
+# Where the deploy form starts demo sessions (#179) — the namespace seed.sh
+# gives the demo accounts RBAC in.
+DEMO_NAMESPACE=default
 EOF
 fi
 
