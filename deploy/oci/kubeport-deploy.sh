@@ -7,24 +7,41 @@
 #
 #   1. GitHub Actions (.github/workflows/deploy.yml) with a deploy-only SSH key
 #      pinned in ~ubuntu/.ssh/authorized_keys as
-#        restrict,command="/usr/local/bin/kubeport-deploy" ssh-ed25519 AAAA... kubeport-gha-deploy
+#        restrict,command="/usr/local/bin/kubeport-deploy --forced" ssh-ed25519 AAAA... kubeport-gha-deploy
 #      sshd then ignores whatever command the client asked for, runs this
-#      script, and hands the request over in $SSH_ORIGINAL_COMMAND.
+#      script with the literal argument --forced, and hands the request over
+#      in $SSH_ORIGINAL_COMMAND.
 #
 #   2. An operator on the admin key:
 #        ssh -i "$KEY" ubuntu@<host> kubeport-deploy deploy <40-hex sha>
-#      No forced command is in effect, so $SSH_ORIGINAL_COMMAND is unset and
-#      the request comes from argv. Only this path accepts
-#      --allow-dex-restart (see "Dex guard" below).
+#      The request comes from argv. Only this path accepts
+#      --allow-dex-restart (see "Dex guard" below), and only this path can
+#      move production backwards (see verify_forward).
+#
+# Which path a request is on is decided by the --forced argument, which only
+# authorized_keys supplies — never by whether $SSH_ORIGINAL_COMMAND happens to
+# be set. An authorized_keys line without --forced reaches main() with empty
+# argv and is rejected.
 #
 # Requests (nothing else is accepted):
 #   status                      helm history, deployed images, lock state
 #   deploy <40-hex sha>         deploy that main commit's images + chart
 #
-# Exit codes — deploy.yml maps these to messages, keep them stable:
-#   0  done               2  request rejected (grammar)
+# Exit codes — keep them stable:
+#   0  done               2  request rejected (grammar, or not forward on the deploy key)
 #   3  lock busy          4  sha is not on main / chart unavailable
-#   10 Dex guard refused  1  anything else (upgrade failed; helm rolled back)
+#   10 Dex guard refused  1  anything else — see the result line for which kind
+#
+# Every deploy ends with exactly one `KUBEPORT_DEPLOY_RESULT=<name>` line on
+# stdout. deploy.yml reads that line, not the exit code, because exit 1 covers
+# outcomes that need opposite responses:
+#   aborted-before-upgrade   stopped before helm upgrade; the cluster is unchanged
+#   failed-rolled-back       helm upgrade failed and helm rolled back
+#   failed-rollout / failed-image-mismatch / failed-values-drift / failed-after-upgrade
+#                            the NEW revision is live and was not rolled back
+#   failed-during-upgrade    ended while helm upgrade was running; state unknown
+# and, with their own exit codes: deployed, deployed-dex-restarted, rejected,
+# refused-not-forward, lock-busy, unverified, dex-guard-refused.
 #
 # See docs/oci-prod-runbook.md §3 and deploy/oci/README.md "자동 배포 설치".
 
@@ -61,7 +78,12 @@ client() {
   printf '%s' "${c%% *}"
 }
 syslog() { command -v logger >/dev/null 2>&1 && logger -t kubeport-deploy -- "$*" || true; }
-result() { printf 'KUBEPORT_DEPLOY_RESULT=%s\n' "$1"; syslog "result=$1 ${2:-}"; }
+RESULT_EMITTED=0
+result() {
+  RESULT_EMITTED=1
+  printf 'KUBEPORT_DEPLOY_RESULT=%s\n' "$1"
+  syslog "result=$1 ${2:-}"
+}
 die() {
   local code=$1
   shift
@@ -141,7 +163,9 @@ lock_state() {
 # a fork through the parent repository's archive URL. The chart runs with this
 # node's admin kubeconfig, so "any sha" would mean "any manifest anyone can
 # push to a fork". Requiring the commit to be reachable from main narrows a
-# leaked deploy key to "can redeploy something that was already merged".
+# leaked deploy key to "can redeploy something that was already merged", and
+# verify_forward narrows that again to "…and not older than what is live".
+# Both paths run this check.
 #
 # compare/main...<sha>: "behind" = sha is an ancestor of main, "identical" =
 # sha is main. Anything else (ahead, diverged, 404) is refused. Fails closed
@@ -153,13 +177,51 @@ verify_on_main() {
     result unverified
     die "$EX_UNVERIFIED" "could not ask GitHub whether $sha is on main (refusing rather than guessing)"
   fi
-  status=$(jq -r '.status // empty' <<<"$body")
+  status=$(jq -r '.status // empty' <<<"$body" 2>/dev/null) || status=""
   case $status in
     behind | identical) log "sha $sha is on main ($status)" ;;
     *)
       result unverified
       die "$EX_UNVERIFIED" "sha $sha is not on main (compare status: ${status:-none})"
       ;;
+  esac
+}
+
+# On main is not enough for the deploy key. Every commit before a security fix
+# (#47, #101) is also on main, so a leaked deploy key could otherwise put the
+# vulnerable build back. The forced-command path therefore only moves forward:
+# the requested sha must be the live one or a descendant of it. Rolling back is
+# a human decision and goes through the admin key, which skips this check.
+#
+# "Live" is the backend Deployment's image tag, which this script sets to
+# sha-<7 hex>. compare/<live>...<sha>: "ahead" = sha descends from live,
+# "identical" = same commit. behind, diverged, a tag of any other shape
+# (latest, a digest) and an unreachable GitHub are all refused — there is
+# nothing trustworthy to compare against.
+refuse_not_forward() {
+  log "ERROR: $1"
+  log "the deploy key only moves production forward — rollback needs the admin key:"
+  log "  ssh -i \"\$KEY\" ubuntu@<host> kubeport-deploy deploy <40-hex sha>   (docs/oci-prod-runbook.md §3-2)"
+  result refused-not-forward
+  exit "$EX_REJECTED"
+}
+
+verify_forward() {
+  local sha=$1 img live body status
+  img=$(kubectl get "deploy/$RELEASE-backend" -n "$NAMESPACE" \
+    -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null) || img=""
+  if [[ ! ${img##*:} =~ ^sha-([0-9a-f]{7})$ ]]; then
+    refuse_not_forward "live backend image is '${img:-<unreadable>}', not a sha-<7 hex> tag — cannot tell whether $sha is forward"
+  fi
+  live=${BASH_REMATCH[1]}
+  if ! body=$(curl -fsS --max-time 20 -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/$REPO/compare/$live...$sha?per_page=1"); then
+    refuse_not_forward "could not ask GitHub how $sha relates to live sha-$live"
+  fi
+  status=$(jq -r '.status // empty' <<<"$body" 2>/dev/null) || status=""
+  case $status in
+    ahead | identical) log "sha $sha is forward of live sha-$live ($status)" ;;
+    *) refuse_not_forward "sha $sha is not forward of live sha-$live (compare status: ${status:-none})" ;;
   esac
 }
 
@@ -185,9 +247,17 @@ fetch_chart() {
     result unverified
     die "$EX_UNVERIFIED" "could not download $REPO@$sha"
   fi
-  tar -xzf "$dest/src.tar.gz" -C "$dest" "$top/deploy/helm/kubeport"
+  # Guarded: under set -e a missing path would exit with tar's own status 2,
+  # which reads as "request rejected".
+  if ! tar -xzf "$dest/src.tar.gz" -C "$dest" "$top/deploy/helm/kubeport"; then
+    result unverified
+    die "$EX_UNVERIFIED" "no deploy/helm/kubeport in $REPO@$sha (or the archive is unreadable)"
+  fi
   CHART_DIR="$dest/$top/deploy/helm/kubeport"
-  [[ -f $CHART_DIR/Chart.yaml ]] || die "$EX_UNVERIFIED" "no chart at deploy/helm/kubeport in $sha"
+  if [[ ! -f $CHART_DIR/Chart.yaml ]]; then
+    result unverified
+    die "$EX_UNVERIFIED" "no chart at deploy/helm/kubeport in $sha"
+  fi
 }
 
 # Values: the release's own user-supplied values, re-applied on top of the new
@@ -387,10 +457,13 @@ render_new_manifest() {
   helm template "$RELEASE" "$chart" -n "$NAMESPACE" -f "$values" "${sets[@]}" >"$out"
 }
 
+# run_upgrade <chart> <values> <tag> <rollback flag>
+# The flag is resolved by the caller before this runs: this function is called
+# under `if !`, where set -e is off, so a failed lookup in here would go on to
+# upgrade without a rollback flag.
 run_upgrade() {
-  local chart=$1 values=$2 tag=$3 flag
+  local chart=$1 values=$2 tag=$3 flag=$4
   local -a sets
-  flag=$(rollback_flag)
   mapfile -t sets < <(image_args "$tag")
   log "helm upgrade $RELEASE -> $tag ($flag, timeout $HELM_TIMEOUT)"
   helm upgrade "$RELEASE" "$chart" -n "$NAMESPACE" -f "$values" "${sets[@]}" \
@@ -444,19 +517,66 @@ cmd_status() {
   print_state
 }
 
+# Where cmd_deploy is, for the EXIT trap: a path that ends without calling
+# result() (a die, or a command failing under set -e) still reports which side
+# of `helm upgrade` it stopped on.
+DEPLOY_PHASE=""
+WORK_DIR=""
+
+on_deploy_exit() {
+  local rc=$?
+  if ((rc != 0 && RESULT_EMITTED == 0)); then
+    case $DEPLOY_PHASE in
+      before-upgrade)
+        log "stopped before helm upgrade — nothing on the cluster was changed"
+        result aborted-before-upgrade
+        ;;
+      upgrade)
+        log "ended while helm upgrade was running — check \`kubeport-deploy status\`; a pending-upgrade release needs runbook §7"
+        result failed-during-upgrade
+        ;;
+      after-upgrade)
+        log "the new revision is live, but checking it failed — see the history above"
+        result failed-after-upgrade
+        ;;
+    esac
+    # Keep the documented codes: whatever command failed (jq 5, curl 22, tar 2)
+    # must not be read as one of 2/3/4/10.
+    rc=1
+  fi
+  if [[ -n $WORK_DIR ]]; then rm -rf "$WORK_DIR"; fi
+  exit "$rc"
+}
+
+# cmd_deploy <sha> <allow dex restart 0|1> <forced 0|1>
 cmd_deploy() {
-  local sha=$1 allow_dex=$2 tag="sha-${1:0:7}" work
+  local sha=$1 allow_dex=$2 forced=$3 tag="sha-${1:0:7}" work flag release_status
+  DEPLOY_PHASE="before-upgrade"
+  trap on_deploy_exit EXIT
   require_tools helm kubectl curl jq tar flock awk cmp sort paste sed
 
   acquire_lock
-  syslog "deploy $sha requested from $(client) allow_dex_restart=$allow_dex"
+  syslog "deploy $sha requested from $(client) forced=$forced allow_dex_restart=$allow_dex"
 
   umask 077
   work=$(mktemp -d "${TMPDIR:-/tmp}/kubeport-deploy.XXXXXX")
-  # shellcheck disable=SC2064  # expand now: $work is fixed for this run
-  trap "rm -rf '$work'" EXIT
+  WORK_DIR=$work
 
   verify_on_main "$sha"
+  if ((forced == 1)); then
+    verify_forward "$sha"
+  fi
+
+  # An interrupted upgrade (a cancelled run, a dropped ssh session, a reboot)
+  # leaves the release pending-*, and every later upgrade fails with "another
+  # operation is in progress". Say so here, before the cluster is touched,
+  # instead of reporting it as a failed-and-rolled-back upgrade.
+  release_status=$(helm status "$RELEASE" -n "$NAMESPACE" -o json | jq -r '.info.status // empty')
+  case $release_status in
+    pending-*) die 1 "release $RELEASE is $release_status — a previous helm operation did not finish. Fix by hand: runbook §7 'another operation (install/upgrade/rollback) is in progress'" ;;
+  esac
+  flag=$(rollback_flag)
+
   fetch_chart "$sha" "$work"
   render_values "$work/values.json"
 
@@ -476,12 +596,14 @@ cmd_deploy() {
     die 1 "Dex guard could not compare manifests"
   fi
 
-  if ! run_upgrade "$CHART_DIR" "$work/values.json" "$tag"; then
+  DEPLOY_PHASE="upgrade"
+  if ! run_upgrade "$CHART_DIR" "$work/values.json" "$tag" "$flag"; then
     log "helm upgrade failed; helm rolled the release back"
     print_state
     result failed-rolled-back "$sha"
     exit 1
   fi
+  DEPLOY_PHASE="after-upgrade"
 
   # helm already waited; this is the explicit, readable confirmation.
   local d
@@ -521,8 +643,12 @@ cmd_deploy() {
 
 main() {
   local raw forced
-  if [[ -n ${SSH_ORIGINAL_COMMAND+set} ]]; then
-    raw=$SSH_ORIGINAL_COMMAND forced=1
+  # --forced is written into authorized_keys and nowhere else. It is the whole
+  # of how the deploy key's requests are told apart: an unset or empty
+  # SSH_ORIGINAL_COMMAND on that path is an empty request and is rejected, and
+  # SSH_ORIGINAL_COMMAND without --forced is ignored.
+  if (($# == 1)) && [[ $1 == --forced ]]; then
+    raw=${SSH_ORIGINAL_COMMAND-} forced=1
   else
     raw="$*" forced=0
   fi
@@ -537,7 +663,7 @@ main() {
   fi
   case $REQ_CMD in
     status) cmd_status ;;
-    deploy) cmd_deploy "$REQ_SHA" "$REQ_ALLOW_DEX_RESTART" ;;
+    deploy) cmd_deploy "$REQ_SHA" "$REQ_ALLOW_DEX_RESTART" "$forced" ;;
   esac
 }
 
