@@ -99,6 +99,20 @@ func TestListInstances_ReportsWhyAPodIsNotRunning(t *testing.T) {
 			wantReason:  "Evicted",
 			wantMessage: "The node was low on resource: memory.",
 		},
+		// The kubelet kills an evicted pod's containers, so they report Error
+		// with exit code 137. Naming that would tell the reader the app keeps
+		// crashing and to change its settings, when the node ran short.
+		"evicted with its containers killed is still evicted": {
+			status: map[string]any{
+				"phase": "Failed", "reason": "Evicted", "message": "The node was low on resource: memory.",
+				"containerStatuses": []any{map[string]any{
+					"name": "app", "restartCount": int64(0),
+					"state": map[string]any{"terminated": map[string]any{"reason": "Error", "exitCode": int64(137)}},
+				}},
+			},
+			wantReason:  "Evicted",
+			wantMessage: "The node was low on resource: memory.",
+		},
 		"still being created is not a problem yet": {
 			status: map[string]any{
 				"phase": "Pending",

@@ -90,11 +90,18 @@ func totalRestarts(status map[string]any) int32 {
 }
 
 // podProblem picks the one reason worth showing for a pod that is not running
-// normally. Init containers come first: a pod whose init container cannot
-// start never gets as far as the rest. A pod-level reason (Evicted) and an
-// unschedulable condition come last, because a container that has a state at
-// all was scheduled, and its state is the nearer cause.
+// normally. A pod-level reason (Evicted) comes first: the kubelet kills the
+// containers of a pod it evicts, and they report Error with exit code 137 —
+// naming that would send the reader to fix a crash that never happened.
+// Init containers come next, because a pod whose init container cannot start
+// never gets as far as the rest. The scheduler's condition comes last: a
+// container that has a state at all was scheduled, and its state is the
+// nearer cause.
 func podProblem(status map[string]any) (reason, message string) {
+	if r, _ := status["reason"].(string); r != "" {
+		m, _ := status["message"].(string)
+		return r, m
+	}
 	for _, key := range []string{"initContainerStatuses", "containerStatuses"} {
 		statuses, _ := status[key].([]any)
 		for _, s := range statuses {
@@ -106,10 +113,6 @@ func podProblem(status map[string]any) (reason, message string) {
 				return r, m
 			}
 		}
-	}
-	if r, _ := status["reason"].(string); r != "" {
-		m, _ := status["message"].(string)
-		return r, m
 	}
 	conditions, _ := status["conditions"].([]any)
 	for _, c := range conditions {
