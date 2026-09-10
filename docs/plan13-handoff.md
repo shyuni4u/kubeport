@@ -48,7 +48,7 @@
 - [x] **B6. k3s 구조화 인증 전환** (Google + Dex): `sudo GOOGLE_CLIENT_ID=<id> bash deploy/oci/k3s-auth-config.sh`. 실패 시 자동 롤백, 수동 롤백은 `sudo ROLLBACK=1 bash deploy/oci/k3s-auth-config.sh`. 컨트롤플레인 약 30초 블립.
 - [x] **B7. RBAC 검증** (README §7.6 검증 블록): `kubectl --token=$TOKEN auth whoami` → `dex:demo-user@demo.kubeport`; `-n demo can-i create deployments` → yes; `-n default` → no; `kubectl auth can-i delete resourcequota --as=dex:demo-admin@demo.kubeport -n demo` → **no**.
 - [x] **B8. 최초 시드**: `kubectl -n kubeport create job --from=cronjob/kubeport-demo-reset demo-seed-initial` 후 `kubectl -n kubeport logs job/demo-seed-initial -c seed -f` 에서 `seed-demo: done`.
-- [ ] **B9. 브라우저 스모크** (사람이 직접): `/` 에 체험 버튼 2개 + 비밀번호 표기 → "사용자로 체험" → Dex 폼에 이메일 프리필 → `/catalog` 에 템플릿 3개 + 데모 배너 → `web-app` 을 `demo` 로 배포 → 릴리스 상세에 파드 표시 → `nightly-job-demo` 는 실패 설명 배너 → demo-admin 으로 `/admin/teams` "새 팀" 이 데모 제한 문구 → **Google 로그인은 그대로 동작**.
+- [ ] **B9. 브라우저 스모크** (사람이 직접): `/` 에 체험 버튼 2개 + 비밀번호 표기 → "사용자로 체험" → Dex 폼이 비어 열림 — 랜딩 버튼 아래 표기된 이메일과 비밀번호 입력(#29) → `/catalog` 에 템플릿 3개 + 데모 배너 → `web-app` 을 `demo` 로 배포 → 릴리스 상세에 파드 표시 → `nightly-job-demo` 는 실패 설명 배너 → demo-admin 으로 `/admin/teams` "새 팀" 이 데모 제한 문구 → **Google 로그인은 그대로 동작**.
 - [x] **B10. 리셋 확인**: 6시간 틱을 기다리거나 `kubectl -n kubeport create job --from=cronjob/kubeport-demo-reset demo-reset-manual`. 내가 만든 릴리스가 사라지고 시드가 복구되는지.
 - [x] **B11. runbook 갱신** — 문서 갱신 완료. 바인딩 이름 변경도 2026-09-08 완료(`kubeport-owner-admin` 생성 → 오너 권한 확인 → `kubeport-demo-admin` 삭제). 참고용 명령:
   ```bash

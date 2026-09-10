@@ -14,7 +14,7 @@
 
 - 실행 위치는 로컬 Claude Code 만. GHA·API 키 없음.
 - 브라우저 대상 기본 URL `https://kubeport.enzo.kr`, `--base-url` 로 교체 가능.
-- 브라우저 리뷰어는 데모 계정만 사용. 로그인 경로 `/api/auth/login?provider=demo&hint=<email>` (Dex 폼에 이메일 프리필, 비밀번호는 `/` 랜딩에 표기). 로그아웃 `/api/auth/logout`. 계정: `demo-admin@demo.kubeport`, `demo-user@demo.kubeport`.
+- 브라우저 리뷰어는 데모 계정만 사용. 로그인 경로 `/api/auth/login?provider=demo&hint=<email>` (Dex 폼은 비어 열린다 — 이메일·비밀번호 모두 `/` 랜딩에 버튼별로 표기, #29). 로그아웃 `/api/auth/logout`. 계정: `demo-admin@demo.kubeport`, `demo-user@demo.kubeport`.
 - 모든 리뷰어 프롬프트에 `kubectl`/`helm`/`ssh` 프로드 조작 금지, security 는 읽기 전용(퍼징·부하 금지).
 - 리뷰어 출력은 `references/finding-schema.md` 규약만. 근거 없는 발견 금지.
 - 사용자향 문자열은 한국어. PR 제목의 `type(scope):` 접두어는 영문, 본문 한국어 (CLAUDE.md).
