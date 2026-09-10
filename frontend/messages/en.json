@@ -210,6 +210,7 @@
     "emptyWaiting": "No output yet. Lines appear here as soon as it runs.",
     "emptyDisconnected": "Connection lost. Try Reconnect; if it keeps dropping, contact an admin.",
     "reconnect": "Reconnect",
+    "ended": "This instance has sent all its logs. If it runs again, Reconnect picks up from there.",
     "error": {
       "k8s-error": "Could not read logs from the cluster. Try again in a moment.",
       "cluster-auth-denied": "The cluster refused the connection. Signing in again will not help — ask an admin.",
@@ -228,7 +229,8 @@
       "connected": "Connected",
       "connecting": "Connecting",
       "disconnected": "Disconnected",
-      "failed": "Not connected"
+      "failed": "Not connected",
+      "ended": "Finished"
     }
   },
   "templates": {

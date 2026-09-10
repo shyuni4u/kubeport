@@ -85,9 +85,15 @@ type Props = {
   initialInstance?: string;
 };
 
-// "disconnected" is a stream that was dropped and can be re-opened;
-// "failed" is one the server refused, with the refusal in `failure`.
-type Status = "connecting" | "connected" | "disconnected" | "failed";
+// "disconnected" is a stream that was dropped and can be re-opened; "failed" is
+// one the server refused, with the refusal in `failure`; "ended" is one that
+// ran to completion — every pod stopped emitting and the server said so.
+//
+// "ended" is its own state rather than a flavour of "failed" because a finished
+// Job is the ordinary outcome, not a fault: reusing "failed" put a red dot and
+// "Something went wrong with the log stream." over a container that had simply
+// done its work.
+type Status = "connecting" | "connected" | "disconnected" | "failed" | "ended";
 
 // The Problem the server answered with before the SSE handshake. Only `title`
 // and `request_id` are kept, for the reason spelled out at the error-frame
@@ -279,7 +285,9 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     es.addEventListener("end", () => {
       es.close();
       setTerminated(lastError ?? {});
-      setStatus("failed");
+      // A stream that carried an error ends in failure; one that did not simply
+      // finished, and calling that "failed" would be a lie about a completed Job.
+      setStatus(lastError ? "failed" : "ended");
     });
     es.onopen = () => setStatus("connected");
     // Two very different failures arrive here, and WHATWG is what tells them
@@ -332,6 +340,27 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     }
   }, [lines, status, autoscroll]);
 
+  // Which refusal, if any, the pane spells out under the log rows.
+  //
+  // A pre-stream refusal always speaks for itself. It is the newest thing that
+  // happened and nothing else on screen says it — and it can arrive with an
+  // older pod error still sitting in the buffer, in which case letting that row
+  // stand in for it would show yesterday's cluster error to someone whose
+  // session has just expired, request id and all.
+  //
+  // A terminal error is the other way round: the error row already printed it,
+  // so repeating it in the footer reads as two separate failures. The footer
+  // takes over only once that row is gone — [Clear] removes it, and so does
+  // LINE_CAP after healthy pods write 2000 lines past it.
+  const footer =
+    status !== "failed"
+      ? null
+      : (failure ??
+        (terminated?.title &&
+        !lines.some((l) => l.kind === "error" && l.requestId === terminated.requestId)
+          ? terminated
+          : null));
+
   return (
     <>
       <div className="flex items-center gap-3 text-xs">
@@ -354,7 +383,13 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
         ref={boxRef}
         className="h-[60vh] overflow-auto rounded bg-slate-950 p-3 font-mono text-[12px] leading-relaxed text-slate-100"
       >
-        {lines.length === 0 && status !== "failed" && (
+        {/*
+          "ended" is excluded alongside "failed": the completion notice below
+          says what happened, and "No output yet" under it would contradict it.
+          A pod that produced nothing at all and then finished is a real case —
+          a Job that exits silently — and it reads as one sentence, not two.
+        */}
+        {lines.length === 0 && status !== "failed" && status !== "ended" && (
           <p className="text-slate-400">
             {status === "disconnected" ? t("emptyDisconnected") : t("emptyWaiting")}
           </p>
@@ -379,17 +414,11 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
           the reason in exactly that case, leaving stale logs under a bare
           "Not connected".
         */}
-        {/*
-          Suppressed only while the error row that says the same thing is still
-          in the buffer — not merely because the stream ended in one. [Clear]
-          removes that row, and so does LINE_CAP once healthy pods have written
-          2000 lines past it; tying the footer to "did it end with an error"
-          left both cases with a red status dot, an empty pane and no reason.
-        */}
-        {status === "failed" && !lines.some((l) => l.kind === "error") && (
-          <p className="whitespace-pre-wrap text-red-300">
-            {openErrorText(t, terminated ?? failure)}
-          </p>
+        {footer && (
+          <p className="whitespace-pre-wrap text-red-300">{openErrorText(t, footer)}</p>
+        )}
+        {status === "ended" && (
+          <p className="whitespace-pre-wrap text-slate-400">{t("ended")}</p>
         )}
       </div>
     </>
@@ -453,15 +482,15 @@ function canReconnect(
   terminated: Failure | null,
 ): boolean {
   if (status === "disconnected") return true;
+  // A stream that finished cleanly: the pod may run again — a CronJob will —
+  // and re-opening is the only way to find out.
+  if (status === "ended") return true;
   if (status !== "failed") return false;
   // A stream the server ended is judged by its own vocabulary: the kinds an
   // error frame can carry are not the kinds a pre-stream refusal can, and only
-  // one of the three is worth another attempt. No kind at all means it simply
-  // finished — a completed Job, a container that exited — and re-opening is a
-  // reasonable thing to want, since the pod may run again.
-  if (terminated !== null) {
+  // one of the three is worth another attempt.
+  if (terminated?.title) {
     const kind = terminated.title;
-    if (!kind) return true;
     return !KNOWN_STREAM_ERRORS.has(kind) || RETRYABLE_STREAM_ERRORS.has(kind);
   }
   const title = failure?.title;
@@ -473,12 +502,16 @@ function canReconnect(
 
 function ConnectionDot({ status }: { status: Status }) {
   const t = useTranslations("logs.status");
+  // "ended" is grey, not red: the stream finished, which is what a completed
+  // Job is supposed to do. Red is reserved for something having gone wrong.
   const color =
     status === "connected"
       ? "bg-green-500"
       : status === "connecting"
         ? "bg-amber-500"
-        : "bg-red-500";
+        : status === "ended"
+          ? "bg-slate-400"
+          : "bg-red-500";
   const label = t(status);
   return (
     <span className="inline-flex items-center gap-1.5">

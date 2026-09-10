@@ -194,8 +194,35 @@ describe("LogsPanel in-stream termination", () => {
     emitEnd();
 
     expect(socket().closed).toBe(true);
-    // The pod may run again, so re-opening is a reasonable thing to want.
+    // The pod may run again — a CronJob will — so re-opening is a reasonable
+    // thing to want.
     expect(screen.getByRole("button", { name: "다시 연결" })).toBeInTheDocument();
+  });
+
+  // Finishing is what a Job is for. Folding it into "failed" put a red dot and
+  // "Something went wrong with the log stream." over a container that had done
+  // exactly what it was asked to.
+  it("reports a clean finish as finished, not as a failure", () => {
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+
+    emitLog("p1", "job done");
+    emitEnd();
+
+    expect(screen.getByText("전송 완료")).toBeInTheDocument();
+    expect(screen.getByText(/로그를 모두 보냈습니다/)).toBeInTheDocument();
+    expect(screen.queryByText(/로그 스트림에 문제가 생겼습니다/)).not.toBeInTheDocument();
+    expect(screen.queryByText("연결 안 됨")).not.toBeInTheDocument();
+  });
+
+  // A pod that exits without printing anything is a real Job. "No output yet"
+  // under "it has sent all its logs" is two sentences disagreeing.
+  it("does not still say it is waiting for output after a clean finish", () => {
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+
+    emitEnd();
+
+    expect(screen.getByText(/로그를 모두 보냈습니다/)).toBeInTheDocument();
+    expect(screen.queryByText(/아직 출력이 없습니다/)).not.toBeInTheDocument();
   });
 
   it("keeps retrying a drop that carried no end frame", () => {
