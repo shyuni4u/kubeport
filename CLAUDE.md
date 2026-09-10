@@ -202,10 +202,19 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
 ### 기다리는 법
 - `gh pr checks --watch`·`sleep` 루프로 턴을 붙잡지 않는다. PR 을 올리면 `gh pr merge --auto --squash` 를 걸고 다음 일로 간다.
   결과를 꼭 봐야 하면 `run_in_background` 로 띄운다.
+- **머지가 곧 배포다** (#199, 2026-09-10). main 머지 → `build-images` 성공 → `deploy.yml` 이 라이브(`kubeport.enzo.kr`)에
+  올리고 `/api/healthz` 의 `version` 이 바뀔 때까지 확인한다. 머지 버튼(= `--auto` 가 초록에 누르는 것)이 프로덕션 배포 버튼이다.
 - **auto-merge 의 필수 체크는 `ci.yml` 4개(`audit` `backend` `frontend` `hooks`)뿐이다** (ruleset `protect-main`, 2026-09-10).
-  `playwright`·`helm` 은 kind 플레이크로 머지를 막지 않게 필수에서 뺐다 — 빨개도 머지된다. 그래서 **클러스터가 있어야
-  도는 테스트**(`backend/internal/k8s`, OpenAPI 프록시 — #121 이후 playwright 잡 안에서만 돈다)나 차트(`deploy/helm/**`)를
-  건드린 PR 은 `--auto` 대신 `playwright`/`helm` 결과까지 보고 머지한다. 긴급 시 ruleset 을 끄는 건 사용자 몫이다.
+  `playwright`·`helm` 은 kind 플레이크로 머지를 막지 않게 필수에서 뺐다 — 빨개도 머지되고, **머지되면 배포된다.** 그래서
+  **클러스터가 있어야 도는 테스트**(`backend/internal/k8s`, OpenAPI 프록시 — #121 이후 playwright 잡 안에서만 돈다)나
+  차트(`deploy/helm/**`)·서버 기동 경로를 건드린 PR 은 `--auto` 대신 `playwright`/`helm` 결과까지 보고 머지한다. 이 규칙이
+  "playwright 가 빨간데 프로덕션에 나간다" 를 막는 유일한 장치다. 긴급 시 ruleset 을 끄는 건 사용자 몫이다.
+- **배포는 사람이 하지 않는다.** raw `helm upgrade` 로 이미지를 올리지 않는다. 재배포·롤백은 관리자 키로
+  `kubeport-deploy deploy <40hex main sha>`(롤백은 이 경로만 — 배포 키는 앞으로만 간다), 값만 바꾸는 작업(비밀번호 회전)은
+  `flock -w 600 /run/lock/kubeport-deploy.lock helm upgrade ...` 로 같은 락을 잡는다. **진행 중인 deploy 런은 Cancel 하지 않는다**
+  (`pending-upgrade` 로 멈춘다). Dex 렌더가 바뀌는 배포는 자동으로 거부(exit 10)되고 PM 이 수동 처리한다 — runbook §3.
+- **시드·리셋 Job 이 만드는 것은 배포로 바뀌지 않는다.** 시드 릴리스를 바꾸는 변경은 머지·배포 뒤 PM 이 리셋 Job 을 수동
+  실행해야 라이브에 보인다(`kubeport-deploy status` 로 락 free·최신 리비전 `deployed` 확인 후).
 - 라이브가 어느 커밋인지는 `curl -s https://kubeport.enzo.kr/api/healthz` 의 `version` 으로 본다 — 세션끼리 "배포됐나요?" 를 묻지 않는다.
 
 ### 브라우저
