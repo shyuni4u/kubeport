@@ -372,7 +372,7 @@
         "renderFailed": "미리보기를 그리지 못했습니다. 편집기는 그대로이니 방금 고친 줄을 되돌리면 됩니다. ({detail})"
       },
       "convert": {
-        "yamlDraftPreview": "이 draft 는 YAML 모드로 작성되어 UI 에서는 미리보기만 가능합니다. UI 로 편집하려면 상세 페이지에서 이 draft 를 삭제한 뒤 새 버전을 시작하세요.",
+        "yamlDraftPreview": "이 draft 는 YAML 모드로 작성되어 UI 에서는 미리보기만 가능합니다. 지금 내용을 고치려면 위의 YAML 모드 탭에서 편집하세요. UI 에디터로 옮기려면 상세 페이지에서 이 draft 를 삭제한 뒤 새 버전을 시작하세요.",
         "yamlDraftInspector": "YAML 로 작성된 draft 라 여기서는 필드 설정을 볼 수만 있고 저장할 수 없습니다.",
         "editInYaml": "YAML 모드에서 편집",
         "willSaveAsNew": "저장 시 새 UI 모드 버전으로 저장됩니다. 일부 구조는 변환 과정에서 누락될 수 있으니 트리에서 확인하세요.",

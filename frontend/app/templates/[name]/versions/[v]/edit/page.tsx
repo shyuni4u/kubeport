@@ -398,7 +398,9 @@ function UIModeEdit({ onDirty }: ModeProps) {
 
   return (
     <div className="space-y-3">
-      <MetaRow meta={meta} onChange={(m) => { setMeta(m); touch(); }} nameLocked hideTeam />
+      {/* Same reason as the inspector's readOnly: nothing here can be saved on a
+          YAML draft, and an edit would also arm the leave-page guard (#184). */}
+      <MetaRow meta={meta} onChange={(m) => { setMeta(m); touch(); }} nameLocked hideTeam readOnly={isYamlDraft} />
       {sourceAuthoringMode !== "ui" && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 space-y-1">
           <div>
