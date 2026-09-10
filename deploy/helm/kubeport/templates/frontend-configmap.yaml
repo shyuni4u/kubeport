@@ -29,6 +29,11 @@ data:
   DEMO_RESET_SCHEDULE: {{ .Values.demo.resetSchedule | quote }}
   DEMO_ADMIN_EMAIL: {{ .Values.demo.adminEmail | quote }}
   DEMO_USER_EMAIL: {{ .Values.demo.userEmail | quote }}
+  # The deploy form starts demo sessions in this namespace, because demo
+  # accounts' RBAC covers it alone — the cluster's own default_namespace would
+  # open the form on a permission denial (#179). Same value demo-rbac.yaml and
+  # the reset job use.
+  DEMO_NAMESPACE: {{ .Values.demo.namespace | quote }}
   {{- with .Values.demo.passwordHint }}
   DEMO_PASSWORD_HINT: {{ . | quote }}
   {{- end }}

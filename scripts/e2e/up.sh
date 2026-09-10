@@ -51,7 +51,17 @@ DEMO_EMAIL_DOMAIN=demo.kubeport
 DEMO_ADMIN_EMAIL=demo-admin@demo.kubeport
 DEMO_USER_EMAIL=demo-user@demo.kubeport
 DEMO_PASSWORD_HINT=demo
+# Where the deploy form starts demo sessions (#179) — the namespace seed.sh
+# gives the demo accounts RBAC in.
+DEMO_NAMESPACE=default
 EOF
+fi
+# The file above is written once, so a checkout from before #179 never got
+# DEMO_NAMESPACE — and without it demo sessions open the deploy form on an
+# empty namespace. Add just that key, leaving everything else as it is.
+if ! grep -q '^DEMO_NAMESPACE=' "$ENV_LOCAL"; then
+  log "adding DEMO_NAMESPACE to frontend/.env.local"
+  echo 'DEMO_NAMESPACE=default' >> "$ENV_LOCAL"
 fi
 
 # 5. kind cluster trusting dex (created once; reused across sessions)
