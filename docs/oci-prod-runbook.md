@@ -86,12 +86,20 @@ main 에 머지하면 사람 손 없이 라이브까지 간다. 설치 절차는
 [deploy/oci/README.md "자동 배포 설치"](../deploy/oci/README.md#자동-배포-설치-github-actions--vm).
 
 ```
-main push → build-images (sha-<7> 이미지 push)
-          → deploy.yml (workflow_run — 성공한 main push 빌드만)
+main push → build-images (sha-<7> 이미지 push)  ┐
+          → CI (audit·backend·frontend·hooks)   ┴→ 둘 중 무엇이 끝나도 deploy.yml (workflow_run)
+          → 같은 sha 의 build-images **와** CI 가 둘 다 success 일 때만 진행 (#202)
           → 전용 배포 키로 ssh → VM forced command: kubeport-deploy "deploy <40자리 sha>"
           → helm upgrade (실패 시 helm 이 자동 롤백)
           → https://kubeport.enzo.kr/api/healthz 의 version 이 sha 7자리가 될 때까지 대기 (5분)
 ```
+
+- **main CI 게이트 (#202)**: PR 의 필수 체크는 PR 브랜치에서 돈 것이고 ruleset 이 "최신 main 기준" 을 강제하지 않는다.
+  그래서 각자 초록인 PR 둘이 합쳐진 main 커밋은 CI 가 빨갈 수 있다 — 그 커밋은 배포하지 않는다.
+  deploy 런은 build-images·CI 완료 **양쪽**에서 트리거되고, 실행 시점에 그 sha 의 두 워크플로 **최신 push 런**을 본다:
+  한쪽이 아직 돌면 `Skipped` notice(나머지 완료가 다시 트리거한다), 한쪽이라도 success 가 아니면 **빨간 deploy 런**
+  (`build-images not green` / `CI not green`) — main 을 고치거나 플레이크면 그 워크플로를 re-run 하면 초록 완료가 배포한다.
+  둘 다 끝나면 트리거도 두 번이라, 라이브 `version` 이 이미 그 sha 면 두 번째는 `already live` 로 건너뛴다.
 
 - **지금 라이브가 어느 커밋인가**: `curl -s https://kubeport.enzo.kr/api/healthz | jq -r .version` —
   ssh 없이 누구나 본다. backend 빌드의 sha 다(frontend 는 같은 커밋·같은 배포로 함께 올라간다).
@@ -103,7 +111,8 @@ main push → build-images (sha-<7> 이미지 push)
   `pending-upgrade` 로 남으면 이후 모든 upgrade 가 막힌다). 수동 배포와는 VM 의 같은 락으로 직렬화된다.
 - **재배포 (앞으로만)**: Actions → deploy → Run workflow, 또는
   `gh workflow run deploy.yml -f sha=<main 커밋 40자리>`. dispatch 는 HEAD 검사를 하지 않는 대신
-  그 sha 가 main 에 있고 build-images 가 성공했는지 먼저 확인한다. 그리고 VM 이 **지금 라이브와 같거나
+  그 sha 가 main 에 있고 build-images **와 CI** 의 최신 push 런이 둘 다 success 인지 먼저 확인한다(아직 돌고 있으면
+  건너뛰지 않고 에러 — dispatch 에는 다시 트리거해 줄 완료 이벤트가 없다). 그리고 VM 이 **지금 라이브와 같거나
   그보다 새 커밋만** 받는다(`deploy/kubeport-backend` 의 `sha-<7>` 태그 기준, GitHub compare 가
   `ahead`/`identical`). 유출된 배포 키로 보안 수정 이전 빌드를 되살리지 못하게 하려는 것이다.
 - **롤백은 관리자 키로 `kubeport-deploy deploy <sha>`** (§3-2). 배포 키 경로로 옛 sha 를 주면
@@ -146,7 +155,7 @@ main push → build-images (sha-<7> 이미지 push)
 
 ### 3-1. 태그가 실제로 있는지 먼저 확인
 
-(자동 배포는 workflow_run 이 곧 "빌드 성공" 이고, dispatch 는 워크플로가 이 확인을 대신한다.
+(자동 배포와 dispatch 는 워크플로가 이 확인 — 그 sha 의 build-images·CI 최신 push 런이 success — 을 대신한다.
 아래는 수동 배포할 때.)
 
 없는 태그로 `helm upgrade` 하면 `ImagePullBackOff` 로 끝나고 롤아웃이 타임아웃까지 매달린다.
@@ -534,7 +543,8 @@ port-forward 로 밖에서 잡는다.
 | `helm upgrade`/`rollback` 이 `another operation (install/upgrade/rollback) is in progress`, 또는 deploy 가 `aborted-before-upgrade` + `release kubeport is pending-upgrade` | 이전 helm 작업이 끝나지 못했다 — deploy 런 Cancel, ssh 끊김, VM 재부팅 중 upgrade. 락을 잡고 마지막 `deployed` 리비전으로 되돌린다: `ssh -i "$KEY" ubuntu@168.107.55.95 "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; helm history kubeport -n kubeport \| tail -5"` 로 `deployed` 인 rev 를 찾고 → `ssh ... "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; flock -w 600 /run/lock/kubeport-deploy.lock helm rollback kubeport <마지막 deployed rev> -n kubeport"`. 그 뒤 원래 하려던 배포를 다시 한다 |
 | deploy 워크플로가 `SSH failed` (exit 255) | 인스턴스 stop/start 로 공인 IP 가 바뀌었다. `OCI_DEPLOY_HOST`·`OCI_DEPLOY_KNOWN_HOSTS` 시크릿 갱신 ([README "자동 배포 설치"](../deploy/oci/README.md#자동-배포-설치-github-actions--vm)) |
 | deploy 워크플로가 `Version not live` | helm 은 끝났는데 `/api/healthz` 의 version 이 안 바뀐다. `kubeport-deploy status` 로 이미지 태그, 파드·ingress 확인 (§3-3). `version` 필드가 생기기 전 빌드를 배포한 거라면(관리자 키로 그 빌드까지 롤백한 뒤에만 가능) dispatch 에 `verify_version=false` |
-| deploy 런이 `Skipped` notice 로 초록 | 그 사이 main 이 더 나아갔다. 새 커밋의 build-images → deploy 가 함께 올린다 (§3-0) |
+| deploy 런이 `Skipped` notice 로 초록 | 셋 중 하나다(notice 문구로 구분, §3-0). `newer than` — 그 사이 main 이 더 나아갔고 새 커밋의 런들이 함께 올린다. `has not finished` — 같은 sha 의 build-images/CI 중 다른 쪽이 아직 돈다, 끝나면 다시 트리거된다. `already live` — 두 트리거 중 먼저 온 쪽이 이미 배포했다 |
+| deploy 런이 `CI not green` / `build-images not green` 으로 빨강 | 그 main 커밋의 CI(또는 빌드)가 실패해 **배포하지 않았다** — 라이브는 이전 커밋 그대로. 합쳐진 두 PR 이 main 에서만 깨지는 경우가 전형이다(#202). main 을 고치는 PR 을 머지하면 그 커밋이 배포된다. 플레이크면 그 워크플로 런을 re-run — 초록 완료가 deploy 를 다시 트리거한다 |
 | 새 파드가 `ImagePullBackOff` | 존재하지 않는 태그로 upgrade 했다. §3-1 로 태그부터 확인하고 `helm rollback kubeport <이전rev> -n kubeport` |
 | backend 파드에 `kubectl exec` 이 `failed to exec in container` | 이미지에 셸이 없다. 정상이다 — port-forward 로 밖에서 잡는다 (§6 "Go API 를 직접 찔러 보기") |
 | `/api/v1/<경로>` 가 404·405 대신 401 | 설계된 동작이다. BFF 세션 게이트가 라우팅보다 먼저다 ([machine-clients.md §5](machine-clients.md#5-호출할-때-알아두면-좋은-것)). `/api/v1` 루트만 예외로 세션 검사 없이 404 |
