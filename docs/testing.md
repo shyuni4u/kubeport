@@ -61,12 +61,11 @@ docker compose -f deploy/docker/docker-compose.yml down -v     # pgdata 볼륨�
 
 `go test -p 1` 은 **한 번의 실행 안에서** 패키지를 직렬로 돌릴 뿐이다. 이 머신에서 Claude 세션 여러 개가 같은 compose postgres 로 동시에 테스트를 돌리면, A 세션의 `internal/api` 가 끝나는 순간 B 세션이 방금 만든 클러스터·템플릿을 지운다 → B 는 404·FK 오류로 **간헐적으로** 깨진다. 재현이 어렵고 코드와 무관한 빨간불이라 가장 비싼 종류의 실패다.
 
-**사용법** — 세션을 시작할 때 한 번:
+**사용법** — 테스트를 돌리는 **같은 명령 줄에서** 받는다. Claude Code 의 Bash 도구처럼 호출마다 셸이 새로 뜨면 앞 호출의 `export` 는 남지 않아, "세션 시작 시 한 번" 은 다음 명령에서 공유 DB 로 되돌아간다. 매번 붙여도 멱등이라 최신이면 no-op 이다:
 
 ```bash
-# 리포(워크트리) 루트에서
-out=$(scripts/test-db.sh) && eval "$out" && echo "$TEST_DATABASE_URL"   # kubeport_test_<워크트리 디렉터리명> 생성 + 스키마 적용 + export
-(cd backend && go test -p 1 ./internal/store/...)
+# 리포(워크트리) 루트에서 — kubeport_test_<워크트리 디렉터리명> 생성 + 스키마 적용 + export, 그리고 같은 줄에서 테스트
+out=$(scripts/test-db.sh) && eval "$out" && echo "$TEST_DATABASE_URL" && (cd backend && go test -p 1 ./internal/store/...)
 ```
 
 > **`eval "$(scripts/test-db.sh)"` 로 쓰지 않는다.** 스크립트가 실패하면(컴포즈 꺼짐·atlas 실패·다른 cwd) stdout 이 비고, 빈 문자열 eval 은 성공으로 끝나 `TEST_DATABASE_URL` 없이 **조용히 공유 DB `kubeport` 로 테스트가 돈다.** `echo` 가 `kubeport_test_` 가 들어간 URL 을 찍지 않았으면 테스트를 돌리지 않는다.
