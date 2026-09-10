@@ -57,6 +57,7 @@
   },
   "demo": {
     "banner": "Demo session. Next reset: {time}",
+    "bannerNoTime": "Demo session. This environment is reset regularly.",
     "dismiss": "Dismiss",
     "restricted": "Not available for demo accounts."
   },
@@ -65,7 +66,7 @@
     "tryAdmin": "Try as admin",
     "tryUser": "Try as user",
     "loginPrimary": "Sign in with Google",
-    "demoNote": "Deploys to a real cluster · resets every 6 hours · don't leave personal data",
+    "demoNote": "Deploys to a real cluster · resets daily · don't leave personal data",
     "demoCreds": "Demo password: {password}",
     "goCatalog": "Go to catalog",
     "compare": {

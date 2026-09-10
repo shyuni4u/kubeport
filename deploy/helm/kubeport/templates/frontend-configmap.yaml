@@ -23,6 +23,10 @@ data:
   DEMO_OIDC_ISSUER: {{ include "kubeport.dex.issuer" . | quote }}
   DEMO_OIDC_CLIENT_ID: {{ .Values.dex.clientId | quote }}
   DEMO_EMAIL_DOMAIN: {{ .Values.demo.emailDomain | quote }}
+  # The banner computes the next reset from this. It used to be a constant in
+  # the frontend, which meant changing the CronJob left the banner telling
+  # visitors a time 15 hours off (#153) — one cadence, one source.
+  DEMO_RESET_SCHEDULE: {{ .Values.demo.resetSchedule | quote }}
   DEMO_ADMIN_EMAIL: {{ .Values.demo.adminEmail | quote }}
   DEMO_USER_EMAIL: {{ .Values.demo.userEmail | quote }}
   {{- with .Values.demo.passwordHint }}

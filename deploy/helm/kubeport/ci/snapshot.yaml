@@ -263,6 +263,10 @@ data:
   DEMO_OIDC_ISSUER: "https://dex.example.test"
   DEMO_OIDC_CLIENT_ID: "kubeport-demo"
   DEMO_EMAIL_DOMAIN: "demo.kubeport"
+  # The banner computes the next reset from this. It used to be a constant in
+  # the frontend, which meant changing the CronJob left the banner telling
+  # visitors a time 15 hours off (#153) — one cadence, one source.
+  DEMO_RESET_SCHEDULE: "0 21 * * *"
   DEMO_ADMIN_EMAIL: "demo-admin@demo.kubeport"
   DEMO_USER_EMAIL: "demo-user@demo.kubeport"
 ---
@@ -1228,7 +1232,7 @@ spec:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/component: frontend
       annotations:
-        checksum/config: f2cd57a0b4d7e180e94df0535ec84196c3465a4153db84f87b69843527a0f10c
+        checksum/config: 3635fda3f2d9116f8222001f11a471631786fc294b12066a5f808a438af0d61b
         checksum/secret: e7dde2c9f0d9e6ff324c1fe9ec29e374b1dfb55ceb2fe06c296a8b108aa27451
     spec:
       securityContext:
@@ -1415,7 +1419,13 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     app.kubernetes.io/managed-by: Helm
 spec:
-  schedule: "0 */6 * * *"
+  schedule: "0 21 * * *"
+  # Never leave this empty: with no timeZone k8s reads the schedule in
+  # kube-controller-manager's local zone, while the banner
+  # (frontend/lib/demo-reset.ts) computes it in UTC. On a node set to
+  # Asia/Seoul the two would be nine hours apart — #153 again, from the
+  # other end. Ignored by API servers below 1.27, which behave as before.
+  timeZone: "Etc/UTC"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
@@ -1438,7 +1448,7 @@ spec:
             # governs the seed container: wipe-k8s used to empty the demo
             # namespace with no idea whether the re-seed could succeed, so a
             # Dex outage still destroyed the workloads and left the releases
-            # pointing at nothing until the next run six hours later (#105).
+            # pointing at nothing until the next scheduled run (#105).
             # Failing here fails the Job before anything is destroyed.
             - name: preflight
               image: ghcr.io/shyuni4u/kubeport-backend:0.1.0

@@ -126,7 +126,7 @@ func demoVisibleTemplates(ctx context.Context, st *store.Store, demoDomain strin
 //
 // The count is the signal #119 asked for: the
 // demo reset CronJob wipes first and re-seeds second, so a failed seed leaves
-// an empty catalog that nothing notices for up to six hours — the last
+// an empty catalog that nothing notices until the next scheduled reset — the last
 // occurrence (#104) was found only because a browser review happened to run
 // just after a reset. Publishing the count lets the existing uptime ping
 // (.github/workflows/uptime-ping.yml) assert it is non-zero, which makes an
