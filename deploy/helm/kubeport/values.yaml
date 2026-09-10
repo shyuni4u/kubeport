@@ -233,6 +233,8 @@ dex:
 # ----- Demo mode (namespace + quota + RBAC + reset CronJob) --------------
 demo:
   enabled: false
+  # Namespace for demo RBAC, quota and the reset job, and where the deploy form
+  # starts demo sessions (rendered to the frontend as DEMO_NAMESPACE).
   namespace: demo
   emailDomain: demo.kubeport
   adminEmail: demo-admin@demo.kubeport

@@ -218,7 +218,7 @@ OCI-specific.
    | `api_url` | **yes** | validated as a URL |
    | `oidc_issuer_url` | **yes** | validated as a URL |
    | `ca_bundle` | no — but set it | PEM text, not base64. **If omitted the backend falls back to TLS verification disabled** (`NewInsecureWithToken`) and still returns 201, so the response cannot tell you this happened |
-   | `default_namespace` | no | deploy form starts on an empty namespace without it |
+   | `default_namespace` | no | deploy form starts on this namespace, or empty without it. Demo sessions (Dex demo accounts) ignore it and start on `demo.namespace`, the only namespace their RBAC covers |
    | `display_name` | no | UI label |
 
    The Go API is **ClusterIP-only**: the chart's Ingress sends every external path
@@ -425,6 +425,10 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
   `/seed-demo --reset` (shipped in the backend image).
   The demo banner derives its "next reset" from the same value; it understands
   `<minute> <hour|*/N|list> * * *` only and omits the time for any other form.
+- The deploy form starts demo sessions in `demo.namespace` (passed to the
+  frontend as `DEMO_NAMESPACE`), not in the cluster's `default_namespace`.
+  Changing `demo.namespace` moves the namespace, its RBAC, the reset job and
+  the form's starting namespace together.
 
 Both demo `Role`s enumerate workload resources explicitly — neither can touch
 the guardrails (`resourcequotas`, `limitranges`, `networkpolicies`) or use

@@ -56,6 +56,13 @@ DEMO_PASSWORD_HINT=demo
 DEMO_NAMESPACE=default
 EOF
 fi
+# The file above is written once, so a checkout from before #179 never got
+# DEMO_NAMESPACE — and without it demo sessions open the deploy form on an
+# empty namespace. Add just that key, leaving everything else as it is.
+if ! grep -q '^DEMO_NAMESPACE=' "$ENV_LOCAL"; then
+  log "adding DEMO_NAMESPACE to frontend/.env.local"
+  echo 'DEMO_NAMESPACE=default' >> "$ENV_LOCAL"
+fi
 
 # 5. kind cluster trusting dex (created once; reused across sessions)
 if ! kind get clusters 2>/dev/null | grep -qx kubeport; then

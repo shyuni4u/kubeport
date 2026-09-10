@@ -18,7 +18,7 @@ else
   KIND_CA="$(kubectl --context kind-kubeport config view --raw --minify --flatten -o json \
     | J 'o => Buffer.from(o.clusters[0].cluster["certificate-authority-data"], "base64").toString()')"
   export KIND_CA
-  node -e 'process.stdout.write(JSON.stringify({name:"kind",api_url:"https://127.0.0.1:6443",ca_bundle:process.env.KIND_CA,oidc_issuer_url:process.env.DEX_ISSUER}))' \
+  node -e 'process.stdout.write(JSON.stringify({name:"kind",api_url:"https://127.0.0.1:6443",ca_bundle:process.env.KIND_CA,oidc_issuer_url:process.env.DEX_ISSUER,default_namespace:"default"}))' \
     | DEX_ISSUER="$DEX_ISSUER" curl -sf -H "Authorization: Bearer $ADM" -H 'content-type: application/json' \
         -X POST "$API_URL/v1/clusters" -d @- >/dev/null
   log "cluster 'kind' registered"

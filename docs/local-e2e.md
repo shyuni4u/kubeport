@@ -258,7 +258,14 @@ DEMO_EMAIL_DOMAIN=demo.kubeport
 DEMO_ADMIN_EMAIL=demo-admin@demo.kubeport
 DEMO_USER_EMAIL=demo-user@demo.kubeport
 DEMO_PASSWORD_HINT=demo
+# Where the deploy form starts demo sessions — the namespace §6 grants the demo accounts.
+DEMO_NAMESPACE=default
 ```
+
+> **Checkout from before #179?** `scripts/e2e/up.sh` adds `DEMO_NAMESPACE` to an
+> existing `frontend/.env.local` on its next run. If you manage the file by hand,
+> add the line yourself and restart the frontend — without it, demo sessions open
+> the deploy form with an empty namespace.
 
 Start with the CA path exported (Next.js openid-client must trust the self-
 signed dex cert):
@@ -290,7 +297,8 @@ jq -n --arg ca "$KIND_CA" '{
   name:"kind",
   api_url:"https://127.0.0.1:6443",
   ca_bundle:$ca,
-  oidc_issuer_url:"https://host.docker.internal:5556"
+  oidc_issuer_url:"https://host.docker.internal:5556",
+  default_namespace:"default"
 }' | curl -s -H "Authorization: Bearer $ADM" -H 'content-type: application/json' \
   -X POST http://localhost:8080/v1/clusters -d @-
 
@@ -360,7 +368,9 @@ All specs assume the seed from §9b (templates `web-app`, `nightly-job`, `app-wi
 1. Visit `https://host.docker.internal:5556/.well-known/openid-configuration`
    once, click **Advanced → Proceed** to cache the self-signed cert exception.
 2. `http://localhost:3000` → login as `alice@example.com` / `alice`
-3. Catalog → Web Service → 배포 → fill form → submit
+3. Catalog → Web Service → 배포 → fill form → submit. The "구역" field starts on the
+   cluster's registered `default_namespace`; if you registered `kind` without one
+   (before #179, or by hand), it starts empty — type `default`.
 4. Release detail page should show `healthy` with 1 instance
 
 ## UI mode (Plan 2)
