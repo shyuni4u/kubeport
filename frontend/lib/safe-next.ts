@@ -62,5 +62,17 @@ export function sanitizeNext(raw: string | null | undefined): string | null {
   // no-op whose only effect is to keep `?next=` in the address bar.
   if (url.pathname === "/") return null;
 
-  return `${url.pathname}${url.search}`;
+  // Check the string we are about to RETURN, not the one we were given.
+  //
+  // Parsing normalizes, and normalization can manufacture an escape that was
+  // not in the input: `/a/..//evil.example` parses with this base's origin —
+  // so every check above passes — and comes out with its pathname collapsed to
+  // `//evil.example`, which is protocol-relative. Resolved again by the
+  // callback or an href, that is https://evil.example. Validating the input
+  // and returning the normalized form meant checking a different value than
+  // the one that gets used. Found by codex review of this change.
+  const path = `${url.pathname}${url.search}`;
+  if (new URL(path, FALLBACK_BASE).origin !== FALLBACK_BASE) return null;
+
+  return path;
 }
