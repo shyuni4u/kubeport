@@ -55,18 +55,29 @@ func parseSpec(src string) (UISpec, error) {
 	return s, nil
 }
 
+// name is how a message refers to the field: its label, or its path when the
+// label is empty, so an error never starts with a bare ": not an integer".
+// ValidateSpec requires a label now, but versions saved before that can still
+// lack one (#152).
+func (f Field) name() string {
+	if f.Label != "" {
+		return f.Label
+	}
+	return f.Path
+}
+
 func (f Field) Validate(v any) error {
 	switch f.Type {
 	case TypeInteger:
 		n, ok := toInt(v)
 		if !ok {
-			return fmt.Errorf("%s: not an integer", f.Label)
+			return fmt.Errorf("%s: not an integer", f.name())
 		}
 		if f.Min != nil && n < *f.Min {
-			return fmt.Errorf("%s: below min %d", f.Label, *f.Min)
+			return fmt.Errorf("%s: below min %d", f.name(), *f.Min)
 		}
 		if f.Max != nil && n > *f.Max {
-			return fmt.Errorf("%s: above max %d", f.Label, *f.Max)
+			return fmt.Errorf("%s: above max %d", f.name(), *f.Max)
 		}
 	case TypeString, TypeAutocomplete:
 		// Autocomplete is a string with advisory suggestions in `Values` —
@@ -77,17 +88,17 @@ func (f Field) Validate(v any) error {
 		// where it would surface as a confusing k8s API error.
 		s, ok := v.(string)
 		if !ok {
-			return fmt.Errorf("%s: not a string", f.Label)
+			return fmt.Errorf("%s: not a string", f.name())
 		}
 		if f.patternRE == nil {
 			return nil
 		}
 		if !f.patternRE.MatchString(s) {
-			return fmt.Errorf("%s: does not match pattern %q", f.Label, f.Pattern)
+			return fmt.Errorf("%s: does not match pattern %q", f.name(), f.Pattern)
 		}
 	case TypeBoolean:
 		if _, ok := v.(bool); !ok {
-			return fmt.Errorf("%s: not a boolean", f.Label)
+			return fmt.Errorf("%s: not a boolean", f.name())
 		}
 	case TypeEnum:
 		s := fmt.Sprint(v)
@@ -96,7 +107,14 @@ func (f Field) Validate(v any) error {
 				return nil
 			}
 		}
-		return fmt.Errorf("%s: not in %v", f.Label, f.Values)
+		return fmt.Errorf("%s: not in %v", f.name(), f.Values)
+	default:
+		// Without this an unknown or misspelled type ("str", "int", or none at
+		// all) fell through every case and returned nil, so whatever the caller
+		// sent — a whole object included — was written into the manifest
+		// unchecked (#136). ValidateSpec now refuses such a spec on save; this
+		// is what still stops a version saved before that.
+		return fmt.Errorf("%s: unsupported field type %q", f.name(), f.Type)
 	}
 	return nil
 }

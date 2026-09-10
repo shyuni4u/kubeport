@@ -39,6 +39,22 @@ func ValidateSpec(resourcesYAML, uiSpecYAML string) error {
 		return err
 	}
 	for i, f := range spec.Fields {
+		switch f.Type {
+		case TypeString, TypeInteger, TypeBoolean, TypeEnum, TypeAutocomplete:
+		default:
+			// The documented contract (openapi UiSpec) is this closed list.
+			// Field.Validate refuses anything else at deploy as well, but saving
+			// is where the author can still fix it (#136).
+			return fmt.Errorf("fields[%d] (label %q) has an unknown type %q; use string, integer, boolean, enum or autocomplete",
+				i, f.Label, f.Type)
+		}
+		if strings.TrimSpace(f.Label) == "" {
+			// The contract marks label required, and it is what the deploy form
+			// shows beside the input. Without one the field reached the form as
+			// an input with nothing next to it, which read as "exposing did
+			// nothing" (#152). The editor already refused this; the API did not.
+			return fmt.Errorf("fields[%d] (path `%s`) has no label; the deploy form shows it beside the input", i, f.Path)
+		}
 		if err := validatePath(f.Path); err != nil {
 			// fields[i] rather than the label alone: a label is a display
 			// string, is not unique, and is translated, so it is a poor

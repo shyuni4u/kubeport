@@ -374,7 +374,8 @@
         "previewSubmit": "Deploy (preview — does nothing)",
         "parseFailed": "Failed to parse ui-spec: {detail}",
         "previewFailed": "Failed to build the preview (HTTP {status}). {detail}",
-        "skippedFields": "Left out of the preview: {fields}. The type is not valid yet.",
+        "skippedFields": "Left out of the preview: {fields}. Their type or values are not complete yet.",
+        "ignoredSettings": "Ignored in the preview: {parts}. The field stays; only this value is set aside until it is complete.",
         "renderFailed": "Could not draw the preview. The editor is untouched — undo the line you just changed. ({detail})"
       },
       "convert": {

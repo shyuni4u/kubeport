@@ -374,7 +374,8 @@
         "previewSubmit": "배포 (미리보기 — 실제 동작 X)",
         "parseFailed": "ui-spec 파싱 실패: {detail}",
         "previewFailed": "미리보기 생성에 실패했습니다 (HTTP {status}). {detail}",
-        "skippedFields": "미리보기에서 제외된 필드: {fields}. 타입이 아직 올바르지 않습니다.",
+        "skippedFields": "미리보기에서 제외된 필드: {fields}. type 이나 values 가 아직 완성되지 않았습니다.",
+        "ignoredSettings": "미리보기에서 무시된 설정: {parts}. 필드는 그대로 두고, 완성될 때까지 이 값만 쓰지 않습니다.",
         "renderFailed": "미리보기를 그리지 못했습니다. 편집기는 그대로이니 방금 고친 줄을 되돌리면 됩니다. ({detail})"
       },
       "convert": {
