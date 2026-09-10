@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -66,8 +67,14 @@ func TestStampLeftBehind_StampsWhatTheNewVersionDropped(t *testing.T) {
 	)
 	forbidGet(dyn, "secrets")
 	var patched []string
+	var secretPatch string
 	dyn.PrependReactor("patch", "*", func(a clientgotesting.Action) (bool, runtime.Object, error) {
-		patched = append(patched, a.GetResource().Resource+"/"+a.(clientgotesting.PatchActionImpl).Name)
+		pa := a.(clientgotesting.PatchActionImpl)
+		patched = append(patched, a.GetResource().Resource+"/"+pa.Name+":"+string(pa.PatchType))
+		if a.GetResource().Resource == "secrets" {
+			secretPatch = string(pa.Patch)
+			return true, nil, nil
+		}
 		return false, nil, nil
 	})
 	ref := k8s.ReleaseRef{Namespace: "demo", Name: "web-app", UID: uidMine, NameOnly: true}
@@ -75,14 +82,35 @@ func TestStampLeftBehind_StampsWhatTheNewVersionDropped(t *testing.T) {
 	err := k8s.NewForTest(dyn).StampLeftBehind(context.Background(), ref, []byte(previousManifest), []byte(nextManifest))
 
 	require.NoError(t, err)
-	require.Equal(t, []string{"configmaps/dropped"}, patched,
-		"not the Deployment the update applies, another release's objects, a gone one, or one it cannot read")
+	require.Equal(t, []string{
+		"configmaps/dropped:application/merge-patch+json",
+		"secrets/unreadable:application/json-patch+json",
+	}, patched, "not the Deployment the update applies, another release's objects, or a gone one")
+	// Security review: an object the caller cannot read is stamped only through
+	// a patch the apiserver refuses unless it carries this release's name.
+	require.Contains(t, secretPatch, `"op":"test","path":"/metadata/labels/kubeport.io~1release","value":"web-app"`)
+	require.Contains(t, secretPatch, `"op":"add","path":"/metadata/labels/kubeport.io~1release-uid","value":"`+uidMine+`"`)
 
 	got, err := dyn.Resource(schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}).
 		Namespace("demo").Get(context.Background(), "dropped", metav1.GetOptions{})
 	require.NoError(t, err)
 	require.Equal(t, uidMine, got.GetLabels()[k8s.ReleaseUIDLabel])
 	require.Equal(t, "web-app", got.GetLabels()[k8s.ReleaseLabel], "the patch adds the id and keeps the name")
+}
+
+// The guarded patch's test op failing means the unreadable object carries
+// another name: not this release's, and not an error.
+func TestStampLeftBehind_AnUnreadableObjectWithAnotherNameIsLeftAlone(t *testing.T) {
+	dyn := cluster(existing("v1", "Secret", "demo", "unreadable", "someone-else"))
+	forbidGet(dyn, "secrets")
+	dyn.PrependReactor("patch", "secrets", func(clientgotesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewInvalid(schema.GroupKind{Kind: "Secret"}, "unreadable", nil)
+	})
+	ref := k8s.ReleaseRef{Namespace: "demo", Name: "web-app", UID: uidMine, NameOnly: true}
+
+	err := k8s.NewForTest(dyn).StampLeftBehind(context.Background(), ref, []byte(previousManifest), []byte(nextManifest))
+
+	require.NoError(t, err)
 }
 
 // An apiserver error is not a verdict: the caller must not drop the fallback

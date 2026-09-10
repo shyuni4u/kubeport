@@ -25,10 +25,12 @@ import (
 //
 // Only an object that still carries ref's name and no id is stamped: one with
 // another release's id, or another name, is not this release's to claim. An
-// object the caller may not read is skipped, not patched blind, for the same
-// reason — it could be another release's by now. A gone object is nothing to
-// stamp. Any other error is returned, and the caller should not go on: the id
-// fallback would be dropped with objects still unstamped.
+// object the caller may write but not read — a demo Secret — cannot be checked
+// that way, and skipping it left exactly that Secret behind on delete (security
+// review). It gets a JSON patch whose test op requires ref's name label, so the
+// apiserver refuses it (422) for an object with another name. A gone object is
+// nothing to stamp. Any other error is returned, and the caller should not go
+// on: the id fallback would be dropped with objects still unstamped.
 func (c *Client) StampLeftBehind(ctx context.Context, ref ReleaseRef, previous, next []byte) error {
 	if ref.UID == "" {
 		return fmt.Errorf("stamp left-behind objects: no release id")
@@ -47,6 +49,14 @@ func (c *Client) StampLeftBehind(ctx context.Context, ref ReleaseRef, previous, 
 	}
 	patch, err := json.Marshal(map[string]any{
 		"metadata": map[string]any{"labels": map[string]string{ReleaseUIDLabel: ref.UID}},
+	})
+	if err != nil {
+		return err
+	}
+	// "~1" is "/" in a JSON pointer.
+	guarded, err := json.Marshal([]map[string]any{
+		{"op": "test", "path": "/metadata/labels/kubeport.io~1release", "value": ref.Name},
+		{"op": "add", "path": "/metadata/labels/kubeport.io~1release-uid", "value": ref.UID},
 	})
 	if err != nil {
 		return err
@@ -71,7 +81,16 @@ func (c *Client) StampLeftBehind(ctx context.Context, ref ReleaseRef, previous, 
 			Namespace(ref.Namespace)
 		existing, err := res.Get(ctx, o.GetName(), metav1.GetOptions{})
 		switch {
-		case apierrors.IsNotFound(err), apierrors.IsForbidden(err):
+		case apierrors.IsNotFound(err):
+			continue
+		case apierrors.IsForbidden(err):
+			_, err := res.Patch(ctx, o.GetName(), types.JSONPatchType, guarded, metav1.PatchOptions{FieldManager: "kubeport"})
+			switch {
+			case err == nil, apierrors.IsNotFound(err), apierrors.IsInvalid(err):
+				// Stamped; gone; or the test op found another name.
+			default:
+				return fmt.Errorf("stamp %s/%s: %w", o.GetKind(), o.GetName(), err)
+			}
 			continue
 		case err != nil:
 			return fmt.Errorf("read %s/%s: %w", o.GetKind(), o.GetName(), err)

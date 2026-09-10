@@ -74,7 +74,8 @@ metadata:
 		"label text inside a value":             {lookalike, true},
 		"label text on its own line in a value": {blockScalar, true},
 		"id on a later document":                {secondDocStamped, false},
-		"nothing stored":                        {"", true},
+		// Security review: nothing rendered is nothing from before the id.
+		"nothing stored": {"", false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ref := releaseRef(store.GetReleaseByIDRow{ID: id, Name: "web", Namespace: "demo", RenderedYaml: tc.yaml})

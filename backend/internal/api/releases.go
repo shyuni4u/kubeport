@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -603,19 +604,24 @@ func releaseRef(rel store.GetReleaseByIDRow) k8s.ReleaseRef {
 		Namespace: rel.Namespace,
 		Name:      rel.Name,
 		UID:       releaseUID(rel.ID),
-		NameOnly:  !appliedWithID(rel.RenderedYaml),
+		NameOnly:  lastAppliedWithoutID(rel.RenderedYaml),
 	}
 }
 
-// appliedWithID reports whether any object in stored rendered YAML carries the
-// release id label. The documents are parsed and metadata.labels read: text
-// matching found the label inside a ConfigMap value just as readily, and took
-// a release from before #195 for a migrated one — hiding its pods and leaving
-// its objects behind on delete (codex review). YAML that does not parse, which
-// kubeport never stores, counts as not stamped: the release it belongs to
-// keeps the behaviour it had.
-func appliedWithID(rendered string) bool {
+// lastAppliedWithoutID reports whether stored rendered YAML has objects and
+// none of them carries the release id label. The documents are parsed and
+// metadata.labels read: text matching found the label inside a ConfigMap value
+// just as readily, and took a release from before #195 for a migrated one —
+// hiding its pods and leaving its objects behind on delete (codex review).
+//
+// A render with no objects is not NameOnly: there is nothing from before the id
+// to own, and counting it as NameOnly kept a release created since #195 on the
+// name-only fallback for good (security review). YAML that does not parse,
+// which kubeport never stores, counts as not stamped: the release keeps the
+// behaviour it had.
+func lastAppliedWithoutID(rendered string) bool {
 	dec := yaml.NewDecoder(strings.NewReader(rendered))
+	objects := 0
 	for {
 		var doc struct {
 			Metadata struct {
@@ -623,10 +629,14 @@ func appliedWithID(rendered string) bool {
 			} `yaml:"metadata"`
 		}
 		if err := dec.Decode(&doc); err != nil {
-			return false
-		}
-		if v, ok := doc.Metadata.Labels[k8s.ReleaseUIDLabel].(string); ok && v != "" {
+			if errors.Is(err, io.EOF) {
+				return objects > 0
+			}
 			return true
+		}
+		objects++
+		if v, ok := doc.Metadata.Labels[k8s.ReleaseUIDLabel].(string); ok && v != "" {
+			return false
 		}
 	}
 }
