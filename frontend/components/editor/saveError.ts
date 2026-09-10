@@ -4,6 +4,8 @@
 // portal-concept explanation instead of a raw JSON body.
 //
 // `t` is a `useTranslations("templates.editor")` instance.
+import { problemTitle } from "@/lib/problem";
+
 type Translator = (key: string, values?: Record<string, string | number>) => string;
 
 export async function saveErrorMessage(t: Translator, res: Response): Promise<string> {
@@ -12,7 +14,12 @@ export async function saveErrorMessage(t: Translator, res: Response): Promise<st
     case 409:
       return t("errors.draftExists");
     case 403:
-      return t("errors.forbidden");
+      // Two refusals share the status. A demo account is refused as
+      // `demo-restricted` — it holds the admin group, so "no permission"
+      // sent the author looking for a role they already have (#180).
+      return problemTitle(detail) === "demo-restricted"
+        ? t("errors.demoRestricted")
+        : t("errors.forbidden");
     case 400:
       return t("errors.invalid", { detail });
     case 429:

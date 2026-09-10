@@ -263,6 +263,7 @@
     "detail": {
       "errors": {
         "forbidden": "You don't have permission for this action. Only the kubeport-admin group can change global templates.",
+        "demoRestricted": "Demo accounts can only change templates created in the demo.",
         "conflict": "The state changed and the request could not be processed (already published, or another draft exists). Refresh and check again.",
         "generic": "The request failed (HTTP {status})."
       },
@@ -309,6 +310,7 @@
       "errors": {
         "draftExists": "This template already has a draft. Only one draft is allowed per template — edit or delete the existing draft from the detail page, then try again.",
         "forbidden": "You don't have permission to edit this template.",
+        "demoRestricted": "Demo accounts can't save this template. They can only edit templates created in the demo, and creating new templates may be turned off for this install. Your edits are still here.",
         "invalid": "Validation failed: {detail}",
         "generic": "Save failed (HTTP {status}). {detail}",
         "rateLimited": "Too many requests just now, so this one was refused. Your edits are still here — try saving again in a few seconds.",
@@ -434,8 +436,10 @@
       "roleHelp": "editor can create, publish and deprecate versions of templates owned by this team. viewer can only browse and deploy them. Neither role can edit global templates (kubeport-admin only).",
       "loginHint": "The target user must have logged in at least once.",
       "confirmRemoveMember": "Remove {email} from this team? They will lose edit access to the team's templates.",
+      "demoNotice": "Demo accounts can browse teams only. Creating teams and adding or removing members is turned off.",
       "errors": {
         "forbidden": "You don't have permission for this action. Only the kubeport-admin group can manage teams.",
+        "demoRestricted": "Demo accounts can't create teams or change team members.",
         "conflict": "A team with that name already exists, or the user is already a member. Refresh and check again.",
         "notFound": "That user could not be found. They must have logged in at least once.",
         "generic": "The request failed (HTTP {status})."

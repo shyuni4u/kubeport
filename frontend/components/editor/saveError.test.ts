@@ -25,6 +25,23 @@ describe("saveErrorMessage", () => {
     expect(await saveErrorMessage(t, res(403))).toBe(ko.templates.editor.errors.forbidden);
   });
 
+  // #180 — a demo admin saving a new template was told it lacked permission,
+  // though it holds the admin group; the refusal was the demo gate.
+  it("says a demo account is restricted when the 403 is demo-restricted", async () => {
+    const msg = await saveErrorMessage(
+      t,
+      res(403, '{"title":"demo-restricted","status":403,"detail":"demo accounts cannot perform this action"}'),
+    );
+    expect(msg).toBe(ko.templates.editor.errors.demoRestricted);
+    expect(msg).not.toBe(ko.templates.editor.errors.forbidden);
+  });
+
+  it("keeps the permission sentence for a 403 of any other kind", async () => {
+    expect(await saveErrorMessage(t, res(403, '{"title":"rbac-denied","status":403}'))).toBe(
+      ko.templates.editor.errors.forbidden,
+    );
+  });
+
   it("keeps the backend validation detail on 400", async () => {
     expect(await saveErrorMessage(t, res(400, "ui-spec: field[0].path not found\n"))).toBe(
       "검증에 실패했습니다: ui-spec: field[0].path not found",

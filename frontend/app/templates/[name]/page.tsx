@@ -5,6 +5,7 @@ import { getTranslations } from "next-intl/server";
 import { apiFetch } from "@/lib/api-server";
 import { ActionForm, type ActionState } from "@/components/ActionForm";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
+import { problemTitle } from "@/lib/problem";
 
 type TemplateStatus = "draft" | "published" | "deprecated";
 
@@ -20,8 +21,13 @@ type TemplateVersion = {
 // localized sentence keyed by status.
 async function actionError(what: string, res: Response): Promise<ActionState> {
   const te = await getTranslations("templates.detail.errors");
-  console.error(`[templates] ${what} failed: ${res.status} ${await res.text()}`);
-  if (res.status === 403) return { error: te("forbidden") };
+  const body = await res.text();
+  console.error(`[templates] ${what} failed: ${res.status} ${body}`);
+  // A demo admin acting on a template the demo did not create is refused as
+  // `demo-restricted`, not for lacking the admin group it does have (#180).
+  if (res.status === 403) {
+    return { error: problemTitle(body) === "demo-restricted" ? te("demoRestricted") : te("forbidden") };
+  }
   if (res.status === 409) return { error: te("conflict") };
   return { error: te("generic", { status: res.status }) };
 }
