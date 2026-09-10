@@ -37,6 +37,8 @@ sudo BOOTSTRAP_EMAIL=you@example.com bash bootstrap.sh
   하나(주석 처리된 줄·`.bak` 경로·스칼라 형식은 불일치), `config.yaml.d/` 드롭인에 apiserver 인자 없음, `auth.yaml` 은 최상위가
   apiVersion·kind·jwt 뿐이고 apiVersion 이 맞으며, 요청한 issuer(`BOOTSTRAP_OIDC_ISSUER`) 항목의 Client ID audience·username
   claim(`BOOTSTRAP_OIDC_USERNAME_CLAIM`)·빈 prefix·그 밖의 매핑 없음. 다른 issuer(Dex) 항목은 비교하지 않고 보존한다.
+  두 파일 모두 주석 줄과 줄끝 주석을 벗긴 뒤 **값**으로 비교한다(audiences 는 원소, 나머지는 따옴표를 뗀 값) — 주석 안의 값은
+  판정에 쓰이지 않고, 그렇게 읽을 수 없는 형식(블록 리스트 audiences, 블록 맵 username 등)은 거부한다.
   고정되는 건 k3s **바이너리 버전**이다. 설치 스크립트(get.k3s.io)는 매번 원격에서 받는다(#221)
 - helm CLI
 - cert-manager + Let's Encrypt ClusterIssuer (`letsencrypt-prod`)

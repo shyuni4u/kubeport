@@ -120,50 +120,103 @@ AUTH_FILE=/etc/rancher/k3s/auth.yaml
 CFG_FILE=/etc/rancher/k3s/config.yaml
 skip_auth_write=""
 
+# Both existing files are read as values, never as raw text: a comment can hold
+# anything — the old client ID, the new one, a different argument — and text
+# matching let it satisfy the check (codex review, three times over). So every
+# line goes through strip() first, which drops a whole comment line or a `#`
+# that follows whitespace outside quotes, and values through unquote(). What
+# the two parsers below cannot read as the layout this script and
+# k3s-auth-config.sh write is reported, and a report refuses the files.
+YAML_AWK_LIB='
+function strip(s,   i, c, q, out, prev) {
+  q = ""; out = ""; prev = " "
+  for (i = 1; i <= length(s); i++) {
+    c = substr(s, i, 1)
+    if (q != "") { out = out c; if (c == q) q = ""; prev = c; continue }
+    if (c == "\"" || c == "\047") { q = c; out = out c; prev = c; continue }
+    if (c == "#" && (prev == " " || prev == "\t")) break
+    out = out c; prev = c
+  }
+  sub(/[ \t]+$/, "", out)
+  return out
+}
+function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+function unquote(v,   f) {
+  v = trim(v); f = substr(v, 1, 1)
+  if (length(v) >= 2 && (f == "\"" || f == "\047") && substr(v, length(v), 1) == f) return substr(v, 2, length(v) - 2)
+  return v
+}
+'
+
 # k3s_config_entries <config.yaml> — "arg <value>" for each active entry of a
-# block-list kube-apiserver-arg (quotes and trailing comments removed), and a
-# line starting "!" for anything else that is set: another top-level key, the
-# key in scalar or flow form, or a line outside the list. Comments and blank
-# lines are skipped, so a commented-out argument is not an argument.
+# block-list kube-apiserver-arg, and a line starting "!" for anything else that
+# is set: another top-level key, the key in scalar or flow form, or a line
+# outside the list.
 k3s_config_entries() {
-  awk '
-    /^[ \t]*(#|$)/ { next }
-    /^kube-apiserver-arg:[ \t]*$/ { inargs = 1; next }
-    /^[^ \t]/ { inargs = 0; k = $0; sub(/:.*/, "", k); print "!key " k; next }
-    inargs && /^[ \t]+-[ \t]+/ {
-      v = $0; sub(/^[ \t]+-[ \t]+/, "", v); sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v)
-      if (v ~ /^".*"$/) v = substr(v, 2, length(v) - 2)
-      print "arg " v; next
-    }
-    { l = $0; sub(/^[ \t]+/, "", l); print "!line " l }
+  awk "${YAML_AWK_LIB}"'
+    { line = strip($0) }
+    line == "" { next }
+    line ~ /^kube-apiserver-arg:$/ { inargs = 1; next }
+    line ~ /^[^ \t]/ { inargs = 0; k = line; sub(/:.*/, "", k); print "!key " k; next }
+    inargs && line ~ /^[ \t]+-[ \t]+/ { v = line; sub(/^[ \t]+-[ \t]+/, "", v); print "arg " unquote(v); next }
+    { print "!line " trim(line) }
   ' "$1" 2>/dev/null
 }
 
-# auth_entry <file> <issuer-url> — the jwt entry for that issuer, as
-# audiences, username claim, username prefix and any other keys it sets,
-# separated by \037. Nothing when the file has no such entry. It reads the
-# layout this script and k3s-auth-config.sh write (one key per line, username
-# as a flow map); a file in another shape has no entry here, so it is refused
-# rather than guessed at.
-auth_entry() {
-  awk -v want="$2" '
-    function flush() {
-      if (inblock && url == want && !done) { printf "%s\037%s\037%s\037%s\n", aud, claim, prefix, other; done = 1 }
+# auth_facts <auth.yaml> <issuer-url> — one fact per line:
+#   top <key> <value>   each top-level key (value unquoted, empty for a block)
+#   found               the jwt entry whose url is <issuer-url> exists
+#   aud <client>        each element of that entry's audiences list
+#   claim <v> / prefix <v>   that entry's username mapping
+#   other <key>         any other key that entry sets
+#   bad <reason>        a line in a shape this cannot read as values
+auth_facts() {
+  awk -v want="$2" "${YAML_AWK_LIB}"'
+    function items(inner, arr,   n, i, parts) {
+      n = split(inner, parts, ","); for (i = 1; i <= n; i++) arr[i] = trim(parts[i]); return n
     }
-    /^[ \t]*-[ \t]*issuer:[ \t]*$/ { flush(); inblock = 1; url = ""; aud = ""; claim = ""; prefix = "<unset>"; other = ""; next }
-    /^[^ \t-]/ { flush(); inblock = 0; next }
-    !inblock { next }
-    /^[ \t]*url:/ { v = $0; sub(/^[ \t]*url:[ \t]*/, "", v); gsub(/["\t ]/, "", v); url = v; next }
-    /^[ \t]*audiences:/ { v = $0; sub(/^[ \t]*audiences:[ \t]*/, "", v); aud = v; next }
-    /^[ \t]*claimMappings:[ \t]*$/ { next }
-    /^[ \t]*username:/ {
-      v = $0
-      if (match(v, /claim:[ \t]*"?[^",} \t]*/)) { c = substr(v, RSTART, RLENGTH); sub(/claim:[ \t]*"?/, "", c); claim = c }
-      if (match(v, /prefix:[ \t]*"[^"]*"/)) { p = substr(v, RSTART, RLENGTH); sub(/prefix:[ \t]*"/, "", p); sub(/"$/, "", p); prefix = p }
+    { line = strip($0) }
+    line == "" { next }
+    line ~ /^[^ \t-]/ {
+      inentry = 0; matching = 0
+      k = line; sub(/:.*/, "", k); v = line; if (index(v, ":")) sub(/^[^:]*:/, "", v); else v = ""
+      print "top " k " " unquote(v); next
+    }
+    line ~ /^[ \t]*-[ \t]*issuer:$/ { inentry = 1; matching = 0; next }
+    !inentry { print "bad line outside a jwt issuer entry: " trim(line); next }
+    line ~ /^[ \t]*url:/ {
+      v = line; sub(/^[ \t]*url:/, "", v)
+      if (unquote(v) == want) {
+        if (found) print "bad more than one jwt entry for this issuer"
+        found = 1; matching = 1; print "found"
+      } else matching = 0
       next
     }
-    /^[ \t]*[A-Za-z]+:/ { k = $0; sub(/^[ \t]*/, "", k); sub(/:.*/, "", k); other = other (other == "" ? "" : ",") k; next }
-    END { flush() }
+    !matching { next }
+    line ~ /^[ \t]*audiences:/ {
+      v = line; sub(/^[ \t]*audiences:/, "", v); v = trim(v)
+      if (v !~ /^\[.*\]$/) { print "bad audiences is not a one-line [list]"; next }
+      n = items(substr(v, 2, length(v) - 2), a)
+      for (i = 1; i <= n; i++) if (a[i] != "") print "aud " unquote(a[i])
+      next
+    }
+    line ~ /^[ \t]*claimMappings:$/ { next }
+    line ~ /^[ \t]*username:/ {
+      v = line; sub(/^[ \t]*username:/, "", v); v = trim(v)
+      if (v !~ /^\{.*\}$/) { print "bad username is not a one-line {map}"; next }
+      n = items(substr(v, 2, length(v) - 2), a)
+      for (i = 1; i <= n; i++) {
+        if (a[i] == "") continue
+        if (!index(a[i], ":")) { print "bad username entry without a value: " a[i]; continue }
+        kk = a[i]; sub(/:.*/, "", kk); kk = unquote(kk)
+        vv = a[i]; sub(/^[^:]*:/, "", vv); vv = unquote(vv)
+        if (kk == "claim") print "claim " vv
+        else if (kk == "prefix") print "prefix " vv
+        else print "other username." kk
+      }
+      next
+    }
+    { k = trim(line); sub(/:.*/, "", k); print "other " k }
   ' "$1" 2>/dev/null
 }
 if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
@@ -208,42 +261,65 @@ if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
       grep -q 'kube-apiserver-arg' "${dropin}" 2>/dev/null &&
         problems+=("${dropin} also passes kube-apiserver-arg, which k3s merges into ${CFG_FILE}")
     done
-    # auth.yaml: apiVersion/kind/jwt and nothing else at the top — an
-    # `anonymous:` or authorization setting there changes what the apiserver
-    # accepts and is not something bootstrap writes.
-    auth_top_extra="$(awk '/^[^ \t#]/ { k = $0; sub(/:.*/, "", k); if (k != "apiVersion" && k != "kind" && k != "jwt") printf "%s ", k }' "${AUTH_FILE}" 2>/dev/null || true)"
-    [[ -z "${auth_top_extra}" ]] ||
-      problems+=("${AUTH_FILE} also sets ${auth_top_extra% } at the top, which bootstrap does not write")
-    grep -qxF "kind: AuthenticationConfiguration" "${AUTH_FILE}" 2>/dev/null ||
-      problems+=("${AUTH_FILE} is not a kind: AuthenticationConfiguration")
-    # AUTH_API, not the default: an override this script accepted and wrote on
-    # the first run must pass on the rerun (codex review).
-    grep -qxF "apiVersion: ${AUTH_API}" "${AUTH_FILE}" 2>/dev/null ||
-      problems+=("${AUTH_FILE} is not apiVersion ${AUTH_API}, which this run selects")
-    # Every field Step 2 would write for the requested issuer, compared in that
-    # issuer's own entry — not the whole file, where the Dex entry could supply
-    # a match. Keeping the file on a partial match dropped a changed issuer or
-    # username claim silently and still said the client was trusted (codex
-    # review). Entries for other issuers (Dex) are left out of the comparison
-    # and kept. The file carries no groups mapping from either script, so any
-    # mapping beyond username is a difference too.
+    # auth.yaml, as values:
+    #   - top level: apiVersion is AUTH_API (not the default — an override this
+    #     script accepted and wrote must pass on the rerun), kind is
+    #     AuthenticationConfiguration, jwt is a block list, and nothing else —
+    #     an `anonymous:` setting there changes what the apiserver accepts;
+    #   - the requested issuer's own entry (not the whole file, where the Dex
+    #     entry could supply a match) holds everything Step 2 would write:
+    #     audiences exactly [BOOTSTRAP_OIDC_CLIENT_ID], the username claim, an
+    #     empty prefix, and no other mapping (neither script writes groups).
+    # Entries for other issuers (Dex) are not compared, and are kept.
     want_issuer="${BOOTSTRAP_OIDC_ISSUER:-https://accounts.google.com}"
     want_claim="${BOOTSTRAP_OIDC_USERNAME_CLAIM:-email}"
-    # `|| true`: with no auth.yaml awk fails, and under `set -eo pipefail` a
-    # failing substitution would end the script here without a word.
-    entry="$(auth_entry "${AUTH_FILE}" "${want_issuer}" | head -n1 || true)"
-    if [[ -z "${entry}" ]]; then
-      problems+=("${AUTH_FILE} has no jwt entry for issuer ${want_issuer} (BOOTSTRAP_OIDC_ISSUER)")
+    top_api="<unset>"; top_kind="<unset>"; top_jwt="<unset>"; top_other=()
+    e_found=""; e_aud=(); e_claim="<unset>"; e_prefix="<unset>"; e_other=(); e_bad=()
+    while IFS= read -r line; do
+      case "${line}" in
+        "top apiVersion "*) top_api="${line#top apiVersion }" ;;
+        "top kind "*) top_kind="${line#top kind }" ;;
+        "top jwt "*) top_jwt="${line#top jwt }" ;;
+        "top "*) key="${line#top }"; top_other+=("${key%% *}") ;;
+        found) e_found=1 ;;
+        "aud "*) e_aud+=("${line#aud }") ;;
+        "claim "*) e_claim="${line#claim }" ;;
+        "prefix "*) e_prefix="${line#prefix }" ;;
+        "other "*) e_other+=("${line#other }") ;;
+        "bad "*) e_bad+=("${line#bad }") ;;
+      esac
+    done < <(auth_facts "${AUTH_FILE}" "${want_issuer}" || true)
+    if [[ ! -f "${AUTH_FILE}" ]]; then
+      problems+=("${AUTH_FILE} is missing")
     else
-      IFS=$'\037' read -r e_aud e_claim e_prefix e_other <<<"${entry}"
-      [[ "${e_aud}" == *"\"${BOOTSTRAP_OIDC_CLIENT_ID}\""* ]] ||
-        problems+=("the ${want_issuer} entry does not list BOOTSTRAP_OIDC_CLIENT_ID as an audience")
-      [[ "${e_claim}" == "${want_claim}" ]] ||
-        problems+=("the ${want_issuer} entry maps usernames from claim '${e_claim}', and this run asks for '${want_claim}' (BOOTSTRAP_OIDC_USERNAME_CLAIM)")
-      [[ -z "${e_prefix}" ]] ||
-        problems+=("the ${want_issuer} entry gives usernames the prefix '${e_prefix}', and bootstrap writes none")
-      [[ -z "${e_other}" ]] ||
-        problems+=("the ${want_issuer} entry also sets ${e_other}, which bootstrap does not write")
+      [[ "${top_api}" == "${AUTH_API}" ]] ||
+        problems+=("${AUTH_FILE} is apiVersion ${top_api}, not ${AUTH_API}, which this run selects")
+      [[ "${top_kind}" == "AuthenticationConfiguration" ]] ||
+        problems+=("${AUTH_FILE} is not a kind: AuthenticationConfiguration")
+      [[ -z "${top_jwt}" ]] ||
+        problems+=("${AUTH_FILE} has no jwt block list, the layout bootstrap and k3s-auth-config.sh write")
+      (( ${#top_other[@]} == 0 )) ||
+        problems+=("${AUTH_FILE} also sets ${top_other[*]} at the top, which bootstrap does not write")
+      for reason in "${e_bad[@]}"; do
+        problems+=("${AUTH_FILE}: ${reason}")
+      done
+      if [[ -z "${e_found}" ]]; then
+        problems+=("${AUTH_FILE} has no jwt entry for issuer ${want_issuer} (BOOTSTRAP_OIDC_ISSUER)")
+      else
+        listed=""
+        for a in "${e_aud[@]}"; do [[ "${a}" == "${BOOTSTRAP_OIDC_CLIENT_ID}" ]] && listed=1; done
+        if [[ -z "${listed}" ]]; then
+          problems+=("the ${want_issuer} entry does not list BOOTSTRAP_OIDC_CLIENT_ID as an audience (it lists [${e_aud[*]}])")
+        elif (( ${#e_aud[@]} != 1 )); then
+          problems+=("the ${want_issuer} entry lists audiences [${e_aud[*]}], and bootstrap writes only BOOTSTRAP_OIDC_CLIENT_ID")
+        fi
+        [[ "${e_claim}" == "${want_claim}" ]] ||
+          problems+=("the ${want_issuer} entry maps usernames from claim '${e_claim}', and this run asks for '${want_claim}' (BOOTSTRAP_OIDC_USERNAME_CLAIM)")
+        [[ -z "${e_prefix}" ]] ||
+          problems+=("the ${want_issuer} entry gives usernames the prefix '${e_prefix}', and bootstrap writes none")
+        (( ${#e_other[@]} == 0 )) ||
+          problems+=("the ${want_issuer} entry also sets ${e_other[*]}, which bootstrap does not write")
+      fi
     fi
     if (( ${#problems[@]} )); then
       echo "error: bootstrap keeps an existing k3s auth config as it is, and this one does not match the run:" >&2
