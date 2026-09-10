@@ -67,8 +67,23 @@ const maxNewContainers = 8192
 // ~200ms, 4MiB is ~760ms.
 //
 // 1MiB is ~20× the largest manifest set anyone writes and ~4× the deliberately
-// oversized one in budget_test.go, while holding one call to ~200ms.
+// oversized one in budget_test.go, while holding one call to ~200ms. It is the
+// allowance for resources.yaml and the ui-spec together.
 const maxSerializedBytes = 1 << 20
+
+// maxPathBytes caps the field-path text one call may carry.
+//
+// maxSerializedBytes sits at the ENCODER, so it cannot see the work in front
+// of it: CanonicalPath runs over every field first, and it scales with the
+// body rather than with the output. Measured, a 3.77MiB body of paths spent
+// 748ms and was then REFUSED by the byte cap — 622ms of it inside
+// CanonicalPath, before the cap could look. A refusal that costs more than an
+// acceptance is not a limit, it is the denial of service wearing one.
+//
+// Path text is countable without parsing anything, so this costs nothing.
+// 512KiB is ~2× the deliberately oversized template's 223KiB and ~350× the
+// demo catalog's, and brings the worst call back to ~150ms.
+const maxPathBytes = 512 << 10
 
 // containerBudget is the per-call allowance, spent by setJSONPathAbsolute.
 type containerBudget struct{ left int }
@@ -191,6 +206,9 @@ func SerializeUIMode(ui UIModeTemplate) (resourcesYAML, uiSpecYAML string, err e
 	// here rather than inside the resource loop on purpose: a per-resource
 	// budget would multiply by the number of resources in the body.
 	budget := &containerBudget{left: maxNewContainers}
+	// Per call, like the budget, and counted before CanonicalPath rather than
+	// after — see maxPathBytes.
+	pathBytes := 0
 
 	for _, r := range ui.Resources {
 		if r.APIVersion == "" || r.Kind == "" || r.Name == "" {
@@ -206,6 +224,13 @@ func SerializeUIMode(ui UIModeTemplate) (resourcesYAML, uiSpecYAML string, err e
 		// which value survives. Refuse rather than save something the admin
 		// cannot predict — the editor cannot produce this, but the API takes a
 		// UIModeTemplate directly.
+		for fpath := range r.Fields {
+			pathBytes += len(fpath)
+		}
+		if pathBytes > maxPathBytes {
+			return "", "", fmt.Errorf(
+				"template's field paths total more than %d bytes", maxPathBytes)
+		}
 		canon := make(map[string]string, len(r.Fields))
 		for fpath := range r.Fields {
 			c, err := CanonicalPath(fpath)
@@ -244,18 +269,35 @@ func SerializeUIMode(ui UIModeTemplate) (resourcesYAML, uiSpecYAML string, err e
 			return "", "", err
 		}
 	}
-	_ = enc.Close()
+	// Close can fail now that the writer can: dropping its error would return
+	// a silently truncated resources.yaml as a success, and the caller saves
+	// and deploys it.
+	if err := enc.Close(); err != nil {
+		return "", "", err
+	}
 
 	if allFields == nil {
 		allFields = []UISpecEntry{}
 	}
-	spec := map[string]any{"fields": allFields}
-	uiBytes, err := yaml.Marshal(spec)
-	if err != nil {
+	// The ui-spec shares the byte allowance rather than getting its own, and
+	// it needs one at all: an exposed field with no default writes NOTHING to
+	// resources.yaml, so a template of nothing but exposed fields sails past
+	// a cap that only watches the document. Measured that way — Values lists
+	// on every field — 3.7MiB of body produced 7.2MiB of ui-spec and 821MB of
+	// allocation with the resources cap untouched.
+	var specBuf bytes.Buffer
+	specEnc := yaml.NewEncoder(&cappedWriter{
+		buf: &specBuf, limit: maxSerializedBytes - capped.written,
+	})
+	specEnc.SetIndent(2)
+	if err := specEnc.Encode(map[string]any{"fields": allFields}); err != nil {
+		return "", "", err
+	}
+	if err := specEnc.Close(); err != nil {
 		return "", "", err
 	}
 
-	return resBuf.String(), string(uiBytes), nil
+	return resBuf.String(), specBuf.String(), nil
 }
 
 // setJSONPathAbsolute writes v at dotted/indexed path into obj, creating any

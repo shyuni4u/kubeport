@@ -31,6 +31,21 @@ describe("saveErrorMessage", () => {
     );
   });
 
+  it("tells the author to wait on 429, rather than printing the Problem", async () => {
+    // The authoring routes gained a rate limit with issue #135, so a save can
+    // now be refused for a reason that fixes itself. Without its own case this
+    // fell through to `generic`, which shows the status and the raw body — and
+    // buries the only thing that matters, that the draft is safe and retrying
+    // works.
+    const msg = await saveErrorMessage(
+      t,
+      res(429, '{"title":"rate-limited","detail":"too many requests; retry after 3s"}'),
+    );
+    expect(msg).toBe(ko.templates.editor.errors.rateLimited);
+    expect(msg).not.toContain("429");
+    expect(msg).not.toContain("rate-limited");
+  });
+
   it("falls back to a generic message with status + detail", async () => {
     expect(await saveErrorMessage(t, res(500, "boom"))).toBe("저장에 실패했습니다 (HTTP 500). boom");
   });

@@ -72,29 +72,35 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	// miss pulls up to 10MiB, and a caller can manufacture misses at will by
 	// varying the group/version.
 	upstream := newRateLimiter(60, 4096)
-	// One budget for every route that runs SerializeUIMode — preview, create,
-	// and the two version writers. They do the same work, so they share the
-	// allowance rather than each getting a private one.
+	// Two buckets for the routes that run SerializeUIMode, split by who fires
+	// them rather than by what they compute.
 	//
-	// Separate from `upstream` because this is CPU, not control plane: none of
-	// these routes touches the apiserver, and sharing that bucket would let an
-	// admin's typing starve the SSAR fan-out the deploy form depends on.
+	// Both are separate from `upstream` because this is CPU, not control
+	// plane: none of these routes touches the apiserver, and sharing that
+	// bucket would let an admin's typing starve the SSAR fan-out the deploy
+	// form depends on.
 	//
-	// 120/min is sized off what the editor can actually emit. The two preview
-	// panes are sibling <TabsContent> panels with no keepMounted, so only one
-	// is ever mounted, and use-debounce is configured without maxWait — it
-	// does not fire DURING continuous typing, only after a 300ms pause. The
-	// ceiling is therefore ~200/min and real use is far below it, while the
-	// 60/min `upstream` bucket that issue #135 asked for could refuse an admin
-	// mid-edit. (An earlier revision of this comment claimed both panes mount
-	// at once; security review checked the tabs and it does not hold.)
+	// They are separate from EACH OTHER because preview fires itself and
+	// saving does not. The debounce is 300ms with no maxWait, so preview can
+	// reach 3.3/s while a 120/min bucket refills at 2/s — a long editing
+	// session drains it. On one shared bucket that lands on the next save as a
+	// 429, and the admin loses the draft: strictly worse than the starvation
+	// this split was introduced to avoid. Saving is already authorized and
+	// already cost-bounded, so it gets its own wallet.
 	//
-	// What it bounds is the flood. The pod's cpu limit is 500m and a maximal
-	// template costs ~200ms once maxSerializedBytes caps it, so 2/s is the
-	// most of that allowance a determined caller can take — bounded and
-	// throttled, where an unmetered loop pegs the limit and throttles every
-	// other route.
-	authoring := newRateLimiter(120, 4096)
+	// Preview's 120/min is sized off what the editor can actually emit: the
+	// two panes are sibling <TabsContent> panels with no keepMounted, so only
+	// one is ever mounted, and its debounce has no maxWait — it fires after a
+	// pause, not during typing. The ceiling is ~200/min and real use is well
+	// under it, while the 60/min `upstream` bucket issue #135 asked for could
+	// refuse an admin mid-edit.
+	//
+	// What both bound is the flood. The pod's cpu limit is 500m and the
+	// limits in SerializeUIMode hold one call to ~150ms, so preview's 2/s is
+	// under half that allowance — bounded and throttled, where an unmetered
+	// loop pegs the limit and throttles every other route on the pod.
+	preview := newRateLimiter(120, 4096)
+	authoring := newRateLimiter(60, 4096)
 	v := r.Group("/v1", requireAuth(deps.Verifier))
 	v.GET("/me", h.GetMe)
 	v.GET("/clusters", h.ListClusters)
@@ -123,7 +129,7 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	// who is not kubeport-admin, and gating preview would let them author
 	// without seeing what they are authoring. noDemoAuthoring would take the
 	// editor walkthrough away from the demo admin, which is the tour.
-	v.POST("/templates/preview", rateLimit(authoring), h.PreviewTemplate)
+	v.POST("/templates/preview", rateLimit(preview), h.PreviewTemplate)
 	v.POST("/templates/:name/render", h.PreviewRender)
 	v.GET("/templates/:name", h.GetTemplate)
 	v.PATCH("/templates/:name", h.UpdateTemplate)

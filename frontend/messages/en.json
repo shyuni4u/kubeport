@@ -292,6 +292,7 @@
         "forbidden": "You don't have permission to edit this template.",
         "invalid": "Validation failed: {detail}",
         "generic": "Save failed (HTTP {status}). {detail}",
+        "rateLimited": "Too many requests just now, so this one was refused. Your edits are still here — try saving again in a few seconds.",
         "metaSave": "Failed to save template metadata (HTTP {status}). {detail}",
         "missingLabel": "Exposed field {path} has no label. This label is what users see in the deploy form.",
         "preview": "Could not build the preview: {detail}",

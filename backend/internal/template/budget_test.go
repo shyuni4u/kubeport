@@ -209,13 +209,58 @@ func TestSerializeUIMode_ChargesNestedUISpecDefault(t *testing.T) {
 	require.Contains(t, err.Error(), "nests deeper")
 }
 
-// Counting containers does not bound output. Many leaves hanging off ONE deep
-// shared prefix creates almost no containers — 16000 leaves under a 120-deep
-// prefix costs ~121, 1.5% of the budget — while every leaf carries the whole
-// prefix's indentation: 4MB of YAML and 763ms of CPU. Peak heap stayed at
-// 36MB and nothing was retained, so this is the pod's 500m cpu at risk rather
-// than its 256Mi, and output bytes are the parameter that tracks it.
+// Counting containers does not bound output. Values carry no containers at
+// all, so a few short paths holding long strings costs nothing anywhere else
+// and still writes megabytes: the object budget sees ~2, the depth limit sees
+// 2, the path-byte limit sees a few KB.
 func TestSerializeUIMode_BoundsOutputSize(t *testing.T) {
+	big := strings.Repeat("x", 4096)
+	fields := map[string]template.UIField{}
+	for i := 0; i < 1000; i++ {
+		fields["data.k"+itoa(i)] = template.UIField{Mode: "fixed", FixedValue: big}
+	}
+	ui := template.UIModeTemplate{
+		Resources: []template.UIResource{
+			{APIVersion: "v1", Kind: "ConfigMap", Name: "m", Fields: fields},
+		},
+	}
+	_, _, err := template.SerializeUIMode(ui)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "bytes of YAML")
+}
+
+// The byte cap watches the document, and an exposed field with no default
+// writes nothing to it — so a template of nothing but exposed fields used to
+// sail straight past. Measured that way, 3.7MiB of body produced 7.2MiB of
+// ui-spec and 821MB of allocation with the resources cap untouched. Both
+// outputs now draw on the one allowance.
+func TestSerializeUIMode_BoundsUISpecOutputSize(t *testing.T) {
+	values := make([]string, 200)
+	for i := range values {
+		values[i] = strings.Repeat("v", 64)
+	}
+	fields := map[string]template.UIField{}
+	for i := 0; i < 1000; i++ {
+		p := "data.k" + itoa(i)
+		fields[p] = template.UIField{Mode: "exposed", UISpec: &template.UISpecEntry{
+			Path: p, Label: "K", Type: "string", Values: values,
+		}}
+	}
+	ui := template.UIModeTemplate{
+		Resources: []template.UIResource{
+			{APIVersion: "v1", Kind: "ConfigMap", Name: "m", Fields: fields},
+		},
+	}
+	_, _, err := template.SerializeUIMode(ui)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "bytes of YAML")
+}
+
+// Field-path text is the work the byte cap cannot see: CanonicalPath runs over
+// every path before the encoder starts, and it scales with the body. A 3.77MiB
+// body of paths spent 748ms and was then refused by the byte cap — 622ms of it
+// before the cap could look. Refusing must be cheaper than accepting.
+func TestSerializeUIMode_BoundsPathTextBeforeCanonicalizing(t *testing.T) {
 	prefix := ""
 	for i := 0; i < 120; i++ {
 		prefix += "a."
@@ -229,9 +274,15 @@ func TestSerializeUIMode_BoundsOutputSize(t *testing.T) {
 			{APIVersion: "v1", Kind: "ConfigMap", Name: "m", Fields: fields},
 		},
 	}
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
 	_, _, err := template.SerializeUIMode(ui)
+	runtime.ReadMemStats(&after)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "bytes of YAML")
+	require.Contains(t, err.Error(), "field paths total")
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(32<<20),
+		"the refusal must not canonicalize the paths it is refusing")
 }
 
 // The guard must not refuse manifests anyone actually writes. This is a

@@ -292,6 +292,7 @@
         "forbidden": "이 템플릿을 편집할 권한이 없습니다.",
         "invalid": "검증에 실패했습니다: {detail}",
         "generic": "저장에 실패했습니다 (HTTP {status}). {detail}",
+        "rateLimited": "요청이 너무 잦아 잠시 거절됐습니다. 편집 내용은 그대로 있으니 몇 초 뒤 다시 저장하세요.",
         "metaSave": "템플릿 메타데이터 저장에 실패했습니다 (HTTP {status}). {detail}",
         "missingLabel": "노출 필드 {path} 에 라벨이 없습니다. 사용자 폼에는 이 라벨이 표시됩니다.",
         "preview": "미리보기를 만들지 못했습니다: {detail}",

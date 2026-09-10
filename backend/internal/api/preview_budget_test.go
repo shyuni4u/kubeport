@@ -131,6 +131,41 @@ func TestPreview_RefusesNestedValueBomb(t *testing.T) {
 	require.Contains(t, w.Body.String(), "validation-error")
 }
 
+// Preview fires itself; saving does not. Preview's debounce can reach 3.3/s
+// while a 120/min bucket refills at 2/s, so a long editing session drains it —
+// and on a shared bucket that arrives as a 429 on the admin's next SAVE, with
+// the draft still unsaved and no 429 handling in the client. That is worse
+// than the starvation the separate bucket was introduced to avoid, so preview
+// and the write routes hold separate wallets. Found by security review.
+func TestPreview_FloodDoesNotBlockSaving(t *testing.T) {
+	r := plainUserRouter(t)
+	// Drain preview's bucket: 120/min burst 120, so 121 refusals it.
+	var last int
+	for i := 0; i < 130; i++ {
+		w := do(t, r, http.MethodPost, "/v1/templates/preview", previewBody(t, "data.key"))
+		last = w.Code
+	}
+	require.Equal(t, http.StatusTooManyRequests, last, "preview should be rate limited by now")
+
+	// The save path must still answer on its own terms. A plain user is not
+	// allowed to create a global template, so 403 is the right answer here —
+	// what matters is that it is not 429.
+	body, err := json.Marshal(map[string]any{
+		"name": "t-" + randSuffix(), "display_name": "T", "authoring_mode": "ui",
+		"ui_state": map[string]any{
+			"resources": []map[string]any{{
+				"apiVersion": "v1", "kind": "ConfigMap", "name": "m",
+				"fields": map[string]any{"data.k": map[string]any{"mode": "fixed", "fixedValue": "v"}},
+			}},
+		},
+	})
+	require.NoError(t, err)
+	w := do(t, r, http.MethodPost, "/v1/templates", bytes.NewReader(body))
+	require.NotEqual(t, http.StatusTooManyRequests, w.Code,
+		"previewing must not spend the budget the admin needs to save")
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+}
+
 // A manifest-shaped path still works. Without this the guard could be set so
 // tight that it refuses the product's own templates and nothing would say so.
 func TestPreview_AllowsARealisticPath(t *testing.T) {
