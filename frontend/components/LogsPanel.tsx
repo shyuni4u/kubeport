@@ -278,11 +278,19 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     // endpoint refuses with (no-pods, not-found, demo-restricted, ...) used to
     // collapse into "the connection dropped, press Reconnect", which named the
     // wrong cause and pointed at a button that could not succeed (#134).
-    es.onerror = () => {
-      // An error frame arrived on this stream, so this is the server hanging
-      // up on purpose, not the network. Close the socket: EventSource has no
-      // other off switch, and left alone the browser re-opens every 3 seconds
-      // forever — including for the two kinds a retry can never clear (#157).
+    es.onerror = (e: Event) => {
+      // A server-sent `error` frame is dispatched here too — same event type,
+      // so onerror and the listener above both see it — but it is NOT the end
+      // of the stream. With ?instance=all the handler follows every pod at
+      // once and returns true after writing the frame, so the healthy pods
+      // keep sending. Only the connection-level event means the stream is over,
+      // and the absence of `data` is what separates the two.
+      if (e && "data" in e) return;
+      // The stream has ended and an error frame came down it, so this is the
+      // server hanging up on purpose rather than the network. Close the socket:
+      // EventSource has no other off switch, and left alone the browser
+      // re-opens every 3 seconds forever — including for the two kinds a retry
+      // can never clear (#157).
       //
       // No readRefusal here. It re-requests the same URL to read a Problem
       // body, and we already have the reason: the frame said it, and the row

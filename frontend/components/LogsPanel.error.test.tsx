@@ -12,7 +12,7 @@ import { LogsPanel } from "./LogsPanel";
 // the pane *says* can tell a stopped stream from one still retrying every 3s.
 type Listener = (e: MessageEvent) => void;
 const listeners = new Map<string, Listener>();
-type Stub = { closed: boolean; onerror: (() => void) | null };
+type Stub = { closed: boolean; onerror: ((e?: Event) => void) | null };
 const sockets: Stub[] = [];
 /** The stream the component is currently on. */
 const socket = () => sockets.at(-1)!;
@@ -21,7 +21,7 @@ beforeAll(() => {
   // @ts-expect-error — minimal shape used by the component.
   global.EventSource = class {
     onopen: (() => void) | null = null;
-    onerror: (() => void) | null = null;
+    onerror: ((e?: Event) => void) | null = null;
     closed = false;
     constructor() {
       listeners.clear();
@@ -36,19 +36,26 @@ beforeAll(() => {
   };
 });
 
+// A server-sent `event: error` frame, dispatched the way a browser dispatches
+// it: an "error"-typed MessageEvent reaches BOTH addEventListener("error") and
+// onerror. Getting this wrong in the stub is what hid the regression codex
+// found — the component looked like it only saw the frame in one place.
 function emitError(payload: unknown) {
   const fn = listeners.get("error");
   if (!fn) throw new Error("component registered no 'error' listener");
+  const e = { data: JSON.stringify(payload) } as MessageEvent;
   act(() => {
-    fn({ data: JSON.stringify(payload) } as MessageEvent);
+    fn(e);
+    socket().onerror?.(e);
   });
 }
 
-// The connection-level "error" event that follows the server closing the
-// stream. Real EventSource dispatches it to the same handlers, without `data`.
+// The connection-level "error" event, which is what the browser fires when the
+// stream actually ends. A plain Event: no `data`, and that absence is the only
+// thing separating it from the frame above.
 function dropConnection() {
   act(() => {
-    socket().onerror?.();
+    socket().onerror?.({} as Event);
   });
 }
 
@@ -115,6 +122,29 @@ describe("LogsPanel error frames", () => {
 // id — while the pane said "Disconnected" and offered a Reconnect button that
 // was already, invisibly, being pressed (#157).
 describe("LogsPanel in-stream termination", () => {
+  // The frame is not the end. With ?instance=all the handler follows every pod
+  // at once, returns true after writing an error frame, and keeps going until
+  // all of them stop — openapi.yaml says so in as many words ("An error frame
+  // does not by itself mean the stream is over"). Closing on the frame would
+  // cut off every healthy pod because one was unreadable, which is worse than
+  // the retry loop this change is here to remove.
+  it("keeps a multiplexed stream open when only one pod fails", () => {
+    render(
+      <LogsPanel releaseId="abc" instances={[{ name: "p1" }, { name: "p2" }]} />,
+    );
+
+    emitError({ title: "k8s-error", status: 502, request_id: "req-partial" });
+
+    expect(socket().closed).toBe(false);
+    // Still live, so a line from the healthy pod must still land.
+    act(() => {
+      listeners.get("log")?.({
+        data: JSON.stringify({ time: Date.now(), pod: "p2", text: "still here" }),
+      } as MessageEvent);
+    });
+    expect(screen.getByText(/still here/)).toBeInTheDocument();
+  });
+
   it("stops the browser's retry loop after an error frame", () => {
     render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
 
