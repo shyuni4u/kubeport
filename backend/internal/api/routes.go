@@ -52,6 +52,14 @@ type Deps struct {
 type Handlers struct {
 	deps    Deps
 	openapi *openapiProxy
+	// streams caps how many log streams a caller holds open at once. The
+	// per-minute budget on that route prices opening one and nothing after, so
+	// on its own it bounds the rate and not the count (#169).
+	streams *streamSlots
+
+	// streamLifetime is how long a log stream stays open before the server
+	// ends it and the client reconnects through a fresh authorization (#169).
+	streamLifetime time.Duration
 }
 
 func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
@@ -68,7 +76,12 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	r.NoMethod(methodNotAllowed)
 	r.GET("/healthz", healthz(deps, &catalogGauge{}))
 
-	h := &Handlers{deps: deps, openapi: newOpenAPIProxy(cfg.OpenAPICacheMax)}
+	h := &Handlers{
+		deps:           deps,
+		openapi:        newOpenAPIProxy(cfg.OpenAPICacheMax),
+		streams:        newStreamSlots(cfg.LogStreamsPerCaller),
+		streamLifetime: logStreamLifetime(cfg.LogStreamMaxLifetime),
+	}
 	noDemo := denyDemo(deps.DemoEmailDomain)
 
 	// One budget shared by every route that makes kubeport call the target

@@ -101,6 +101,18 @@ backend:
   # How often expired sessions are deleted (Go duration, e.g. "30m"). Empty
   # uses the built-in default of 1h; anything under 1m is clamped to 1m.
   sessionReapInterval: ""
+  # Log streams (#169). Empty uses the built-in default.
+  # How many log streams one caller (OIDC subject) may hold open at once; the
+  # next one gets 429 too-many-streams. Default 16. Empty, 0, a negative number
+  # or a non-integer all mean the default — there is no "unlimited". Demo
+  # accounts are shared by every visitor, so on a demo install this is roughly
+  # how many log panes can be open at once per demo account.
+  logStreamsPerCaller: ""
+  # How long one log stream stays open before the server ends it and the
+  # browser reconnects through a fresh authorization (Go duration, e.g. "30m").
+  # Default 1h — the longest a revoked permission keeps receiving logs. Empty,
+  # zero or unparseable means the default.
+  logStreamMaxLifetime: ""
 
 # ----- Frontend -----------------------------------------------------------
 frontend:

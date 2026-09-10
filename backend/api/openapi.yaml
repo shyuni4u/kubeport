@@ -1181,6 +1181,20 @@ paths:
 
         This endpoint has no way to tell a client that a *pod* is done while
         others continue; `end` is about the whole stream.
+
+        **A stream is also ended by the server after a fixed lifetime** — one
+        hour by default, which an install can change — and that ending sends
+        **no** `end` frame, because it is not a finish (#169). Nothing else
+        would ever close a stream the reader keeps open, and the stream does
+        not re-check its caller after the handshake, so without this a revoked
+        permission or an expired session went on receiving logs for as long as
+        the tab stayed open. Treat it like any drop: reconnect. A browser does
+        so on its own, through a refreshed token and a new authorization; a
+        named instance resumes from its cursor and `instance=all` replays.
+
+        A caller may also hold only so many streams open at once (16 by
+        default, which an install can change); past that, opening another is
+        `429 too-many-streams` — see the `RateLimited` response.
       parameters:
         - $ref: "#/components/parameters/ReleaseID"
         - name: instance
@@ -1471,6 +1485,19 @@ components:
         `Retry-After` says how many seconds to wait; honour it rather than
         retrying at once or sleeping an arbitrary constant. The demo's two Dex
         accounts are static, so concurrent demo visitors share one bucket.
+
+        `too-many-streams` is the other 429, and only
+        `GET /v1/releases/{id}/logs` gives it: the caller already holds as many
+        log streams **open** as it may (#169). The bucket above prices opening a
+        stream and nothing after, so it cannot bound how many a caller keeps —
+        and each keeps a goroutine per pod and an apiserver connection alive.
+        Branch on `title`: this one clears when one of the caller's streams
+        closes, not after a set time, so close a stream you no longer need
+        rather than only backing off. `Retry-After` is still present, as a
+        backoff hint rather than a prediction, and the `X-RateLimit-*` pair is
+        **not** — it describes the per-minute budget and would be wrong about a
+        count of open streams. The cap is per caller, so the demo's shared
+        accounts share it too.
       headers:
         Retry-After:
           description: Seconds to wait before retrying. Always present on a 429.
@@ -1629,7 +1656,11 @@ components:
         - conflict          # 409 — name taken, or version in the wrong state
         - rate-limited      # 429 — over the per-caller budget on the SSAR and
                             # cluster-openapi routes. Carries Retry-After.
-        - k8s-error         # 502 — the call to the cluster failed or was
+        - too-many-streams  # 429 — the caller already holds as many log
+                            # streams open as it may (#169). Clears when one of
+                            # them closes, not with time. Carries Retry-After as
+                            # a backoff hint and no X-RateLimit-* pair.
+        - k8s-error        # 502 — the call to the cluster failed or was
                             # refused. No longer a 500: a client that could not
                             # be built at all is now `internal`, because the
                             # reason named the apiserver's address (#49).

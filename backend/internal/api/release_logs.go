@@ -88,12 +88,62 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 		resumeFrom = time.Time{}
 	}
 
+	// Take a slot for as long as this request lives. The route's rate limiter
+	// priced the open; this bounds how many a caller keeps (#169).
+	//
+	// Here, after every check the request alone can fail and before the first
+	// cluster call: a caller already at the cap learns so without costing the
+	// apiserver a LIST. The deferred release covers every way out after this
+	// line — a client that cannot be built, a cluster error, no matching pod,
+	// or the stream ending — so a refused request never keeps a slot.
+	//
+	// The refusal is its own kind, not `rate-limited`. Both are 429 and both
+	// mean "not now", but they clear differently: a rate clears with time, and
+	// this clears when one of the caller's streams closes. Under the shared kind
+	// the web UI told a reader who had clicked once that they were requesting
+	// too often, and a client that only backs off never learns that closing a
+	// stream of its own is the fix. Retry-After is still sent — the RateLimited
+	// response promises it on every 429 — as a backoff hint, not a prediction.
+	// The X-RateLimit-* pair is left off: it is documented as requests per
+	// minute, and this is a count of open streams.
+	if !h.streams.tryAcquire(u.Subject) {
+		c.Header("Retry-After", "10")
+		writeError(c, http.StatusTooManyRequests, "too-many-streams",
+			"too many log streams open for this caller; close one and retry")
+		return
+	}
+	defer h.streams.release(u.Subject)
+
+	// Bounded by a lifetime as well as by the caller leaving (#169).
+	//
+	// Nothing else ends a stream the reader keeps open. The proxy in front does
+	// not: Traefik's writeTimeout defaults to 0 and its idleTimeout counts only
+	// idle keep-alive connections, which the 15s ping keeps this from ever
+	// being. And the stream itself never looks at its caller again —
+	// authorizeReleaseAccess ran once at the handshake and the cluster checked
+	// the token once when the log request opened — so a tab left open went on
+	// receiving pod logs after the caller's RBAC was revoked or their session
+	// had expired, for as long as the tab lived.
+	//
+	// When the lifetime is up the handler just returns, with no `end` frame.
+	// To the browser that is a dropped connection, so it reconnects — through
+	// the BFF, which refreshes the token, into a handshake that authorizes
+	// again. A named instance resumes from Last-Event-ID; `instance=all`
+	// replays into a cleared pane, the same as after any other drop.
+	//
+	// It starts here, the moment the slot is taken, and covers pod discovery as
+	// well as the stream: the cluster client has no timeout of its own, and an
+	// apiserver that accepts the connection and never answers the listing would
+	// otherwise hold the slot for as long as it stalled.
+	streamCtx, cancel := context.WithTimeout(ctx, h.streamLifetime)
+	defer cancel()
+
 	cli, err := h.deps.K8sFactory.NewWithToken(rel.ClusterApiUrl, rel.ClusterCaBundle.String, u.IDToken)
 	if err != nil {
 		internalError(c, "StreamReleaseLogs: k8s client", err)
 		return
 	}
-	instances, err := cli.ListInstances(ctx, rel.Namespace, rel.Name)
+	instances, err := cli.ListInstances(streamCtx, rel.Namespace, rel.Name)
 	if err != nil {
 		clusterError(c, "StreamReleaseLogs: list instances", err)
 		return
@@ -112,11 +162,25 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
+	// Not reused after the stream, because of the write deadline below: with no
+	// server WriteTimeout, net/http never clears a deadline set on a connection,
+	// so a keep-alive request that came next would inherit a deadline that has
+	// already passed and fail. Closing costs one handshake per stream, and
+	// streams are long.
+	c.Writer.Header().Set("Connection", "close")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 
-	streamCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	// The context only ends a handler that gets back to its select. One stuck
+	// in a write does not: a reader that keeps the connection but stops reading
+	// fills the socket buffers, the next write blocks in the kernel, and
+	// cancelling a context does not interrupt it. So the lifetime is also a
+	// deadline on writing. When it passes, the blocked write fails, net/http
+	// cancels the request context, and the loop below returns with its slot.
+	// A writer that cannot take a deadline — a test recorder — just goes
+	// without.
+	if deadline, ok := streamCtx.Deadline(); ok {
+		_ = http.NewResponseController(c.Writer).SetWriteDeadline(deadline)
+	}
 
 	ch, errCh := cli.StreamLogs(streamCtx, rel.Namespace, pods, resumeFrom)
 	ping := time.NewTicker(15 * time.Second)
@@ -133,6 +197,16 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	// The reason is ours, generic, and names nothing about the cluster — same
 	// rule as sseError (#108).
 	end := func() bool {
+		// The fan-in channels also close when streamCtx does — the pod
+		// goroutines follow it. Then they closed because this handler gave up
+		// (the lifetime ran out, or the reader left), not because the pods
+		// stopped emitting, and saying `end` would tell the client to stop for
+		// good when the right move is to reconnect. select picks at random
+		// among ready cases, so without this check a rotation would sometimes
+		// arrive as a false finish.
+		if streamCtx.Err() != nil {
+			return false
+		}
 		c.SSEvent("end", `{"reason":"all pods stopped emitting"}`)
 		return false
 	}
@@ -140,8 +214,16 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	c.Stream(func(w io.Writer) bool {
 		select {
 		case <-streamCtx.Done():
-			// The reader is gone. There is no one to tell, and gin has already
-			// given up on the connection.
+			// The reader is gone, or the lifetime is up. There is no one to
+			// tell, and gin has already given up on the connection.
+			//
+			// A reader that vanished without closing — a laptop lid, a dead
+			// network — also ends up here, but only once a write fails. Nothing
+			// arrives to be read, so the server's background read never sees
+			// EOF; it is net/http cancelling the request context on a failed
+			// write (the next line or ping, once the kernel stops retrying)
+			// that brings us here and hands the slot back. That is why this
+			// context has to stay derived from the request's.
 			return false
 		case <-ping.C:
 			c.SSEvent("ping", time.Now().Unix())

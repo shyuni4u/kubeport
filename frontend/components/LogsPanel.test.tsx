@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from "vitest";
 import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithIntl as render } from "@/tests/intl-test-utils";
@@ -137,6 +137,90 @@ describe("LogsPanel reconnect", () => {
     render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
     drop();
     expect(screen.queryByText(/새로고침/)).toBeNull();
+  });
+});
+
+// #169 — the backend caps log streams per caller, and the demo's accounts are
+// shared by every visitor. A pane forgotten in a background tab held a slot
+// indefinitely: the server's lifetime ends the stream, and the browser
+// reconnects it straight away.
+describe("LogsPanel in a hidden tab", () => {
+  let visibility: DocumentVisibilityState = "visible";
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    sockets.length = 0;
+    visibility = "visible";
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibility,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    visibility = "visible";
+  });
+
+  function show(state: DocumentVisibilityState) {
+    act(() => {
+      visibility = state;
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+  }
+
+  function wait(ms: number) {
+    act(() => {
+      vi.advanceTimersByTime(ms);
+    });
+  }
+
+  it("gives the stream back once the tab has stayed hidden", () => {
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+    expect(sockets).toHaveLength(1);
+
+    show("hidden");
+    wait(5 * 60 * 1000);
+
+    expect(sockets[0].closed).toBe(true);
+  });
+
+  it("keeps the stream through a short look at another tab", () => {
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+
+    show("hidden");
+    wait(60 * 1000);
+    show("visible");
+    wait(10 * 60 * 1000);
+
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0].closed).toBe(false);
+  });
+
+  it("opens a fresh stream when the tab is shown again", () => {
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+    emit("line one");
+
+    show("hidden");
+    wait(5 * 60 * 1000);
+    show("visible");
+
+    expect(sockets).toHaveLength(2);
+    expect(sockets[1].closed).toBe(false);
+    expect(screen.getByText("연결 중")).toBeInTheDocument();
+    // Emptied, like [Reconnect]: the replay would print it a second time.
+    expect(screen.queryByText(/line one/)).toBeNull();
+  });
+
+  // A tab opened in the background never fires visibilitychange until it is
+  // shown, so the hook has to look at the state it starts in.
+  it("counts a tab that was opened in the background", () => {
+    visibility = "hidden";
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+
+    wait(5 * 60 * 1000);
+
+    expect(sockets[0].closed).toBe(true);
   });
 });
 

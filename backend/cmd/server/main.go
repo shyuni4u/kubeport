@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -61,6 +62,10 @@ func main() {
 		AppEncryptionKeyB64:     os.Getenv("APP_ENCRYPTION_KEY_B64"),
 		OpenAPICacheMax:         getenvInt("KBP_OPENAPI_CACHE_MAX", 64),
 		SessionReapInterval:     getenvDuration("KBP_SESSION_REAP_INTERVAL", session.DefaultInterval),
+		// Unset means 0, which the api package turns into its own default —
+		// one place holds the number rather than two that can drift.
+		LogStreamsPerCaller:  getenvInt("KBP_LOG_STREAMS_PER_CALLER", 0),
+		LogStreamMaxLifetime: getenvDuration("KBP_LOG_STREAM_MAX_LIFETIME", 0),
 	}
 
 	issuers, err := resolveIssuers(cfg)
@@ -111,8 +116,39 @@ func main() {
 		Version:                 version,
 	})
 	log.Printf("kubeport %s listening on %s", version, cfg.ListenAddr)
-	if err := r.Run(cfg.ListenAddr); err != nil {
+	if err := newHTTPServer(cfg.ListenAddr, r).ListenAndServe(); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// newHTTPServer is the server this process listens with.
+//
+// It replaces gin's r.Run, which is a zero-value http.Server with no timeout of
+// any kind: a client could send its headers one byte at a time and hold a
+// connection for as long as it liked (#169).
+//
+// Only two timeouts are set, because this process serves long-lived
+// Server-Sent Events and the other two would end them. WriteTimeout is a
+// deadline on the whole response, so every log stream would be cut at that
+// age. ReadTimeout's deadline stays on the connection while the handler runs,
+// and when it expires the server's background read fails and cancels the
+// request context — ending the stream just the same. ReadHeaderTimeout bounds
+// only the handshake, and IdleTimeout only keep-alive sockets between
+// requests; neither touches a response in progress.
+//
+// IdleTimeout is longer than the client's on purpose. The only client is the
+// frontend BFF — the chart's Ingress sends every request to it, and this
+// process has no external route — which calls us with Node's fetch (undici),
+// whose idle keep-alive sockets time out after 4s by default. If this side
+// closed an idle socket first, the BFF could send the next request on it just
+// as it closed and get a reset instead of a response. At 120s the client
+// always retires the connection before we do.
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 }
 
@@ -129,6 +165,10 @@ func getenvInt(k string, def int) int {
 		if err == nil {
 			return n
 		}
+		// Same rule as getenvDuration: a typo falls back rather than failing
+		// startup, but says so — otherwise an operator who set a knob has no
+		// sign it was ignored.
+		log.Printf("WARN: %s=%q is not an integer (%v); using %d", k, v, err, def)
 	}
 	return def
 }

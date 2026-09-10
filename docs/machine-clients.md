@@ -397,11 +397,37 @@ kubelet 스탬프가 없는 줄도 `id` 를 안 받는다. 그 줄의 `time` 은
 전부 로그 본문으로 찍는 소박한 파서는 이 페이로드를 한 줄로 출력한다 — **페이로드가 아니라 이벤트
 이름으로 분기하라.**
 
-**429 를 만나면 `Retry-After` 를 지킨다.** `POST /v1/selfsubjectaccessreview` 와 클러스터 openapi 읽기
-두 라우트가 호출자(OIDC subject)별 토큰버킷 하나를 공유한다 — 분당 60회, 버스트 동일
+**429 를 만나면 `Retry-After` 를 지킨다.** `POST /v1/selfsubjectaccessreview`, 클러스터 openapi 읽기,
+로그 스트림 열기가 호출자(OIDC subject)별 토큰버킷 하나를 공유한다 — 분당 60회, 버스트 동일
 ([#73](https://github.com/shyuni4u/kubeport/issues/73)). 응답에 `Retry-After`(초)와 `X-RateLimit-Limit`·
 `X-RateLimit-Remaining` 이 붙는다. 즉시 재시도하면 제한만 다시 맞는다. 데모의 Dex 계정 2개는 정적이라
 동시 접속자들이 **한 버킷을 공유**한다는 점도 감안할 것.
+
+**로그 스트림은 동시에 열어 둘 수 있는 개수에도 상한이 있다**([#169](https://github.com/shyuni4u/kubeport/issues/169)).
+위 버킷은 스트림을 **여는** 횟수만 센다 — 한 번 열린 스트림은 몇 시간을 붙들고 있어도 토큰을 더 쓰지
+않는다. 그런데 열린 스트림 하나가 파드마다 goroutine 하나와 apiserver 연결 하나를 계속 잡고 있어서,
+여는 속도만 제한해서는 붙들고 있는 개수가 무한히 늘 수 있다. 그래서 같은 호출자가 동시에 열어 둔
+스트림이 상한에 닿으면 새 스트림은 **`429 too-many-streams`** 다 (기본 16개. 자가호스팅 설치는 Helm 값 `backend.logStreamsPerCaller` —
+환경변수 `KBP_LOG_STREAMS_PER_CALLER` — 로 바꾼다).
+
+- **`rate-limited` 와 `title` 로 구분한다.** 둘 다 429 지만 풀리는 방식이 다르다. `rate-limited` 는
+  시간이 지나면 풀리고, `too-many-streams` 는 그 호출자의 스트림 하나가 **닫혀야** 풀린다. 기다리기만
+  하는 재시도 정책으로는 자기 스트림을 닫아야 한다는 걸 알 수 없다.
+- 이때도 `Retry-After` 는 붙지만 **예측이 아니라 백오프 힌트**다. 자리가 언제 날지는 서버도 모른다.
+- `X-RateLimit-Limit`·`X-RateLimit-Remaining` 은 **붙지 않는다.** 그 둘은 분당 요청 수를 뜻하는데, 이
+  거절은 열린 스트림 **개수** 때문이라 그 값을 넣으면 틀린 숫자가 된다.
+- 필요 없어진 스트림은 닫는다. 상한은 호출자별이라 **데모의 공유 계정은 이 상한도 공유**한다.
+
+**로그 스트림은 수명도 있다 — 기본 1시간**(자가호스팅 설치는 Helm 값 `backend.logStreamMaxLifetime` —
+환경변수 `KBP_LOG_STREAM_MAX_LIFETIME`, Go duration 예 `30m` — 로 바꾼다). 시간이 되면 서버가 스트림을
+끊고, 이때 **`end` 프레임은 오지 않는다.** 끝난 게 아니라 교체이기 때문이다. 그러니 평범한 끊김처럼
+**재연결**하면 된다 — `EventSource` 는 알아서 한다. 이름 지정 인스턴스는 커서에서 재개되고, `instance=all`
+은 처음부터 다시 받는다.
+
+이게 필요한 이유: 브라우저와 백엔드 사이의 어떤 것도 열린 스트림을 닫지 않는다(프록시 Traefik 의
+`writeTimeout` 은 0 이고, `idleTimeout` 은 15초 ping 때문에 발동하지 않는다). 그리고 스트림은 핸드셰이크
+이후 호출자를 **다시 확인하지 않는다.** 그래서 권한이 회수되거나 세션이 만료돼도 탭이 열려 있는 동안은
+로그가 계속 흘렀다. 재연결은 새로 갱신된 토큰으로 인가를 다시 거친다.
 
 **요청 바디는 4 MiB 까지다.** 넘으면 읽는 쪽에서 끊긴다.
 

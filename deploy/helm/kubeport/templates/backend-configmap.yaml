@@ -15,6 +15,15 @@ data:
   # below 1m are clamped.
   KBP_SESSION_REAP_INTERVAL: {{ . | quote }}
   {{- end }}
+  {{- with .Values.backend.logStreamsPerCaller }}
+  # Log streams one caller may hold open at once. Default 16 (#169).
+  KBP_LOG_STREAMS_PER_CALLER: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.backend.logStreamMaxLifetime }}
+  # How long one log stream stays open before the browser reconnects and is
+  # authorized again (Go duration). Default 1h (#169).
+  KBP_LOG_STREAM_MAX_LIFETIME: {{ . | quote }}
+  {{- end }}
   {{- if .Values.demo.enabled }}
   KBP_DEMO_EMAIL_DOMAIN: {{ .Values.demo.emailDomain | quote }}
   {{- if .Values.demo.allowTemplateCreate }}

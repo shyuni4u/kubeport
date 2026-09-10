@@ -54,6 +54,23 @@ type fakeK8sApplier struct {
 	// means StreamLogs was called with a zero time.
 	sinceSeen *time.Time
 
+	// streamStarted, when set, receives a value as soon as StreamLogs is called
+	// — that is, once the handler has passed every check and is committed to
+	// streaming. A test holding one stream open waits on it before sending the
+	// next request; without it the second request races the first to the slot.
+	// Buffered by the test; a full channel is skipped rather than blocked on.
+	streamStarted chan struct{}
+
+	// logFeed, when set, makes StreamLogs a pod that is still running and writes
+	// whatever the test sends it: each value is one line, and the stream stays
+	// open until the client leaves. It lets a test make the handler write at a
+	// moment of its choosing instead of waiting out the 15s ping.
+	logFeed chan string
+
+	// instancesStall makes ListInstances hang until its context ends, like an
+	// apiserver that accepted the connection and never answered.
+	instancesStall bool
+
 	// accessChecks records every CheckAccess call for assertions.
 	// accessResult is the stub response; accessErr overrides it when non-nil.
 	accessChecks []k8s.AccessCheck
@@ -74,7 +91,11 @@ func (f *fakeK8sApplier) DeleteByRelease(_ context.Context, _, release string) e
 	return nil
 }
 
-func (f *fakeK8sApplier) ListInstances(_ context.Context, _, _ string) ([]k8s.Instance, error) {
+func (f *fakeK8sApplier) ListInstances(ctx context.Context, _, _ string) ([]k8s.Instance, error) {
+	if f.instancesStall {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if f.instancesErr != nil {
 		return nil, f.instancesErr
 	}
@@ -85,6 +106,12 @@ func (f *fakeK8sApplier) StreamLogs(ctx context.Context, _ string, _ []string, s
 	if !since.IsZero() {
 		s := since
 		f.sinceSeen = &s
+	}
+	if f.streamStarted != nil {
+		select {
+		case f.streamStarted <- struct{}{}:
+		default:
+		}
 	}
 	ch := make(chan k8s.LogLine)
 	errCh := make(chan error, 1)
@@ -97,6 +124,20 @@ func (f *fakeK8sApplier) StreamLogs(ctx context.Context, _ string, _ []string, s
 	go func() {
 		defer close(ch)
 		defer close(errCh)
+		if f.logFeed != nil {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case text := <-f.logFeed:
+					select {
+					case <-ctx.Done():
+						return
+					case ch <- k8s.LogLine{Pod: "web-7d9f8-x2k4l", Text: text}:
+					}
+				}
+			}
+		}
 		for i, text := range f.logLines {
 			at := f.logLineAt
 			if i < len(f.logLineAts) {

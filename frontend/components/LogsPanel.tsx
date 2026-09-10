@@ -53,6 +53,7 @@ const KNOWN_OPEN_ERRORS = new Set([
   "internal",
   "k8s-error",
   "rate-limited",
+  "too-many-streams",
 ]);
 
 // Kinds a retry can actually clear. `no-pods` belongs here even though it is
@@ -66,12 +67,20 @@ const KNOWN_OPEN_ERRORS = new Set([
 // The rest are verdicts: not yours, gone, signed out, the cluster refused the
 // token. Those keep the button hidden, which is the half of #134 point 3 that
 // still holds.
+//
+// `too-many-streams` is a wait too: a slot frees when a stream closes — one of
+// the reader's own in another tab, or, on the demo's shared accounts, someone
+// else's (#169).
 const RETRYABLE_OPEN_ERRORS = new Set([
   "k8s-error",
   "internal",
   "no-pods",
   "rate-limited",
+  "too-many-streams",
 ]);
+
+// How long the page may stay hidden before its log stream is given back (#169).
+const HIDDEN_CLOSE_MS = 5 * 60 * 1000;
 
 // EventSource.readyState. Read off the instance rather than the constructor so
 // the component does not depend on statics a stub may not define.
@@ -114,6 +123,17 @@ export function LogsPanel({ releaseId, instances, initialInstance = "all" }: Pro
   // beginning: keeping the old lines would show every one of them twice, and
   // dropping them loses nothing, because the replay brings them straight back.
   const [attempt, setAttempt] = useState(0);
+  // A pane left in a background tab gives its stream back (#169). The backend
+  // caps how many log streams one caller holds open, and the demo's accounts
+  // are shared by every visitor, so a pane forgotten in a background tab was a
+  // slot no one else could use — and not only for the server's one-hour
+  // lifetime, because the browser reconnects the moment that ends. Five minutes
+  // hidden frees it; a look at another tab costs nothing.
+  //
+  // Unmounting is the close, and showing the tab again mounts a fresh Stream —
+  // the same as [Reconnect]: the pane empties and the replay brings the lines
+  // back (#46).
+  const hiddenTooLong = useHiddenFor(HIDDEN_CLOSE_MS);
 
   return (
     <div className="flex flex-col gap-2">
@@ -124,16 +144,48 @@ export function LogsPanel({ releaseId, instances, initialInstance = "all" }: Pro
         autoscroll={autoscroll}
         onAutoscrollChange={setAutoscroll}
       >
-        <Stream
-          key={`${releaseId}:${instance}:${attempt}`}
-          releaseId={releaseId}
-          instance={instance}
-          autoscroll={autoscroll}
-          onReconnect={() => setAttempt((n) => n + 1)}
-        />
+        {!hiddenTooLong && (
+          <Stream
+            key={`${releaseId}:${instance}:${attempt}`}
+            releaseId={releaseId}
+            instance={instance}
+            autoscroll={autoscroll}
+            onReconnect={() => setAttempt((n) => n + 1)}
+          />
+        )}
       </Toolbar>
     </div>
   );
+}
+
+// useHiddenFor is true once the page has stayed hidden for `ms`, and false
+// again the moment it is shown.
+function useHiddenFor(ms: number): boolean {
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => setHidden(true), ms);
+    };
+    const onChange = () => {
+      if (document.visibilityState === "hidden") {
+        arm();
+      } else {
+        clearTimeout(timer);
+        setHidden(false);
+      }
+    };
+    // A tab opened in the background starts hidden, and no event says so until
+    // it is shown.
+    if (document.visibilityState === "hidden") arm();
+    document.addEventListener("visibilitychange", onChange);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onChange);
+    };
+  }, [ms]);
+  return hidden;
 }
 
 type ToolbarProps = {
