@@ -60,6 +60,27 @@ spec:
         spec:
           serviceAccountName: demo-reset
           restartPolicy: Never
+          {{- with .Values.demo.resetHostAliasIP }}
+          # The seeder authenticates against Dex at its public issuer URL, and
+          # on OCI a Pod cannot reach the instance's own public address: the
+          # address is not on any interface (the edge NATs it), so a packet
+          # from the pod CIDR never comes back — `connect: no route to host`,
+          # while the node itself reaches the same URL fine.
+          #
+          # Pointing the hostname at the ingress address keeps everything else
+          # intact: the request still carries that Host and SNI, so the
+          # certificate matches, and DEMO_OIDC_ISSUER is unchanged — which
+          # matters, because the issuer is compared against the token's `iss`
+          # claim. Rewriting the issuer to a service DNS name would break that
+          # comparison; rewriting only the resolution does not.
+          #
+          # Empty by default. Set it where the cluster cannot hairpin its own
+          # public address — see the runbook's demo-mode section.
+          hostAliases:
+            - ip: {{ . | quote }}
+              hostnames:
+                - {{ $.Values.dex.host | quote }}
+          {{- end }}
           securityContext:
             {{- toYaml .Values.podSecurityContext | nindent 12 }}
           initContainers:
