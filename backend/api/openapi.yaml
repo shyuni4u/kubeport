@@ -190,6 +190,24 @@ paths:
                       templates:
                         type: integer
                         description: Published, demo-owned templates. Absent when `available` is false.
+                      last_seed:
+                        type: string
+                        format: date-time
+                        description: |
+                          When the demo catalog was last seeded: the oldest
+                          `created_at` among the templates counted above, in UTC
+                          to the second. A reset deletes every demo-owned
+                          template and the seed recreates them, so a reset that
+                          was skipped — its preflight failed and it deleted
+                          nothing — leaves this value old while `templates`
+                          stays non-zero. It also stays old while any non-demo
+                          release references a demo template version: the
+                          reset then skips deleting the demo catalog as a
+                          whole. Alert when it is older than the reset interval
+                          plus slack — the public demo uses 26h for its daily
+                          schedule. Absent when `available` is false or
+                          `templates` is 0.
+                        examples: ["2026-09-10T21:00:07Z"]
 
   /v1/me:
     get:
