@@ -121,10 +121,18 @@ Only re-run when `schema.hcl` changes.
 ### 4. Start dex + Postgres
 
 ```bash
-docker compose -f deploy/docker/docker-compose.yml up -d
+scripts/compose.sh up -d
 curl -ks https://host.docker.internal:5556/.well-known/openid-configuration | jq .issuer
 # → "https://host.docker.internal:5556"
 ```
+
+`scripts/compose.sh` runs compose on the **main checkout's** `deploy/docker`,
+from wherever you call it. Every checkout's `deploy/docker` is the same compose
+project (`docker`), so a plain `docker compose -f deploy/docker/docker-compose.yml up -d`
+inside a worktree recreates the shared dex from that worktree's `dex.yaml` and
+`certs` — and deleting the worktree after its PR merges breaks dex for every
+session (#230). The certificate from step 2 therefore lives in the main
+checkout too; `scripts/e2e/*` look for it there.
 
 ### 5. Create kind cluster with OIDC trust for dex
 
@@ -459,7 +467,7 @@ ss -tlnp 2>/dev/null | grep ':6443' || echo "nothing on 6443"
      -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
    KIND_CA=$(echo "$KIND_CA_B64" | base64 -d)
 
-   docker exec -i docker-postgres-1 psql -U kubeport -d kubeport -v ca="$KIND_CA" <<'EOF'
+   scripts/compose.sh exec -T postgres psql -U kubeport -d kubeport -v ca="$KIND_CA" <<'EOF'
    UPDATE clusters SET ca_bundle = :'ca' WHERE name='kind';
    SELECT name, length(ca_bundle) FROM clusters;
    EOF
@@ -497,7 +505,7 @@ ships an admin-only force-delete UI, your options are:
 - **Redeploy the same release name on the new cluster.** The DB row stays and
   the new k8s resources match the existing labels.
 - **Manually delete the row** after confirming it's actually orphaned:
-  `docker exec -i docker-postgres-1 psql -U kubeport -d kubeport -c "DELETE FROM releases WHERE name='<name>';"`
+  `scripts/compose.sh exec -T postgres psql -U kubeport -d kubeport -c "DELETE FROM releases WHERE name='<name>';"`
 
 **Prevention.** Tear down kind cleanly before host shutdown
 (`kind delete cluster --name kubeport`) — `docker stop` of the control-plane is
@@ -539,7 +547,7 @@ manual playbook.
 
 ```bash
 kind delete cluster --name kubeport
-docker compose -f deploy/docker/docker-compose.yml down   # keeps pgdata volume
+scripts/compose.sh down   # keeps pgdata volume
 ```
 
 Wipe everything including DB: append `-v` to the compose command.

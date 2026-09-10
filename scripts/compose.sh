@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# The shared local stack (postgres + dex), always run from the main checkout.
+#
+#   scripts/compose.sh up -d        # from the main checkout or any worktree
+#   scripts/compose.sh ps
+#   scripts/compose.sh exec -T postgres psql -U kubeport -d kubeport
+#   scripts/compose.sh down         # keeps the pgdata volume
+#
+# Why (#230): every checkout's deploy/docker is the same compose project,
+# `docker` — the name comes from the directory. So
+# `docker compose -f deploy/docker/docker-compose.yml up -d` typed inside a
+# worktree recreates the SHARED containers from that worktree, and dex then
+# bind-mounts that worktree's dex.yaml and certs. Worktrees are deleted when
+# their PR merges; deleting that one breaks dex for every session on the
+# machine. This runs compose on the main checkout's files, which stay.
+#
+# The project name is kept on purpose. scripts/test-db.sh finds the shared
+# postgres through it, and a new name would start a new, empty pgdata volume
+# and fight the old containers for ports 5432 and 5556.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$here/scripts/lib/main-checkout.sh"
+
+MAIN="$(main_checkout "$here")"
+DIR="$MAIN/deploy/docker"
+FILE="$DIR/docker-compose.yml"
+
+say() { printf '\033[1;34m[compose]\033[0m %s\n' "$*" >&2; }
+die() { printf '\033[1;31m[compose]\033[0m %s\n' "$*" >&2; exit 1; }
+
+[[ -f "$FILE" ]] || die "no $FILE — the main checkout was resolved to $MAIN"
+
+case "${1:-}" in
+  up|create|start|restart)
+    if [[ ! -f "$DIR/certs/dex.crt" || ! -f "$DIR/certs/dex.key" ]]; then
+      src="$(running_dex_certs_dir)"
+      if [[ -n "$src" ]]; then
+        die "$DIR/certs has no dex.crt/dex.key, and certificates are not committed.
+  The running dex uses the ones in $src — copy those, do not generate new ones:
+  a new CA breaks every session and kind cluster that trusts the current one.
+      cp \"$src/dex.crt\" \"$src/dex.key\" \"$DIR/certs/\""
+      fi
+      die "$DIR/certs has no dex.crt/dex.key, so dex cannot start (certificates are not committed).
+  On a new machine, scripts/e2e/up.sh generates them — docs/local-e2e.md §2."
+    fi
+    for svc in postgres dex; do
+      wd="$(compose_container_workdir "$svc")"
+      if [[ -n "$wd" && "$(norm_path "$wd")" != "$(norm_path "$DIR")" ]]; then
+        say "$svc was created from $wd — it will be recreated from $DIR"
+      fi
+    done
+    ;;
+esac
+
+exec docker compose --project-directory "$DIR" -f "$FILE" "$@"

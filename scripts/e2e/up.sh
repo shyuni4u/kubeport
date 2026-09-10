@@ -8,6 +8,10 @@ for t in docker kind kubectl atlas openssl node; do need "$t"; done
 
 # 1. Self-signed dex cert (one per machine; kind trusts it at cluster creation).
 if [[ ! -f "$DEX_CRT" ]]; then
+  # A dex already running from another checkout has a CA that sessions and
+  # the kind cluster trust. A new one here would replace it on the next up.
+  running="$(running_dex_certs_dir)"
+  [[ -z "$running" ]] || die "no $DEX_CRT, but the running dex uses $running — copy dex.crt and dex.key from there instead of generating a new CA"
   log "generating self-signed dex cert"
   mkdir -p "$CERT_DIR"
   openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
@@ -17,8 +21,8 @@ if [[ ! -f "$DEX_CRT" ]]; then
 fi
 
 # 2. postgres + dex
-log "docker compose up"
-docker compose -f "$ROOT/deploy/docker/docker-compose.yml" up -d
+log "docker compose up (main checkout)"
+"$ROOT/scripts/compose.sh" up -d
 for i in $(seq 1 30); do
   curl -ksf "$DEX_ISSUER/.well-known/openid-configuration" >/dev/null && break
   [[ $i == 30 ]] && die "dex not reachable at $DEX_ISSUER — check the hosts entry (docs/local-e2e.md §1)"

@@ -271,6 +271,11 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
   Bash 도구는 호출 사이에 환경변수를 유지하지 않아, 따로 eval 해 두면 다음 명령은 조용히 공용 DB 로 돈다. 매번 붙여도 멱등이라
   최신이면 no-op 이다(실측 2초, 새 DB 는 3초). `eval "$(…)"` 형태는 스크립트가 실패해도 성공으로 끝나 쓰지 않는다([docs/testing.md](docs/testing.md) §3.4).
   공용 DB 에서 두 세션이 동시에 돌리면 `TestMain` 의 이름 패턴 정리가 서로의 행을 지운다.
+- **공용 compose(postgres + dex)는 `scripts/compose.sh` 로만 띄운다** — 워크트리에서 `docker compose -f deploy/docker/docker-compose.yml up -d`
+  를 직접 치지 않는다(#230). 모든 체크아웃의 `deploy/docker` 가 같은 프로젝트 `docker` 라, 워크트리에서 치면 공용 dex 가 그 워크트리의
+  `dex.yaml`·`certs` 를 bind-mount 하고, 머지 뒤 워크트리를 지우는 순간 모든 세션의 dex 테스트가 깨진다. 스크립트는 메인 체크아웃 파일로
+  돌리고, 인증서가 없으면 **새로 만들지 말고** 돌고 있는 dex 의 것을 복사하라고 멈춘다. 공용 컨테이너 재기동은 다른 세션 테스트를 끊으니
+  치기 직전에 PM 에게 한 줄.
 
 ## 코드 리뷰
 
@@ -342,7 +347,7 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
 
 **기본 커맨드** (컴포즈 기동 상태 가정):
 ```bash
-docker compose -f deploy/docker/docker-compose.yml up -d
+scripts/compose.sh up -d
 cd backend && go test ./...
 ```
 

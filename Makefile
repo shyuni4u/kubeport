@@ -2,11 +2,13 @@
 
 HELM_CHART_DIR := deploy/helm/kubeport
 
+# Through scripts/compose.sh: the shared stack always runs from the main
+# checkout, so `make compose-up` in a worktree cannot hand it that worktree (#230).
 compose-up:
-	docker compose -f deploy/docker/docker-compose.yml up -d
+	scripts/compose.sh up -d
 
 compose-down:
-	docker compose -f deploy/docker/docker-compose.yml down
+	scripts/compose.sh down
 
 test:
 	cd backend && go test ./...
