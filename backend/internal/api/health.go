@@ -35,10 +35,19 @@ var errCatalogScopeUnset = errors.New("catalog reporting needs KBP_DEMO_EMAIL_DO
 // healthCacheTTL. The lock is held across the query on purpose: a burst
 // collapses into one round trip instead of one per request.
 type catalogGauge struct {
-	mu        sync.Mutex
-	at        time.Time
+	mu      sync.Mutex
+	at      time.Time
+	catalog demoCatalog
+	err     error
+}
+
+// demoCatalog is what the gauge caches: both fields come from the same pass
+// over the same rows, so they cannot disagree about which templates count.
+type demoCatalog struct {
 	templates int
-	err       error
+	// lastSeed is the oldest created_at among the counted templates, zero when
+	// there are none. See demoVisibleTemplates for why oldest.
+	lastSeed time.Time
 }
 
 // count deliberately takes no caller context. The cached value belongs to the
@@ -48,7 +57,7 @@ type catalogGauge struct {
 // without an attacker — the BFF gives up after five seconds — and it would
 // have turned the uptime alarm permanently red, hiding the empty-catalog case
 // this whole signal exists to catch.
-func (g *catalogGauge) count(st *store.Store, demoDomain string) (int, error) {
+func (g *catalogGauge) count(st *store.Store, demoDomain string) (demoCatalog, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	// A failure is held briefly so a burst still collapses, but not for the
@@ -59,13 +68,13 @@ func (g *catalogGauge) count(st *store.Store, demoDomain string) (int, error) {
 		ttl = healthErrTTL
 	}
 	if !g.at.IsZero() && time.Since(g.at) < ttl {
-		return g.templates, g.err
+		return g.catalog, g.err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), healthQueryTimeout)
 	defer cancel()
-	n, err := demoVisibleTemplates(ctx, st, demoDomain)
-	g.at, g.templates, g.err = time.Now(), n, err
-	return g.templates, err
+	cat, err := demoVisibleTemplates(ctx, st, demoDomain)
+	g.at, g.catalog, g.err = time.Now(), cat, err
+	return g.catalog, err
 }
 
 // demoVisibleTemplates counts what a demo visitor can actually deploy, which
@@ -81,21 +90,32 @@ func (g *catalogGauge) count(st *store.Store, demoDomain string) (int, error) {
 // reset that wiped the demo catalog and failed to re-seed — the monitor would
 // report healthy while visitors saw an empty catalog. That is the exact
 // failure this signal exists to catch.
-func demoVisibleTemplates(ctx context.Context, st *store.Store, demoDomain string) (int, error) {
+//
+// The same rows also date the seed (#148). Since #140 a reset whose preflight
+// fails deletes nothing, so a skipped cycle leaves the count exactly as green
+// as a successful one. A cycle that does run deletes every demo-owned template
+// and the seeder recreates them, so the oldest demo-owned published row is
+// when the catalog was last seeded. Oldest rather than newest: a template
+// published after the seed — a demo visitor's, where authoring is opted in —
+// would otherwise make a catalog that has not been re-seeded in days look
+// fresh. The error it can make is the safe one: a demo template a real user's
+// release still references survives the reset (see seed-demo's reset) and
+// keeps last_seed old, which is worth someone looking at anyway.
+func demoVisibleTemplates(ctx context.Context, st *store.Store, demoDomain string) (demoCatalog, error) {
 	// Without a demo domain there is no "demo-owned" to filter on, and the
 	// count would be the size of the operator's own catalog. The chart happens
 	// to prevent this by nesting the env inside demo.enabled, but that is the
 	// chart's accident, not this endpoint's contract: a compose file or a
 	// `kubectl set env` reaches it directly.
 	if demoDomain == "" {
-		return 0, errCatalogScopeUnset
+		return demoCatalog{}, errCatalogScopeUnset
 	}
 	rows, err := st.ListTemplates(ctx)
 	if err != nil {
-		return 0, err
+		return demoCatalog{}, err
 	}
 	isDemoOwner := map[[16]byte]bool{}
-	n := 0
+	var cat demoCatalog
 	for _, row := range rows {
 		if !row.CurrentVersionID.Valid || row.CurrentStatus.String != "published" {
 			continue
@@ -105,16 +125,20 @@ func demoVisibleTemplates(ctx context.Context, st *store.Store, demoDomain strin
 		if !seen {
 			owner, err := st.GetUserByID(ctx, row.OwnerUserID)
 			if err != nil {
-				return 0, err
+				return demoCatalog{}, err
 			}
 			demo = auth.IsDemoEmail(owner.Email.String, demoDomain)
 			isDemoOwner[key] = demo
 		}
-		if demo {
-			n++
+		if !demo {
+			continue
+		}
+		cat.templates++
+		if row.CreatedAt.Valid && (cat.lastSeed.IsZero() || row.CreatedAt.Time.Before(cat.lastSeed)) {
+			cat.lastSeed = row.CreatedAt.Time
 		}
 	}
-	return n, nil
+	return cat, nil
 }
 
 // healthz answers the kubelet probes on the bare path with a constant — they
@@ -124,13 +148,18 @@ func demoVisibleTemplates(ctx context.Context, st *store.Store, demoDomain strin
 // so. The endpoint is unauthenticated, so a self-hosted install must not leak
 // its catalog's size to anyone who asks; the public demo opts in.
 //
-// The count is the signal #119 asked for: the
-// demo reset CronJob wipes first and re-seeds second, so a failed seed leaves
-// an empty catalog that nothing notices until the next scheduled reset — the last
-// occurrence (#104) was found only because a browser review happened to run
-// just after a reset. Publishing the count lets the existing uptime ping
-// (.github/workflows/uptime-ping.yml) assert it is non-zero, which makes an
-// already-scheduled 10-minute cron the alert channel with no new infrastructure.
+// The count is the signal #119 asked for: a seed that fails after the reset
+// has wiped leaves an empty catalog that nothing notices until the next
+// scheduled reset — the last occurrence (#104) was found only because a
+// browser review happened to run just after a reset. Publishing the count lets
+// the existing uptime ping (.github/workflows/uptime-ping.yml) assert it is
+// non-zero, which makes an already-scheduled 10-minute cron the alert channel
+// with no new infrastructure.
+//
+// `last_seed` is the other half (#148). Since the reset checks its
+// dependencies before deleting anything (#140), a cycle that cannot run is
+// skipped rather than emptying the demo — so the count stays green, and only
+// the seed's age shows that the daily reset has not happened.
 //
 // It stays 200 even when the count is unavailable: the same path backs the
 // readiness probe, and failing it over a reporting problem would take the pod
@@ -154,7 +183,7 @@ func healthz(deps Deps, gauge *catalogGauge) gin.HandlerFunc {
 		}
 		body := gin.H{"status": "ok", "version": version}
 		if deps.HealthPublicCatalog && deps.Store != nil {
-			n, err := gauge.count(deps.Store, deps.DemoEmailDomain)
+			cat, err := gauge.count(deps.Store, deps.DemoEmailDomain)
 			switch {
 			case errors.Is(err, errCatalogScopeUnset):
 				// A misconfiguration, not an outage: say nothing publicly and
@@ -168,7 +197,14 @@ func healthz(deps Deps, gauge *catalogGauge) gin.HandlerFunc {
 				body["status"] = "degraded"
 				body["catalog"] = gin.H{"available": false}
 			default:
-				body["catalog"] = gin.H{"available": true, "templates": n}
+				catalog := gin.H{"available": true, "templates": cat.templates}
+				// Whole seconds in UTC: the consumer is a shell cron doing
+				// `date -d`, and sub-second precision says nothing about a
+				// daily job.
+				if !cat.lastSeed.IsZero() {
+					catalog["last_seed"] = cat.lastSeed.UTC().Truncate(time.Second).Format(time.RFC3339)
+				}
+				body["catalog"] = catalog
 			}
 		}
 		c.JSON(http.StatusOK, body)

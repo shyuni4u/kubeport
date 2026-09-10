@@ -89,3 +89,27 @@ jobs:
             echo "::error::Demo catalog is empty — the reset CronJob wiped and failed to re-seed. See docs/oci-prod-runbook.md (demo reset)."
             exit 1
           fi
+
+          # A non-empty catalog is not a fresh one (#148). The reset checks its
+          # dependencies before deleting anything (#140), so a cycle that
+          # cannot run is skipped with the previous seed left in place — the
+          # count above stays green. last_seed dates the catalog, so its age
+          # is what shows the daily reset has not happened.
+          last_seed=$(printf '%s' "$body" | jq -r '.catalog.last_seed // empty')
+          if [ -z "$last_seed" ]; then
+            # Only a backend from before #148 omits it next to a non-zero
+            # count. main is ahead of the live image between a merge and its
+            # deploy, so this is a warning rather than a failure.
+            echo "::warning::Health returned no catalog.last_seed — the live backend predates #148, so a skipped reset is not being checked."
+            exit 0
+          fi
+          age=$(( $(date -u +%s) - $(date -u -d "$last_seed" +%s) ))
+          echo "catalog.last_seed = $last_seed ($(( age / 3600 ))h ago)"
+          # demo.resetSchedule is daily (21:00 UTC), so a healthy seed is just
+          # under 24h old right before the next cycle. Two hours of slack
+          # covers the Job's own runtime, a late CronJob start and this cron's
+          # drift; past that, at least one cycle did not run.
+          if [ "$age" -gt $(( 26 * 3600 )) ]; then
+            echo "::error::Demo catalog last seeded at $last_seed, $(( age / 3600 ))h ago — the daily reset skipped at least one cycle. See docs/oci-prod-runbook.md (demo reset)."
+            exit 1
+          fi
