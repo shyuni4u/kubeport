@@ -77,8 +77,10 @@ func TestDemoAdmin_ListReleasesScopedToDemoDomain(t *testing.T) {
 
 	nonDemoID := createRelease(t, adminRouter, tplName, clusterName, "real-"+randSuffix(), demoValues)
 
+	// The demo deploys from its own catalog: since #226 a demo account cannot
+	// deploy the operator's template, so the demo release needs a demo one.
 	demoRouter := newDemoAdminRouter(t, s, applier)
-	demoID := createRelease(t, demoRouter, tplName, clusterName, "demo-"+randSuffix(), demoValues)
+	demoID := createRelease(t, demoRouter, seedDemoTemplate(t, s), clusterName, "demo-"+randSuffix(), demoValues)
 
 	w := do(t, demoRouter, http.MethodGet, "/v1/releases?limit=200", nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())

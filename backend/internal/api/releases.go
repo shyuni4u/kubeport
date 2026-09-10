@@ -152,6 +152,27 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "not-found", "template version")
 		return
 	}
+	// The catalog shows a caller only the templates on their side of the demo
+	// line (scopeTemplatesToDemo), and deploying by name must not cross it
+	// either (#226). Answered exactly like a missing version, as the list
+	// answers by omission — and before the publish check, whose 409 would
+	// otherwise confirm the template exists.
+	if h.deps.DemoEmailDomain != "" {
+		tpl, err := h.deps.Store.GetTemplateByName(ctx, r.Template)
+		if err != nil {
+			writeError(c, http.StatusNotFound, "not-found", "template version")
+			return
+		}
+		inScope, err := h.inDemoScope(c, nil, tpl.OwnerUserID)
+		if err != nil {
+			internalError(c, "CreateRelease: demo scope", err)
+			return
+		}
+		if !inScope {
+			writeError(c, http.StatusNotFound, "not-found", "template version")
+			return
+		}
+	}
 	if !requireDeployableVersion(c, tv, r.Template) {
 		return
 	}

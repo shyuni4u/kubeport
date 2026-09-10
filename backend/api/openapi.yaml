@@ -980,6 +980,12 @@ paths:
           description: |
             No such template version, or no such cluster — `detail` says which.
             This is what a mistyped `template` or `cluster` returns.
+
+            On an install with a demo, a template on the other side of the demo
+            line answers the same `template version` 404 as a missing one: a
+            demo account cannot deploy the operator's templates, and a
+            non-admin real user cannot deploy the demo's — the same split the
+            template list draws. It is not a 403, so the name is not confirmed.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
