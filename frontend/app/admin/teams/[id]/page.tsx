@@ -5,13 +5,19 @@ import { apiFetch } from "@/lib/api-server";
 import { ActionForm, type ActionState } from "@/components/ActionForm";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { HelpHint } from "@/components/HelpHint";
+import { isDemoEmail } from "@/lib/demo";
+import { problemTitle } from "@/lib/problem";
 
 // Localized inline error for a failed member mutation. Raw body goes to the
 // server log only.
 async function actionError(what: string, res: Response): Promise<ActionState> {
   const te = await getTranslations("admin.teams.errors");
-  console.error(`[admin/teams] ${what} failed: ${res.status} ${await res.text()}`);
-  if (res.status === 403) return { error: te("forbidden") };
+  const body = await res.text();
+  console.error(`[admin/teams] ${what} failed: ${res.status} ${body}`);
+  // Demo admins hold kubeport-admin; the refusal is the demo gate (#180).
+  if (res.status === 403) {
+    return { error: problemTitle(body) === "demo-restricted" ? te("demoRestricted") : te("forbidden") };
+  }
   if (res.status === 404) return { error: te("notFound") };
   if (res.status === 409) return { error: te("conflict") };
   return { error: te("generic", { status: res.status }) };
@@ -24,10 +30,15 @@ export default async function TeamDetailPage({
 }) {
   const { id } = await params;
   const t = await getTranslations("admin.teams");
-  const [membersRes, teamsRes] = await Promise.all([
+  const [membersRes, teamsRes, meRes] = await Promise.all([
     apiFetch(`/v1/teams/${id}/members`),
     apiFetch(`/v1/teams`),
+    apiFetch("/v1/me"),
   ]);
+  // Every member change here is refused for demo accounts by the demo gate,
+  // whatever the install allows — say so up front (#180).
+  const me = meRes.ok ? ((await meRes.json()) as { email?: string }) : null;
+  const isDemo = isDemoEmail(me?.email);
   // Unknown team → global not-found page; other failures bubble to
   // app/error.tsx without the backend body in the message.
   if (membersRes.status === 404) notFound();
@@ -68,6 +79,11 @@ export default async function TeamDetailPage({
   return (
     <div>
       <h1 className="text-xl font-bold mb-4">{team?.name ?? id}</h1>
+      {isDemo && (
+        <p role="status" className="mb-4 rounded-md border px-3 py-2 text-sm text-muted-foreground">
+          {t("demoNotice")}
+        </p>
+      )}
 
       <h2 className="font-semibold mb-2">{t("membersHeading")}</h2>
       <table className="w-full bg-white border rounded text-sm mb-6">

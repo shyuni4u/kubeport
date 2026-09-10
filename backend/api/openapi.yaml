@@ -1454,8 +1454,10 @@ components:
     Forbidden:
       description: |
         `title` says who refused: `rbac-denied` is kubeport's own check or the
-        cluster's RBAC; `demo-restricted` is a demo account hitting a write that
-        demo accounts never get.
+        cluster's RBAC; `demo-restricted` is the demo gate — a management write
+        demo accounts never get, template creation on an install without
+        demo.allowTemplateCreate, or a read or change of a template or release
+        that no demo account owns.
       headers:
         X-Request-Id: { $ref: "#/components/headers/RequestId" }
       content:
@@ -1644,7 +1646,7 @@ components:
       enum:
         - unauthenticated   # 401 — no/invalid token or session
         - rbac-denied       # 403 — kubeport's own check refused
-        - demo-restricted   # 403 — demo account, write not available
+        - demo-restricted   # 403 — the demo gate; scope in the Forbidden response
         - validation-error  # 400 — body or parameter rejected
         - not-found         # 404 — no such object, and also the router's own
                             # fallback for a path that matches no route (#81)

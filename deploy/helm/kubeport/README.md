@@ -429,6 +429,14 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
   frontend as `DEMO_NAMESPACE`), not in the cluster's `default_namespace`.
   Changing `demo.namespace` moves the namespace, its RBAC, the reset job and
   the form's starting namespace together.
+- Demo accounts get the `kubeport-admin` UX, but the backend refuses them with
+  403 `demo-restricted` on cluster registration, OpenAPI refresh, team and
+  member changes, force-delete, and any template or release no demo account
+  owns — the UI says so on those screens. Creating *new* templates is also
+  refused unless you set `demo.allowTemplateCreate=true`
+  (`KBP_DEMO_ALLOW_TEMPLATE_CREATE`); leave it off for a public demo, since
+  templates demo visitors author outlive a reset once someone deploys from
+  them. The reset CronJob does not need it.
 
 Both demo `Role`s enumerate workload resources explicitly — neither can touch
 the guardrails (`resourcequotas`, `limitranges`, `networkpolicies`) or use
