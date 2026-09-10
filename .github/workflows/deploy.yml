@@ -4,12 +4,17 @@ name: deploy
 #
 # The workflow holds no cluster credentials. It holds an SSH key that the VM
 # pins to one program — deploy/oci/kubeport-deploy.sh, via
-# `restrict,command=...` in authorized_keys — which accepts exactly
-# `deploy <40-hex sha>` and `status`, checks the sha is on main, takes the same
-# lock a manual deploy takes, refuses anything that would restart Dex, and lets
-# helm roll back on failure. What the key can do is what that script does.
+# `restrict,command="... --forced"` in authorized_keys — which accepts exactly
+# `deploy <40-hex sha>` and `status`, checks the sha is on main and no older
+# than what is live, takes the same lock a manual deploy takes, refuses anything
+# that would restart Dex, and lets helm roll back on failure. What the key can
+# do is what that script does. It cannot roll back: that is the admin key's
+# `kubeport-deploy deploy <sha>` (docs/oci-prod-runbook.md §3-2).
 #
-# Setup (keys, secrets, VM install): deploy/oci/README.md "자동 배포 설치".
+# Runs only in shyuni4u/kubeport: a fork or a self-hosted copy has no VM and no
+# `production` environment, and would otherwise go red on every main push.
+#
+# Setup (keys, environment secrets, VM install): deploy/oci/README.md "자동 배포 설치".
 # Operating it, and the manual path: docs/oci-prod-runbook.md §3.
 
 on:
@@ -20,11 +25,11 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: "Full 40-char sha of a main commit (redeploy or roll back). `git rev-parse origin/main` after a fetch."
+        description: "Full 40-char sha of a main commit, equal to or newer than live (redeploy, or catch up). Rolling back is not possible here — use the admin key: runbook §3-2. `git rev-parse origin/main` after a fetch."
         required: true
         type: string
       verify_version:
-        description: "Wait for /api/healthz to report this sha. Turn off only when rolling back to a build older than the `version` field."
+        description: "Wait for /api/healthz to report this sha. Turn off only if the build predates the `version` field."
         required: false
         type: boolean
         default: true
@@ -56,12 +61,20 @@ jobs:
     # build is a release rather than main, and a dispatched build may be of any
     # branch. `branches: [main]` above already filters head_branch; it is
     # repeated here so the condition reads completely in one place.
+    #
+    # The repository check comes first: in a fork every clause after it would
+    # pass, and the job would fail on the missing secrets (see the header).
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
+      github.repository == 'shyuni4u/kubeport' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    # The OCI_DEPLOY_* secrets are environment secrets of `production`, whose
+    # deployment-branch policy allows main only — a workflow run on any other
+    # ref cannot read the deploy key even if this file is edited on a branch.
+    environment: production
     runs-on: ubuntu-latest
     # Deploy step 45m + health wait 5m + resolve.
     timeout-minutes: 60
@@ -166,22 +179,43 @@ jobs:
           rc=${PIPESTATUS[0]}
           rm -f "$key"
 
-          case $rc in
-            0) echo "::notice title=Deployed::sha-${SHA:0:7} is rolled out." ;;
-            10)
-              echo "::error title=Refused: this deploy would restart Dex::Nothing was changed. Dex keeps its signing keys in memory, and after a restart the apiserver keeps the old ones (demo logins work, cluster calls 401, /healthz stays green). Deploy by hand with --allow-dex-restart and restart k3s right after — the exact commands are in the log above and in docs/oci-prod-runbook.md §3."
+          # Branch on the script's result line, not the exit code: exit 1
+          # covers "nothing changed", "rolled back" and "new revision live but
+          # unverified", which need opposite responses. Anchored, so log text
+          # (the script prefixes its own lines) cannot pass for a result.
+          result=$(grep -Eo '^KUBEPORT_DEPLOY_RESULT=[a-z-]+$' "$RUNNER_TEMP/deploy.log" | tail -1 | cut -d= -f2)
+          case $result in
+            deployed) echo "::notice title=Deployed::sha-${SHA:0:7} is rolled out." ;;
+            dex-guard-refused)
+              echo "::error title=Refused: this deploy would restart Dex::Nothing was changed. Dex keeps its signing keys in memory, and after a restart the apiserver keeps the old ones (demo logins work, cluster calls 401, /healthz stays green). Deploy by hand with --allow-dex-restart and restart k3s right after — the exact commands are in the log above and in docs/oci-prod-runbook.md §3-4."
               ;;
-            2) echo "::error title=Rejected::The VM refused the request's format." ;;
-            3) echo "::error title=Lock busy::Another deploy (probably a manual one) held the lock for 10 minutes. Re-run once it finishes: 'kubeport-deploy status'." ;;
-            4) echo "::error title=Unverified::The VM could not confirm $SHA is on main, or could not fetch its chart from GitHub." ;;
-            255) echo "::error title=SSH failed::Could not reach the VM. If it was stopped/started its public IP changed: update OCI_DEPLOY_HOST and OCI_DEPLOY_KNOWN_HOSTS." ;;
-            *) echo "::error title=Deploy failed::helm upgrade failed and the release was rolled back (see the history above). Production is on the previous revision." ;;
+            refused-not-forward)
+              echo "::error title=Refused: not forward of live::Nothing was changed. $SHA is older than (or not comparable with) what production runs, and the deploy key only moves forward. To roll back, use the admin key: kubeport-deploy deploy <sha> (docs/oci-prod-runbook.md §3-2)."
+              ;;
+            rejected) echo "::error title=Rejected::Nothing was changed. The VM refused the request's format — or its authorized_keys line lacks --forced (deploy/oci/README.md \"자동 배포 설치\" step 3)." ;;
+            lock-busy) echo "::error title=Lock busy::Nothing was changed. Another deploy (probably a manual one) held the lock for 10 minutes. Re-run once it finishes: 'kubeport-deploy status'." ;;
+            unverified) echo "::error title=Unverified::Nothing was changed. The VM could not confirm $SHA is on main, or could not fetch its chart from GitHub." ;;
+            aborted-before-upgrade) echo "::error title=Stopped before upgrade::Nothing was changed on the cluster. The script stopped before helm upgrade (values, chart render, Dex comparison or a pending release) — the reason is the ERROR line above." ;;
+            failed-rolled-back) echo "::error title=Deploy failed, rolled back::helm upgrade failed and helm rolled the release back. Production is on the previous revision (see the history above)." ;;
+            failed-rollout|failed-image-mismatch|failed-values-drift|failed-after-upgrade)
+              echo "::error title=Live but not verified ($result)::The NEW revision is running and was NOT rolled back. Read the history and the ERROR above, then keep it or roll back with the admin key (docs/oci-prod-runbook.md §3-0)."
+              ;;
+            failed-during-upgrade) echo "::error title=Ended during upgrade::The state is unknown. Run 'kubeport-deploy status'; a pending-upgrade release is fixed by runbook §7." ;;
+            "")
+              if [ "$rc" = 255 ]; then
+                echo "::error title=SSH failed::No result from the VM. If the log above never reached the script, the VM was unreachable: after a stop/start its public IP changed — update OCI_DEPLOY_HOST and OCI_DEPLOY_KNOWN_HOSTS. If it shows helm upgrade starting, the session dropped mid-deploy: run 'kubeport-deploy status'."
+              else
+                echo "::error title=No result::The VM ended without a result line (exit $rc). The state is unknown: run 'kubeport-deploy status'."
+              fi
+              ;;
+            *) echo "::error title=Unknown result::'$result' (exit $rc) — deploy.yml does not know this result; read the log above." ;;
           esac
           {
             echo "### deploy ${SHA:0:7}"
             echo
-            echo "exit: \`$rc\` — $(grep -o 'KUBEPORT_DEPLOY_RESULT=.*' "$RUNNER_TEMP/deploy.log" | tail -1 || echo 'no result line')"
+            echo "exit: \`$rc\` — result: \`${result:-none}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$rc" = 0 ] && [ "$result" != deployed ]; then rc=1; fi
           exit "$rc"
 
       # helm reported ready; this confirms the public URL actually serves the

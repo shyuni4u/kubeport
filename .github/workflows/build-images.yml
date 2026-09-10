@@ -5,9 +5,12 @@ name: build-images
 # See ADR 0003 §"공통 스택" — multi-arch is required for Phase 1↔2/3 zero-touch
 # (x86 GCP bootstrap → ARM OCI/Hetzner production without rebuild).
 #
-# Both arches on main and tags, which is where images are published. A PR builds
-# amd64 only and pushes nothing — see the comments on `platforms:` and on the
-# `pull_request:` paths below.
+# Images are published only by a push event: a push to main, or a `v*` tag.
+# A PR builds amd64 only and pushes nothing — see the comments on `platforms:`
+# and on the `pull_request:` paths below. A workflow_dispatch builds both arches
+# (it can answer "does arm64 still build" for a branch) but also pushes nothing:
+# deploy/oci/kubeport-deploy.sh deploys `sha-<7>`, and a dispatched build of an
+# unmerged branch must not be able to publish a tag of that shape.
 
 on:
   # No paths filter here, deliberately. docs/oci-prod-runbook.md deploys with
@@ -113,8 +116,8 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
-        # PR from forks 는 GITHUB_TOKEN 으로 push 권한 없음 — push 단계 자체를 건너뜀
-        if: github.event_name != 'pull_request'
+        # push 이벤트(main·v* 태그)만 이미지를 올린다 — PR·dispatch 는 로그인 자체를 건너뜀
+        if: github.event_name == 'push'
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
@@ -156,8 +159,10 @@ jobs:
           # the PR. Neither Dockerfile branches on architecture today, and main
           # still gates before anything is deployed.
           platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
-          # PR 은 build only (push 안 함, ghcr 권한 없음)
-          push: ${{ github.event_name != 'pull_request' }}
+          # main push·v* 태그 push 만 올린다. PR·workflow_dispatch 는 build only —
+          # dispatch 는 아무 브랜치에서나 돌릴 수 있어, 올리면 main 에 없는 커밋이
+          # 배포 스크립트가 쓰는 `sha-<7>` 태그를 갖게 된다.
+          push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # GHA cache — backend/frontend 별로 분리해서 cross-pollination 방지
