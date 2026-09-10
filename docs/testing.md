@@ -35,8 +35,8 @@ cd backend && go test -short ./...
 
 ```bash
 docker compose -f deploy/docker/docker-compose.yml up -d   # postgres + dex
-cd backend/migrations && atlas schema apply --env local --auto-approve   # 최초 1회 또는 schema 변경 후
-cd backend && go test ./...
+(cd backend/migrations && atlas schema apply --env local --auto-approve)   # 최초 1회 또는 schema 변경 후
+(cd backend && go test -p 1 ./...)   # -p 1: 패키지 병렬 금지 (§6)
 ```
 
 > 위 명령은 공유 DB `kubeport` 를 쓴다. **다른 세션·워크트리가 같은 머신에서 테스트를 돌릴 수 있다면 §3.4 의 세션별 DB 를 먼저 만든다.**
@@ -64,9 +64,12 @@ docker compose -f deploy/docker/docker-compose.yml down -v     # pgdata 볼륨�
 **사용법** — 세션을 시작할 때 한 번:
 
 ```bash
-out=$(scripts/test-db.sh) && eval "$out"        # kubeport_test_<워크트리 디렉터리명> 생성 + 스키마 적용 + TEST_DATABASE_URL export
-cd backend && go test -p 1 ./internal/store/...
+# 리포(워크트리) 루트에서
+out=$(scripts/test-db.sh) && eval "$out" && echo "$TEST_DATABASE_URL"   # kubeport_test_<워크트리 디렉터리명> 생성 + 스키마 적용 + export
+(cd backend && go test -p 1 ./internal/store/...)
 ```
+
+> **`eval "$(scripts/test-db.sh)"` 로 쓰지 않는다.** 스크립트가 실패하면(컴포즈 꺼짐·atlas 실패·다른 cwd) stdout 이 비고, 빈 문자열 eval 은 성공으로 끝나 `TEST_DATABASE_URL` 없이 **조용히 공유 DB `kubeport` 로 테스트가 돈다.** `echo` 가 `kubeport_test_` 가 들어간 URL 을 찍지 않았으면 테스트를 돌리지 않는다.
 
 | 명령 | 동작 |
 |------|------|
