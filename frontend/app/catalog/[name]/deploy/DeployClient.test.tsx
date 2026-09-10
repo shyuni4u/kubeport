@@ -486,3 +486,77 @@ describe("DeployClient namespace default", () => {
     );
   });
 });
+
+// #182 — the name was checked only by the API. A name the help text already
+// ruled out went through and came back as a 400, and an empty one switched the
+// button off without saying why.
+describe("DeployClient release name", () => {
+  beforeEach(() => {
+    pushMock.mockReset();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  const nameInput = () => screen.getByLabelText("배포 이름") as HTMLInputElement;
+  const submitButton = () => screen.getByRole("button", { name: /배포하기/ });
+  const clusterWithNamespace = () =>
+    routedFetch({ clusters: [{ name: "dev", default_namespace: "team-a" }] });
+
+  it("says why the button is off while the name is empty", async () => {
+    vi.stubGlobal("fetch", clusterWithNamespace());
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={spec} />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("구역") as HTMLInputElement).value).toBe("team-a"),
+    );
+
+    expect(submitButton()).toBeDisabled();
+    expect(nameInput()).toHaveAccessibleDescription("배포 이름을 입력하면 배포할 수 있습니다.");
+    // Where every form starts is not an error.
+    expect(nameInput()).toHaveAttribute("aria-invalid", "false");
+  });
+
+  it("flags a name the API would refuse before anyone submits it", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", clusterWithNamespace());
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={spec} />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("구역") as HTMLInputElement).value).toBe("team-a"),
+    );
+
+    // The reviewer's input from #182.
+    await user.type(nameInput(), "Web App 배포 테스트 1");
+    expect(nameInput()).toHaveAttribute("aria-invalid", "true");
+    expect(nameInput()).toHaveAccessibleDescription(/하이픈으로 시작하거나 끝날 수 없습니다/);
+    expect(submitButton()).toBeDisabled();
+
+    await user.clear(nameInput());
+    await user.type(nameInput(), "web-app-test-1");
+    expect(nameInput()).toHaveAttribute("aria-invalid", "false");
+    expect(screen.queryByText(/하이픈으로 시작하거나 끝날 수 없습니다/)).toBeNull();
+    await waitFor(() => expect(submitButton()).toBeEnabled());
+  });
+
+  // maxLength stops typing past the limit, but not a value the page prefilled
+  // (a demo account's default is the template name plus a suffix).
+  it("asks for a shorter name when a prefilled one is too long", async () => {
+    vi.stubGlobal("fetch", clusterWithNamespace());
+    render(
+      <DeployClient
+        templateName="web-app"
+        version={1}
+        team={null}
+        spec={spec}
+        defaultName={"a".repeat(64)}
+      />,
+    );
+
+    expect(nameInput()).toHaveAccessibleDescription("63자 이하로 줄여 주세요.");
+    expect(nameInput()).toHaveAttribute("aria-invalid", "true");
+    expect(submitButton()).toBeDisabled();
+  });
+});

@@ -38,7 +38,13 @@ test.describe("demo user deploys and deletes a release", () => {
     const prefilled = await nameInput.inputValue();
     await nameInput.fill("");
     await expect(submit).toBeDisabled();
+    // #182 — a name the API would refuse is flagged while typing, not after a
+    // 400 round-trip.
+    await nameInput.fill("Web App 1");
+    await expect(page.getByText(/하이픈으로 시작하거나 끝날 수 없습니다/)).toBeVisible();
+    await expect(submit).toBeDisabled();
     await nameInput.fill(prefilled || `e2e-user-${Date.now().toString(36)}`);
+    await expect(page.getByText(/하이픈으로 시작하거나 끝날 수 없습니다/)).toHaveCount(0);
 
     // Welcome message has a pattern (no quotes) → Korean sentence, not "Invalid".
     const welcome = page.getByRole("textbox", { name: "환영 문구" });
