@@ -32,9 +32,11 @@ sudo BOOTSTRAP_EMAIL=you@example.com bash bootstrap.sh
   `BOOTSTRAP_K3S_ALLOW_EOL=1` 을 줄 때만 깐다 — 아니면 호스트를 건드리기 전에 거부한다. AuthenticationConfiguration 의
   apiVersion 은 apiserver 버전(이미 깔린 k3s 가 있으면 그 버전)에 맞춰 고른다. 재실행은 이미 있는
   `/etc/rancher/k3s/auth.yaml`·`config.yaml` 을 덮어쓰지 않는다 — `k3s-auth-config.sh` 가 넣은 Dex 신뢰가 지워지지 않게.
-  대신 내용을 검사해, 이번 실행과 어긋나면 호스트를 건드리기 전에 멈춘다 — `config.yaml` 의 `authentication-config` 인자,
-  apiVersion, 그리고 요청한 issuer(`BOOTSTRAP_OIDC_ISSUER`) 항목의 Client ID audience·username claim(`BOOTSTRAP_OIDC_USERNAME_CLAIM`)·prefix
-  와 그 밖의 매핑 유무. 다른 issuer(Dex) 항목은 비교하지 않고 보존한다.
+  대신 **k3s 가 실제로 읽을 설정이 bootstrap 이 쓸 설정과 같은지** 검사해, 어긋나면 호스트를 건드리기 전에 멈춘다 —
+  `config.yaml` 은 `kube-apiserver-arg` 블록 리스트 하나에 활성 항목이 정확히 `authentication-config=/etc/rancher/k3s/auth.yaml`
+  하나(주석 처리된 줄·`.bak` 경로·스칼라 형식은 불일치), `config.yaml.d/` 드롭인에 apiserver 인자 없음, `auth.yaml` 은 최상위가
+  apiVersion·kind·jwt 뿐이고 apiVersion 이 맞으며, 요청한 issuer(`BOOTSTRAP_OIDC_ISSUER`) 항목의 Client ID audience·username
+  claim(`BOOTSTRAP_OIDC_USERNAME_CLAIM`)·빈 prefix·그 밖의 매핑 없음. 다른 issuer(Dex) 항목은 비교하지 않고 보존한다.
   고정되는 건 k3s **바이너리 버전**이다. 설치 스크립트(get.k3s.io)는 매번 원격에서 받는다(#221)
 - helm CLI
 - cert-manager + Let's Encrypt ClusterIssuer (`letsencrypt-prod`)

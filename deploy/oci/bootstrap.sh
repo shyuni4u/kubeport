@@ -120,6 +120,25 @@ AUTH_FILE=/etc/rancher/k3s/auth.yaml
 CFG_FILE=/etc/rancher/k3s/config.yaml
 skip_auth_write=""
 
+# k3s_config_entries <config.yaml> — "arg <value>" for each active entry of a
+# block-list kube-apiserver-arg (quotes and trailing comments removed), and a
+# line starting "!" for anything else that is set: another top-level key, the
+# key in scalar or flow form, or a line outside the list. Comments and blank
+# lines are skipped, so a commented-out argument is not an argument.
+k3s_config_entries() {
+  awk '
+    /^[ \t]*(#|$)/ { next }
+    /^kube-apiserver-arg:[ \t]*$/ { inargs = 1; next }
+    /^[^ \t]/ { inargs = 0; k = $0; sub(/:.*/, "", k); print "!key " k; next }
+    inargs && /^[ \t]+-[ \t]+/ {
+      v = $0; sub(/^[ \t]+-[ \t]+/, "", v); sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v)
+      if (v ~ /^".*"$/) v = substr(v, 2, length(v) - 2)
+      print "arg " v; next
+    }
+    { l = $0; sub(/^[ \t]+/, "", l); print "!line " l }
+  ' "$1" 2>/dev/null
+}
+
 # auth_entry <file> <issuer-url> — the jwt entry for that issuer, as
 # audiences, username claim, username prefix and any other keys it sets,
 # separated by \037. Nothing when the file has no such entry. It reads the
@@ -161,8 +180,42 @@ if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
   fi
   if [[ -e "${AUTH_FILE}" || -e "${CFG_FILE}" ]]; then
     problems=()
-    grep -qF "authentication-config=${AUTH_FILE}" "${CFG_FILE}" 2>/dev/null ||
-      problems+=("${CFG_FILE} does not pass authentication-config=${AUTH_FILE}")
+    # The files are kept only if what k3s will actually load is what Step 2
+    # would write — one post-condition, checked on both files, instead of
+    # looking for the right text somewhere in them (codex review: a
+    # commented-out argument or one naming auth.yaml.bak also contained it).
+    #
+    # config.yaml: the only key is a block list kube-apiserver-arg, whose one
+    # active entry is exactly authentication-config=<the auth.yaml checked
+    # below> — the file both scripts write. k3s also merges config.yaml.d/*.yaml,
+    # so a drop-in that passes apiserver arguments is a difference as well.
+    cfg_args=(); cfg_other=()
+    while IFS= read -r line; do
+      case "${line}" in
+        "arg "*) cfg_args+=("${line#arg }") ;;
+        *) cfg_other+=("${line}") ;;
+      esac
+    done < <(k3s_config_entries "${CFG_FILE}" || true)
+    if [[ ! -f "${CFG_FILE}" ]]; then
+      problems+=("${CFG_FILE} is missing, so k3s would not load ${AUTH_FILE}")
+    elif (( ${#cfg_other[@]} )); then
+      problems+=("${CFG_FILE} has more than the kube-apiserver-arg list bootstrap writes: ${cfg_other[*]}")
+    elif (( ${#cfg_args[@]} != 1 )) || [[ "${cfg_args[0]}" != "authentication-config=${AUTH_FILE}" ]]; then
+      problems+=("${CFG_FILE}'s active kube-apiserver-arg entries are [${cfg_args[*]}]; bootstrap writes exactly authentication-config=${AUTH_FILE}")
+    fi
+    for dropin in "${CFG_FILE}.d"/*.yaml; do
+      [[ -f "${dropin}" ]] || continue
+      grep -q 'kube-apiserver-arg' "${dropin}" 2>/dev/null &&
+        problems+=("${dropin} also passes kube-apiserver-arg, which k3s merges into ${CFG_FILE}")
+    done
+    # auth.yaml: apiVersion/kind/jwt and nothing else at the top — an
+    # `anonymous:` or authorization setting there changes what the apiserver
+    # accepts and is not something bootstrap writes.
+    auth_top_extra="$(awk '/^[^ \t#]/ { k = $0; sub(/:.*/, "", k); if (k != "apiVersion" && k != "kind" && k != "jwt") printf "%s ", k }' "${AUTH_FILE}" 2>/dev/null || true)"
+    [[ -z "${auth_top_extra}" ]] ||
+      problems+=("${AUTH_FILE} also sets ${auth_top_extra% } at the top, which bootstrap does not write")
+    grep -qxF "kind: AuthenticationConfiguration" "${AUTH_FILE}" 2>/dev/null ||
+      problems+=("${AUTH_FILE} is not a kind: AuthenticationConfiguration")
     # AUTH_API, not the default: an override this script accepted and wrote on
     # the first run must pass on the rerun (codex review).
     grep -qxF "apiVersion: ${AUTH_API}" "${AUTH_FILE}" 2>/dev/null ||
