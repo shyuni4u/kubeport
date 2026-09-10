@@ -15,7 +15,7 @@ func TestStreamPodLogs_ClosesOnCancel(t *testing.T) {
 	cs := fakecore.NewSimpleClientset()
 	ctx, cancel := context.WithCancel(context.Background())
 
-	ch, errCh := StreamPodLogs(ctx, cs, "default", []string{"p1"})
+	ch, errCh := StreamPodLogs(ctx, cs, "default", []string{"p1"}, time.Time{})
 	cancel()
 
 	deadline := time.After(time.Second)

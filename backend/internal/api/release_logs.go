@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gin-contrib/sse"
 	"github.com/gin-gonic/gin"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
@@ -39,6 +40,54 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 		writeError(c, http.StatusUnauthorized, "unauthenticated", "missing token")
 		return
 	}
+	// Everything that can be judged from the request alone is judged here,
+	// before a client is built or the cluster is asked anything. A malformed
+	// `?since=` used to cost an apiserver pod LIST before being turned away.
+	want := c.DefaultQuery("instance", "all")
+	// Pod names are capped at 253 characters by k8s; anything longer cannot
+	// match and is not worth scanning the instance list for.
+	if len(want) > 253 {
+		writeError(c, http.StatusBadRequest, "validation-error", "instance name too long")
+		return
+	}
+
+	// Where to pick up from. The browser sends `Last-Event-ID` by itself on its
+	// automatic reconnect — the reconnect nobody chooses, and the one that used
+	// to replay the whole container log into a pane it does not clear (#107).
+	// `?since=` is the explicit form for callers with no EventSource keeping
+	// track for them, and wins when both are present.
+	resumeFrom, err := parseResumePoint(c.Query("since"), c.GetHeader("Last-Event-ID"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "validation-error",
+			"since must be an RFC3339 timestamp")
+		return
+	}
+	// Resumable only when the request names an instance, never for `all` —
+	// even when `all` currently matches a single pod.
+	//
+	// One instant cannot stand for progress through several pods: they are
+	// merged with no ordering, so the last id belongs to whichever wrote most
+	// recently, and resuming all of them from it would silently skip what a
+	// slower pod had not reached. Nor can it survive the set changing: a
+	// single-replica release that rolls over matches one pod before and one
+	// after, and the departed pod's cursor would be applied to its replacement.
+	// A named instance is in the URL, means the same pod on every reconnect,
+	// and answers 404 if that pod is gone. A per-pod cursor for `all` is #172.
+	resumable := want != "all"
+	// An explicit `?since=` on an `all` stream is refused, not ignored. The
+	// caller wrote it, and answering with the whole log would look exactly like
+	// a working resume while every reconnect duplicated. `Last-Event-ID` stays
+	// ignored below: the browser attaches that on its own and keeps it when the
+	// reader switches from one instance to `all`.
+	if !resumable && c.Query("since") != "" {
+		writeError(c, http.StatusBadRequest, "validation-error",
+			"since requires a named instance; instance=all cannot resume")
+		return
+	}
+	if !resumable {
+		resumeFrom = time.Time{}
+	}
+
 	cli, err := h.deps.K8sFactory.NewWithToken(rel.ClusterApiUrl, rel.ClusterCaBundle.String, u.IDToken)
 	if err != nil {
 		internalError(c, "StreamReleaseLogs: k8s client", err)
@@ -50,13 +99,6 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 		return
 	}
 
-	want := c.DefaultQuery("instance", "all")
-	// k8s pod name limit is 253; reject anything longer than that to
-	// avoid wasted work scanning the instance list.
-	if len(want) > 253 {
-		writeError(c, http.StatusBadRequest, "validation-error", "instance name too long")
-		return
-	}
 	var pods []string
 	for _, ins := range instances {
 		if want == "all" || want == ins.Name {
@@ -76,7 +118,7 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	ch, errCh := cli.StreamLogs(streamCtx, rel.Namespace, pods)
+	ch, errCh := cli.StreamLogs(streamCtx, rel.Namespace, pods, resumeFrom)
 	ping := time.NewTicker(15 * time.Second)
 	defer ping.Stop()
 
@@ -84,10 +126,9 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	//
 	// Without this the stream just stopped, and the client could not tell that
 	// from a dropped connection — WHATWG gives EventSource no way to, so the
-	// browser reopened three seconds later and, since we open with no
-	// SinceTime, replayed the whole container log. A browser-initiated
-	// reconnect does not clear the pane either, so the same lines accumulated
-	// until they filled it. A finished Job's pod was enough (#162).
+	// browser reopened three seconds later, forever. On an `instance=all`
+	// stream, which has no resume point, each reopen replayed the whole
+	// container log. A finished Job's pod was enough (#162).
 	//
 	// The reason is ours, generic, and names nothing about the cluster — same
 	// rule as sseError (#108).
@@ -145,15 +186,111 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 				}
 				return end()
 			}
+			// SinceTime is whole seconds, so a resume gets back everything from
+			// the second the caller already had. Trim that overlap here: the
+			// exact instant asked for and the line's own nanoseconds are both
+			// known on this side, and doing it anywhere else would make every
+			// client responsible for deduplicating to be correct.
+			//
+			// A line with no stamp cannot be compared, so it goes through. A
+			// possible duplicate beats a line that silently disappears.
+			//
+			// At-or-before treats an equal stamp as already delivered, which is
+			// not strictly provable: two lines written in the same nanosecond
+			// would share an id and the second would be dropped unread. The
+			// alternative, strictly-before, resends the boundary line on every
+			// reconnect — a duplicate the reader sees at each network hiccup, to
+			// insure against a tie at nanosecond resolution on per-line stamps.
+			// Chosen this way deliberately. If ties turn out to happen, the fix
+			// is a position beside the time in the id, not flipping this.
+			if !resumeFrom.IsZero() && !line.At.IsZero() && !line.At.After(resumeFrom) {
+				return true
+			}
+			// The container's own clock, not ours. Stamping with time.Now() here
+			// dated every line to the moment we forwarded it, so opening a pod's
+			// logs replayed its whole history as having happened just now — 16
+			// minutes of startup all reading the same second (#131).
+			//
+			// Falling back to now for a line the kubelet could not stamp: the
+			// alternative is a line with no time, and the pane renders one per
+			// row. "Roughly now" is wrong by the age of the stream; nothing at
+			// all is wrong by more, and looks like a rendering bug.
+			at := line.At
+			if at.IsZero() {
+				at = time.Now()
+			}
 			body, _ := json.Marshal(map[string]any{
-				"time": time.Now().UnixMilli(),
+				"time": at.UnixMilli(),
 				"pod":  line.Pod,
 				"text": line.Text,
 			})
-			c.SSEvent("log", string(body))
+			// The id is what makes the resume above possible: the browser stores
+			// the last one it saw and hands it back on reconnect. Full
+			// nanosecond precision, because whole seconds would make the trim
+			// either drop real lines or keep duplicates.
+			//
+			// Only a line the kubelet actually stamped gets one. `at` may be a
+			// display fallback of time.Now(), and putting that in the id would
+			// tell the browser it had read up to *now* — so a drop right after
+			// an unstamped line would skip whatever history was still coming.
+			// A frame with no id leaves the browser's cursor where it was,
+			// which is exactly right.
+			//
+			// And only when this stream follows one pod. See resumable().
+			ev := sse.Event{Event: "log", Data: string(body)}
+			if resumable && !line.At.IsZero() {
+				// UTC, nine fractional digits, always. RFC3339Nano trims trailing
+				// zeros and keeps the kubelet's offset, so ids varied in length
+				// and zone — "…36.1Z" sorts after "…36.123Z" as a string though
+				// it is earlier, and a non-browser caller picking the max id as
+				// its cursor would resume past lines it never read. Fixed width
+				// in one zone makes string order and time order the same thing.
+				ev.Id = line.At.UTC().Format(resumeIDLayout)
+			}
+			c.Render(-1, ev)
 			return true
 		}
 	})
+}
+
+// resumeIDLayout is the exact shape of a log frame's SSE id: RFC3339 in UTC
+// with exactly nine fractional digits. parseResumePoint still accepts any
+// RFC3339 on the way in; this only fixes what the server hands out.
+const resumeIDLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
+// parseResumePoint reads the point a caller wants to pick up from.
+//
+// An empty result means "from the beginning", which is what a first open wants
+// and what any caller gets by saying nothing.
+//
+// The two sources are treated differently when they do not parse, because they
+// come from different places.
+//
+// `?since=` is something the caller wrote. A value we cannot read is their
+// mistake, and answering it with the whole log would look like it worked while
+// they went on sending something ignored — so it is an error.
+//
+// `Last-Event-ID` is something no caller ever typed. The browser attaches it
+// by itself on every automatic reconnect, from whatever id it last stored, and
+// nothing on the page can clear it. If that value is ever unreadable — an id
+// format that has changed since the tab loaded (a per-pod cursor is planned,
+// #172), a proxy or an extension that rewrote it — a 400 would repeat on every
+// reconnect for as long as the tab stays open, and since a non-2xx response
+// makes EventSource give up, the reader is left with a log pane that is dead
+// and no way to revive it short of a reload. Starting over costs a replay; a
+// lockout costs the pane. So the header degrades to "from the beginning".
+func parseResumePoint(since, lastEventID string) (time.Time, error) {
+	if since != "" {
+		return time.Parse(time.RFC3339Nano, since)
+	}
+	if lastEventID == "" {
+		return time.Time{}, nil
+	}
+	at, err := time.Parse(time.RFC3339Nano, lastEventID)
+	if err != nil {
+		return time.Time{}, nil
+	}
+	return at, nil
 }
 
 // clusterError answers a cluster call that failed *before* the stream opened,

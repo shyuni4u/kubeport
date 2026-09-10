@@ -355,3 +355,49 @@ describe("LogsPanel in-stream termination", () => {
     expect(screen.getByText("연결 중")).toBeInTheDocument();
   });
 });
+
+// #107 in the view most readers actually use. The backend resumes a named
+// instance from Last-Event-ID, but `instance=all` — the default — emits no ids,
+// because one cursor cannot stand for several pods. So a browser reconnect on
+// `all` replays the container log from the top, and without this the replay
+// piled onto the lines already on screen: every one of them twice, then three
+// times, with each network hiccup.
+describe("LogsPanel browser reconnect", () => {
+  it("clears the pane before an `all` stream replays", () => {
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+
+    reopen();
+    emitLog("p1", "first round");
+    expect(screen.getByText(/first round/)).toBeInTheDocument();
+
+    dropConnection();
+    reopen();
+
+    expect(screen.queryByText(/first round/)).not.toBeInTheDocument();
+  });
+
+  // The first open is not a reconnect. Clearing there would race the lines of
+  // a stream that has only just started.
+  it("keeps what arrived after the first open", () => {
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+
+    reopen();
+    emitLog("p1", "arrived after the first open");
+
+    expect(screen.getByText(/arrived after the first open/)).toBeInTheDocument();
+  });
+
+  // A named instance resumes, so the server sends only what came after the
+  // cursor. Clearing would throw away exactly the lines the resume exists to
+  // keep.
+  it("keeps the pane on a named instance, which resumes instead", () => {
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} initialInstance="p1" />);
+
+    reopen();
+    emitLog("p1", "before the drop");
+    dropConnection();
+    reopen();
+
+    expect(screen.getByText(/before the drop/)).toBeInTheDocument();
+  });
+});
