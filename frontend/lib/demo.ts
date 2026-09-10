@@ -1,3 +1,5 @@
+import { RELEASE_NAME_MAX_LENGTH } from "./release-name";
+
 export function isDemoEmail(
   email: string | null | undefined,
   domain: string = process.env.DEMO_EMAIL_DOMAIN ?? "demo.kubeport",
@@ -21,11 +23,23 @@ export function demoNamespaceFor(
 }
 
 /** Appends a 4-char lowercase suffix for demo users so two visitors deploying
- *  the same template with the default name don't collide on (cluster, ns, name). */
+ *  the same template with the default name don't collide on (cluster, ns, name).
+ *
+ *  The result prefills the deploy form, which accepts only a lowercase DNS-1123
+ *  label (#182). Template names are not held to that — nothing validates their
+ *  format — so the template name is folded into one first. Otherwise a template
+ *  called `WebApp` would open the form on a red error the visitor never typed. */
 export function withDemoSuffix(name: string, isDemo: boolean, rand: () => number = Math.random): string {
   if (!isDemo) return name;
   const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
   let s = "";
   for (let i = 0; i < 4; i++) s += alphabet[Math.floor(rand() * alphabet.length)];
-  return `${name}-${s}`;
+  const base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    // Room for "-" and the suffix.
+    .slice(0, RELEASE_NAME_MAX_LENGTH - (s.length + 1))
+    .replace(/-+$/, "");
+  return base ? `${base}-${s}` : s;
 }

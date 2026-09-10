@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { RELEASE_NAME_MAX_LENGTH, releaseNameProblem } from "@/lib/release-name";
 import type { UISpec } from "@/lib/ui-spec-to-zod";
 
 type Props = {
@@ -329,6 +330,9 @@ export function DeployClient({
     rbac.cluster === meta.cluster &&
     rbac.namespace === debouncedNamespace;
 
+  // Only a new release has a name field; an update keeps the one it has.
+  const nameProblem = isUpdate ? null : releaseNameProblem(meta.name);
+
   const submit = useCallback(
     async (values: Record<string, unknown>) => {
       setSubmitting(true);
@@ -407,11 +411,31 @@ export function DeployClient({
                 placeholder={t("namePlaceholder")}
                 value={meta.name}
                 required
+                maxLength={RELEASE_NAME_MAX_LENGTH}
+                aria-invalid={nameProblem === "format" || nameProblem === "tooLong"}
+                aria-describedby={nameProblem ? "deploy-name-message" : undefined}
                 onChange={(e) => {
                   clearErr();
                   setMeta({ ...meta, name: e.target.value });
                 }}
               />
+              {/*
+                The name used to be checked only by the API, so a name the
+                help text already ruled out went through and came back as a
+                400, and an empty one just switched the button off with no
+                reason given (#182). An empty name is where the form starts,
+                so it gets a quiet hint rather than an error — but it is also
+                the only thing saying why the button is off.
+              */}
+              {nameProblem === "empty" ? (
+                <p id="deploy-name-message" className="text-xs text-muted-foreground">
+                  {t("nameRequired")}
+                </p>
+              ) : nameProblem ? (
+                <p id="deploy-name-message" className="text-sm text-destructive">
+                  {t(nameProblem === "tooLong" ? "nameTooLong" : "nameInvalid")}
+                </p>
+              ) : null}
             </div>
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-1">
@@ -497,7 +521,7 @@ export function DeployClient({
             submitting ||
             rbacBlocked ||
             // The namespace can now start empty (#179), and the API requires one.
-            (!isUpdate && (!meta.cluster || !meta.name.trim() || !meta.namespace.trim()))
+            (!isUpdate && (!meta.cluster || nameProblem !== null || !meta.namespace.trim()))
           }
           onChange={handleValuesChange}
           onSubmit={submit}
