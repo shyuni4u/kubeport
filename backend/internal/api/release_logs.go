@@ -138,7 +138,12 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
+	// Not reused after the stream, because of the write deadline below: with no
+	// server WriteTimeout, net/http never clears a deadline set on a connection,
+	// so a keep-alive request that came next would inherit a deadline that has
+	// already passed and fail. Closing costs one handshake per stream, and
+	// streams are long.
+	c.Writer.Header().Set("Connection", "close")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 
 	// Bounded by a lifetime as well as by the caller leaving (#169).
@@ -159,6 +164,17 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	// replays into a cleared pane, the same as after any other drop.
 	streamCtx, cancel := context.WithTimeout(ctx, h.streamLifetime)
 	defer cancel()
+	// The context only ends a handler that gets back to its select. One stuck
+	// in a write does not: a reader that keeps the connection but stops reading
+	// fills the socket buffers, the next write blocks in the kernel, and
+	// cancelling a context does not interrupt it. So the lifetime is also a
+	// deadline on writing. When it passes, the blocked write fails, net/http
+	// cancels the request context, and the loop below returns with its slot.
+	// A writer that cannot take a deadline — a test recorder — just goes
+	// without.
+	if deadline, ok := streamCtx.Deadline(); ok {
+		_ = http.NewResponseController(c.Writer).SetWriteDeadline(deadline)
+	}
 
 	ch, errCh := cli.StreamLogs(streamCtx, rel.Namespace, pods, resumeFrom)
 	ping := time.NewTicker(15 * time.Second)

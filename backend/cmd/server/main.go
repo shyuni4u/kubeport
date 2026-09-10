@@ -128,12 +128,13 @@ func main() {
 // only the handshake, and IdleTimeout only keep-alive sockets between
 // requests; neither touches a response in progress.
 //
-// IdleTimeout is longer than the proxy's on purpose. Traefik keeps an idle
-// upstream connection to this process for up to 90s (serversTransport
-// forwardingTimeouts.idleConnTimeout, its default; production does not set
-// it). If this side closed an idle socket first, Traefik could hand that
-// socket the next request just as it closed, and the request would come back
-// as a 502. At 120s the proxy always retires the connection before we do.
+// IdleTimeout is longer than the client's on purpose. The only client is the
+// frontend BFF — the chart's Ingress sends every request to it, and this
+// process has no external route — which calls us with Node's fetch (undici),
+// whose idle keep-alive sockets time out after 4s by default. If this side
+// closed an idle socket first, the BFF could send the next request on it just
+// as it closed and get a reset instead of a response. At 120s the client
+// always retires the connection before we do.
 func newHTTPServer(addr string, handler http.Handler) *http.Server {
 	return &http.Server{
 		Addr:              addr,
@@ -156,6 +157,10 @@ func getenvInt(k string, def int) int {
 		if err == nil {
 			return n
 		}
+		// Same rule as getenvDuration: a typo falls back rather than failing
+		// startup, but says so — otherwise an operator who set a knob has no
+		// sign it was ignored.
+		log.Printf("WARN: %s=%q is not an integer (%v); using %d", k, v, err, def)
 	}
 	return def
 }

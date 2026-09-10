@@ -327,6 +327,23 @@ away from printing your encryption key into a terminal or a CI log.
 | nginx-ingress (any) | `nginx` | varies |
 | kind / minikube (CI smoke) | `nginx` (or disable) | `standard` |
 
+### Backend tuning (optional)
+
+Every one of these may be left empty; the backend then uses the default shown.
+
+| Value | Default | What it does |
+|---|---|---|
+| `backend.openapiCacheMax` | `64` | Cluster OpenAPI documents kept in memory. |
+| `backend.sessionReapInterval` | `""` (1h) | How often expired sessions are deleted (Go duration; under 1m is clamped to 1m). |
+| `backend.logStreamsPerCaller` | `""` (16) | Log streams one caller may hold open at once; the next one gets `429 too-many-streams`. Empty, 0, negative or non-integer all mean the default — there is no "unlimited". |
+| `backend.logStreamMaxLifetime` | `""` (1h) | How long one log stream stays open before the browser reconnects and is authorized again (Go duration). Also the longest a revoked permission keeps receiving logs. |
+
+**Demo installs:** the Dex demo accounts are shared by every visitor, so
+`backend.logStreamsPerCaller` is effectively how many log panes can be open at
+once per demo account. The web UI closes a pane's stream after its tab has been
+hidden for five minutes. Raise the value if visitors report "Too many log panes
+are open".
+
 ## Schema sync
 
 The chart embeds a copy of `backend/migrations/schema.hcl` at
