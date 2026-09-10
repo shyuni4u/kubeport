@@ -19,7 +19,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { termLabel } from "@/lib/kube-term-map";
 import { RELEASE_NAME_MAX_LENGTH, releaseNameProblem } from "@/lib/release-name";
+import { useKubeTermsStore } from "@/stores/kube-terms-store";
 import type { UISpec } from "@/lib/ui-spec-to-zod";
 
 type Props = {
@@ -96,6 +98,10 @@ export function DeployClient({
   const router = useRouter();
   const t = useTranslations("deploy");
   const isUpdate = Boolean(updateReleaseId);
+  // The namespace label follows the terms switch like the permission card
+  // under it: 구역 by default, Namespace with Kubernetes terms on (#250).
+  const kube = useKubeTermsStore((s) => s.showKubeTerms);
+  const tTerms = useTranslations("releases.terms");
 
   // Map a failed response to a non-technical, localized message. The raw
   // backend text is preserved only as the Error `cause` (for logs / debugging)
@@ -484,7 +490,7 @@ export function DeployClient({
             <div className="col-span-2 flex flex-col gap-1">
               <div className="flex items-center gap-1">
                 <label htmlFor="deploy-namespace" className="text-sm font-medium">
-                  {t("namespaceLabel")}
+                  {termLabel("namespace", kube, (k) => tTerms(k))}
                 </label>
                 <HelpHint text={t("namespaceHelp")} />
               </div>

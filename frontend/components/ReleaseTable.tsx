@@ -108,7 +108,9 @@ export function ReleaseTable({ rows }: { rows: ReleaseRow[] }) {
           <tr>
             <th className="px-4 py-3 text-left font-medium">{t("name")}</th>
             <th className="px-4 py-3 text-left font-medium">{t("template")}</th>
-            <th className="px-4 py-3 text-left font-medium">{t("namespace")}</th>
+            <th className="px-4 py-3 text-left font-medium">
+              {t("namespace")}
+            </th>
           </tr>
         </thead>
         <tbody>

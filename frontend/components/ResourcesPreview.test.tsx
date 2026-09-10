@@ -63,7 +63,7 @@ metadata:
   name: web
 `;
     render(<ResourcesPreview renderedYaml={yaml} pending={false} />);
-    fireEvent.click(screen.getByRole("switch", { name: "원본 k8s 용어 보기" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Kubernetes 용어로 보기" }));
     expect(screen.getByText("apps/v1 Deployment")).toBeInTheDocument();
     expect(screen.queryByText("앱")).not.toBeInTheDocument();
     expect(useKubeTermsStore.getState().touched).toBe(true);
