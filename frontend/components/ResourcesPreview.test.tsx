@@ -1,9 +1,14 @@
-import { describe, it, expect } from "vitest";
-import { screen } from "@testing-library/react";
+import { describe, it, expect, beforeEach } from "vitest";
+import { fireEvent, screen } from "@testing-library/react";
 import { renderWithIntl as render } from "@/tests/intl-test-utils";
 import { ResourcesPreview } from "./ResourcesPreview";
+import { useKubeTermsStore } from "@/stores/kube-terms-store";
 
 describe("ResourcesPreview", () => {
+  beforeEach(() => {
+    useKubeTermsStore.setState({ showKubeTerms: false, touched: false });
+  });
+
   it("shows placeholder when renderedYaml is null and not pending", () => {
     render(<ResourcesPreview renderedYaml={null} pending={false} />);
     expect(
@@ -28,7 +33,8 @@ describe("ResourcesPreview", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders each kind + name for a valid multi-doc YAML", () => {
+  // #39 — a user met "Deployment" and "Service" here and nowhere else.
+  it("names each resource in plain words by default", () => {
     const yaml = `apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -40,23 +46,61 @@ metadata:
   name: web-svc
 `;
     render(<ResourcesPreview renderedYaml={yaml} pending={false} />);
-    expect(screen.getByText("Deployment")).toBeInTheDocument();
+    expect(screen.getByText("앱")).toBeInTheDocument();
     expect(screen.getByText("web")).toBeInTheDocument();
-    expect(screen.getByText("Service")).toBeInTheDocument();
+    expect(screen.getByText("내부 주소")).toBeInTheDocument();
     expect(screen.getByText("web-svc")).toBeInTheDocument();
-    // Two items listed
+    expect(screen.queryByText("Deployment")).not.toBeInTheDocument();
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
 
-  it("shows (unnamed) when metadata.name is missing", () => {
+  // An admin reading raw terms wants what the manifest says: a kind name alone
+  // cannot tell batch/v1 from a CRD.
+  it("shows apiVersion and kind once the raw-terms switch is on", () => {
+    const yaml = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+`;
+    render(<ResourcesPreview renderedYaml={yaml} pending={false} />);
+    fireEvent.click(screen.getByRole("switch", { name: "원본 k8s 용어 보기" }));
+    expect(screen.getByText("apps/v1 Deployment")).toBeInTheDocument();
+    expect(screen.queryByText("앱")).not.toBeInTheDocument();
+    expect(useKubeTermsStore.getState().touched).toBe(true);
+  });
+
+  it("keeps a kind with no plain name as it is", () => {
+    const yaml = `apiVersion: example.com/v1
+kind: Widget
+metadata:
+  name: w
+`;
+    render(<ResourcesPreview renderedYaml={yaml} pending={false} />);
+    expect(screen.getByText("Widget")).toBeInTheDocument();
+  });
+
+  // Knative's Service is not a core Service; "내부 주소" would describe
+  // something it is not.
+  it("keeps a CRD that reuses a core kind name as written", () => {
+    const yaml = `apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: hello
+`;
+    render(<ResourcesPreview renderedYaml={yaml} pending={false} />);
+    expect(screen.getByText("Service")).toBeInTheDocument();
+    expect(screen.queryByText("내부 주소")).not.toBeInTheDocument();
+  });
+
+  it("says the resource has no name, in the page's language, when metadata.name is missing", () => {
     const yaml = `apiVersion: v1
 kind: ConfigMap
 data:
   foo: bar
 `;
     render(<ResourcesPreview renderedYaml={yaml} pending={false} />);
-    expect(screen.getByText("ConfigMap")).toBeInTheDocument();
-    expect(screen.getByText("(unnamed)")).toBeInTheDocument();
+    expect(screen.getByText("설정")).toBeInTheDocument();
+    expect(screen.getByText("(이름 없음)")).toBeInTheDocument();
   });
 
   it("skips docs without kind", () => {
@@ -70,7 +114,7 @@ metadata:
   name: real
 `;
     render(<ResourcesPreview renderedYaml={yaml} pending={false} />);
-    expect(screen.getByText("Secret")).toBeInTheDocument();
+    expect(screen.getByText("비밀값")).toBeInTheDocument();
     expect(screen.getByText("real")).toBeInTheDocument();
     expect(screen.queryByText("no-kind")).not.toBeInTheDocument();
     expect(screen.getAllByRole("listitem")).toHaveLength(1);

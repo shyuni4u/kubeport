@@ -38,7 +38,7 @@ describe("RBACCheckPanel verdict timing", () => {
     const record = () => {
       commits.push({
         verdict: document.querySelector("[data-testid=verdict]")?.textContent ?? "",
-        deniedShown: document.body.textContent?.includes("권한이 거부되었습니다") ?? false,
+        deniedShown: document.body.textContent?.includes("만들 권한이 없습니다") ?? false,
       });
     };
 

@@ -453,10 +453,12 @@ useEffect(() => {
 
 - 상태: 작은 Zustand 스토어 `stores/kube-terms-store.ts` (세션 단위, persist 안 함)
   ```ts
-  { showKubeTerms: boolean, toggle: () => void }
+  { showKubeTerms: boolean, touched: boolean, toggle: () => void, applyDefault: (show: boolean) => void }
   ```
 - ON: 라벨 `인스턴스` → `Pod`, `접근 URL` → `Service DNS`, `재시작` → `Restart count`
 - 번역 맵은 `lib/kube-term-map.ts` 로 분리
+- 시작값은 역할로 정한다 (#39): 서버 컴포넌트가 `roleFromGroups(me.groups)` 로 판정해 `KubeTermsDefault` 에 넘기고, admin 은 ON·user 는 OFF. 사용자가 토글을 한 번 누르면(`touched`) 그 뒤로는 기본값을 적용하지 않는다.
+- 적용 화면: 릴리스 상세 헤더, 배포 폼의 리소스 미리보기·권한 확인 패널. kind 이름은 `messages/*.json` 의 `kinds.*` 로 번역하고(`lib/kube-kinds.ts`), 목록 밖 kind 는 원문 그대로 둔다.
 
 ### 6.6 업데이트 플로우
 

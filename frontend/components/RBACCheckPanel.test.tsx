@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, waitFor, cleanup } from "@testing-library/react";
 import { renderWithIntl as render } from "@/tests/intl-test-utils";
 import { RBACCheckPanel } from "./RBACCheckPanel";
+import { useKubeTermsStore } from "@/stores/kube-terms-store";
+
+const HINT = "클러스터와 구역을 정하면 여기에 만들 수 있는지 확인합니다.";
+const ALL_ALLOWED = "위 목록을 모두 만들 수 있습니다.";
 
 function okResponse(body: { allowed: boolean; reason?: string }): Response {
   return {
@@ -22,6 +26,7 @@ function httpResponse(status: number): Response {
 describe("RBACCheckPanel", () => {
   beforeEach(() => {
     vi.useRealTimers();
+    useKubeTermsStore.setState({ showKubeTerms: false, touched: false });
   });
 
   afterEach(() => {
@@ -34,9 +39,7 @@ describe("RBACCheckPanel", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     render(<RBACCheckPanel cluster="" namespace="default" kinds={["Deployment"]} />);
-    expect(
-      screen.getByText("클러스터/네임스페이스를 입력하면 권한을 확인합니다."),
-    ).toBeInTheDocument();
+    expect(screen.getByText(HINT)).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -44,9 +47,7 @@ describe("RBACCheckPanel", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     render(<RBACCheckPanel cluster="dev" namespace="" kinds={["Deployment"]} />);
-    expect(
-      screen.getByText("클러스터/네임스페이스를 입력하면 권한을 확인합니다."),
-    ).toBeInTheDocument();
+    expect(screen.getByText(HINT)).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -54,9 +55,7 @@ describe("RBACCheckPanel", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     render(<RBACCheckPanel cluster="dev" namespace="default" kinds={[]} />);
-    expect(
-      screen.getByText("클러스터/네임스페이스를 입력하면 권한을 확인합니다."),
-    ).toBeInTheDocument();
+    expect(screen.getByText(HINT)).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -71,17 +70,21 @@ describe("RBACCheckPanel", () => {
       />,
     );
     await waitFor(() => {
-      expect(screen.getByText("모든 리소스 생성 권한 확인됨.")).toBeInTheDocument();
+      expect(screen.getByText(ALL_ALLOWED)).toBeInTheDocument();
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("shows the check scope (verb · namespace) in the header", async () => {
+  // #39 — "create · team-a" was the one line of the panel still in k8s words.
+  it("shows the check scope in plain words in the header", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => okResponse({ allowed: true })));
     render(<RBACCheckPanel cluster="dev" namespace="team-a" kinds={["Deployment"]} />);
-    expect(screen.getByText("create · team-a")).toBeInTheDocument();
+    expect(screen.getByText("team-a 구역에 만들기")).toBeInTheDocument();
+    expect(screen.queryByText("create · team-a")).not.toBeInTheDocument();
   });
 
+  // "내부 주소: 권한이 거부되었습니다" read as a blocked connection; the row
+  // has to say it is creating that thing that is not allowed.
   it("renders a plain-language denied row (raw reason only as title) plus next step", async () => {
     const raw = 'deployments.apps is forbidden: User "u" cannot create resource';
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -101,13 +104,13 @@ describe("RBACCheckPanel", () => {
     );
     // The icon is a lucide <svg> sibling since #114, so the sentence is its
     // own element and the admin-only raw reason stays on the <li>.
-    const row = await screen.findByText("Service: 권한이 거부되었습니다.");
+    const row = await screen.findByText("내부 주소 — 만들 권한이 없습니다.");
     expect(row.closest("li")).toHaveAttribute("title", raw);
     expect(screen.queryByText(/is forbidden/)).not.toBeInTheDocument();
     expect(screen.getByText(/이 상태로는 배포가 실패합니다/)).toBeInTheDocument();
     // Deployment (allowed) should not be in the denied list.
-    expect(screen.queryByText(/Deployment:/)).not.toBeInTheDocument();
-    expect(screen.queryByText("모든 리소스 생성 권한 확인됨.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^앱 —/)).not.toBeInTheDocument();
+    expect(screen.queryByText(ALL_ALLOWED)).not.toBeInTheDocument();
   });
 
   it("renders HTTP status sentence when server returns 403", async () => {
@@ -118,7 +121,7 @@ describe("RBACCheckPanel", () => {
     );
     await waitFor(() => {
       expect(
-        screen.getByText("Deployment: 권한 확인에 실패했습니다 (HTTP 403)."),
+        screen.getByText("앱 — 권한 확인에 실패했습니다 (HTTP 403)."),
       ).toBeInTheDocument();
     });
   });
@@ -132,10 +135,10 @@ describe("RBACCheckPanel", () => {
       <RBACCheckPanel cluster="dev" namespace="default" kinds={["Deployment"]} />,
     );
     const row = await screen.findByText(
-      "Deployment: 권한 확인에 실패했습니다 (HTTP 0).",
+      "앱 — 권한 확인에 실패했습니다 (HTTP 0).",
     );
     expect(row.closest("li")).toHaveAttribute("title", "network down");
-    expect(screen.queryByText(/Deployment: network down/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/network down/)).not.toBeInTheDocument();
   });
 
   it("reports unknown kinds as not-checked instead of allowed, without fetching them", async () => {
@@ -145,9 +148,9 @@ describe("RBACCheckPanel", () => {
       <RBACCheckPanel cluster="dev" namespace="default" kinds={["TotallyMadeUpCRD"]} />,
     );
     await waitFor(() => {
-      expect(screen.getByText(/확인하지 못한 종류: TotallyMadeUpCRD/)).toBeInTheDocument();
+      expect(screen.getByText(/확인하지 못한 항목: TotallyMadeUpCRD/)).toBeInTheDocument();
     });
-    expect(screen.queryByText("모든 리소스 생성 권한 확인됨.")).not.toBeInTheDocument();
+    expect(screen.queryByText(ALL_ALLOWED)).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -162,10 +165,10 @@ describe("RBACCheckPanel", () => {
       />,
     );
     await waitFor(() => {
-      expect(screen.getByText("모든 리소스 생성 권한 확인됨.")).toBeInTheDocument();
+      expect(screen.getByText(ALL_ALLOWED)).toBeInTheDocument();
     });
     expect(
-      screen.getByText(/확인하지 못한 종류: TotallyMadeUpCRD, OtherCRD/),
+      screen.getByText(/확인하지 못한 항목: TotallyMadeUpCRD, OtherCRD/),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -209,7 +212,7 @@ describe("RBACCheckPanel", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("모든 리소스 생성 권한 확인됨.")).toBeInTheDocument();
+      expect(screen.getByText(ALL_ALLOWED)).toBeInTheDocument();
     });
 
     // Now resolve the stale call with a denial. UI must stay on success state.
@@ -218,8 +221,47 @@ describe("RBACCheckPanel", () => {
     // Give React a tick to process the resolved promise (if it were wrongly committed).
     await new Promise((r) => setTimeout(r, 20));
 
-    expect(screen.getByText("모든 리소스 생성 권한 확인됨.")).toBeInTheDocument();
+    expect(screen.getByText(ALL_ALLOWED)).toBeInTheDocument();
     expect(screen.queryByText(/stale denial/)).not.toBeInTheDocument();
+  });
+});
+
+// #39 — an admin who turns raw terms on fixes RoleBindings with what the review
+// asked k8s: the verb, group/resource, and k8s's own reason.
+describe("RBACCheckPanel with raw k8s terms on", () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+    useKubeTermsStore.setState({ showKubeTerms: true, touched: true });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the raw verb and namespace in the header", () => {
+    vi.stubGlobal("fetch", vi.fn(async () => okResponse({ allowed: true })));
+    render(<RBACCheckPanel cluster="dev" namespace="team-a" kinds={["Deployment"]} />);
+    expect(screen.getByText("create · team-a")).toBeInTheDocument();
+  });
+
+  it("names the denied review as verb and group/resource, with k8s's reason visible", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => okResponse({ allowed: false, reason: "RBAC: no rule for deployments.apps" })),
+    );
+    render(<RBACCheckPanel cluster="dev" namespace="default" kinds={["Deployment"]} />);
+    expect(
+      await screen.findByText("create apps/deployments — 만들 권한이 없습니다."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("RBAC: no rule for deployments.apps")).toBeInTheDocument();
+  });
+
+  it("leaves the group out for a core resource", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => okResponse({ allowed: false, reason: "" })));
+    render(<RBACCheckPanel cluster="dev" namespace="default" kinds={["Service"]} />);
+    expect(await screen.findByText("create services — 만들 권한이 없습니다.")).toBeInTheDocument();
   });
 });
 
@@ -229,6 +271,7 @@ describe("RBACCheckPanel", () => {
 describe("RBACCheckPanel onResult", () => {
   beforeEach(() => {
     vi.useRealTimers();
+    useKubeTermsStore.setState({ showKubeTerms: false, touched: false });
   });
 
   afterEach(() => {

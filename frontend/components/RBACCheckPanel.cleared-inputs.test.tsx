@@ -30,7 +30,7 @@ describe("RBACCheckPanel with inputs cleared mid-check", () => {
 
     expect(screen.queryByText("확인 중…")).not.toBeInTheDocument();
     expect(
-      screen.getByText("클러스터/네임스페이스를 입력하면 권한을 확인합니다."),
+      screen.getByText("클러스터와 구역을 정하면 여기에 만들 수 있는지 확인합니다."),
     ).toBeInTheDocument();
   });
 });
