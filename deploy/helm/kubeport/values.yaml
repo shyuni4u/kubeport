@@ -271,6 +271,10 @@ demo:
   # 48-hour gap instead of 12 — which is exactly why #148 asks for the last
   # successful seed time on /healthz: nothing else can tell a skipped cycle
   # from a healthy one.
+  #
+  # .github/workflows/uptime-ping.yml fails when catalog.last_seed is older
+  # than 26h, which assumes this daily schedule. Change that threshold (to the
+  # new interval plus 2h) in the same PR as this value.
   resetSchedule: "0 21 * * *"
   # The banner derives its "next reset" from this same value, and reads only
   # `<minute> <hour|*/N|comma list> * * *`. Forms k8s accepts but the banner

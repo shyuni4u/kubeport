@@ -480,6 +480,14 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
   (`KBP_DEMO_ALLOW_TEMPLATE_CREATE`); leave it off for a public demo, since
   templates demo visitors author outlive a reset once someone deploys from
   them. The reset CronJob does not need it.
+- `demo.publicHealthCatalog=true` (off by default) makes the unauthenticated
+  `/healthz?verbose=1` report `catalog.templates` (demo-owned published
+  templates) and `catalog.last_seed` (UTC, the oldest of their `created_at`).
+  Alert when `templates` is 0 (a reset wiped and failed to re-seed) or
+  `last_seed` is older than your `demo.resetSchedule` interval plus about 2h
+  (a reset did not run, or skipped the catalog because a non-demo release
+  references a demo template). Leave it off unless the install is a public
+  demo — it tells anyone the catalog's size.
 
 Both demo `Role`s enumerate workload resources explicitly — neither can touch
 the guardrails (`resourcequotas`, `limitranges`, `networkpolicies`) or use

@@ -267,13 +267,23 @@ ssh -i "$KEY" ubuntu@168.107.55.95 \
   이 값이 빠지면 `/healthz?verbose=1` 이 카탈로그 수를 내지 않고,
   `uptime-ping.yml` 이 10분 안에 "카탈로그 필드 없음" 으로 실패한다 — 데모가 멀쩡해도.
   그건 오탐이 아니라 설계된 신호다(감시가 꺼진 것을 감시가 알린다). 배포 직후 확인할 것.
-- **`catalog.last_seed` 경보 (#148)** — 같은 응답의 `last_seed` 가 **26시간보다 오래되면** `uptime-ping.yml` 이
-  실패한다. 리셋은 preflight 가 실패하면 아무것도 지우지 않으므로(#140) 템플릿 수는 초록인 채로 남고,
-  건너뛴 사이클은 이 값으로만 보인다. 뜨면 마지막 리셋 Job 의 로그에서 `preflight:` 줄로 원인을 보고,
+- **`catalog.last_seed` 경보 (#148)** — 같은 응답의 `last_seed`(데모 소유 published 템플릿의 가장 오래된
+  `created_at`) 가 **26시간보다 오래되면** `uptime-ping.yml` 이 실패한다. 템플릿 수는 초록인데 리셋만 안 된
+  상태는 이 값으로만 보인다. 뜨면 이 순서로 원인을 찾는다:
+  1. **Job 이 생기기는 했나** — `kubectl -n kubeport get cronjob kubeport-demo-reset` 의 `SUSPEND`·`LAST SCHEDULE`,
+     `kubectl -n kubeport get job -l app.kubernetes.io/instance=kubeport`.
+  2. **실패한 Job 이면** `kubectl -n kubeport logs job/<잡> -c preflight`(Dex·API·DB — 아무것도 안 지웠다, #140)
+     → `-c wipe-k8s`(kubectl·RBAC — DB 는 그대로) → `-c seed` 순으로 첫 에러 줄.
+  3. **Job 이 성공(`seed-demo: done`)했는데 경보가 그대로면** `-c seed` 로그의
+     `WARN: reset: … skipped — referenced by non-demo releases`. 데모가 아닌 릴리스가 데모 템플릿 버전을
+     **하나라도** 참조하면 리셋의 `template_versions`·`templates` DELETE 가 문장째 건너뛰어 **데모 카탈로그
+     전체가** 남는다(데모가 아닌 admin 은 데모 카탈로그를 보고 배포할 수 있다). 이때는 수동 리셋을 돌려도
+     안 풀린다 — 그 릴리스를 먼저 지운다.
+
   원인을 치운 뒤 §5 "리셋" 의 수동 실행을 한 번 돌리면 값이 새로 찍혀 경보가 풀린다.
-  값은 데모 소유 published 템플릿의 가장 오래된 `created_at` 이다 — 데모 템플릿을 실제 사용자 릴리스가
-  참조해 리셋이 그 행을 못 지우면 값이 계속 오래돼 보이는데, 그것도 누가 봐야 할 상태다.
-  응답에 이 필드가 아예 없으면 #148 이전 백엔드라 경고만 남기고 통과한다.
+  필드가 없거나 형식이 틀려도 실패한다(감시가 꺼진 것을 감시가 알린다) — #148 머지 직후 배포가 끝나기 전의
+  한두 번은 그래서 난다. 임계값은 하루 1회 리셋 기준이라 `demo.resetSchedule` 을 바꾸면 워크플로의
+  `26 * 3600` 도 새 주기 + 2시간으로 같이 바꾼다.
 - ⚠️ **시드 릴리스 구성이 바뀐 버전을 올렸으면 롤아웃 직후 데모 리셋을 한 번 수동 실행한다.**
   해당: #161 (`web-app-demo` → `app-with-config-demo`). 안 하면 다음 21:00 UTC 까지 옛
   `web-app-demo` 가 `Deployment/web`·`Service/web`·`ConfigMap/web-config` 를 쥐고 있어
@@ -470,7 +480,8 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
 - **리셋**: CronJob `kubeport-demo-reset`, **하루 한 번 21:00 UTC = 06:00 KST**
   (`demo.resetSchedule`). 한국 시간 새벽이라 방문자 작업을 뺏을 확률이 가장 낮다. 6시간
   주기였을 때와 달리 **실패해도 몇 시간 뒤 자동 재시도가 없다** — 한 번 건너뛰면 이틀 공백이다
-  ([#148](https://github.com/shyuni4u/kubeport/issues/148)). 수동 실행은 잡 이름을 매번 다르게 준다 —
+  ([#148](https://github.com/shyuni4u/kubeport/issues/148) — `uptime-ping.yml` 이 `catalog.last_seed` 가 26시간을
+  넘으면 알린다. 주기를 바꾸면 그 임계값도 새 주기 + 2시간으로 같이 바꾼다). 수동 실행은 잡 이름을 매번 다르게 준다 —
   성공한 수동 잡은 CronJob 의 `successfulJobsHistoryLimit` 대상이 아니라 남으므로 고정 이름은
   두 번째 실행에서 `already exists` 로 실패한다:
   ```bash
@@ -487,7 +498,8 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
   데모 계정은 `kubeport-admin` 을 갖지만, 저작은 결과물이 방문자의 세션보다 오래 남고 남에게 보이는
   유일한 관리자 권한이라서다. 저작 체험까지 보여주려면 `--set demo.allowTemplateCreate=true`
   (backend `KBP_DEMO_ALLOW_TEMPLATE_CREATE`). 켜도 데모가 만든 템플릿은 실제 사용자 카탈로그에
-  안 보이지만, 누군가 그걸로 배포하면 리셋이 그 템플릿을 건너뛴다(`tolerateFK`).
+  안 보이지만, 데모가 아닌 계정이 그걸로 배포하면 리셋이 **데모 템플릿 삭제를 통째로** 건너뛴다(`tolerateFK` —
+  DELETE 가 문장 단위라 그 템플릿만이 아니다. `last_seed` 경보가 이걸로 뜬다, §3-2).
   결정 근거: [brainstorming-summary §14](brainstorming-summary.md).
   **리셋 CronJob 은 이 플래그와 무관하다** — 시드는 API 가 아니라 DB 로 직접 쓴다
   (`cmd/seed-demo/templates.go`). 한때 API 를 타서, 게이트가 닫힌 상태로 배포하자 리셋마다

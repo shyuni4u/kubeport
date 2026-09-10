@@ -97,18 +97,38 @@ jobs:
           # is what shows the daily reset has not happened.
           last_seed=$(printf '%s' "$body" | jq -r '.catalog.last_seed // empty')
           if [ -z "$last_seed" ]; then
-            # Only a backend from before #148 omits it next to a non-zero
-            # count. main is ahead of the live image between a merge and its
-            # deploy, so this is a warning rather than a failure.
-            echo "::warning::Health returned no catalog.last_seed — the live backend predates #148, so a skipped reset is not being checked."
-            exit 0
+            # Same reasoning as the missing catalog field above: next to a
+            # non-zero count, a missing last_seed means the skipped-reset check
+            # went blind — a backend from before #148 (the minutes between
+            # merging it and its deploy, or a rollback) or a regression.
+            echo "::error::Health returned no catalog.last_seed — a skipped demo reset is not being checked. The live backend predates #148 or the field regressed."
+            exit 1
           fi
-          age=$(( $(date -u +%s) - $(date -u -d "$last_seed" +%s) ))
+          # Judge only the exact shape the backend emits. date -d also takes
+          # "tomorrow" or a far-future date, and either would make the age
+          # negative and pass; and this value is echoed into the log below.
+          # [[ =~ ]] anchors the whole string, where grep would match one line
+          # of a value with an embedded newline.
+          rfc3339_utc='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+          if ! [[ $last_seed =~ $rfc3339_utc ]]; then
+            echo "::error::catalog.last_seed is not an RFC3339 UTC timestamp — refusing to judge the seed's age."
+            exit 1
+          fi
+          if ! seed_epoch=$(date -u -d "$last_seed" +%s); then
+            echo "::error::catalog.last_seed $last_seed did not parse as a date."
+            exit 1
+          fi
+          age=$(( $(date -u +%s) - seed_epoch ))
           echo "catalog.last_seed = $last_seed ($(( age / 3600 ))h ago)"
+          if [ "$age" -lt -300 ]; then
+            echo "::error::catalog.last_seed $last_seed is in the future — clock skew or a malformed health body."
+            exit 1
+          fi
           # demo.resetSchedule is daily (21:00 UTC), so a healthy seed is just
           # under 24h old right before the next cycle. Two hours of slack
           # covers the Job's own runtime, a late CronJob start and this cron's
-          # drift; past that, at least one cycle did not run.
+          # drift; past that, at least one cycle did not run. Change this
+          # together with demo.resetSchedule: the new interval plus 2h.
           if [ "$age" -gt $(( 26 * 3600 )) ]; then
             echo "::error::Demo catalog last seeded at $last_seed, $(( age / 3600 ))h ago — the daily reset skipped at least one cycle. See docs/oci-prod-runbook.md (demo reset)."
             exit 1
