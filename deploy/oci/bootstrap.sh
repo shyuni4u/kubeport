@@ -124,14 +124,23 @@ if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
     echo "error: installed k3s ${installed} (k8s 1.${auth_minor}) predates structured authentication; upgrade k3s first (a restart, so ask first — runbook §2)" >&2
     exit 1
   fi
+  # Whether this apiserver can read AUTH_API at all is its own check, before the
+  # existing files are compared with it — so a file written for the version
+  # this run selects passes, and a version the apiserver lacks is named as such.
+  if [[ "${AUTH_API}" == "apiserver.config.k8s.io/v1" ]] && (( auth_minor < 34 )); then
+    echo "error: k8s 1.${auth_minor} has no ${AUTH_API}; use BOOTSTRAP_AUTH_API=apiserver.config.k8s.io/v1beta1 or leave it unset" >&2
+    exit 1
+  fi
   if [[ -e "${AUTH_FILE}" || -e "${CFG_FILE}" ]]; then
     problems=()
     grep -qF "authentication-config=${AUTH_FILE}" "${CFG_FILE}" 2>/dev/null ||
       problems+=("${CFG_FILE} does not pass authentication-config=${AUTH_FILE}")
     grep -qF "\"${BOOTSTRAP_OIDC_CLIENT_ID}\"" "${AUTH_FILE}" 2>/dev/null ||
       problems+=("${AUTH_FILE} does not list BOOTSTRAP_OIDC_CLIENT_ID as an audience")
-    grep -qxF "apiVersion: ${auth_api_default}" "${AUTH_FILE}" 2>/dev/null ||
-      problems+=("${AUTH_FILE} is not apiVersion ${auth_api_default}, which k8s 1.${auth_minor} reads")
+    # AUTH_API, not the default: an override this script accepted and wrote on
+    # the first run must pass on the rerun (codex review).
+    grep -qxF "apiVersion: ${AUTH_API}" "${AUTH_FILE}" 2>/dev/null ||
+      problems+=("${AUTH_FILE} is not apiVersion ${AUTH_API}, which this run selects")
     if (( ${#problems[@]} )); then
       echo "error: bootstrap keeps an existing k3s auth config as it is, and this one does not match the run:" >&2
       printf '  - %s\n' "${problems[@]}" >&2
@@ -139,9 +148,6 @@ if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
       exit 1
     fi
     skip_auth_write=1
-  elif [[ "${AUTH_API}" == "apiserver.config.k8s.io/v1" ]] && (( auth_minor < 34 )); then
-    echo "error: k8s 1.${auth_minor} has no ${AUTH_API}; use BOOTSTRAP_AUTH_API=apiserver.config.k8s.io/v1beta1 or leave it unset" >&2
-    exit 1
   fi
 fi
 
