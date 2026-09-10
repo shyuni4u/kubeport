@@ -39,8 +39,11 @@ export async function GET(req: NextRequest) {
     code_challenge: challenge,
     code_challenge_method: "S256",
   };
-  // Dex pre-fills its login form from login_hint; only pass it for the demo
-  // provider so we never leak a hint to the primary IdP.
+  // login_hint goes to the demo provider only, so a hint never leaks to the
+  // primary IdP. Dex's local connector currently ignores it — the login form
+  // opens empty — so the landing page shows each demo account's email under
+  // its button instead (#29). Kept because it costs nothing and an IdP that
+  // honours it would pre-fill.
   const hint = req.nextUrl.searchParams.get("hint");
   if (provider === "demo" && hint) params.login_hint = hint;
 
