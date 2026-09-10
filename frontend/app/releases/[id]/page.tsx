@@ -3,9 +3,11 @@ import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { MetricCards } from "@/components/MetricCards";
 import { InstancesTable, type Instance } from "@/components/InstancesTable";
+import { isStaleStatus } from "@/components/ReleaseStaleBanner";
 
 type ReleaseOverview = {
   id: string;
+  status: string;
   instances_total: number;
   instances_ready: number;
   instances: Instance[];
@@ -38,7 +40,11 @@ export default async function ReleaseOverviewPage({
         <h2 className="mb-2 text-sm font-medium">
           {t("instancesHeading", { count: d.instances.length })}
         </h2>
-        <InstancesTable releaseId={d.id} instances={d.instances} />
+        <InstancesTable
+          releaseId={d.id}
+          instances={d.instances}
+          staleNotice={isStaleStatus(d.status)}
+        />
       </section>
     </div>
   );

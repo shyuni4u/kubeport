@@ -1,18 +1,9 @@
 import { apiFetch } from "@/lib/api-server";
 import { ReleaseHeader, type ReleaseHeaderData } from "@/components/ReleaseHeader";
 import { ReleaseTabs } from "@/components/ReleaseTabs";
-import { ReleaseStaleBanner, type StaleStatus } from "@/components/ReleaseStaleBanner";
+import { ReleaseStaleBanner, isStaleStatus } from "@/components/ReleaseStaleBanner";
 import { roleFromGroups } from "@/lib/role";
 import { notFound } from "next/navigation";
-
-const STALE_STATUSES = new Set<StaleStatus>([
-  "cluster-unreachable",
-  "resources-missing",
-]);
-
-function isStaleStatus(status: string): status is StaleStatus {
-  return STALE_STATUSES.has(status as StaleStatus);
-}
 
 export default async function ReleaseDetailLayout({
   children,

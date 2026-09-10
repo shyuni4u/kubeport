@@ -26,9 +26,17 @@ export type Instance = {
 export function InstancesTable({
   releaseId,
   instances,
+  staleNotice = false,
 }: {
   releaseId: string;
   instances: Instance[];
+  /**
+   * True when a ReleaseStaleBanner sits above this table. It decides which
+   * empty-state sentence to use: pointing at "the notice above" is only
+   * honest when there is one, and an empty table is perfectly normal without
+   * it — a CronJob between runs, a Deployment scaled to zero.
+   */
+  staleNotice?: boolean;
 }) {
   const kube = useKubeTermsStore((s) => s.showKubeTerms);
   const tInstances = useTranslations("releases.instances");
@@ -66,6 +74,22 @@ export function InstancesTable({
         </TableRow>
       </TableHeader>
       <TableBody>
+        {/*
+          An empty <tbody> left the header row floating over blank space with
+          nothing saying whether the table was loading, broken, or simply
+          empty (#114). This is server-rendered with the data, so there is no
+          loading state to distinguish — say it is empty.
+        */}
+        {instances.length === 0 && (
+          <TableRow>
+            <TableCell
+              colSpan={4}
+              className="py-8 text-center text-sm text-muted-foreground"
+            >
+              {tInstances(staleNotice ? "emptyWithNotice" : "empty")}
+            </TableCell>
+          </TableRow>
+        )}
         {instances.map((i) => (
           <TableRow key={i.name}>
             <TableCell className="font-mono text-xs">{i.name}</TableCell>

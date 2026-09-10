@@ -47,4 +47,18 @@ describe("statusChipVariantFromRelease", () => {
     expect(statusChipVariantFromRelease("deprecated")).toBe("muted");
     expect(statusChipVariantFromRelease("xyz")).toBe("muted");
   });
+
+  // #114 — `resources-missing` was danger while its sibling drift state and
+  // the ReleaseStaleBanner explaining both were amber, so the detail page
+  // showed a red chip above an amber banner about the same fact.
+  //
+  // Asserted as "the two agree with each other" rather than as two separate
+  // literals: the point is that the family cannot drift apart again, and
+  // pinning them independently is exactly what let it happen.
+  it("gives both drift states the same severity as their banner", () => {
+    expect(statusChipVariantFromRelease("resources-missing")).toBe(
+      statusChipVariantFromRelease("cluster-unreachable"),
+    );
+    expect(statusChipVariantFromRelease("resources-missing")).toBe("warning");
+  });
 });

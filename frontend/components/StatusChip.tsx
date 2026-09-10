@@ -28,11 +28,19 @@ export function statusChipVariantFromRelease(status: string): StatusVariant {
     case "healthy":
       return "success";
     case "warning":
+    // The two drift states Plan 8 detects at read time. Both are recoverable
+    // bookkeeping — the DB and the cluster disagree — not an outage, and both
+    // are explained by ReleaseStaleBanner, which is amber for either one.
+    //
+    // `resources-missing` used to be `danger` here, so the page showed a red
+    // chip above an amber banner about the same fact and the reader had to
+    // guess which severity to believe (#114). Its sibling was already
+    // `warning`; this makes the family agree with itself and with the banner.
     case "cluster-unreachable":
+    case "resources-missing":
       return "warning";
     case "error":
     case "failed":
-    case "resources-missing":
       return "danger";
     case "deprecated":
       return "muted";

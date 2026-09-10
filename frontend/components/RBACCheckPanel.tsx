@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
 /**
@@ -155,8 +156,21 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
         {showPlaceholder && (
           <span className="text-muted-foreground">{t("hint")}</span>
         )}
+        {/*
+          Icons are lucide, not emoji (#114). The panel used ❌/⚠ literals
+          while StatusChip and ReleaseStaleBanner next to it used lucide, so
+          one card rendered in the platform's emoji font at a size and weight
+          nothing else on the page shared.
+
+          Every icon is aria-hidden: the sentence beside it already says the
+          same thing, and an emoji's own name ("cross mark") was being read
+          out ahead of it.
+        */}
         {!loading && allAllowed && (
-          <span className="text-green-700">{t("allAllowed")}</span>
+          <span className="flex items-center gap-1.5 text-green-700">
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            {t("allAllowed")}
+          </span>
         )}
         {!loading && denied.length > 0 && (
           <>
@@ -172,8 +186,18 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
                   ? t("httpError", { status: r.httpStatus ?? 0 })
                   : t("denied");
                 return (
-                  <li key={r.resource} className="text-red-700" title={r.reason || undefined}>
-                    ❌ {t("deniedRow", { resource: r.resource, message })}
+                  <li
+                    key={r.resource}
+                    className="flex items-start gap-1.5 text-red-700"
+                    title={r.reason || undefined}
+                  >
+                    <XCircle
+                      className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span>
+                      {t("deniedRow", { resource: r.resource, message })}
+                    </span>
                   </li>
                 );
               })}
@@ -182,8 +206,16 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
           </>
         )}
         {!loading && skipped.length > 0 && (
-          <p className="text-amber-700">
-            ⚠ {t("skipped", { kinds: skipped.map((r) => r.resource).join(", ") })}
+          <p className="flex items-start gap-1.5 text-amber-700">
+            <AlertTriangle
+              className="mt-0.5 h-3.5 w-3.5 shrink-0"
+              aria-hidden="true"
+            />
+            <span>
+              {t("skipped", {
+                kinds: skipped.map((r) => r.resource).join(", "),
+              })}
+            </span>
           </p>
         )}
       </CardContent>
