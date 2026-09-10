@@ -455,10 +455,15 @@ cd backend && go build ./... && cd ..
 ```
 kind create cluster --name pr-review
 helm install kubeport deploy/helm/kubeport --namespace kubeport --create-namespace \
-  --set ingress.enabled=false --set postgres.enabled=true --wait --timeout 5m
+  -f deploy/helm/kubeport/ci/smoke-values.yaml --wait --timeout 5m
 kubectl --context kind-pr-review -n kubeport get pods
 kind delete cluster --name pr-review
 ```
+`ci/smoke-values.yaml` 을 쓴다 — `--set` 나열은 차트를 따라가지 못하고 먼저 썩는다.
+이전 판은 없는 키(`postgres.enabled`, 진짜는 `postgres.embedded`)를 넘겼고 helm 은 그걸
+조용히 무시했으며, 필수값 누락으로 렌더 단계에서 죽었다 (#126). helm 은 CI 와 같은
+3.20.2 를 쓴다.
+
 문서에 없는 값을 넣어야 성공했다면 그것이 finding 이다 (문서에 없는 전제).
 
 ## 출력

@@ -89,7 +89,7 @@ spec:
       containers:
         - name: backend
           image: {{ include "kubeport.backend.image" . }}
-          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          imagePullPolicy: {{ include "kubeport.pullPolicy" (dict "img" .Values.images.backend) }}
           ports:
             - name: http
               containerPort: {{ .Values.backend.service.port }}

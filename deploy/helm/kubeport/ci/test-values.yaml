@@ -30,6 +30,10 @@ tls:
     issuerKind: ClusterIssuer
     issuerName: letsencrypt-prod
 
+# A literal, so the snapshot stays byte-stable. `0.1.0` is NOT a tag that exists
+# in ghcr — nothing is ever pulled from this file, it only feeds `helm template`.
+# Do not read it as the chart's default (that is `latest`, see values.yaml) and
+# do not "fix" it to match: changing it rewrites four snapshot lines for nothing.
 images:
   backend:
     tag: "0.1.0"

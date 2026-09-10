@@ -106,15 +106,51 @@ app.kubernetes.io/component: postgres
 
 {{/*
 Image reference helpers.
+
+The fallback is `latest`, NOT `.Chart.AppVersion`. build-images.yml publishes
+`sha-<short>`, `main` and `latest`; it publishes a semver tag only from
+`type=semver`, which fires on a `v*.*.*` git tag — and this repo has none, so
+`0.1.0` has never existed in ghcr. Falling back to AppVersion meant the chart's
+own defaults rendered `ghcr.io/shyuni4u/kubeport-backend:0.1.0` and a default
+`helm install` ended in ImagePullBackOff on both Deployments (#89).
+
+If a `v*.*.*` tag is ever cut, that publishes a matching image tag and the
+AppVersion fallback becomes correct again — restore it in the same commit that
+cuts the tag, so the two never disagree.
 */}}
 {{- define "kubeport.backend.image" -}}
-{{- $tag := .Values.images.backend.tag | default .Chart.AppVersion -}}
+{{- $tag := .Values.images.backend.tag | default "latest" -}}
 {{- printf "%s:%s" .Values.images.backend.repository $tag -}}
 {{- end -}}
 
 {{- define "kubeport.frontend.image" -}}
-{{- $tag := .Values.images.frontend.tag | default .Chart.AppVersion -}}
+{{- $tag := .Values.images.frontend.tag | default "latest" -}}
 {{- printf "%s:%s" .Values.images.frontend.repository $tag -}}
+{{- end -}}
+
+{{/*
+Pull policy, derived from the tag unless the operator states one.
+
+The two halves of this pair have to agree and a single default cannot serve both.
+`latest` moves, so IfNotPresent makes a node keep the first build it ever pulled:
+the release is then neither current nor pinned, two nodes can run different code,
+and `helm upgrade` emits no rollout at all because the tag string is unchanged.
+A `sha-<7>` tag is immutable, so Always buys nothing there and costs real
+availability — a registry it cannot reach stops a Pod from restarting on an image
+already sitting on its disk, which is exactly when you least want that.
+
+So: rolling tag → Always, pinned tag → IfNotPresent. Setting
+images.<c>.pullPolicy explicitly still wins; the empty default means "derive".
+*/}}
+{{- define "kubeport.pullPolicy" -}}
+{{- $img := .img -}}
+{{- if $img.pullPolicy -}}
+{{- $img.pullPolicy -}}
+{{- else if eq ($img.tag | default "latest") "latest" -}}
+Always
+{{- else -}}
+IfNotPresent
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -159,8 +195,17 @@ OIDC redirect URI — derived from host if not explicitly set.
 {{- printf "%s-dex" (include "kubeport.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{/*
+Dex issuer URL.
+
+The message says "or demo.enabled" because the demo-reset CronJob logs in through
+dex and so renders this too. With demo.enabled=true and dex.enabled=false the old
+wording told the operator that dex.host was "required when dex.enabled" while
+their own values had dex.enabled=false — true about the template, useless about
+their mistake, which is that demo mode has no IdP to log into without dex.
+*/}}
 {{- define "kubeport.dex.issuer" -}}
-{{- printf "https://%s" (required "dex.host is required when dex.enabled" .Values.dex.host) -}}
+{{- printf "https://%s" (required "dex.host is required when dex.enabled=true or demo.enabled=true (demo accounts log in through dex; set dex.enabled=true, dex.host and dex.clientSecret)" .Values.dex.host) -}}
 {{- end -}}
 
 {{/* JSON array for KBP_OIDC_ISSUERS: primary + (optional) dex */}}

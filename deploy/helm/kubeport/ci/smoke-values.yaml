@@ -30,10 +30,15 @@ tls:
   certManager:
     enabled: false
 
-images:
-  backend:
-    tag: "latest"
-    pullPolicy: IfNotPresent
-  frontend:
-    tag: "latest"
-    pullPolicy: IfNotPresent
+# No `images:` override here, deliberately. This file used to pin `tag: latest`,
+# which is what values.yaml now defaults to anyway — so the smoke test was
+# pulling the right image for a reason that had nothing to do with the chart's
+# own defaults, and it stayed green through the whole life of #89, where those
+# defaults rendered `:0.1.0` and a plain `helm install` could not start a single
+# Pod. Letting the defaults apply is what makes this job a guard: if the default
+# tag ever names something ghcr does not have, kind-smoke goes red here instead
+# of on a stranger's first install.
+#
+# This file is also what the chart README's "Try it first" path hands to
+# `helm install`, so what CI proves and what a reader is told to run are the
+# same command.
