@@ -84,17 +84,22 @@ describe("hover and highlight", () => {
   const STATE = "(?:hover|focus|data-open|data-popup-open|data-highlighted):";
 
   it("never borrows a surface token", () => {
+    // Every fill token whose job is to *be* a surface. `card` and `popover` are
+    // in the list although nothing hovers to them today: on this theme's grey
+    // page a hover to white is 1.06:1, the same invisible step `bg-muted` gave.
+    // The set was widened after a probe showed `hover:bg-card` walking past an
+    // earlier, shorter version of this list.
     // `(?![\w-])` so `bg-secondary-foreground/10` is left alone: overlaying a
     // *foreground* at low alpha darkens whatever it lands on, which is the one
     // way to tint a chip whose own surface is unknown. `/50` still matches —
     // that is the case this is about.
-    expect(hits(new RegExp(`${STATE}bg-(?:muted|accent|secondary|sidebar-accent)(?![\\w-])`))).toEqual([]);
+    expect(hits(new RegExp(`${STATE}bg-(?:muted|accent|secondary|sidebar-accent|card|popover|background)(?![\\w-])`))).toEqual([]);
   });
 
   it("never borrows a surface token through an opacity either", () => {
     // The trap #106 fell into: `bg-muted/30` -> `bg-muted` reads like a fix and
     // moves 1.064 to 1.124. Opacity cannot raise a fill above its own token.
-    expect(hits(new RegExp(`${STATE}bg-(?:muted|accent|secondary|sidebar-accent)/`))).toEqual([]);
+    expect(hits(new RegExp(`${STATE}bg-(?:muted|accent|secondary|sidebar-accent|card|popover|background)/`))).toEqual([]);
   });
 
   /**
@@ -175,7 +180,7 @@ describe("selection", () => {
     // page-coloured chip on a muted rail, 1.13:1. A surface is a surface
     // whichever end of the scale it sits at.
     expect(
-      hits(/(aria-pressed|data-\[state=on\]|data-active|aria-selected):bg-(muted|accent|background)\b/),
+      hits(/(aria-pressed|data-\[state=on\]|data-active|aria-selected):bg-(muted|accent|background|card|popover|secondary|sidebar-accent)\b/),
     ).toEqual([]);
   });
 
@@ -320,4 +325,35 @@ describe("disabled state", () => {
     expect(src, `${file} not found — did it move?`).toBeDefined();
     expect(src!.text).not.toMatch(/(disabled|aria-disabled|data-disabled):opacity-\d/);
   });
+
+  /**
+   * The other half of the same state, asserted because this PR rewrote only the
+   * first half.
+   *
+   * Colour makes a control *look* disabled; `pointer-events-none` makes it
+   * *be* disabled. #112 replaced the colour across six components, and the
+   * guard above only bans the old spelling — so a later edit could drop the
+   * pointer-events half and the suite would stay green, with the control still
+   * looking correct.
+   *
+   * The deploy form's RBAC gate is the case that matters: `rbacBlocked` reaches
+   * a native `<Button disabled>`, so the browser suppresses submit. The backend
+   * SSAR and k8s RBAC are still the deciding authority — this is a defence
+   * layer, not the boundary — but losing a layer silently is the thing worth
+   * preventing.
+   *
+   * Scoped to the ui/ primitives, which wrap base-ui: a select or menu item is
+   * a `<div role="option">`, and there `pointer-events-none` is the only thing
+   * stopping the click. KindPicker is left out because its disabled control is
+   * a plain `<button disabled>` — the browser does not dispatch click on one at
+   * all, so demanding the class there would be cargo cult rather than a guard.
+   */
+  it.each(LABEL_BEARING.filter((f) => f.startsWith("components/ui/")))(
+    "%s still blocks interaction while disabled",
+    (file) => {
+      const src = FILES.find((f) => f.file === file);
+      expect(src, `${file} not found — did it move?`).toBeDefined();
+      expect(src!.text).toMatch(/(disabled|aria-disabled|data-disabled):pointer-events-none/);
+    },
+  );
 });
