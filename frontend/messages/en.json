@@ -148,8 +148,46 @@
     },
     "instances": {
       "logsLink": "Logs →",
-      "empty": "No running instances.",
+      "empty": "No instances are running right now. For a scheduled job, they appear at its next run.",
       "emptyWithNotice": "No running instances. See the notice above."
+    },
+    "problems": {
+      "heading": "What happened",
+      "cause": {
+        "image": {
+          "what": "The program (image) to run could not be downloaded ({count, plural, one {# instance} other {# instances}}).",
+          "fix": "In the deploy form, check the field that names the program or its version for typos, then fix it and deploy again."
+        },
+        "crash": {
+          "what": "It exits right after starting and keeps restarting ({count, plural, one {# instance} other {# instances}}).",
+          "fix": "Check the last messages in the 'Logs' tab. If a setting is wrong, change it and deploy again."
+        },
+        "exited": {
+          "what": "It stopped with an error ({count, plural, one {# instance} other {# instances}}).",
+          "fix": "Check the last messages in the 'Logs' tab. If a setting is wrong, change it and deploy again."
+        },
+        "memory": {
+          "what": "It was stopped for going over its memory limit ({count, plural, one {# instance} other {# instances}}).",
+          "fix": "It needs more memory. If the deploy form has a memory field, raise it and deploy again; otherwise contact an admin."
+        },
+        "config": {
+          "what": "It could not start because of a configuration error ({count, plural, one {# instance} other {# instances}}).",
+          "fix": "A setting or secret value it needs may not be ready yet. Contact an admin."
+        },
+        "capacity": {
+          "what": "Waiting for room in the cluster ({count, plural, one {# instance} other {# instances}}).",
+          "fix": "It starts on its own once there is room. If this goes on, contact an admin."
+        },
+        "evicted": {
+          "what": "Stopped because the server ran short of resources ({count, plural, one {# instance} other {# instances}}).",
+          "fix": "It is usually recreated on its own. If it keeps happening, contact an admin."
+        },
+        "other": {
+          "what": "Not running normally ({count, plural, one {# instance} other {# instances}}).",
+          "fix": "Check the 'Logs' tab, or contact an admin."
+        }
+      },
+      "changeSettings": "Change settings and deploy again →"
     },
     "phase": {
       "Running": "Running",
@@ -160,8 +198,14 @@
       "CrashLoopBackOff": "Repeatedly restarting (failing to run)",
       "ImagePullBackOff": "Cannot pull image",
       "ErrImagePull": "Cannot pull image",
+      "InvalidImageName": "Invalid image name",
       "CreateContainerConfigError": "Container configuration error",
+      "CreateContainerError": "Container creation error",
       "ContainerCreating": "Creating container",
+      "OOMKilled": "Out of memory",
+      "Error": "Exited with an error",
+      "Evicted": "Evicted for lack of resources",
+      "Unschedulable": "Waiting for room",
       "Terminating": "Terminating",
       "Completed": "Completed"
     },

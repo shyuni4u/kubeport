@@ -72,7 +72,7 @@ describe("InstancesTable", () => {
     it("says the table is empty instead of rendering nothing", () => {
       render(<InstancesTable releaseId="abc" instances={[]} />);
       expect(
-        screen.getByText("실행 중인 인스턴스가 없습니다."),
+        screen.getByText(/^지금 실행 중인 인스턴스가 없습니다\./),
       ).toBeInTheDocument();
     });
 
@@ -94,7 +94,7 @@ describe("InstancesTable", () => {
     it("keeps the empty row spanning the full width of the header", () => {
       render(<InstancesTable releaseId="abc" instances={[]} />);
       const cell = screen
-        .getByText("실행 중인 인스턴스가 없습니다.")
+        .getByText(/^지금 실행 중인 인스턴스가 없습니다\./)
         .closest("td");
       const headers = document.querySelectorAll("thead th");
       expect(cell).toHaveAttribute("colSpan", String(headers.length));
@@ -114,5 +114,21 @@ describe("InstancesTable", () => {
     expect(screen.getByText("pod-1")).toBeInTheDocument();
     expect(screen.getByText("pod-2")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
+  });
+
+  // #33 — "Pending" says nothing about a pod that will never pull its image.
+  it("shows the reason instead of the phase when there is one", () => {
+    render(
+      <InstancesTable
+        releaseId="abc"
+        instances={[
+          { name: "pod-1", phase: "Pending", ready: false, restarts: 0, reason: "ImagePullBackOff" },
+          { name: "pod-2", phase: "Pending", ready: false, restarts: 0, reason: "Unschedulable" },
+        ]}
+      />,
+    );
+    expect(screen.getByText("이미지를 가져올 수 없음")).toBeInTheDocument();
+    expect(screen.getByText("자리 대기 중")).toBeInTheDocument();
+    expect(screen.queryByText("대기 중")).toBeNull();
   });
 });

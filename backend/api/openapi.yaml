@@ -2222,10 +2222,10 @@ components:
       enum:
         - healthy              # every instance ready
         - warning              # some instance not ready yet
-        - error                # an instance Failed, or restarted more than 5 times
-        - unknown              # no instances found, cause undetermined
+        - error                # an instance Failed, restarted more than 5 times, or is stuck on a reason that does not clear by waiting (ImagePullBackOff, CrashLoopBackOff, OOMKilled, …)
+        - unknown              # no instances, but the release's objects are still there or could not be read — a CronJob between runs, a Deployment scaled to zero
         - cluster-unreachable  # the cluster did not answer — says nothing about the workload
-        - resources-missing    # cluster answered, objects are gone (deleted outside kubeport)
+        - resources-missing    # no instances, and the objects the caller could read are gone or now belong to another release (deleted outside kubeport)
 
     Instance:
       type: object
@@ -2237,6 +2237,21 @@ components:
           example: Running
         ready: { type: boolean }
         restarts: { type: integer }
+        reason:
+          type: string
+          description: |
+            Why the pod is not running normally, in k8s's own word: a container
+            waiting or terminated reason (ImagePullBackOff, CrashLoopBackOff,
+            OOMKilled, CreateContainerConfigError, …), a pod reason (Evicted),
+            or the scheduler's (Unschedulable). Absent when there is nothing to
+            explain, including while a container is still being created.
+          example: ImagePullBackOff
+        message:
+          type: string
+          description: |
+            The detail k8s attached to `reason`, verbatim and untranslated. For
+            CrashLoopBackOff and OOMKilled it describes how the container last
+            ended, e.g. "Error, exit code 1".
 
     Team:
       type: object

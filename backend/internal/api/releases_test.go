@@ -85,6 +85,16 @@ type fakeK8sApplier struct {
 	applyCheckErr   error
 	checkedReleases []string
 	checkedCreating []bool
+
+	// presence is what ReleasePresence reports once ListInstances has found no
+	// pods; presenceErr is returned alongside it. The zero value is
+	// PresenceUnknown.
+	presence    k8s.Presence
+	presenceErr error
+}
+
+func (f *fakeK8sApplier) ReleasePresence(context.Context, string, string, []byte) (k8s.Presence, error) {
+	return f.presence, f.presenceErr
 }
 
 func (f *fakeK8sApplier) CheckApply(_ context.Context, _, release string, _ []byte, creating bool) (k8s.ApplyCheck, error) {
@@ -231,10 +241,10 @@ func seedCluster(t *testing.T, r http.Handler) string {
 	t.Helper()
 	name := "cluster-" + randSuffix()
 	body, _ := json.Marshal(map[string]any{
-		"name":           name,
-		"api_url":        "https://k8s.example.com",
+		"name":            name,
+		"api_url":         "https://k8s.example.com",
 		"oidc_issuer_url": "http://localhost:5556",
-		"ca_bundle":      testCAPEM(),
+		"ca_bundle":       testCAPEM(),
 	})
 	w := do(t, r, http.MethodPost, "/v1/clusters", bytes.NewReader(body))
 	require.Equal(t, http.StatusCreated, w.Code, "seed cluster: %s", w.Body.String())
@@ -503,7 +513,7 @@ func TestReleases_List_NonAdminSeesOnlyOwn(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"template": tplName, "version": 1,
 		"cluster": clusterName, "namespace": "default",
-		"name": "admin-rel-" + randSuffix(),
+		"name":   "admin-rel-" + randSuffix(),
 		"values": map[string]any{"Deployment[web].spec.replicas": 1},
 	})
 	w := do(t, adminRouter, http.MethodPost, "/v1/releases", bytes.NewReader(body))
@@ -665,8 +675,8 @@ func TestReleases_GetByID_ListInstancesError_ReturnsClusterUnreachable(t *testin
 }
 
 // TestReleases_GetByID_NoInstances_ReturnsResourcesMissing: cluster reachable,
-// list call succeeds with [] — workload likely deleted out-of-band. Was
-// previously bucketed as "unknown"; Plan 8 separates the case.
+// list call succeeds with [] and the release's objects are gone — workload
+// deleted out-of-band. Plan 8 separates the case from "unknown".
 func TestReleases_GetByID_NoInstances_ReturnsResourcesMissing(t *testing.T) {
 	r, applier, _ := newTestRouterWithFactory(t)
 	clusterName := seedCluster(t, r)
@@ -674,6 +684,7 @@ func TestReleases_GetByID_NoInstances_ReturnsResourcesMissing(t *testing.T) {
 	id := seedReleaseAdmin(t, r, clusterName, tplName, "missing")
 
 	applier.instances = nil // explicit: no pods come back
+	applier.presence = k8s.PresenceMissing
 
 	w := do(t, r, http.MethodGet, "/v1/releases/"+id, nil)
 	require.Equal(t, http.StatusOK, w.Code)
@@ -682,6 +693,83 @@ func TestReleases_GetByID_NoInstances_ReturnsResourcesMissing(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	require.Equal(t, "resources-missing", got["status"])
 	require.EqualValues(t, 0, got["instances_total"])
+}
+
+// No pods is not no objects. A CronJob between runs has none, and calling it
+// resources-missing put up a banner saying it had been deleted outside
+// kubeport (#33). Only a cluster that shows the objects gone earns that
+// status; one that shows them there, or cannot tell, leaves it unknown.
+func TestReleases_GetByID_NoInstancesButNotShownGone_ReturnsUnknown(t *testing.T) {
+	cases := map[string]struct {
+		presence k8s.Presence
+		err      error
+	}{
+		"objects found":        {presence: k8s.PresenceFound},
+		"nothing readable":     {presence: k8s.PresenceUnknown},
+		"presence check fails": {presence: k8s.PresenceMissing, err: errors.New("simulated timeout")},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			r, applier, _ := newTestRouterWithFactory(t)
+			clusterName := seedCluster(t, r)
+			tplName := seedPublishedTemplate(t, r)
+			id := seedReleaseAdmin(t, r, clusterName, tplName, "idle")
+
+			applier.instances = nil
+			applier.presence, applier.presenceErr = tc.presence, tc.err
+
+			w := do(t, r, http.MethodGet, "/v1/releases/"+id, nil)
+			require.Equal(t, http.StatusOK, w.Code)
+
+			var got map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+			require.Equal(t, "unknown", got["status"])
+			require.EqualValues(t, 0, got["instances_total"])
+		})
+	}
+}
+
+// A pod that cannot pull its image stays Pending and is never restarted, so
+// neither Phase nor Restarts marks it failed. Its reason has to, and has to
+// reach the client so the page can say what went wrong (#33).
+func TestReleases_GetByID_StuckReason_ReturnsErrorWithReason(t *testing.T) {
+	r, applier, _ := newTestRouterWithFactory(t)
+	clusterName := seedCluster(t, r)
+	tplName := seedPublishedTemplate(t, r)
+	id := seedReleaseAdmin(t, r, clusterName, tplName, "stuck")
+
+	applier.instances = []k8s.Instance{{
+		Name: "web-1", Phase: "Pending",
+		Reason: "ImagePullBackOff", Message: `Back-off pulling image "ghcr.io/does-not-exist/web:0.0.0"`,
+	}}
+
+	w := do(t, r, http.MethodGet, "/v1/releases/"+id, nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Equal(t, "error", got["status"])
+	ins := got["instances"].([]any)[0].(map[string]any)
+	require.Equal(t, "ImagePullBackOff", ins["reason"])
+	require.Contains(t, ins["message"], "does-not-exist")
+}
+
+// Waiting on capacity can clear on its own, so an unschedulable pod is still
+// settling, not failed.
+func TestReleases_GetByID_Unschedulable_StaysWarning(t *testing.T) {
+	r, applier, _ := newTestRouterWithFactory(t)
+	clusterName := seedCluster(t, r)
+	tplName := seedPublishedTemplate(t, r)
+	id := seedReleaseAdmin(t, r, clusterName, tplName, "unsched")
+
+	applier.instances = []k8s.Instance{{Name: "web-1", Phase: "Pending", Reason: "Unschedulable"}}
+
+	w := do(t, r, http.MethodGet, "/v1/releases/"+id, nil)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Equal(t, "warning", got["status"])
 }
 
 // TestReleases_Delete_ForceAdmin_BypassesK8s: admin can DELETE ?force=true

@@ -384,11 +384,34 @@ func (h *Handlers) GetRelease(c *gin.Context) {
 		return
 	}
 	if len(instances) == 0 {
-		respondReleaseOverview(c, rel, instances, "resources-missing")
+		// No pods is not the same as no objects: a CronJob between runs, a
+		// Deployment scaled to zero (#33). Only a cluster that shows the
+		// objects gone earns resources-missing, whose banner says they were
+		// deleted outside kubeport; a cluster that cannot tell leaves it unknown.
+		presence, err := cli.ReleasePresence(ctx, rel.Namespace, rel.Name, []byte(rel.RenderedYaml))
+		if err == nil && presence == k8s.PresenceMissing {
+			respondReleaseOverview(c, rel, instances, "resources-missing")
+			return
+		}
+		respondReleaseOverview(c, rel, instances, "unknown")
 		return
 	}
 
 	respondReleaseOverview(c, rel, instances, "")
+}
+
+// stuckReasons do not clear by waiting. The kubelet retries them on a back-off
+// while the pod stays Pending, or Running and not ready, and a pod that cannot
+// pull its image is never restarted — so Phase and Restarts alone left such a
+// release on "warning" for good, the colour of one that is still starting.
+var stuckReasons = map[string]bool{
+	"ImagePullBackOff":           true,
+	"ErrImagePull":               true,
+	"InvalidImageName":           true,
+	"CrashLoopBackOff":           true,
+	"OOMKilled":                  true,
+	"CreateContainerConfigError": true,
+	"CreateContainerError":       true,
 }
 
 // respondReleaseOverview writes the release detail response. statusOverride
@@ -438,7 +461,7 @@ func abstractStatus(instances []k8s.Instance) string {
 		if !i.Ready && i.Phase != "Succeeded" {
 			allReady = false
 		}
-		if i.Phase == "Failed" || i.Restarts > maxRestartsBeforeError {
+		if i.Phase == "Failed" || i.Restarts > maxRestartsBeforeError || stuckReasons[i.Reason] {
 			hasError = true
 		}
 	}

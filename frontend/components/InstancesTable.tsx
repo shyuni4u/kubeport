@@ -9,8 +9,8 @@ import { StatusChip, type StatusVariant } from "./StatusChip";
 // (CrashLoopBackOff, ImagePullBackOff, Error…) must not look like "muted".
 export function instanceVariant(ready: boolean, phase: string): StatusVariant {
   if (ready) return "success";
-  if (/backoff|err|fail|oom|evicted/i.test(phase)) return "danger";
-  if (/pending|creating|init|terminating|waiting/i.test(phase)) return "warning";
+  if (/backoff|err|fail|oom|evicted|invalid/i.test(phase)) return "danger";
+  if (/pending|creating|init|terminating|waiting|unschedulable/i.test(phase)) return "warning";
   return "muted";
 }
 import { termLabel, type TermKey } from "@/lib/kube-term-map";
@@ -21,6 +21,15 @@ export type Instance = {
   phase: string;
   ready: boolean;
   restarts: number;
+  /**
+   * Why the pod is not running normally, in k8s's word (ImagePullBackOff,
+   * OOMKilled, Unschedulable…), absent when there is nothing to explain.
+   * Phase cannot say it: a pod that will never pull its image is "Pending"
+   * for good (#33).
+   */
+  reason?: string;
+  /** k8s's own detail for `reason`, verbatim. */
+  message?: string;
 };
 
 export function InstancesTable({
@@ -56,8 +65,14 @@ export function InstancesTable({
     "CrashLoopBackOff",
     "ImagePullBackOff",
     "ErrImagePull",
+    "InvalidImageName",
     "CreateContainerConfigError",
+    "CreateContainerError",
     "ContainerCreating",
+    "OOMKilled",
+    "Error",
+    "Evicted",
+    "Unschedulable",
     "Terminating",
     "Completed",
   ]);
@@ -92,12 +107,29 @@ export function InstancesTable({
         )}
         {instances.map((i) => (
           <TableRow key={i.name}>
-            <TableCell className="font-mono text-xs">{i.name}</TableCell>
+            {/* Truncated below sm: the status chip now carries the reason, a
+                longer label, and a full pod name pushed it off a 390px screen. */}
+            <TableCell
+              className="max-w-[8rem] truncate font-mono text-xs sm:max-w-none"
+              title={i.name}
+            >
+              {i.name}
+            </TableCell>
             <TableCell>
+              {/* The reason, when there is one, is the word worth showing:
+                  "Pending" says nothing about a pod that will never pull its
+                  image (#33). The colour reads both, so a reason the patterns
+                  do not know still takes a Failed or Pending phase's colour
+                  instead of going grey. */}
               <StatusChip
-                variant={instanceVariant(i.ready, i.phase)}
+                variant={instanceVariant(
+                  i.ready,
+                  [i.reason, i.phase].filter(Boolean).join(" "),
+                )}
               >
-                <span title={i.phase}>{phaseLabel(i.phase)}</span>
+                <span title={i.reason || i.phase}>
+                  {phaseLabel(i.reason || i.phase)}
+                </span>
               </StatusChip>
             </TableCell>
             <TableCell>{i.restarts}</TableCell>
