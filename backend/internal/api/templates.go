@@ -350,6 +350,20 @@ func (h *Handlers) ListTemplateVersions(c *gin.Context) {
 	if h.templateHiddenByDemoScope(c, tpl.OwnerUserID, "template") {
 		return
 	}
+	// Never published: hidden from those who may not read its drafts, the
+	// same test ListTemplates and GetTemplate apply. It hangs on the template,
+	// not on its versions — deleting the only draft leaves none to look at.
+	if !tpl.CurrentVersionID.Valid {
+		canRead, err := h.canReadTemplate(ctx, nil, ownershipOf(tpl))
+		if err != nil {
+			internalError(c, "ListTemplateVersions", err)
+			return
+		}
+		if !canRead {
+			writeError(c, http.StatusNotFound, "not-found", "template")
+			return
+		}
+	}
 	vs, err := h.deps.Store.ListTemplateVersions(ctx, name)
 	if err != nil {
 		internalError(c, "ListTemplateVersions", err)
@@ -369,13 +383,6 @@ func (h *Handlers) ListTemplateVersions(c *gin.Context) {
 				if v.Status != statusDraft {
 					published = append(published, v)
 				}
-			}
-			// Every version was a draft, so the template has never been
-			// published — answer exactly as ListTemplates/GetTemplate do
-			// instead of confirming its existence with an empty list.
-			if len(published) == 0 {
-				writeError(c, http.StatusNotFound, "not-found", "template")
-				return
 			}
 			vs = published
 		}

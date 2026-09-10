@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -67,6 +68,36 @@ func TestTemplateReads_AcrossTheDemoLineLooksExactlyLikeMissing(t *testing.T) {
 	require.Equal(t, problemShape(t, missingVersion), problemShape(t, hiddenVersion))
 }
 
+// A draft of a published template carries a reasoned 403 for callers who can
+// see the template. Across the demo line that reason would name the demo rule
+// and confirm the template, so the demo line has to be decided first.
+func TestTemplateReads_DraftAcrossTheDemoLineLooksExactlyLikeMissing(t *testing.T) {
+	s := testStore(t)
+	adminRouter := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: s})
+	hidden := seedPublishedTemplate(t, adminRouter)
+	body, _ := json.Marshal(map[string]any{
+		"authoring_mode": "yaml",
+		"resources_yaml": minimalResources,
+		"ui_spec_yaml":   minimalUISpec,
+	})
+	w := do(t, adminRouter, http.MethodPost, "/v1/templates/"+hidden+"/versions", bytes.NewReader(body))
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+
+	demoAdmin := demoScopeRouter(t, "demo-admin@"+demoDomain, true)
+	visible := seedDemoTemplate(t, s)
+	_, missingBody := readTemplate(t, demoAdmin, templateRead{http.MethodGet, "/v1/templates/" + visible + "/versions/99"})
+	missing := problemShape(t, missingBody)
+
+	for _, rd := range []templateRead{
+		{http.MethodGet, "/v1/templates/" + hidden + "/versions/2"},
+		{http.MethodPost, "/v1/templates/" + hidden + "/render?version=2"},
+	} {
+		code, hiddenBody := readTemplate(t, demoAdmin, rd)
+		require.Equal(t, http.StatusNotFound, code, "%s %s: %s", rd.method, rd.path, hiddenBody)
+		require.Equal(t, missing, problemShape(t, hiddenBody), "%s: the draft must not confirm the template", rd.path)
+	}
+}
+
 // Never published: a global template only kubeport-admin may read, read by an
 // ordinary user. The list hides it, so the item routes — the default render
 // path included, which used to say "has no published version" — must too.
@@ -74,6 +105,18 @@ func TestTemplateReads_NeverPublishedLooksExactlyLikeMissing(t *testing.T) {
 	s := testStore(t)
 	adminRouter := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: s})
 	hidden := seedGlobalTemplate(t, adminRouter) // v1 draft, never published
+
+	requireLooksMissing(t, newPlainUserRouter(t, s, randSuffix()), hidden)
+}
+
+// Deleting the only draft leaves a never-published template with no versions
+// at all. Whether it is hidden must not hang on it still having a draft.
+func TestTemplateReads_NeverPublishedWithoutVersionsLooksExactlyLikeMissing(t *testing.T) {
+	s := testStore(t)
+	adminRouter := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: s})
+	hidden := seedGlobalTemplate(t, adminRouter)
+	w := do(t, adminRouter, http.MethodDelete, "/v1/templates/"+hidden+"/versions/1", nil)
+	require.Less(t, w.Code, 300, w.Body.String())
 
 	requireLooksMissing(t, newPlainUserRouter(t, s, randSuffix()), hidden)
 }
