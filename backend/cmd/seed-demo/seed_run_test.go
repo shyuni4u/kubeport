@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -137,5 +139,71 @@ func TestSeederRun_FailsWhenItsObjectsBelongToSomethingElse(t *testing.T) {
 
 	if err == nil || !strings.Contains(err.Error(), "belong to something else") {
 		t.Fatalf("want a loud failure naming the ownership conflict, got %v", err)
+	}
+}
+
+// #232: the seeder shares the demo user's release write budget with every
+// visitor. By the time it creates releases the reset has already wiped the
+// namespace, so a 429 must be waited out, not reported as a failed seed.
+func TestSeederRun_WaitsOutARateLimit(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if hits.Add(1) <= 2 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"title":"rate-limited","status":429}`))
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"x"}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := &apiClient{base: srv.URL, hc: srv.Client(), token: "t"}
+	var waited []time.Duration
+	s := &Seeder{admin: c, user: c, cluster: "kind", ns: "demo",
+		wait: func(_ context.Context, d time.Duration) error { waited = append(waited, d); return nil }}
+
+	if err := s.Run(context.Background()); err != nil {
+		t.Fatalf("a rate-limited create should be retried until it succeeds, got %v", err)
+	}
+	if want := int32(2 + len(releaseSpecs())); hits.Load() != want {
+		t.Fatalf("want %d requests (2 refused + one per release), got %d", want, hits.Load())
+	}
+	if len(waited) != 2 || waited[0] != time.Second || waited[1] != time.Second {
+		t.Fatalf("want two waits of the server's Retry-After (1s), got %v", waited)
+	}
+}
+
+// The retry is bounded: a bucket someone keeps empty must still end the Job,
+// loudly, inside its deadline rather than hang it.
+func TestSeederRun_GivesUpOnAPersistentRateLimit(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Retry-After", "600")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"title":"rate-limited","status":429}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := &apiClient{base: srv.URL, hc: srv.Client(), token: "t"}
+	var longest time.Duration
+	s := &Seeder{admin: c, user: c, cluster: "kind", ns: "demo",
+		wait: func(_ context.Context, d time.Duration) error {
+			if d > longest {
+				longest = d
+			}
+			return nil
+		}}
+
+	err := s.Run(context.Background())
+
+	if err == nil || !strings.Contains(err.Error(), "429") {
+		t.Fatalf("want the create to fail with the 429 after the retries, got %v", err)
+	}
+	if hits.Load() != seedWriteAttempts {
+		t.Fatalf("want exactly %d attempts, got %d", seedWriteAttempts, hits.Load())
+	}
+	if longest != seedMaxRetryWait {
+		t.Fatalf("a huge Retry-After must be clamped to %s, waited up to %s", seedMaxRetryWait, longest)
 	}
 }

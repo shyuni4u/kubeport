@@ -64,6 +64,23 @@ type Handlers struct {
 	// streamLifetime is how long a log stream stays open before the server
 	// ends it and the client reconnects through a fresh authorization (#169).
 	streamLifetime time.Duration
+
+	// releaseWrite is the budget for creating, updating and deleting a release
+	// (#232), the routes that cost the most per request: a create or update
+	// dry-runs and then applies every object the template renders, a delete
+	// issues a DeleteCollection per kind, and an update rolls the workload out
+	// again. One bucket for the three, so a loop cannot switch verbs for a
+	// fresh one, and apart from the read and control-plane budgets, so writes
+	// cannot starve a detail page or the deploy form's permission check.
+	// 30/min never refuses a person pressing deploy or delete.
+	//
+	// It is spent inside the handlers, just before the first cluster call,
+	// not as route middleware. On the demo every visitor shares one identity —
+	// the reset Job's seeder among them — and a bucket drained by requests the
+	// handler refuses for free (a body that does not parse, a release that is
+	// not yours) would lock all of them out of deploying while costing the
+	// caller nothing and sparing the apiserver nothing.
+	releaseWrite *rateLimiter
 }
 
 func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
@@ -85,6 +102,7 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 		openapi:        newOpenAPIProxy(cfg.OpenAPICacheMax),
 		streams:        newStreamSlots(cfg.LogStreamsPerCaller),
 		streamLifetime: logStreamLifetime(cfg.LogStreamMaxLifetime),
+		releaseWrite:   newRateLimiter(30, 4096),
 	}
 	noDemo := denyDemo(deps.DemoEmailDomain)
 
@@ -94,8 +112,9 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	// actually do the fetching unmetered: a cache miss pulls up to 10MiB, and
 	// a caller can manufacture misses at will by varying the group/version.
 	//
-	// Release reads and release writes, which also call the apiserver, have
-	// budgets of their own below.
+	// Release reads, which also call the apiserver, have a budget of their own
+	// below; release writes spend theirs inside the handlers
+	// (Handlers.releaseWrite).
 	upstream := newRateLimiter(60, 4096)
 	// Two buckets for the routes that run SerializeUIMode, split by who fires
 	// them rather than by what they compute.
@@ -139,18 +158,6 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	// and a list view one per row, so several visitors fit, while a loop is
 	// held to 4 pod LISTs a second per caller.
 	releaseRead := newRateLimiter(240, 4096)
-	// Creating, updating and deleting a release cost the most per request of
-	// anything here (#232): a create or update dry-runs and then applies every
-	// object the template renders, and a delete issues a DeleteCollection per
-	// kind — and an update rolls the workload out again. They had no budget at
-	// all.
-	//
-	// One bucket for the three, so a loop cannot switch verbs for a fresh one,
-	// and apart from `releaseRead` and `upstream`, so a stream of writes cannot
-	// starve a detail page or the deploy form's permission check. A person
-	// submits the deploy form or presses delete once; 30/min never refuses
-	// that, and holds a loop to one write every two seconds.
-	releaseWrite := newRateLimiter(30, 4096)
 	v := r.Group("/v1", requireAuth(deps.Verifier))
 	v.GET("/me", h.GetMe)
 	v.GET("/clusters", h.ListClusters)
@@ -192,7 +199,8 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	v.POST("/templates/:name/versions/:v/deprecate", h.DeprecateVersion)
 	v.POST("/templates/:name/versions/:v/undeprecate", h.UndeprecateVersion)
 	v.GET("/releases", h.ListReleases)
-	v.POST("/releases", rateLimit(releaseWrite), h.CreateRelease)
+	// Release writes are budgeted inside the handlers — see Handlers.releaseWrite.
+	v.POST("/releases", h.CreateRelease)
 	v.GET("/releases/:id", rateLimit(releaseRead), h.GetRelease)
 	// Opening a stream lists the release's pods and then follows one log per
 	// pod, so it is a control-plane fan-out like the two above and belongs on
@@ -202,8 +210,8 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	// it. One token per open, not one per line; a follow that stays up for an
 	// hour spends nothing after the handshake.
 	v.GET("/releases/:id/logs", rateLimit(upstream), h.StreamReleaseLogs)
-	v.PUT("/releases/:id", rateLimit(releaseWrite), h.UpdateRelease)
-	v.DELETE("/releases/:id", rateLimit(releaseWrite), h.DeleteRelease)
+	v.PUT("/releases/:id", h.UpdateRelease)
+	v.DELETE("/releases/:id", h.DeleteRelease)
 	v.GET("/teams", h.ListTeams)
 	v.POST("/teams", requireAdmin(), noDemo, h.CreateTeam)
 	v.GET("/teams/:id/members", h.ListTeamMembers)

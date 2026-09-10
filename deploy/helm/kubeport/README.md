@@ -455,8 +455,14 @@ page reads twice per render and re-renders every 3–15s while a rollout settles
 so 240/min covers well over a dozen such tabs per identity. On a demo install
 every visitor of one Dex account shares that identity: when the budget runs out,
 release pages show the error screen and the backend answers `429 rate-limited`
-with `X-RateLimit-Limit: 240`. Changing a budget needs a code change
-(`backend/internal/api/routes.go`).
+with `X-RateLimit-Limit: 240`. When the write budget runs out instead, the
+deploy form shows a generic failure and delete says it could not delete; the
+backend answers `429 rate-limited` with `X-RateLimit-Limit: 30` on
+`POST /v1/releases` or `PUT`/`DELETE /v1/releases/{id}`, and it works again
+within seconds. A write refused before it reaches the cluster (a bad body, a
+release that is not yours) does not spend that budget, and the demo reset's
+seeder — which runs as the demo user — waits out a 429 rather than failing.
+Changing a budget needs a code change (`backend/internal/api/routes.go`).
 
 ## Schema sync
 
