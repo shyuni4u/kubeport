@@ -128,15 +128,16 @@ curl -ks -X POST https://host.docker.internal:5556/token \
 - 얻은 신원은 데모 도메인이라 다음에서 **403 `demo-restricted`** 다: 항상 막히는 관리 쓰기(`POST /v1/clusters`,
   `POST /v1/clusters/:name/openapi/refresh`, `POST /v1/teams`, 팀 멤버 추가·삭제, `DELETE /v1/releases/:id?force=true`),
   설치가 `demo.allowTemplateCreate=true` 를 켜지 않았을 때의 `POST /v1/templates`, 그리고 데모 계정이 만들지 않은
-  템플릿의 변경과 릴리스의 읽기·변경.
+  릴리스의 읽기·변경.
 - 데모 계정이 만들지 않은 템플릿은 **읽기도 배포도 403 이 아니라 404 `not-found`** 다 — `GET /v1/templates/:name`·
   `/versions`·`/versions/:v`, `POST /v1/templates/:name/render`, `POST /v1/releases` 모두 없는 템플릿·버전과 같은
   응답이다([#226](https://github.com/shyuni4u/kubeport/issues/226), [#238](https://github.com/shyuni4u/kubeport/issues/238)).
-  템플릿 목록이 숨기는 것과 같은 선이라, 이 **읽기·배포 경로에서는** 이름을 알아도 내용을 받거나 존재를 확인할 수
-  없다(아예 없는 이름과 status·title·detail 이 같다). 반대 방향도 같다: 관리자가 아닌 실사용자에게 데모 템플릿은 없는
-  것으로 보인다. **변경 경로**(`PATCH /v1/templates/:name`, 버전 생성·수정·삭제, publish·deprecate)는 아직 403 사유로
-  이름의 존재를 확인해 준다([#244](https://github.com/shyuni4u/kubeport/issues/244)). 선 밖에서도, **한 번도 게시되지 않은** 템플릿의 초안을 읽을 권한이
-  없으면 403 이 아니라 404 다. 이미 게시된 템플릿의 이후 초안만 사유가 담긴 403 을 준다(이름은 이미 카탈로그에 공개돼 있어서).
+  **변경 경로**(`PATCH /v1/templates/:name`, 버전 생성·수정·삭제, publish·deprecate·undeprecate)도 같은 404 다
+  ([#244](https://github.com/shyuni4u/kubeport/issues/244)). 템플릿 목록이 숨기는 것과 같은 선이라, 이름을 알아도 내용을
+  받거나 존재를 확인할 수 없다(아예 없는 이름과 status·title·detail 이 같다). 반대 방향도 같다: 관리자가 아닌 실사용자에게
+  데모 템플릿은 없는 것으로 보인다. 선 밖에서도, **한 번도 게시되지 않은** 템플릿의 초안을 읽을 권한이 없으면 읽기든 변경이든
+  403 이 아니라 404 다. 사유가 담긴 403 은 **볼 수는 있지만 바꿀 수 없는** 템플릿에만 온다 — 게시된 템플릿(이름이 이미
+  카탈로그에 공개돼 있다)의 변경이나 이후 초안 읽기, 팀 viewer 의 변경.
 - k8s 쪽 권한도 `demo` 네임스페이스로 묶여 있다(`templates/demo-rbac.yaml`).
 
 그래서 **데모 범위의 스모크 자동화는 가능하고, 실사용자 권한으로 운영을 자동화하는 경로는 여전히

@@ -40,8 +40,8 @@ func TestDemoAdmin_CannotEditNonDemoOwnedTemplate(t *testing.T) {
 	demoRouter := newDemoAdminRouter(t, s, &fakeK8sApplier{})
 	body, _ := json.Marshal(map[string]any{"display_name": "hijacked"})
 	w := do(t, demoRouter, http.MethodPatch, "/v1/templates/"+tplName, bytes.NewReader(body))
-	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
-	require.Contains(t, w.Body.String(), "demo-restricted")
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "not-found")
 
 	// The real admin is unaffected.
 	w2 := do(t, adminRouter, http.MethodPatch, "/v1/templates/"+tplName, bytes.NewReader(body))

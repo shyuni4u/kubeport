@@ -45,7 +45,7 @@ func TestPermissions_GlobalTemplate_NonAdminDenied(t *testing.T) {
 
 	// Non-admin attempts to deprecate the global template.
 	w := do(t, userR, http.MethodPost, "/v1/templates/"+name+"/versions/1/deprecate", nil)
-	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
 // TestPermissions_TeamTemplate_EditorAllowed verifies that team editors
