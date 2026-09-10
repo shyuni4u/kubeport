@@ -236,6 +236,12 @@ demo:
   # Namespace for demo RBAC, quota and the reset job, and where the deploy form
   # starts demo sessions (rendered to the frontend as DEMO_NAMESPACE).
   namespace: demo
+  # Demo accounts. adminEmail and userEmail must each end in @<emailDomain>
+  # (compared case-insensitively, as the backend does) and equal one of
+  # dex.staticPasswords[].email exactly — changing an account is two edits. An
+  # account outside the domain skips demo scoping, and adminEmail also becomes
+  # a full kubeport-admin. The chart refuses to render otherwise (#208, #209);
+  # see README "Demo mode (Dex)".
   emailDomain: demo.kubeport
   adminEmail: demo-admin@demo.kubeport
   userEmail: demo-user@demo.kubeport

@@ -12,7 +12,22 @@ the backend's IsDemoEmail does; the Dex account must match exactly, because the
 same address is rendered into RBAC subjects and admin emails that are compared
 with the token's email as-is.
 */ -}}
-{{- $suffix := printf "@%s" (lower (required "demo.emailDomain is required when demo.enabled=true" .Values.demo.emailDomain)) -}}
+{{- /*
+Each value must be one address (or one domain) before anything else is
+compared: the admin email is joined into the comma-separated
+KBP_DEV_ADMIN_EMAILS, so "ops@example.org,demo-admin@<domain>" would end in the
+demo domain here and still hand ops@example.org kubeport-admin there.
+*/ -}}
+{{- $domain := required "demo.emailDomain is required when demo.enabled=true" .Values.demo.emailDomain -}}
+{{- if not (regexMatch "^[^@,\\s]+$" (toString $domain)) -}}
+{{- fail (printf "demo.emailDomain (%v) must be a single domain: no @, commas or whitespace" $domain) -}}
+{{- end -}}
+{{- range $key, $email := dict "demo.adminEmail" .Values.demo.adminEmail "demo.userEmail" .Values.demo.userEmail -}}
+{{- if not (regexMatch "^[^@,\\s]+@[^@,\\s]+$" (toString ($email | default ""))) -}}
+{{- fail (printf "%s (%v) must be a single address: no commas, whitespace or extra @" $key $email) -}}
+{{- end -}}
+{{- end -}}
+{{- $suffix := printf "@%s" (lower $domain) -}}
 {{- $dexEmails := list -}}
 {{- range .Values.dex.staticPasswords -}}
 {{- $dexEmails = append $dexEmails (.email | default "") -}}
@@ -20,10 +35,11 @@ with the token's email as-is.
 {{- range $key, $email := dict "demo.adminEmail" .Values.demo.adminEmail "demo.userEmail" .Values.demo.userEmail -}}
 {{- $email = $email | default "" -}}
 {{- if not (hasSuffix $suffix (lower $email)) -}}
-{{- fail (printf "%s (%s) must end in %s: an account outside the demo domain skips demo scoping and is a full kubeport-admin" $key $email $suffix) -}}
+{{- $why := ternary "skips demo scoping and, appended to KBP_DEV_ADMIN_EMAILS, is a full kubeport-admin" "skips demo scoping" (eq $key "demo.adminEmail") -}}
+{{- fail (printf "%s (%s) must end in %s: an account outside the demo domain %s, while the landing page prints its password" $key $email $suffix $why) -}}
 {{- end -}}
 {{- if not (has $email $dexEmails) -}}
-{{- fail (printf "%s (%s) must match one of dex.staticPasswords[].email exactly: the landing page tells visitors to sign in with it" $key $email) -}}
+{{- fail (printf "%s (%s) must match one of dex.staticPasswords[].email exactly (Dex has: %s): the landing page tells visitors to sign in with it. A --set of only dex.staticPasswords[N].hash replaces the whole entry and drops its email — set email, username, userID and hash together" $key $email (join ", " $dexEmails)) -}}
 {{- end -}}
 {{- end -}}
 apiVersion: v1

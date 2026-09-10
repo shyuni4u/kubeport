@@ -45,6 +45,9 @@ helm-lint:
 		--set demo.userEmail=someone-else@demo.kubeport 2>&1 | grep -q "must match one of dex.staticPasswords" \
 		|| { echo "demo email guard: a user email Dex does not know rendered"; exit 1; }
 	@helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
+		--set-string "demo.adminEmail=ops@example.org\,demo-admin@demo.kubeport" 2>&1 | grep -q "must be a single address" \
+		|| { echo "demo email guard: a comma-joined admin email rendered"; exit 1; }
+	@helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
 		--set demo.emailDomain=DEMO.kubeport >/dev/null \
 		|| { echo "demo email guard: refused a demo.emailDomain that differs only in case"; exit 1; }
 	@echo "demo email guard: ok"

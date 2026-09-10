@@ -326,7 +326,9 @@ admin UI 에 클러스터 등록 화면이 아직 없으므로, admin 토큰으�
     새 차트의 기본값(`demo.namespace`, `dex.image`, `demo.resetSchedule` …)이 전부 빈 값이 되어
     `Namespace ""` 같은 에러로 실패한다.
   - **`staticPasswords[N].hash` 만 `--set` 하면 email/username/userID 가 사라진다.** Helm 은 리스트를
-    병합하지 않고 통째로 교체하므로 항목의 네 필드를 전부 준다. (증상: Dex 가 `Invalid username or password`.)
+    병합하지 않고 통째로 교체하므로 항목의 네 필드를 전부 준다. (증상: 렌더 단계에서
+    `demo.adminEmail (demo-admin@demo.kubeport) must match one of dex.staticPasswords[].email exactly (Dex has: , )`
+    로 실패한다. 이 가드(#209)가 생기기 전에는 배포는 됐고 Dex 가 `Invalid username or password` 를 냈다.)
 
 - Dex 인증서 발급 완료 (`kubectl get certificate -n kubeport` 에서 Dex cert `Ready=True`).
 - 클러스터 **내부에서** Dex 에 닿는지 확인. backend 는 issuer discovery 를 lazy 하게 하므로
