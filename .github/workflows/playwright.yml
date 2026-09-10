@@ -315,7 +315,11 @@ jobs:
           KIND_CA=$(kubectl --context kind-kubeport config view --raw --minify --flatten -o json \
             | jq -r '.clusters[0].cluster."certificate-authority-data"' | base64 -d)
           export KIND_CA
-          cd backend && go test -p 1 ./internal/api/ ./internal/k8s/
+          # -v so the log names the tests that ran. KBP_REQUIRE_KIND is what
+          # gates; this is so a human can see which kind-backed tests executed
+          # without inferring it from an exit code — the distinction this whole
+          # change is about.
+          cd backend && go test -p 1 -v ./internal/api/ ./internal/k8s/
 
       - name: Seed demo data
         env:
