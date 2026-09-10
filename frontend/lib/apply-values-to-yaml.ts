@@ -1,5 +1,7 @@
 import { parseAllDocuments, type Document } from "yaml";
 
+import { parseTemplatePath } from "./template-path";
+
 // Client-side mirror of the backend's template.Render path injection
 // (backend/internal/template/jsonpath.go), used by the landing-page
 // comparison so the "admin YAML" pane reacts to the "user form" pane without
@@ -7,28 +9,9 @@ import { parseAllDocuments, type Document } from "yaml";
 // documents or paths are ignored instead of auto-created, because this is a
 // display aid, not the deploy path.
 //
-// Path grammar: `Kind[selector].seg.seg[idx]...` — selector is a
-// metadata.name or a zero-based index among documents of that kind, and may
-// be omitted when exactly one document of the kind exists.
-
-const headRE = /^([A-Z][A-Za-z]+)(?:\[([^\]]+)\])?(.*)$/;
-const segRE = /^(?:([A-Za-z_][A-Za-z0-9_]*)|\[(\d+)\])/;
-
-function parsePath(p: string): { kind: string; selector: string; keys: (string | number)[] } | null {
-  const m = headRE.exec(p);
-  if (!m) return null;
-  const [, kind, selector = "", tail] = m;
-  let rest = tail.startsWith(".") ? tail.slice(1) : tail;
-  const keys: (string | number)[] = [];
-  while (rest !== "") {
-    const s = segRE.exec(rest);
-    if (!s) return null;
-    keys.push(s[1] !== undefined ? s[1] : Number(s[2]));
-    rest = rest.slice(s[0].length);
-    if (rest.startsWith(".")) rest = rest.slice(1);
-  }
-  return { kind, selector, keys };
-}
+// The grammar itself lives in ./template-path — it used to be a second copy of
+// the regexes here, which is how issue #129's bug came to exist in three
+// places at once.
 
 function findDoc(docs: Document[], kind: string, selector: string): Document | null {
   const matches = docs.filter((d) => d.get("kind") === kind);
@@ -47,7 +30,7 @@ export function applyValuesToYaml(resourcesYaml: string, values: Record<string, 
   const docs = parseAllDocuments(resourcesYaml);
   for (const [p, v] of Object.entries(values)) {
     if (v === undefined) continue;
-    const parsed = parsePath(p);
+    const parsed = parseTemplatePath(p);
     if (!parsed || parsed.keys.length === 0) continue;
     const doc = findDoc(docs, parsed.kind, parsed.selector);
     if (!doc || !doc.hasIn(parsed.keys)) continue;

@@ -3,9 +3,6 @@ package template
 import (
 	"bytes"
 	"fmt"
-	"regexp"
-	"strconv"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -64,6 +61,23 @@ func SerializeUIMode(ui UIModeTemplate) (resourcesYAML, uiSpecYAML string, err e
 			"kind":       r.Kind,
 			"metadata":   map[string]any{"name": r.Name},
 		}
+		// Two field paths that canonicalize to the same location would both be
+		// written into the same key, and Go's map iteration order decides
+		// which value survives. Refuse rather than save something the admin
+		// cannot predict — the editor cannot produce this, but the API takes a
+		// UIModeTemplate directly.
+		canon := make(map[string]string, len(r.Fields))
+		for fpath := range r.Fields {
+			c, err := CanonicalPath(fpath)
+			if err != nil {
+				return "", "", fmt.Errorf("resource %s/%s field %q: %w", r.Kind, r.Name, fpath, err)
+			}
+			if prev, dup := canon[c]; dup {
+				return "", "", fmt.Errorf("resource %s/%s: fields %q and %q address the same path", r.Kind, r.Name, prev, fpath)
+			}
+			canon[c] = fpath
+		}
+
 		for fpath, f := range r.Fields {
 			switch f.Mode {
 			case "fixed":
@@ -112,26 +126,12 @@ func SerializeUIMode(ui UIModeTemplate) (resourcesYAML, uiSpecYAML string, err e
 // front), but here we're generating a fresh document from scratch so the
 // array is expected to be created on demand.
 func setJSONPathAbsolute(obj map[string]any, path string, v any) error {
-	// Tokenize the path into segments: either a map key or an array index.
-	type seg struct {
-		key string // set when segment is a map key
-		idx int    // set when segment is an array index
-		arr bool   // true if array segment
-	}
-	var segs []seg
-	rest := path
-	for rest != "" {
-		m := uimodeSegRE.FindStringSubmatch(rest)
-		if m == nil {
-			return fmt.Errorf("bad path remainder %q", rest)
-		}
-		rest = strings.TrimPrefix(rest[len(m[0]):], ".")
-		if m[1] != "" {
-			segs = append(segs, seg{key: m[1]})
-		} else {
-			n, _ := strconv.Atoi(m[2])
-			segs = append(segs, seg{idx: n, arr: true})
-		}
+	// One tokenizer, shared with jsonpath.go. The two used to carry separate
+	// copies of the same regex, which is why issue #129's bug existed twice:
+	// this function generates the paths that setInto then has to read back.
+	segs, err := parsePathSegments(path)
+	if err != nil {
+		return err
 	}
 	if len(segs) == 0 {
 		return fmt.Errorf("empty path")
@@ -217,5 +217,3 @@ func setJSONPathAbsolute(obj map[string]any, path string, v any) error {
 	}
 	return nil
 }
-
-var uimodeSegRE = regexp.MustCompile(`^(?:([A-Za-z_][A-Za-z0-9_]*)|\[(\d+)\])`)

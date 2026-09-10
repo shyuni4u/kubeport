@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -19,15 +20,66 @@ type Labels struct {
 }
 
 // ValidateSpec parses the resources and ui-spec YAML pair and returns a
-// non-nil error if either is malformed or if any ui-spec field has an
-// invalid pattern. It skips value injection and required-field checks so
-// admins can register templates whose fields are required at deploy time.
+// non-nil error if either is malformed, if any ui-spec field has an invalid
+// pattern, or if any field path is unparseable. It skips value injection and
+// required-field checks so admins can register templates whose fields are
+// required at deploy time.
+//
+// Path syntax is checked here rather than only at render time because every
+// caller is a write: an unparseable path saved now surfaces as a failed deploy
+// later, in front of the user rather than the admin who mistyped it. Quoted
+// segments make that more likely, since they are the one part of the grammar
+// an admin writes by hand.
 func ValidateSpec(resourcesYAML, uiSpecYAML string) error {
 	if _, err := parseMultiDoc(resourcesYAML); err != nil {
 		return err
 	}
-	if _, err := parseSpec(uiSpecYAML); err != nil {
+	spec, err := parseSpec(uiSpecYAML)
+	if err != nil {
 		return err
+	}
+	for i, f := range spec.Fields {
+		if err := validatePath(f.Path); err != nil {
+			// fields[i] rather than the label alone: a label is a display
+			// string, is not unique, and is translated, so it is a poor
+			// handle for a client deciding which entry to correct.
+			// The path is delimited with backticks, not %q: paths now carry
+			// quote characters of their own, and %q escapes them into
+			// something the author cannot paste back.
+			return fmt.Errorf("fields[%d] (label %q) has an unusable path `%s`: %w", i, f.Label, f.Path, err)
+		}
+	}
+	return nil
+}
+
+// validatePath rejects a ui-spec path that Render could not use, or could use
+// in a way the author did not mean.
+//
+// Canonical spelling is required, not merely accepted. The parser takes
+// `spec["replicas"]` and `spec.replicas` as the same node, but Render looks a
+// value up by exact string — `input[f.Path]` — so a values payload written with
+// the other spelling misses, and the field silently falls back to its default
+// while the deploy returns 201. One spelling per path removes the whole class,
+// and it costs nothing: every generator already emits only this one.
+func validatePath(path string) error {
+	_, _, rest, err := parseHead(path)
+	if err != nil {
+		return err
+	}
+	segs, err := parsePathSegments(rest)
+	if err != nil {
+		return err
+	}
+	if len(segs) == 0 {
+		return fmt.Errorf("path selects a whole resource; append the field to set, as in %s.spec.replicas", path)
+	}
+	canon, err := CanonicalPath(rest)
+	if err != nil {
+		return err
+	}
+	if canon != rest {
+		return fmt.Errorf("path is not canonical: write it as `%s` (quote a key only when the bare form cannot express it)",
+			strings.TrimSuffix(path, rest)+canon)
 	}
 	return nil
 }

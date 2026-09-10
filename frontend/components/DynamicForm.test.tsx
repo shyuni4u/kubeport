@@ -595,3 +595,43 @@ describe("DynamicForm submit emphasis", () => {
     expect(button.className).toContain("border");
   });
 });
+
+// A quoted segment reaches the deploy form whenever an admin exposes a label
+// or annotation. DynamicForm rewrites `.`, `[` and `]` out of RHF field names
+// because RHF reads all three as nesting; the quote characters that quoting
+// introduces are new to that encoding, so the flat key has to survive them.
+describe("DynamicForm quoted path segments", () => {
+  const quoted = `Deployment[web].metadata.labels["app.kubernetes.io/name"]`;
+
+  it("submits a quoted path as one flat key", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const spec: UISpec = {
+      fields: [{ path: quoted, label: "앱 이름", type: "string", default: "web-app", required: true }],
+    };
+    renderWithIntl(<DynamicForm spec={spec} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    // Not `{Deployment: {web: {metadata: ...}}}` — the backend looks the whole
+    // string up in a flat map.
+    expect(Object.keys(onSubmit.mock.calls[0][0])).toEqual([quoted]);
+    expect(onSubmit.mock.calls[0][0][quoted]).toBe("web-app");
+  });
+
+  it("reports a validation failure against the quoted field", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const spec: UISpec = {
+      fields: [{ path: quoted, label: "앱 이름", type: "string", pattern: "^[a-z]+$", required: true }],
+    };
+    renderWithIntl(<DynamicForm spec={spec} onSubmit={onSubmit} />);
+    await user.type(screen.getByLabelText(/앱 이름/), "NOPE");
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+
+    // The issue path has to map back to this field's encoded name, or the
+    // message renders detached from the input that caused it.
+    await waitFor(() => expect(onSubmit).not.toHaveBeenCalled());
+    expect(screen.getByLabelText(/앱 이름/)).toHaveAttribute("aria-invalid", "true");
+  });
+});
