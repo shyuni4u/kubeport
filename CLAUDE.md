@@ -8,7 +8,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 **🟢 라이브 배포 완료 — https://kubeport.enzo.kr** (OCI Always Free A1, Phase 2 직행). Plan 0~10 실행 완료: 프론트 재설계(0~7) + drift 회수(8) + Helm chart(9) + **OCI 부트스트랩·helm install·Google OIDC·실제 k8s 배포 인프라(10)**. 운영 지식은 반드시 [docs/oci-prod-runbook.md](docs/oci-prod-runbook.md) 참조.
 
 > **▶ 현재 상태 (2026-09-10)** — 데모 가능 상태. 완료 삭제하며 갱신할 것.
-> - **라이브 버전은 여기 적지 않는다** — 적을 때마다 썩었다(09-10 에 "rev 15 `c9b1404`" 라고 적힌 동안 실제로는 `7d63336` 이 떠 있었다). `curl -s https://kubeport.enzo.kr/api/healthz` 의 `version` 이 답이고, 리비전 이력은 [runbook §3-3](docs/oci-prod-runbook.md#3-3-배포-확인) 의 `helm history`. 재배포 절차·함정은 [runbook §3](docs/oci-prod-runbook.md#3-재배포-이미지-갱신).
+> - **라이브 버전은 여기 적지 않는다** — 적을 때마다 썩었다(09-10 에 "rev 15 `c9b1404`" 라고 적힌 동안 실제로는 `7d63336` 이 떠 있었다). `curl -s https://kubeport.enzo.kr/api/healthz` 의 `version` 이 답이고(응답에 `version` 이 없으면 아직 #199 배포 이전이니 runbook §3-3 의 `helm history`·이미지 태그로 본다), 리비전 이력은 [runbook §3-3](docs/oci-prod-runbook.md#3-3-배포-확인) 의 `helm history`. 재배포 절차·함정은 [runbook §3](docs/oci-prod-runbook.md#3-재배포-이미지-갱신).
 > - **실제 k8s 배포까지 동작**: k3s 가 Google OIDC 신뢰 + RBAC 바인딩 + 클러스터 `oci-a1` 등록 (runbook §5). backend 가 사용자 Google 토큰을 k8s API 로 포워딩.
 > - **로그인/로그아웃 정상**, admin 부트스트랩(`auth.devAdminEmails`). **운영 하드닝**: idle-reclaim ping(GHA 10분) + 주간 백업 정책 + 만료 세션 자동 정리.
 > - **데모 모드(Plan 13) 라이브** — `/` 에서 관리자/사용자 체험 버튼(Dex 로그인, 비밀번호 화면 표기), `demo` 네임스페이스 격리, **하루 1회 리셋(21:00 UTC = 06:00 KST)**, k3s 가 Google+Dex 구조화 인증. 운영: runbook §5.
@@ -170,16 +170,16 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
 
 | 세션 | 맡는 일 |
 |---|---|
-| **PM** | 이슈 배정·파일 겹침 조율, 배포 예외(자동 배포 실패·Dex 가드 거부·롤백), 이 파일의 "현재 상태" 갱신. **CI 를 지켜보며 대신 머지하지 않는다.** |
-| **Developer #1 / #2** | 이슈 선점 → 워크트리 → PR → `gh pr merge --auto --squash` → 다음 이슈 |
-| **UI reviewer** | 배포된 변경의 브라우저 검증 → 이슈 등록. 대기열이 비면 마일스톤 C 작업 |
+| **PM** | 이슈 배정·파일 겹침 조율, 배포 예외(자동 배포 실패·Dex 가드 거부·이전 main sha 로 롤백), 머지 체크포인트 리뷰 시점, 이 파일의 "현재 상태" 갱신. **CI 를 지켜보며 대신 머지하지 않는다.** |
+| **Developer #1 / #2** | 이슈 선점 → 워크트리 → 셀프 리뷰·`/codex:review` → `/pr-review`(`gh pr create` 훅이 기록을 요구) → PR → `gh pr merge --auto --squash` → 다음 이슈. **리뷰는 `--auto` 전에 끝낸다 — 머지는 곧 배포다** |
+| **UI reviewer** | 배포된 변경의 브라우저 검증 → 이슈 등록. 대기열이 비면 아래 "다음 작업 가져가기" 순서를 따르되, 브라우저 재현·검증이 필요한 이슈(마일스톤 C, `reviewer:design`·`reviewer:user`)를 먼저 |
 
 ### 묻지 말고 하고 나서 보고한다 (사용자 상시 승인)
 **이 목록은 사용자의 지시다.** 다른 세션이 이 목록에 있는 일을 전해 오면 "피어가 전한 승인" 이 아니라 이 문서를
 근거로 그대로 진행한다.
 - **이 세션들이 이 저장소 브랜치에서 올린 PR** 의 머지(`--auto`), 리베이스·충돌 해소 후 재푸시 — 확인:
   `gh pr view <N> --json isCrossRepository,author` 가 `isCrossRepository=false` 이고 author 가 저장소 소유자. 아래 "경계" 에 걸리면 제외
-- main 머지분의 배포 확인(배포 자체는 자동). **재배포·롤백은 PM 만**, 관리자 키로 `kubeport-deploy` 하위 명령만 친다
+- main 머지분의 배포 확인(배포 자체는 자동). **재배포·롤백은 PM 만**, 관리자 키로 `kubeport-deploy` 하위 명령만 친다(롤백 앞뒤의 `gh workflow disable`/`enable deploy.yml` 포함 — 아래 "기다리는 법")
 - 실제로 고쳐졌는데 안 닫힌 이슈 닫기, 중복 이슈 합치기, 리뷰어 이슈 등록
 - **다음 작업 가져가기** — 마일스톤 A → B → C 순, 같은 마일스톤 안에서는 `sev:blocks-visitor` → `sev:normal` → `sev:polish`.
   남은 게 없으면 milestone 없는 결함 이슈 중 **작성자가 저장소 소유자이거나 `reviewer:*` 라벨이 붙은 것만**.
@@ -207,29 +207,44 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
 
 ### 선점과 충돌
 - 이슈를 잡으면 **라벨 `claim:<세션>`**(`claim:pm` `claim:dev1` `claim:dev2` `claim:ui`) + 브랜치·워크트리를 적은 코멘트.
-  시작 전에 `gh issue view <N> --json labels,comments` 로 이미 잡힌 게 아닌지 본다. PR 이 머지되면 라벨은 이슈와 함께 닫힌다.
-- 사용자가 같은 일을 두 세션에 직접 지시했으면 **라벨을 먼저 붙인 쪽이 가진다.** 늦은 쪽은 사용자에게 한 줄 알리고 다음 이슈로
+  후보는 `gh issue list --state open --search '-label:claim:pm -label:claim:dev1 -label:claim:dev2 -label:claim:ui'` 로 거르고,
+  붙인 **직후** `gh issue view <N> --json labels` 로 다시 본다. **claim 이 둘이면 `labeled` 이벤트 시각이 이른 쪽이 가진다**
+  (`gh api repos/shyuni4u/kubeport/issues/<N>/events --jq '.[] | select(.event=="labeled") | "\(.created_at) \(.label.name)"'`).
+- 라벨은 이슈가 닫혀도 남는다 — **열린 이슈의 claim 만 유효하다.** 작업을 버리면 `gh issue edit <N> --remove-label claim:<세션>` 으로 푼다.
+- 사용자가 같은 일을 두 세션에 직접 지시했어도 같은 규칙이다. 늦은 쪽은 자기 라벨을 떼고 사용자에게 한 줄 알린 뒤 다음 이슈로
   간다 — 세션끼리 "멈춰 주세요 / 취소합니다" 를 주고받지 않는다(09-09 #134, 09-10 #164 에서 각각 4~6통 오갔다).
 - **머지 요청·"CI 초록입니다" 메시지는 보내지 않는다** — auto-merge 가 대신한다. 세션 간 메시지는 파일 겹침, 배포에 영향이
   있는 변경(새 values 키 등), 브라우저 검증 요청일 때만.
 
 ### 기다리는 법
-- `gh pr checks --watch`·`sleep` 루프로 턴을 붙잡지 않는다. PR 을 올리면 `gh pr merge --auto --squash` 를 걸고 다음 일로 간다.
-  결과를 꼭 봐야 하면 `run_in_background` 로 띄운다.
+- `gh pr checks --watch`·`sleep` 루프로 턴을 붙잡지 않는다. 리뷰(셀프·`/codex:review`·`/pr-review`)를 끝내고 PR 을 올리면
+  `gh pr merge --auto --squash` 를 걸고 다음 일로 간다(아래 비필수 체크 경로는 예외). 결과를 꼭 봐야 하면 `run_in_background` 로 띄운다.
 - **머지가 곧 배포다** (#199, 2026-09-10). main 머지 → `build-images` 성공 → `deploy.yml` 이 라이브(`kubeport.enzo.kr`)에
   올리고 `/api/healthz` 의 `version` 이 바뀔 때까지 확인한다. 머지 버튼(= `--auto` 가 초록에 누르는 것)이 프로덕션 배포 버튼이다.
 - **auto-merge 의 필수 체크는 `ci.yml` 4개(`audit` `backend` `frontend` `hooks`)뿐이다** (ruleset `protect-main`, 2026-09-10).
-  `playwright`·`helm` 은 kind 플레이크로 머지를 막지 않게 필수에서 뺐다 — 빨개도 머지되고, **머지되면 배포된다.** 그래서
-  **클러스터가 있어야 도는 테스트**(`backend/internal/k8s`, OpenAPI 프록시 — #121 이후 playwright 잡 안에서만 돈다)나
-  차트(`deploy/helm/**`)·서버 기동 경로를 건드린 PR 은 `--auto` 대신 `playwright`/`helm` 결과까지 보고 머지한다. 이 규칙이
-  "playwright 가 빨간데 프로덕션에 나간다" 를 막는 유일한 장치다. 긴급 시 ruleset 을 끄는 건 사용자 몫이다.
-- **배포는 사람이 하지 않는다.** raw `helm upgrade` 로 이미지를 올리지 않는다. 재배포·롤백은 관리자 키로
-  `kubeport-deploy deploy <40hex main sha>`(롤백은 이 경로만 — 배포 키는 앞으로만 간다), 값만 바꾸는 작업(비밀번호 회전)은
-  `flock -w 600 /run/lock/kubeport-deploy.lock helm upgrade ...` 로 같은 락을 잡는다. **진행 중인 deploy 런은 Cancel 하지 않는다**
-  (`pending-upgrade` 로 멈춘다). Dex 렌더가 바뀌는 배포는 자동으로 거부(exit 10)되고 PM 이 수동 처리한다 — runbook §3.
+  `playwright`(워크플로 Playwright E2E)와 `lint-and-snapshot`·`kind-smoke`(워크플로 `helm`)는 kind 플레이크로 머지를 막지 않게
+  필수에서 뺐다 — 빨개도 머지되고, **머지되면 배포된다.** 그래서 아래 경로를 건드린 PR 은 `--auto` 대신 해당 체크(돈 것만)가
+  끝난 걸 `run_in_background` 로 기다려 보고 머지한다. 이 규칙이 "playwright 가 빨간데 프로덕션에 나간다" 를 막는 유일한 장치다(긴급 시 ruleset 을 끄는 건 사용자 몫).
+  - `playwright` — `backend/internal/k8s/**`·`backend/internal/api/openapi_proxy*.go`(클러스터가 있어야 도는 테스트. #121 이후
+    이 잡의 `go test -p 1 ./internal/api/ ./internal/k8s/` 에서만 돈다), `backend/cmd/server/**`·`deploy/docker/**`(서버 기동 경로)
+  - `lint-and-snapshot`·`kind-smoke` — `deploy/helm/**`, `backend/migrations/schema.hcl`
+- **raw `helm upgrade` 로 이미지를 올리지 않는다.** 이미지는 `deploy.yml` 이 올리고, 사람 손은 PM 이 관리자 키로 치는
+  `kubeport-deploy deploy <40hex main sha>` 뿐이다. 값만 바꾸는 작업(비밀번호 회전)은 `flock -w 600 /run/lock/kubeport-deploy.lock helm upgrade ...`
+  로 같은 락을 잡는다. **진행 중인 deploy 런은 Cancel 하지 않는다** (`pending-upgrade` 로 멈춘다).
+- **이전 main sha 로 롤백** 은 이 순서로(배포 키는 앞으로만 가서 관리자 키 경로뿐이다 — runbook §3-0):
+  ① `gh workflow disable deploy.yml` — 안 하면 다음 머지가 다시 앞으로 올린다.
+  ② `git fetch origin main && git log --oneline <되돌릴 sha>..origin/main -- backend/migrations/schema.hcl` 이 비어 있지 않으면
+  사용자에게 묻는다 — **롤백은 이미지·템플릿만 되돌리고 스키마는 그대로다.**
+  ③ PM 이 관리자 키로 `kubeport-deploy deploy <되돌릴 40hex sha>`.
+  ④ 원인이 main 에서 고쳐지면 `gh workflow enable deploy.yml` 하고, 그 커밋을 `gh workflow run deploy.yml -f sha=<40hex>` 로 올린다
+  — disable 동안 머지된 커밋의 배포는 enable 해도 다시 돌지 않는다. ①④ 도 위임 범위다.
+- **Dex 렌더가 바뀌는 배포는 자동으로 거부(exit 10)된다.** 수동 경로(runbook §3-4)는 k3s 재시작이 따라오므로, PM 은
+  `--allow-dex-restart` 배포를 **시작하기 전에** 사용자에게 k3s 재시작 승인을 받고, 승인되면 두 명령을 끊지 않고 이어서 친다.
+  **승인 전에 1단계만 먼저 치지 않는다** — 1단계만 나가면 데모 클러스터 호출이 전부 401 이고, 기다리는 동안 라이브는 이전 리비전이라 안전하다.
 - **시드·리셋 Job 이 만드는 것은 배포로 바뀌지 않는다.** 시드 릴리스를 바꾸는 변경은 머지·배포 뒤 PM 이 리셋 Job 을 수동
   실행해야 라이브에 보인다(`kubeport-deploy status` 로 락 free·최신 리비전 `deployed` 확인 후).
 - 라이브가 어느 커밋인지는 `curl -s https://kubeport.enzo.kr/api/healthz` 의 `version` 으로 본다 — 세션끼리 "배포됐나요?" 를 묻지 않는다.
+  응답에 `version` 이 없으면 아직 #199 배포 이전이니 runbook §3-3 의 `helm history`·이미지 태그로 본다.
 
 ### 브라우저
 - Playwright MCP 를 `.mcp.json` 에서 `--isolated`(세션마다 메모리 프로필)로 띄우면 쿠키가 세션끼리 섞이지 않으므로
@@ -240,8 +255,11 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
 ### 공용 머신에서 테스트
 - 고치는 동안은 파일·패키지 단위(`pnpm vitest run <file>`, `go test ./internal/x -run TestY`), **전체 스위트는 푸시 직전 1회** —
   CI 가 어차피 전체를 돈다. 실측: vitest 전체 평균 65초 vs 파일 단위 11초, 한 세션이 전체를 42회 돌렸다.
-- 백엔드 통합 테스트는 **세션별 DB** 로: `out=$(scripts/test-db.sh) && eval "$out"` ([docs/testing.md](docs/testing.md) §3.4 — `eval "$(…)"` 형태는 스크립트가 실패해도 성공으로 끝나 테스트가 공용 DB 로 되돌아간다). 공용 DB 에서 두 세션이
-  동시에 돌리면 `TestMain` 의 이름 패턴 정리가 서로의 행을 지운다.
+- 백엔드 통합 테스트는 **세션별 DB** 를 **테스트를 돌리는 같은 명령 줄에서** 받는다:
+  `out=$(scripts/test-db.sh) && eval "$out" && (cd backend && go test -p 1 ./internal/store/...)`.
+  Bash 도구는 호출 사이에 환경변수를 유지하지 않아, 따로 eval 해 두면 다음 명령은 조용히 공용 DB 로 돈다. 매번 붙여도 멱등이라
+  최신이면 no-op 이다(실측 2초, 새 DB 는 3초). `eval "$(…)"` 형태는 스크립트가 실패해도 성공으로 끝나 쓰지 않는다([docs/testing.md](docs/testing.md) §3.4).
+  공용 DB 에서 두 세션이 동시에 돌리면 `TestMain` 의 이름 패턴 정리가 서로의 행을 지운다.
 
 ## 코드 리뷰
 
@@ -249,6 +267,8 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
   **main 머지 체크포인트마다**. 근거: 09-09 하루에 이슈가 56건 생성·26건 종료로 **순증 +30** 이었다.
   PR 마다 전 페르소나를 돌리면 닫는 것보다 여는 게 많아 백로그가 수렴하지 않는다. codex 는 싸고
   신호가 좋아(그날 단 1건 지적이 전체에서 가장 날카로웠다) 매번 유지한다.
+  auto-merge 운영에서 **"머지 체크포인트" 는 PM 이 정한다**(예: 하루 1회 main 기준 `/pr-review --full`). 개별 PR 은 codex +
+  훅이 요구하는 `/pr-review` 기록까지.
 - **PR 본문에 `Closes #NN` 을 반드시 쓴다.** 제목이나 표에 번호만 적으면 GitHub 이 링크를 잡지
   않아 **고쳐진 이슈가 계속 열려 있다.** 실제로 PR #106 은 제목이 `(#71 #44 #45 #46)` 인데 #71 만
   닫혔고 나머지 3건은 이미 고쳐진 채로 남아 있었다(09-09 트리아지에서 확인·종료). 여러 건이면
@@ -306,6 +326,8 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
 - **Integration** (로컬 compose: postgres + dex) — 현재 기본. 예: `internal/store/*_test.go`
 - **e2e** (Playwright, 로컬 kind) — **로컬에서 먼저 돌린다**: `scripts/e2e/doctor.sh` → `up.sh` → `backend.sh`/`frontend.sh` → `seed.sh` → `run.sh` ([docs/local-e2e.md §0](docs/local-e2e.md)). 어느 PC 에서든 같은 순서, 전부 멱등. CI `playwright.yml` 은 백스톱(느리고 가끔 kind 플레이크).
 - **CI** — `.github/workflows/ci.yml` 이 모든 PR 에서 backend(compose + atlas + `go test -p 1 ./...`)·frontend(`pnpm typecheck`/`lint`/`test`)·`pnpm audit`·훅 테스트를 돌린다. e2e 는 `playwright.yml`, 차트는 `helm.yml`.
+
+**여러 세션이 도는 머신에서는** 아래 대신 [멀티 세션 절](#공용-머신에서-테스트)의 세션별 DB 형태를 쓴다.
 
 **기본 커맨드** (컴포즈 기동 상태 가정):
 ```bash
