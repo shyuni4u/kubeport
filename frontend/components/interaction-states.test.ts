@@ -108,6 +108,35 @@ describe("hover and highlight", () => {
   });
 });
 
+/**
+ * A dark-mode base fill silently outranks a theme-agnostic hover.
+ *
+ * `dark:bg-input/30` compiles to `.dark\:bg-input\/30:is(.dark *)` and
+ * `hover:bg-hover` to `.hover\:bg-hover:hover` — the same specificity, with the
+ * dark rule emitted later. So a variant that keeps a `dark:bg-*` base and
+ * relies on a bare `hover:` loses its hover feedback in dark mode entirely,
+ * with nothing in the class string to suggest it. shadcn ships the pair
+ * (`dark:hover:bg-input/50`) for exactly this reason; dropping the dark half
+ * while keeping the dark base is what broke the outline button.
+ *
+ * Confirmed against the emitted CSS in cross-review, not inferred.
+ */
+describe("dark-mode base fills", () => {
+  it("never leave a hover to a rule the dark base outranks", () => {
+    const broken: string[] = [];
+    for (const { file, text } of FILES) {
+      for (const m of text.matchAll(/"([^"\\]*(?:\\.[^"\\]*)*)"/g)) {
+        const classes = m[1];
+        if (!/(?:^|\s)dark:bg-/.test(classes)) continue;
+        if (!/(?:^|\s)hover:bg-/.test(classes)) continue;
+        if (/(?:^|\s)dark:hover:bg-/.test(classes)) continue;
+        broken.push(`${file}: a dark base fill with no dark hover`);
+      }
+    }
+    expect(broken).toEqual([]);
+  });
+});
+
 describe("selection", () => {
   const SELECTED_STATE = /((?:aria-[a-z]+|data-\[[^\]]+\]|data-[a-z-]+):)bg-selected\b/g;
 

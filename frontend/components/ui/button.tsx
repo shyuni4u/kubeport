@@ -19,11 +19,18 @@ const buttonVariants = cva(
       variant: {
         default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
         // `bg-hover`, not `bg-muted`: --muted is a surface and sits 1.12:1 from
-        // the page, so an outline/ghost button gave no feedback at all on hover
-        // (#130). The `dark:` overrides are gone with it — --hover is defined
-        // per theme, which is what a state token is for.
+        // the page, so an outline or ghost button gave no feedback at all on
+        // hover (#130). --hover is defined per theme, which is what a state
+        // token is for.
+        //
+        // `dark:hover:bg-hover` still has to be spelled out, though, and is not
+        // redundant. This variant keeps a dark-mode base fill, and
+        // `dark:bg-input/30` carries the same specificity as a bare `hover:`
+        // while being emitted later — so without the dark hover the button
+        // stops responding to the pointer in dark mode entirely. Ghost needs no
+        // such pair: it has no base fill for the dark rule to hold.
         outline:
-          "border-border bg-background hover:bg-hover hover:text-foreground aria-expanded:bg-hover aria-expanded:text-foreground dark:border-input dark:bg-input/30",
+          "border-border bg-background hover:bg-hover hover:text-foreground aria-expanded:bg-hover aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-hover",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-hover aria-expanded:bg-hover aria-expanded:text-secondary-foreground",
         ghost:
