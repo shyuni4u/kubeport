@@ -9,7 +9,7 @@ vi.mock("@/lib/session", () => ({
   getValidToken: (s: unknown) => getValidToken(s),
 }));
 
-import { GET } from "./route";
+import { GET, POST } from "./route";
 
 const fetchMock = vi.fn();
 
@@ -53,6 +53,22 @@ describe("BFF proxy — resume header", () => {
     await GET(req({ "Last-Event-ID": "2026-09-09T07:36:36.123456789Z" }), params);
 
     expect(sentHeaders()["Last-Event-ID"]).toBe("2026-09-09T07:36:36.123456789Z");
+  });
+
+  // The only reader of this header is the log stream, which is always a GET.
+  // The proxy serves every method on every path, so the entry is scoped to
+  // match its one consumer rather than the whole surface.
+  it("does not forward Last-Event-ID on anything but GET", async () => {
+    await POST(
+      new NextRequest(new URL("https://kubeport.enzo.kr/api/v1/releases"), {
+        method: "POST",
+        headers: { "Last-Event-ID": "2026-09-09T07:36:36Z", "content-type": "application/json" },
+        body: "{}",
+      }),
+      { params: Promise.resolve({ path: ["releases"] }) },
+    );
+
+    expect(sentHeaders()).not.toHaveProperty("Last-Event-ID");
   });
 
   it("sends no resume header when the browser has nothing to resume from", async () => {

@@ -79,8 +79,73 @@ func TestStreamReleaseLogs_LogFramesCarryTheirTimeAsId(t *testing.T) {
 
 	body := resumeReleaseAt(t, applier, "?instance=web-7d9f8-x2k4l", func(*http.Request) {})
 
-	require.Contains(t, body, "id:"+wrote.Format(time.RFC3339Nano),
+	require.Contains(t, body, "id:"+wrote.UTC().Format(idLayout),
 		"the log frame carried no resumable id — got: %s", body)
+}
+
+// idLayout mirrors the handler's resumeIDLayout: UTC, nine fractional digits.
+// Written out here rather than imported so the test states the contract a
+// caller relies on, instead of agreeing with whatever the code happens to say.
+const idLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
+// The id's shape is part of the contract, not an accident of Go's formatter.
+// RFC3339Nano trims trailing zeros and keeps the kubelet's offset, so a
+// whole-second stamp came out as "…:36Z" and a +09:00 one as "…+09:00" — ids of
+// varying length in varying zones, whose string order is not their time order.
+// A caller that picks the greatest id it has seen as its cursor, which is the
+// natural thing to do with a value that looks sortable, would then resume past
+// lines it never received.
+func TestStreamReleaseLogs_IdsAreFixedWidthUTC(t *testing.T) {
+	seoul := time.FixedZone("KST", 9*60*60)
+	applier := &fakeK8sApplier{
+		instances: []k8s.Instance{{Name: "web-1"}},
+		logLines:  []string{"whole second, not UTC", "tenth of a second"},
+		logLineAts: []time.Time{
+			time.Date(2026, 9, 9, 16, 36, 36, 0, seoul),
+			time.Date(2026, 9, 9, 7, 36, 36, 100_000_000, time.UTC),
+		},
+	}
+
+	body := resumeReleaseAt(t, applier, "?instance=web-1", func(*http.Request) {})
+
+	require.Contains(t, body, "id:2026-09-09T07:36:36.000000000Z\n")
+	require.Contains(t, body, "id:2026-09-09T07:36:36.100000000Z\n")
+}
+
+// `?since=` on an `instance=all` stream is refused rather than ignored. The
+// caller wrote it; a 200 with the whole log would look like a working resume
+// while every reconnect duplicated. Tightening this later would break whoever
+// had come to rely on the silence, so it is strict from the first release.
+func TestStreamReleaseLogs_RefusesSinceWithoutANamedInstance(t *testing.T) {
+	applier := &fakeK8sApplier{instances: []k8s.Instance{{Name: "web-1"}}}
+	s := testStore(t)
+	r := api.NewRouter(config.Config{}, api.Deps{
+		Verifier: adminVerifier{}, Store: s,
+		K8sFactory: &fakeK8sFactory{applier: applier},
+	})
+	cluster := seedCluster(t, r)
+	tpl := seedPublishedTemplate(t, r)
+	body, _ := json.Marshal(map[string]any{
+		"template": tpl, "version": 1,
+		"cluster": cluster, "namespace": "default",
+		"name":   "logs-" + randSuffix(),
+		"values": map[string]any{"Deployment[web].spec.replicas": 1},
+	})
+	w := do(t, r, http.MethodPost, "/v1/releases", bytes.NewReader(body))
+	require.Equal(t, http.StatusCreated, w.Code)
+	var created map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/releases/"+created["id"].(string)+"/logs?since=2026-09-09T07:00:00Z", nil)
+	req.Header.Set("Authorization", "Bearer x")
+	rec := newStreamRecorder()
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code, "body: %s", rec.Body.String())
+	var p map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &p))
+	require.Equal(t, "validation-error", p["title"])
 }
 
 // The browser sends the id it last saw. That is the resume point, and it has to
@@ -266,7 +331,7 @@ func TestStreamReleaseLogs_AnUnstampedLineDoesNotAdvanceTheResumePoint(t *testin
 
 	body := resumeReleaseAt(t, applier, "?instance=web-1", func(*http.Request) {})
 
-	require.Contains(t, body, "id:"+stamped.Format(time.RFC3339Nano))
+	require.Contains(t, body, "id:"+stamped.UTC().Format(idLayout))
 	require.Equal(t, 1, strings.Count(body, "id:"),
 		"the unstamped line carried an id, which would move the cursor to now — got: %s", body)
 }
@@ -315,4 +380,96 @@ func TestStreamReleaseLogs_NamingAnInstanceResumes(t *testing.T) {
 	require.NotNil(t, applier.sinceSeen, "a named instance did not resume")
 	require.True(t, applier.sinceSeen.Equal(resume))
 	require.Contains(t, body, "id:")
+}
+
+// A `Last-Event-ID` we cannot read starts the stream over instead of refusing.
+//
+// Nobody typed that value. The browser attaches it on every automatic
+// reconnect and nothing on the page can clear it, so a 400 here would repeat
+// for as long as the tab stays open — and a non-2xx makes EventSource give up,
+// leaving a dead log pane the reader cannot revive without reloading. It is
+// also going to happen for real: the day the id format changes (#172), tabs
+// opened before the deploy carry the old shape into the new server.
+func TestStreamReleaseLogs_AnUnreadableLastEventIDStartsOver(t *testing.T) {
+	applier := &fakeK8sApplier{
+		instances: []k8s.Instance{{Name: "web-1"}},
+		logLines:  []string{"from the top"},
+		logLineAt: time.Date(2026, 9, 9, 7, 0, 0, 0, time.UTC),
+	}
+
+	body := resumeReleaseAt(t, applier, "?instance=web-1", func(r *http.Request) {
+		r.Header.Set("Last-Event-ID", "web-1@2026-09-09T07:00:00Z,web-2@2026-09-09T07:01:00Z")
+	})
+
+	require.Nil(t, applier.sinceSeen, "an unreadable header was turned into a window")
+	require.Contains(t, body, "from the top")
+}
+
+// ...while the same garbage in `?since=` is still refused. That one the caller
+// wrote, and a 200 with the whole log would let them go on sending it.
+func TestStreamReleaseLogs_AnUnreadableSinceIsStillRefused(t *testing.T) {
+	applier := &fakeK8sApplier{instances: []k8s.Instance{{Name: "web-1"}}}
+	s := testStore(t)
+	r := api.NewRouter(config.Config{}, api.Deps{
+		Verifier: adminVerifier{}, Store: s,
+		K8sFactory: &fakeK8sFactory{applier: applier},
+	})
+	cluster := seedCluster(t, r)
+	tpl := seedPublishedTemplate(t, r)
+	body, _ := json.Marshal(map[string]any{
+		"template": tpl, "version": 1,
+		"cluster": cluster, "namespace": "default",
+		"name":   "logs-" + randSuffix(),
+		"values": map[string]any{"Deployment[web].spec.replicas": 1},
+	})
+	w := do(t, r, http.MethodPost, "/v1/releases", bytes.NewReader(body))
+	require.Equal(t, http.StatusCreated, w.Code)
+	var created map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/releases/"+created["id"].(string)+"/logs?instance=web-1&since=garbage", nil)
+	req.Header.Set("Authorization", "Bearer x")
+	// A perfectly good header alongside must not rescue a bad explicit value.
+	req.Header.Set("Last-Event-ID", "2026-09-09T07:00:00Z")
+	rec := newStreamRecorder()
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code, "body: %s", rec.Body.String())
+}
+
+// Input the request alone can refute is refuted before the cluster is asked
+// anything. Otherwise every malformed `?since=` costs an apiserver pod LIST
+// under the caller's token before it is turned away.
+func TestStreamReleaseLogs_RefusesBadInputBeforeTouchingTheCluster(t *testing.T) {
+	applier := &fakeK8sApplier{instances: []k8s.Instance{{Name: "web-1"}}}
+	factory := &fakeK8sFactory{applier: applier}
+	s := testStore(t)
+	r := api.NewRouter(config.Config{}, api.Deps{
+		Verifier: adminVerifier{}, Store: s,
+		K8sFactory: factory,
+	})
+	cluster := seedCluster(t, r)
+	tpl := seedPublishedTemplate(t, r)
+	body, _ := json.Marshal(map[string]any{
+		"template": tpl, "version": 1,
+		"cluster": cluster, "namespace": "default",
+		"name":   "logs-" + randSuffix(),
+		"values": map[string]any{"Deployment[web].spec.replicas": 1},
+	})
+	w := do(t, r, http.MethodPost, "/v1/releases", bytes.NewReader(body))
+	require.Equal(t, http.StatusCreated, w.Code)
+	var created map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
+	callsBefore := factory.calls
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/releases/"+created["id"].(string)+"/logs?since=garbage", nil)
+	req.Header.Set("Authorization", "Bearer x")
+	rec := newStreamRecorder()
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, callsBefore, factory.calls,
+		"a request refutable from its own query string still built a cluster client")
 }

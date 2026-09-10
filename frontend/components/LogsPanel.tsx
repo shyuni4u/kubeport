@@ -109,11 +109,10 @@ export function LogsPanel({ releaseId, instances, initialInstance = "all" }: Pro
   // closes the dead EventSource, empties the buffer and puts the status dot
   // back to "connecting" — all by construction, with no setState in an effect.
   //
-  // Emptying it is the point, not a side effect (#46). The backend opens each
-  // stream with PodLogOptions{Follow: true} and no SinceTime, so a reconnect
-  // replays the container log from the beginning: keeping the old lines would
-  // show every one of them twice, and dropping them loses nothing, because the
-  // replay brings them straight back.
+  // Emptying it is the point, not a side effect (#46). A fresh EventSource
+  // carries no Last-Event-ID, so the backend sends the container log from the
+  // beginning: keeping the old lines would show every one of them twice, and
+  // dropping them loses nothing, because the replay brings them straight back.
   const [attempt, setAttempt] = useState(0);
 
   return (
@@ -279,9 +278,9 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     });
     // The server saying it is done. This is the only way to know: WHATWG gives
     // EventSource no way to tell a finished stream from a dropped one, so
-    // without this frame the browser reopens on its own 3s timer and — this
-    // endpoint has no resume point — is served the whole container log again,
-    // forever, with the pane never clearing between rounds (#157, #162).
+    // without this frame the browser reopens on its own 3s timer, forever —
+    // and on `instance=all`, which has no resume point, is served the whole
+    // container log every round (#157, #162).
     es.addEventListener("end", () => {
       es.close();
       setTerminated(lastError ?? {});
@@ -289,13 +288,26 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
       // finished, and calling that "failed" would be a lie about a completed Job.
       setStatus(lastError ? "failed" : "ended");
     });
+    // Whether this EventSource has connected before. Every open after the first
+    // is the browser reconnecting by itself after a drop.
+    let opened = false;
     es.onopen = () => {
-      // A new HTTP stream on the same EventSource — the browser reconnected by
-      // itself after a drop. `lastError` belongs to the stream that just ended,
-      // so carrying it over would let an old pod failure describe this one: a
-      // clean finish reported as a failure, and an rbac-denied that has since
-      // been granted still hiding the Reconnect button.
+      // A new HTTP stream on the same EventSource. `lastError` belongs to the
+      // stream that just ended, so carrying it over would let an old pod failure
+      // describe this one: a clean finish reported as a failure, and an
+      // rbac-denied that has since been granted still hiding the Reconnect
+      // button.
       lastError = null;
+      // On `all` the reconnect cannot resume — the backend emits no ids there
+      // (one cursor cannot stand for several pods, #172) — so it replays the
+      // container log from the top into a pane the browser does not clear.
+      // That was #107's duplicate pile-up, and `all` is the default view, so
+      // resuming only named instances left the symptom where most readers are.
+      // Clearing here is the same trade the Reconnect button makes (#46): the
+      // replay brings every line straight back, minus scrollback past LINE_CAP.
+      // A named instance resumes instead, so its pane is kept.
+      if (opened && instance === "all") setLines([]);
+      opened = true;
       setStatus("connected");
     };
     // Two very different failures arrive here, and WHATWG is what tells them
@@ -416,10 +428,12 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
           >
             {/*
               slate-400, not slate-500: the timestamp is meant to recede, but
-              500 on this ground is 4.24:1 and 12px is ordinary text, so it was
-              under the 4.5:1 bar (#131). 400 is 7.87:1 and still well below the
-              log text's 18.41:1, which is the distinction that was wanted.
-              LogsPanel.contrast.test.ts holds both ends.
+              500 on this ground is 4.23:1 and 12px is ordinary text, so it was
+              under the 4.5:1 bar (#131) — the same figure the issue read off
+              live pixels. 400 is 7.66:1 and still well below the log text's
+              18.40:1, which is the distinction that was wanted. Ratios are for
+              Tailwind v4's OKLCH palette; LogsPanel.contrast.test.ts reads
+              those values from node_modules and holds both ends.
             */}
             <span className="text-slate-400">
               [{new Date(l.time).toLocaleTimeString()}]

@@ -140,6 +140,18 @@ paths:
       operationId: healthz
       summary: Liveness probe
       security: []
+      parameters:
+        - name: verbose
+          in: query
+          required: false
+          description: |
+            `1` adds detail to the body — on a demo install with a public
+            catalog, the published template count, which the uptime ping
+            asserts is non-zero so an empty demo is noticed. Any other value,
+            or none, returns just `{"status": "ok"}`. The status is 200 either
+            way: this path backs the readiness probe, and failing it over a
+            reporting problem would take the pod out of service.
+          schema: { type: string, enum: ["1"] }
       responses:
         "200":
           description: Process is up. Does not check the database.
@@ -1048,7 +1060,7 @@ paths:
 
         | event | data |
         |---|---|
-        | `log`   | `{"time": <unix ms>, "pod": "<name>", "text": "<line>"}`. `time` is when the container wrote the line, from the kubelet's own stamp — not when the server forwarded it (#131). Carries an SSE `id:` holding the same instant at nanosecond precision; that is the resume point below |
+        | `log`   | `{"time": <unix ms>, "pod": "<name>", "text": "<line>"}`. `time` is when the container wrote the line, from the kubelet's own stamp — not when the server forwarded it (#131); replayed history carries past times, and under `instance=all` frame order and `time` order can differ, so do not read `time` as progress. **On a named-instance stream**, a stamped line also carries an SSE `id:` — the same instant, always UTC with exactly nine fractional digits (`2026-09-09T07:36:36.120000000Z`), so ids sort as strings in time order. That is the resume point below |
         | `ping`  | unix seconds, every 15s to keep the connection open |
         | `error` | a `Problem`, same schema and same `ErrorKind` vocabulary as any other error. `title` is `rbac-denied` (403, the caller may read the release but not its pods' logs — permanent), `cluster-auth-denied` (502, the cluster refused the forwarded token — permanent), or `k8s-error` (502, transport or anything else — retryable) |
         | `end`   | `{"reason": "all pods stopped emitting"}` — a fixed string. The stream is over; the server closes immediately after. Always the last frame a client receives |
@@ -1076,10 +1088,10 @@ paths:
         **Treat `end` as the signal to stop, not the connection closing.**
         Nothing else distinguishes a finished stream from a dropped one:
         WHATWG gives `EventSource` no way to tell them apart, so a client that
-        waits for the close instead reconnects on the browser's own 3s timer
-        and — since this endpoint has no resume point — is served the whole
-        container log again, indefinitely (#162). Close the connection yourself
-        when `end` arrives.
+        waits for the close instead reconnects on the browser's own 3s timer,
+        indefinitely (#162) — and on an `instance=all` stream, which has no
+        resume point (below), is served the whole container log every time.
+        Close the connection yourself when `end` arrives.
 
         A connection that closes **without** `end` was dropped, not finished,
         and reopening is the right response. The only paths that omit the frame
@@ -1157,6 +1169,22 @@ paths:
             A browser does not need this — its `EventSource` sends
             `Last-Event-ID` by itself. This parameter is for callers that do
             not, and it takes precedence over that header when both are given.
+
+            **Requires a named `instance`.** With `instance=all` — the default —
+            an explicit `since` is `400 validation-error` rather than silently
+            ignored: a 200 carrying the whole log would look like a working
+            resume while every reconnect duplicated. (`Last-Event-ID` on an
+            `all` stream is still ignored, not refused — the browser keeps it
+            across an instance switch.) See the description above for why `all`
+            cannot resume.
+
+            An unparseable `since` is `400 validation-error`: the caller wrote
+            it, and a 200 with the whole log would let them keep sending it.
+            An unparseable `Last-Event-ID` is **not** an error — it starts the
+            stream from the beginning instead. No caller typed that value; the
+            browser re-attaches it on every automatic reconnect and nothing on
+            the page can clear it, so refusing it would leave the tab with a log
+            pane that fails on every reconnect until reloaded.
           schema: { type: string, format: date-time }
       responses:
         "200":

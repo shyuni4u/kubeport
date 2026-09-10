@@ -66,8 +66,13 @@ async function proxy(
   // Named one at a time on purpose — this object is an allowlist, not a
   // passthrough, and the reason is Cookie: the session lives in one and the
   // backend must only ever see the bearer token minted above.
+  //
+  // GET only. An allowlist entry should be no wider than whatever reads it, and
+  // the only reader is the log stream, which EventSource always opens with GET.
+  // This handler serves every method on every /v1 path, so without the check a
+  // browser-controlled value would reach endpoints that have no use for it.
   const lastEventId = req.headers.get("last-event-id");
-  if (lastEventId) headers["Last-Event-ID"] = lastEventId;
+  if (req.method === "GET" && lastEventId) headers["Last-Event-ID"] = lastEventId;
 
   // Forward req.signal so browser disconnect (EventSource close, tab nav)
   // cancels the upstream fetch — critical for SSE endpoints which would
