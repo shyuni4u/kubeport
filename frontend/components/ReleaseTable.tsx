@@ -94,7 +94,7 @@ export function ReleaseTable({ rows }: { rows: ReleaseRow[] }) {
         <p>{t("empty")}</p>
         <Link
           href="/catalog"
-          className="mt-3 inline-block font-medium text-primary hover:underline"
+          className="mt-3 inline-block font-medium text-link hover:underline"
         >
           {t("emptyCta")}
         </Link>
@@ -126,7 +126,7 @@ export function ReleaseTable({ rows }: { rows: ReleaseRow[] }) {
                   <span className="flex items-center gap-2">
                     <Link
                       href={`/releases/${r.id}`}
-                      className="font-medium text-primary hover:underline"
+                      className="font-medium text-link hover:underline"
                     >
                       {r.name}
                     </Link>

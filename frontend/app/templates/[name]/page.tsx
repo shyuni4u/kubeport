@@ -163,7 +163,7 @@ export default async function TemplateDetail({
               <>
                 <Link
                   href={`/templates/${name}/versions/${v.version}/edit?mode=${v.authoring_mode}`}
-                  className="text-primary text-sm"
+                  className="text-link text-sm"
                 >
                   {tr("edit")}
                 </Link>
@@ -173,7 +173,7 @@ export default async function TemplateDetail({
                       <input type="hidden" name="version" value={v.version} />
                       <ConfirmSubmit
                         message={tr("detail.confirmPublish", { version: v.version })}
-                        className="text-primary text-sm"
+                        className="text-link text-sm"
                       >
                         {tr("publish")}
                       </ConfirmSubmit>
@@ -203,7 +203,7 @@ export default async function TemplateDetail({
                 {v.status === "deprecated" && (
                   <ActionForm action={undeprecate}>
                     <input type="hidden" name="version" value={v.version} />
-                    <button className="text-primary text-sm" title={tr("undeprecateHelp")}>
+                    <button className="text-link text-sm" title={tr("undeprecateHelp")}>
                       {tr("undeprecate")}
                     </button>
                   </ActionForm>

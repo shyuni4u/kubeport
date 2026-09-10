@@ -34,7 +34,7 @@ function FieldBadge({ mode }: { mode: "fixed" | "exposed" }) {
     );
   }
   return (
-    <span className="ml-1 rounded-sm bg-accent px-1 text-[11px] text-primary">
+    <span className="ml-1 rounded-sm bg-accent px-1 text-[11px] text-link">
       ● {t("exposedBadge")}
     </span>
   );

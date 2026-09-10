@@ -35,12 +35,15 @@ const buttonVariants = cva(
           "bg-secondary text-secondary-foreground hover:bg-hover aria-expanded:bg-hover aria-expanded:text-secondary-foreground",
         ghost:
           "hover:bg-hover hover:text-foreground aria-expanded:bg-hover aria-expanded:text-foreground",
+        // Opaque for the same reason as the badge: a translucent fill inherits
+        // its contrast from whatever is behind the button, so the label's
+        // 5.35:1 was only true on the surfaces it happened to be tried on.
         destructive:
-          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
+          "bg-destructive-surface text-destructive hover:bg-destructive-surface-hover focus-visible:border-destructive focus-visible:ring-destructive",
         // The one variant with no fill of its own, so it opts out of the
         // disabled fill rather than turning into a grey chip. twMerge keeps the
         // variant's value over the base's.
-        link: "text-primary underline-offset-4 hover:underline disabled:border-transparent disabled:bg-transparent",
+        link: "text-link underline-offset-4 hover:underline disabled:border-transparent disabled:bg-transparent",
       },
       size: {
         default:

@@ -134,7 +134,7 @@ describe("dark-mode surface tokens", () => {
  */
 const TEXT_SURFACES = ["--background", "--card", "--muted", "--hover", "--selected"] as const;
 
-describe.each(["--foreground", "--muted-foreground"] as const)("%s", (fg) => {
+describe.each(["--foreground", "--muted-foreground", "--link"] as const)("%s", (fg) => {
   // The label colour has to survive the surface moving under it. shadcn's
   // default sat at 4.34:1 on the old --background and would have dropped to
   // 3.85:1 once --muted darkened — on the very surfaces #71 makes solid.
@@ -211,22 +211,40 @@ describe("--destructive", () => {
    * #111 measured the Delete button's label at 3.97:1 and the same red on the
    * page at 4.38:1 — both under AA.
    *
-   * The chip fill is the binding constraint, and it moves with the token: both
-   * `Badge variant="destructive"` and `Button variant="destructive"` draw
-   * `bg-destructive/10` (`/20` in dark mode) and then put `text-destructive` on
-   * top, so the red is always read against a 10%-tint of itself. Darkening the
-   * text darkens the fill under it too, which is why picking this value by eye
-   * against the page alone is what left it at 3.97:1.
+   * The chip is the binding constraint. `Badge variant="destructive"` and
+   * `Button variant="destructive"` put `text-destructive` on a red fill, so
+   * the red is always read against a tint of itself; darkening the text
+   * darkens the fill under it in step, which is why choosing this value by eye
+   * against the page alone left it at 3.97:1.
+   *
+   * The fill is opaque (`--destructive-surface`) rather than
+   * `bg-destructive/10`, so this ratio is a property of two tokens and not of
+   * whatever the chip happens to be sitting on. That was the other half: a
+   * translucent chip on a hovered release row composited over --hover and read
+   * 3.32:1 with the same two tokens unchanged.
    */
-  const CHIP_ALPHA = { ":root": 0.1, ".dark": 0.2 } as const;
-
-  it.each(THEMES)("clears 4.5:1 on both surfaces and its own chip in $name mode", ({ scope }) => {
-    const fg = rgb(scope, "--destructive");
-    for (const surface of SURFACES) {
-      const chip = compositeOver(fg, CHIP_ALPHA[scope], rgb(scope, surface));
-      expect(contrastRatio(fg, rgb(scope, surface)), `${surface} plain`).toBeGreaterThanOrEqual(4.5);
-      expect(contrastRatio(fg, chip), `${surface} chip`).toBeGreaterThanOrEqual(4.5);
+  it.each(THEMES)("clears 4.5:1 on every surface and on its own chip in $name mode", ({ scope }) => {
+    for (const surface of [...SURFACES, "--destructive-surface", "--destructive-surface-hover"]) {
+      expect(ratio(scope, "--destructive", surface), surface).toBeGreaterThanOrEqual(4.5);
     }
+  });
+
+  // The guard that keeps the fill opaque. A translucent fill would pass the
+  // assertion above — it is written against the token, not the rendered
+  // pixel — while still inheriting its real contrast from the row underneath.
+  it("has an opaque chip fill in both themes", () => {
+    for (const scope of [":root", ".dark"]) {
+      expect(() => token(scope, "--destructive-surface")).not.toThrow();
+    }
+  });
+
+  // The old spelling, kept as a worked example of why it had to go: a 10% tint
+  // of the same red over a hovered row is 3.32:1, under AA, with no token
+  // change able to fix it.
+  it("would still fail if the fill were left translucent", () => {
+    const fg = rgb(":root", "--destructive");
+    const overHover = compositeOver(fg, 0.1, rgb(":root", "--hover"));
+    expect(contrastRatio(fg, overHover)).toBeLessThan(4.5);
   });
 });
 
@@ -280,7 +298,7 @@ describe("token blocks", () => {
   // A token defined in one theme and forgotten in the other falls back to the
   // light value on a dark page. `--hover` and `--selected` are new, so this is
   // the moment the habit is cheapest to establish.
-  it.each(["--hover", "--selected", "--selected-foreground"])(
+  it.each(["--hover", "--selected", "--selected-foreground", "--link", "--destructive-surface", "--destructive-surface-hover"])(
     "%s is defined in both themes",
     (name) => {
       expect(() => token(":root", name)).not.toThrow();
@@ -291,7 +309,7 @@ describe("token blocks", () => {
   // Tailwind only emits `bg-hover` / `bg-selected` / `text-selected-foreground`
   // if the token is mapped in @theme. Without this the classes compile to
   // nothing and every fix in this PR silently reverts to a transparent fill.
-  it.each(["--color-hover", "--color-selected", "--color-selected-foreground"])(
+  it.each(["--color-hover", "--color-selected", "--color-selected-foreground", "--color-link", "--color-destructive-surface"])(
     "%s is exposed to Tailwind via @theme",
     (name) => {
       expect(css).toContain(`${name}:`);

@@ -30,7 +30,10 @@
   --color-hover: var(--hover);
   --color-selected: var(--selected);
   --color-selected-foreground: var(--selected-foreground);
+  --color-link: var(--link);
   --color-destructive: var(--destructive);
+  --color-destructive-surface: var(--destructive-surface);
+  --color-destructive-surface-hover: var(--destructive-surface-hover);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -121,6 +124,24 @@
   --selected: oklch(0.86 0.07 275);
   --selected-foreground: oklch(0.35 0.2 275);
   /*
+    --primary at text weight. The two cannot be one token.
+
+    --primary is a *fill*: it is chosen so white sits on it, and at 0.55 it was
+    4.82:1 as text on the page — passing, with nothing to spare. Put it on any
+    tinted surface and it fails, which is how the new --hover surfaced it: a
+    release-name link on a hovered row dropped to 3.20:1. No value of --hover
+    avoids that; even a hover so faint it is invisible (1.17:1) leaves the link
+    at 4.13:1. The foreground was the problem all along.
+
+    Splitting them also stops the two requirements pulling against each other.
+    Dark mode shows why: --primary must stay light enough to be a fill, and
+    lifting it far enough to be readable text on --hover would take white-on-
+    primary from 3.42:1 to 2.24:1. One token cannot go both ways.
+
+    0.45 / 0.80 clear 4.5:1 on every surface text lands on, --hover included.
+  */
+  --link: oklch(0.45 0.2 275);
+  /*
     Darkened from shadcn's 0.577 (#111). The binding constraint is not the page
     but the chip: destructive buttons and badges draw `bg-destructive/10` and
     then put `text-destructive` on it, so the red is always read against a tint
@@ -128,6 +149,22 @@
     0.505 gives 5.35:1 on the chip over a card, 4.92:1 over the page background.
   */
   --destructive: oklch(0.505 0.213 27.5);
+  /*
+    An *opaque* fill for destructive chips and buttons, replacing
+    `bg-destructive/10`.
+
+    A translucent fill has no contrast of its own — it inherits whatever it
+    lands on. On a card the chip read 5.35:1; on a hovered release row the same
+    chip composited over --hover and fell to 3.32:1, and no choice of red fixes
+    that, because darkening the text darkens the tint under it in step. The
+    sibling variants were already opaque (`bg-green-100`, `bg-amber-100`) and
+    never had the problem.
+
+    Picked to land where `destructive/10` over a card already sat, so the chip
+    looks the same on the surface it is usually seen on.
+  */
+  --destructive-surface: oklch(0.93 0.035 25);
+  --destructive-surface-hover: oklch(0.89 0.05 25);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   /*
@@ -191,6 +228,11 @@
   --hover: oklch(0.36 0 0);
   --selected: oklch(0.35 0.08 275);
   --selected-foreground: oklch(0.9 0.05 275);
+  /* Lighter than --primary here, for the same reason it is darker in light
+     mode: this one is read, not filled. */
+  --link: oklch(0.8 0.15 275);
+  --destructive-surface: oklch(0.28 0.06 25);
+  --destructive-surface-hover: oklch(0.31 0.07 25);
   /*
     Left at shadcn's dark value. The light red had to move because its chip was
     3.97:1; this one is already 4.66:1 on `bg-destructive/20` over a card and

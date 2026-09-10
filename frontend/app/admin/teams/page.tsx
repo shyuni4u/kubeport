@@ -51,7 +51,7 @@ export default async function AdminTeamsPage() {
       <ul className="space-y-2">
         {teams.map(t => (
           <li key={t.id}>
-            <Link href={`/admin/teams/${t.id}`} className="text-primary">
+            <Link href={`/admin/teams/${t.id}`} className="text-link">
               {t.display_name ?? t.name}
             </Link>
             <span className="text-xs text-muted-foreground ml-2">{t.name}</span>

@@ -16,9 +16,19 @@ describe("StatusChip", () => {
 
   it("danger variant uses destructive palette", () => {
     const { container } = render(<StatusChip variant="danger">!</StatusChip>);
-    // shadcn destructive variant uses bg-destructive/10
     const cls = (container.firstChild as HTMLElement).className;
     expect(cls).toMatch(/destructive/);
+  });
+
+  // The fill has to be opaque, like the amber and green siblings above.
+  // shadcn ships `bg-destructive/10`, and a translucent chip takes its contrast
+  // from whatever is behind it: 5.35:1 on a card, 3.32:1 once a release row is
+  // hovered underneath it — which is exactly where StatusChip is shown.
+  it("danger variant's fill does not depend on what is behind it", () => {
+    const { container } = render(<StatusChip variant="danger">!</StatusChip>);
+    const cls = (container.firstChild as HTMLElement).className;
+    expect(cls).toContain("bg-destructive-surface");
+    expect(cls).not.toMatch(/bg-destructive\/\d/);
   });
 });
 

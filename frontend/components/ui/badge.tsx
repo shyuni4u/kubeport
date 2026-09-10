@@ -12,12 +12,17 @@ const badgeVariants = cva(
         default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
         secondary:
           "bg-secondary text-secondary-foreground [a]:hover:bg-hover",
+        // Opaque, like its `success` and `warning` siblings. `bg-destructive/10`
+        // has no contrast of its own — it borrows whatever it lands on — so the
+        // same chip read 5.35:1 on a card and 3.32:1 on a hovered release row,
+        // which is where StatusChip actually shows it. The focus ring loses its
+        // alpha for the reason every other ring did (#111).
         destructive:
-          "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
+          "bg-destructive-surface text-destructive focus-visible:ring-destructive [a]:hover:bg-destructive-surface-hover",
         outline:
           "border-border text-foreground [a]:hover:bg-hover [a]:hover:text-foreground",
         ghost: "hover:bg-hover hover:text-foreground",
-        link: "text-primary underline-offset-4 hover:underline",
+        link: "text-link underline-offset-4 hover:underline",
         success:
           "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200 [a]:hover:bg-green-200",
         warning:

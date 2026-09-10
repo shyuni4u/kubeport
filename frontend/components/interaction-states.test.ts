@@ -192,6 +192,14 @@ describe("focus ring", () => {
     expect(hits(/(ring|outline)-ring\/\d/)).toEqual([]);
   });
 
+  // The same trick under another colour: the destructive variants drew their
+  // focus ring as `ring-destructive/20`, which composites to about the same
+  // 2:1 the primary ring did. `aria-invalid:` rings are left alone — those
+  // mark a field, they are not the focus indicator.
+  it("is never drawn at half alpha in a variant's own colour either", () => {
+    expect(hits(/focus-visible:(ring|border)-[a-z-]+\/\d/)).toEqual([]);
+  });
+
   /**
    * Focus owns the `ring` property; selection may not touch it.
    *
@@ -210,6 +218,49 @@ describe("focus ring", () => {
     expect(hits(/(aria-pressed|data-\[state=on\]|data-active|aria-selected|aria-current):ring-/)).toEqual(
       [],
     );
+  });
+});
+
+describe("text colour", () => {
+  /**
+   * `--primary` is a fill; `--link` is the same hue at text weight.
+   *
+   * One token cannot be both. --primary is chosen so white sits on it, which
+   * caps how dark it can go, and at that weight it was 4.82:1 as text on the
+   * page — passing with nothing to spare, and failing on every tinted surface
+   * including the new --hover (3.20:1 for a release-name link on a hovered
+   * row). Dark mode makes the conflict explicit: readable-as-text and
+   * usable-as-fill pull the value in opposite directions.
+   *
+   * `text-primary-foreground` is untouched — that is the label *on* a primary
+   * fill, which is the pairing --primary is designed for.
+   */
+  it("never uses the fill token as a text colour", () => {
+    expect(hits(/text-primary(?!-foreground)(?![\w-])/)).toEqual([]);
+  });
+});
+
+describe("destructive fills", () => {
+  /**
+   * A translucent chip inherits its contrast from whatever it lands on, which
+   * is how the same StatusChip read 5.35:1 on a card and 3.32:1 on a hovered
+   * row. The opaque surface token makes it a property of the palette instead.
+   *
+   * The pairing is what matters, not the fill alone: LoginErrorBanner draws
+   * `bg-destructive/5` as a plain tinted panel and puts --foreground and
+   * --muted-foreground on it, which is 7:1 and has nothing to do with this. It
+   * is `text-destructive` on a tint *of itself* that has no floor.
+   */
+  it("do not put destructive text on a translucent tint of itself", () => {
+    const bad: string[] = [];
+    for (const { file, text } of FILES) {
+      for (const m of text.matchAll(/"([^"\\]*(?:\\.[^"\\]*)*)"/g)) {
+        if (/bg-destructive\/\d/.test(m[1]) && /text-destructive/.test(m[1])) {
+          bad.push(`${file}: translucent destructive fill under destructive text`);
+        }
+      }
+    }
+    expect(bad).toEqual([]);
   });
 });
 
