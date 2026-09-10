@@ -52,6 +52,24 @@ const KIND_TO_RESOURCE: Record<string, { group: string; resource: string }> = {
   PersistentVolumeClaim: { group: "", resource: "persistentvolumeclaims" },
 };
 
+/**
+ * The verdict for a finished set of checks. The render (what the panel shows)
+ * and the fetch callback (what the deploy form hears) both use it, so they
+ * cannot disagree about what counts as a denial.
+ *
+ * Only a real RBAC "no" is a denial — see RbacStatus. `httpStatus` set means
+ * the check failed rather than the permission being absent.
+ */
+function statusFrom(results: CheckResult[]): RbacStatus {
+  const checked = results.filter((r) => !r.skipped);
+  if (checked.some((r) => !r.allowed && r.httpStatus === undefined)) return "denied";
+  // "All allowed" only speaks for kinds we could actually check — skipped
+  // kinds are reported separately so the panel never shows green for a
+  // deploy that may still be denied.
+  if (checked.length > 0 && checked.every((r) => r.allowed)) return "allowed";
+  return "unknown";
+}
+
 export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
   const t = useTranslations("templates.rbac");
   const [results, setResults] = useState<CheckResult[]>([]);
@@ -98,13 +116,25 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
           };
         }
       }),
-    )
-      .then((r) => {
-        if (active) setResults(r);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    ).then((r) => {
+      if (!active) return;
+      // Results, the end of loading and the verdict go up together, so React
+      // commits the denied rows and the parent's disabled button at once
+      // (#99). Reporting the verdict from the effect below instead left one
+      // commit where the panel said "denied" and the button still worked.
+      // `loading` is cleared here rather than in a `.finally`, which would run
+      // a microtask later and split the same update across two commits.
+      //
+      // onResult is the one captured when this check started. The parent
+      // stamps the verdict with the cluster and namespace it closes over, and
+      // those are the inputs this check was for: had they changed, the cleanup
+      // would have set `active` false and nothing would be reported.
+      setResults(r);
+      setLoading(false);
+      onResult?.(statusFrom(r));
+    });
+    // Every check above settles to a result — none rejects — so there is no
+    // failure branch to leave `loading` stuck.
     return () => {
       active = false;
     };
@@ -117,26 +147,17 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
   const effectiveResults = hasInputs ? results : [];
   const checked = effectiveResults.filter((r) => !r.skipped);
   const skipped = effectiveResults.filter((r) => r.skipped);
-  // "All allowed" only speaks for kinds we could actually check — skipped
-  // kinds are reported separately so the panel never shows green for a
-  // deploy that may still be denied.
   const allAllowed = checked.length > 0 && checked.every((r) => r.allowed);
   const denied = checked.filter((r) => !r.allowed);
   const showPlaceholder = !loading && effectiveResults.length === 0;
 
-  // Only a real RBAC "no" is a denial — see RbacStatus. `httpStatus` set means
-  // the check failed rather than the permission being absent.
   const status: RbacStatus =
-    loading || !hasInputs
-      ? "unknown"
-      : denied.some((r) => r.httpStatus === undefined)
-        ? "denied"
-        : allAllowed
-          ? "allowed"
-          : "unknown";
+    loading || !hasInputs ? "unknown" : statusFrom(effectiveResults);
 
-  // Reported from its own effect (not inside the fetch) so the parent also
-  // hears about resets — cleared cluster, emptied kinds, a re-check starting.
+  // Still reported from an effect as well, for what the fetch callback never
+  // sees: cleared inputs and a re-check starting both go back to "unknown".
+  // For a finished check it repeats what the callback already sent, which the
+  // parent's state setter treats as no change.
   useEffect(() => {
     onResult?.(status);
   }, [status, onResult]);
