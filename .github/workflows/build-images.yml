@@ -121,6 +121,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # The backend reports this on /healthz, and deploy.yml waits for it to
+      # equal the sha it deployed. It must be the same seven characters as the
+      # `type=sha,format=short` tag below (metadata-action's default short
+      # length is 7), so it is cut here rather than left to git describe or
+      # ref_name, which is what it used to be (`main-<40 hex>`).
+      - name: Short sha for the build version
+        id: ver
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata (tags, labels)
         id: meta
         uses: docker/metadata-action@v6
@@ -157,4 +166,4 @@ jobs:
           # Provenance/SBOM 생성은 CD 단순화 위해 일단 끔 (필요 시 켜기)
           provenance: false
           build-args: |
-            VERSION=${{ github.ref_name }}-${{ github.sha }}
+            VERSION=${{ steps.ver.outputs.short }}

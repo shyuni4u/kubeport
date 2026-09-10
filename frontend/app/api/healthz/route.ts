@@ -19,7 +19,14 @@ export const dynamic = "force-dynamic";
  *
  * The catalog count itself is opt-in on the backend
  * (`KBP_HEALTH_PUBLIC_CATALOG`), so on a self-hosted install this returns just
- * `{"status":"ok"}` and discloses nothing.
+ * `{"status":"ok","version":"<sha>"}` and discloses nothing the public
+ * repository does not already.
+ *
+ * The body also carries the backend's `version` (short git sha). That is how
+ * `.github/workflows/deploy.yml` confirms a rollout landed, and how anyone
+ * can tell which commit is live without shell access to the node. It is the
+ * backend's build, not this frontend's — both are built from the same commit
+ * and deployed together, so one value answers the question.
  *
  * No session check: it is a liveness probe, and requiring auth would defeat
  * the point. Nothing here reflects caller-supplied input.

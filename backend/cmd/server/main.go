@@ -18,6 +18,13 @@ import (
 	"kubeport/internal/store"
 )
 
+// version is set at build time by `-ldflags -X main.version=...` (see
+// backend/Dockerfile). build-images.yml passes the short commit sha, the same
+// value as the image's `sha-<7>` tag, and /healthz reports it. The Dockerfile
+// has always passed this flag, but until this variable existed `-X` had
+// nothing to write to and the value was silently dropped.
+var version = "dev"
+
 // k8sFactory adapts the k8s package constructors to api.K8sClientFactory.
 //
 // Every caller of this factory forwards the user's id_token to the cluster —
@@ -101,8 +108,9 @@ func main() {
 		DemoEmailDomain:         cfg.DemoEmailDomain,
 		DemoAllowTemplateCreate: cfg.DemoAllowTemplateCreate,
 		HealthPublicCatalog:     cfg.HealthPublicCatalog,
+		Version:                 version,
 	})
-	log.Printf("listening on %s", cfg.ListenAddr)
+	log.Printf("kubeport %s listening on %s", version, cfg.ListenAddr)
 	if err := r.Run(cfg.ListenAddr); err != nil {
 		log.Fatal(err)
 	}

@@ -43,6 +43,10 @@ type Deps struct {
 	// the catalog size. Off by default — see config.Config for why, and
 	// healthz() for what consumes it.
 	HealthPublicCatalog bool
+	// Version is the build identifier /healthz reports — the short git sha the
+	// image was built from (build-images.yml passes it as VERSION, the same
+	// seven characters as the `sha-<7>` image tag). "" reports "dev".
+	Version string
 }
 
 type Handlers struct {
