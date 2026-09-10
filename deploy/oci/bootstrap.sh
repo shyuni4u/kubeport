@@ -170,53 +170,78 @@ k3s_config_entries() {
 #   claim <v> / prefix <v>   that entry's username mapping
 #   other <key>         any other key that entry sets
 #   bad <reason>        a line in a shape this cannot read as values
+#
+# Each jwt entry is read whole before its url decides whether it is the one
+# asked for. Deciding on the url line and reading only what followed skipped
+# any key written above it — a discoveryURL or certificateAuthority placed
+# before url passed as "bootstrap writes this" (#236). The entry starts at a
+# list dash at the jwt list's own indentation; a dash deeper than that is a
+# nested list, which neither script writes.
 auth_facts() {
   awk -v want="$2" "${YAML_AWK_LIB}"'
     function items(inner, arr,   n, i, parts) {
       n = split(inner, parts, ","); for (i = 1; i <= n; i++) arr[i] = trim(parts[i]); return n
     }
+    function emit(s) { buf = buf s "\n" }
+    function flush() {
+      if (inentry && entryurl == want) {
+        if (found) print "bad more than one jwt entry for this issuer"
+        found = 1; print "found"; printf "%s", buf
+      }
+      inentry = 0; entryurl = ""; sawurl = 0; buf = ""
+    }
     { line = strip($0) }
     line == "" { next }
     line ~ /^[^ \t-]/ {
-      inentry = 0; matching = 0
+      flush(); jwtdash = ""
       k = line; sub(/:.*/, "", k); v = line; if (index(v, ":")) sub(/^[^:]*:/, "", v); else v = ""
       print "top " k " " unquote(v); next
     }
-    line ~ /^[ \t]*-[ \t]*issuer:$/ { inentry = 1; matching = 0; next }
+    line ~ /^[ \t]*-([ \t]|$)/ {
+      ind = line; sub(/-.*/, "", ind); d = length(ind)
+      if (jwtdash == "") jwtdash = d
+      if (d != jwtdash) {
+        if (inentry) emit("bad nested list inside an issuer entry: " trim(line))
+        else print "bad line outside a jwt issuer entry: " trim(line)
+        next
+      }
+      flush(); inentry = 1
+      sub(/^[ \t]*-[ \t]*/, "", line)
+      if (line == "") next
+      line = "    " line
+    }
     !inentry { print "bad line outside a jwt issuer entry: " trim(line); next }
+    line ~ /^[ \t]*(issuer|claimMappings):$/ { next }
     line ~ /^[ \t]*url:/ {
       v = line; sub(/^[ \t]*url:/, "", v)
-      if (unquote(v) == want) {
-        if (found) print "bad more than one jwt entry for this issuer"
-        found = 1; matching = 1; print "found"
-      } else matching = 0
+      if (sawurl) emit("bad more than one url in an issuer entry")
+      sawurl = 1; entryurl = unquote(v)
       next
     }
-    !matching { next }
     line ~ /^[ \t]*audiences:/ {
       v = line; sub(/^[ \t]*audiences:/, "", v); v = trim(v)
-      if (v !~ /^\[.*\]$/) { print "bad audiences is not a one-line [list]"; next }
+      if (v !~ /^\[.*\]$/) { emit("bad audiences is not a one-line [list]"); next }
       n = items(substr(v, 2, length(v) - 2), a)
-      for (i = 1; i <= n; i++) if (a[i] != "") print "aud " unquote(a[i])
+      for (i = 1; i <= n; i++) if (a[i] != "") emit("aud " unquote(a[i]))
       next
     }
-    line ~ /^[ \t]*claimMappings:$/ { next }
     line ~ /^[ \t]*username:/ {
       v = line; sub(/^[ \t]*username:/, "", v); v = trim(v)
-      if (v !~ /^\{.*\}$/) { print "bad username is not a one-line {map}"; next }
+      if (v !~ /^\{.*\}$/) { emit("bad username is not a one-line {map}"); next }
       n = items(substr(v, 2, length(v) - 2), a)
       for (i = 1; i <= n; i++) {
         if (a[i] == "") continue
-        if (!index(a[i], ":")) { print "bad username entry without a value: " a[i]; continue }
+        if (!index(a[i], ":")) { emit("bad username entry without a value: " a[i]); continue }
         kk = a[i]; sub(/:.*/, "", kk); kk = unquote(kk)
         vv = a[i]; sub(/^[^:]*:/, "", vv); vv = unquote(vv)
-        if (kk == "claim") print "claim " vv
-        else if (kk == "prefix") print "prefix " vv
-        else print "other username." kk
+        if (kk == "claim") emit("claim " vv)
+        else if (kk == "prefix") emit("prefix " vv)
+        else emit("other username." kk)
       }
       next
     }
-    { k = trim(line); sub(/:.*/, "", k); print "other " k }
+    { k = trim(line); sub(/:.*/, "", k); emit("other " k) }
+    END { flush() }
   ' "$1" 2>/dev/null
 }
 if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
