@@ -43,15 +43,6 @@ permissions:
   contents: read
   actions: read
 
-# One deploy at a time, and a running deploy is never cancelled: killing the
-# ssh session mid-`helm upgrade` would leave the release in pending-upgrade,
-# which blocks every later upgrade until someone runs `helm rollback` by hand.
-# GitHub keeps only the newest *pending* run per group, so a burst of merges
-# collapses to "the one running" + "the newest waiting" — which is what we want.
-concurrency:
-  group: deploy-prod
-  cancel-in-progress: false
-
 env:
   REPO: ${{ github.repository }}
   HEALTH_URL: https://kubeport.enzo.kr/api/healthz
@@ -80,6 +71,20 @@ jobs:
     # deployment-branch policy allows main only — a workflow run on any other
     # ref cannot read the deploy key even if this file is edited on a branch.
     environment: production
+    # One deploy at a time, and a running deploy is never cancelled: killing the
+    # ssh session mid-`helm upgrade` would leave the release in pending-upgrade,
+    # which blocks every later upgrade until someone runs `helm rollback` by hand.
+    # GitHub keeps only the newest *pending* run per group, so a burst of merges
+    # collapses to "the one running" + "the newest waiting".
+    #
+    # Job level, not workflow level: every build-images/CI completion creates a
+    # run of this workflow — PR runs, fork runs, cancelled main CI — and a
+    # workflow-level group would let those runs, which the `if` above then
+    # skips, take the single pending slot and cancel a real deploy waiting
+    # behind a running one. A job the `if` skips never enters this group.
+    concurrency:
+      group: deploy-prod
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     # Deploy step 45m + health wait 5m + resolve.
     timeout-minutes: 60

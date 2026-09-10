@@ -107,8 +107,11 @@ main push → build-images (sha-<7> 이미지 push)  ┐
   남긴다. 더 새 커밋의 빌드가 끝나면 그쪽 배포가 두 커밋을 함께 올린다. 빌드는 끝나는 순서가
   섞이므로, 이게 없으면 늦게 끝난 **옛 커밋의 배포가 라이브를 뒤로 되돌린다.** 대가: 새 커밋의
   빌드가 실패하면 아무것도 안 올라간다 — 그 빌드의 빨간 불이 신호이고, 필요하면 아래 dispatch.
-- **동시성**: `concurrency: deploy-prod`, 진행 중인 배포는 취소하지 않는다(ssh 가 끊겨 helm 이
+- **동시성**: job 수준 `concurrency: deploy-prod`, 진행 중인 배포는 취소하지 않는다(ssh 가 끊겨 helm 이
   `pending-upgrade` 로 남으면 이후 모든 upgrade 가 막힌다). 수동 배포와는 VM 의 같은 락으로 직렬화된다.
+  워크플로 수준이 아니라 **job 수준**인 이유: build-images·CI 가 끝날 때마다(PR·fork·취소된 CI 포함) 이 워크플로의
+  런이 생기는데, 그룹이 워크플로 수준이면 `if` 에 걸려 아무것도 안 할 런이 대기 자리 하나를 차지해 **기다리던 실배포를
+  취소**한다. job 수준이면 `if` 에서 걸러진 런은 그룹에 들어오지 않는다.
 - **재배포 (앞으로만)**: Actions → deploy → Run workflow, 또는
   `gh workflow run deploy.yml -f sha=<main 커밋 40자리>`. dispatch 는 HEAD 검사를 하지 않는 대신
   그 sha 가 main 에 있고 build-images **와 CI** 의 최신 push 런이 둘 다 success 인지 먼저 확인한다(아직 돌고 있으면
