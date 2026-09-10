@@ -47,10 +47,11 @@ fi
 # §2. BOOTSTRAP_K3S_VERSION overrides it — say, to rebuild at a known older
 # version — and an override is announced, never silent.
 K3S_PINNED="v1.36.3+k3s1"
-# The oldest Kubernetes minor upstream still patches (kubernetes.io/releases;
-# 1.34 until 2026-10-27). Raise it when that minor reaches end of life, in the
-# same kind of commit as the pin.
+# The oldest Kubernetes minor upstream still patches, and the day that support
+# ends (kubernetes.io/releases). This moves on its own schedule, not the pin's:
+# raise both whenever a new Kubernetes minor comes out (about every 4 months).
 K3S_MIN_SUPPORTED_MINOR=34
+K3S_MIN_SUPPORTED_UNTIL="2026-10-27"
 K3S_VERSION="${BOOTSTRAP_K3S_VERSION:-${K3S_PINNED}}"
 
 # The minor of a k3s version string, or nothing when it is not one.
@@ -79,6 +80,12 @@ if (( k3s_minor < K3S_MIN_SUPPORTED_MINOR )) && [[ "${BOOTSTRAP_K3S_ALLOW_EOL:-}
   echo "error: k3s ${K3S_VERSION} is past upstream end of life (oldest supported minor: 1.${K3S_MIN_SUPPORTED_MINOR}); set BOOTSTRAP_K3S_ALLOW_EOL=1 to install it anyway (recovery only)" >&2
   exit 1
 fi
+# Once that day passes, the floor above lets an unsupported minor through. Say
+# so loudly rather than stop: this script is what a recovery runs, and failing
+# it because of the date would bite at the worst moment.
+if [[ "$(date -u +%F)" > "${K3S_MIN_SUPPORTED_UNTIL}" ]]; then
+  echo "WARNING: K3S_MIN_SUPPORTED_MINOR=${K3S_MIN_SUPPORTED_MINOR} is stale (1.${K3S_MIN_SUPPORTED_MINOR} reached end of life ${K3S_MIN_SUPPORTED_UNTIL}); raise it in deploy/oci/bootstrap.sh" >&2
+fi
 if [[ "${K3S_VERSION}" != "${K3S_PINNED}" ]]; then
   echo "NOTE: BOOTSTRAP_K3S_VERSION=${K3S_VERSION} overrides the pinned ${K3S_PINNED}" >&2
 fi
@@ -102,9 +109,40 @@ else
   auth_api_default="apiserver.config.k8s.io/v1beta1"
 fi
 AUTH_API="${BOOTSTRAP_AUTH_API:-${auth_api_default}}"
-if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" && "${AUTH_API}" == "apiserver.config.k8s.io/v1" ]] && (( auth_minor < 34 )); then
-  echo "error: k8s 1.${auth_minor} has no ${AUTH_API}; use BOOTSTRAP_AUTH_API=apiserver.config.k8s.io/v1beta1 or leave it unset" >&2
-  exit 1
+
+# Existing auth config is never overwritten: deploy/oci/k3s-auth-config.sh adds
+# the Dex issuer to the same files, and replacing them with the Google-only form
+# removed that trust silently — the next k3s restart turned every demo cluster
+# call into a 401 (security review of #206). Keeping them is only right when they
+# already say what this run asks for, so their content is checked here, before
+# the host changes, rather than a warning scrolling past mid-run.
+AUTH_FILE=/etc/rancher/k3s/auth.yaml
+CFG_FILE=/etc/rancher/k3s/config.yaml
+skip_auth_write=""
+if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
+  if (( auth_minor < 30 )); then
+    echo "error: installed k3s ${installed} (k8s 1.${auth_minor}) predates structured authentication; upgrade k3s first (a restart, so ask first — runbook §2)" >&2
+    exit 1
+  fi
+  if [[ -e "${AUTH_FILE}" || -e "${CFG_FILE}" ]]; then
+    problems=()
+    grep -qF "authentication-config=${AUTH_FILE}" "${CFG_FILE}" 2>/dev/null ||
+      problems+=("${CFG_FILE} does not pass authentication-config=${AUTH_FILE}")
+    grep -qF "\"${BOOTSTRAP_OIDC_CLIENT_ID}\"" "${AUTH_FILE}" 2>/dev/null ||
+      problems+=("${AUTH_FILE} does not list BOOTSTRAP_OIDC_CLIENT_ID as an audience")
+    grep -qxF "apiVersion: ${auth_api_default}" "${AUTH_FILE}" 2>/dev/null ||
+      problems+=("${AUTH_FILE} is not apiVersion ${auth_api_default}, which k8s 1.${auth_minor} reads")
+    if (( ${#problems[@]} )); then
+      echo "error: bootstrap keeps an existing k3s auth config as it is, and this one does not match the run:" >&2
+      printf '  - %s\n' "${problems[@]}" >&2
+      echo "  Fix it by hand, or re-run deploy/oci/k3s-auth-config.sh, which writes Google and Dex together." >&2
+      exit 1
+    fi
+    skip_auth_write=1
+  elif [[ "${AUTH_API}" == "apiserver.config.k8s.io/v1" ]] && (( auth_minor < 34 )); then
+    echo "error: k8s 1.${auth_minor} has no ${AUTH_API}; use BOOTSTRAP_AUTH_API=apiserver.config.k8s.io/v1beta1 or leave it unset" >&2
+    exit 1
+  fi
 fi
 
 echo "== Step 1/4: OS firewall (iptables) — open 80/443 =="
@@ -164,13 +202,10 @@ echo "== Step 2/4: k3s single-node install =="
 # NB: values MUST be quoted — a trailing ':' in a value makes YAML parse the list
 # item as a map and k3s dies with "unknown flag". See deploy/oci/README.md §7.1.
 # The apiVersion is AUTH_API, chosen from the apiserver version at the top.
-#
-# Existing files are left alone. deploy/oci/k3s-auth-config.sh later rewrites
-# auth.yaml to trust Dex as well; overwriting it with the Google-only form on a
-# re-run removed that trust silently, and the next k3s restart turned every
-# demo cluster call into a 401 (security review of #206).
-if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]] && [[ -e /etc/rancher/k3s/auth.yaml || -e /etc/rancher/k3s/config.yaml ]]; then
-  echo "  WARNING: /etc/rancher/k3s/auth.yaml or config.yaml already exists (Dex trust from k3s-auth-config.sh, or settings of your own); leaving both unchanged" >&2
+# Existing files were checked there and are kept (skip_auth_write) — they may
+# carry the Dex trust k3s-auth-config.sh adds.
+if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" && -n "${skip_auth_write}" ]]; then
+  echo "  /etc/rancher/k3s/auth.yaml + config.yaml already trust this client; leaving them unchanged"
 elif [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
   mkdir -p /etc/rancher/k3s
   cat > /etc/rancher/k3s/auth.yaml <<YAML
@@ -211,6 +246,10 @@ else
     echo "  k3s ${installed} already installed (matches the pin), skipping"
   else
     echo "  WARNING: k3s ${installed:-of unknown version} is installed, but this script pins ${K3S_VERSION}; leaving it unchanged" >&2
+  fi
+  installed_minor="$(k3s_minor_of "${installed}" || true)"
+  if [[ -n "${installed_minor}" ]] && (( installed_minor < K3S_MIN_SUPPORTED_MINOR )); then
+    echo "  WARNING: the installed k8s 1.${installed_minor} is past upstream end of life; upgrading it restarts k3s, so it needs approval (runbook §2)" >&2
   fi
 fi
 

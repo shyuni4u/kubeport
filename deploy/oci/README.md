@@ -32,6 +32,7 @@ sudo BOOTSTRAP_EMAIL=you@example.com bash bootstrap.sh
   `BOOTSTRAP_K3S_ALLOW_EOL=1` 을 줄 때만 깐다 — 아니면 호스트를 건드리기 전에 거부한다. AuthenticationConfiguration 의
   apiVersion 은 apiserver 버전(이미 깔린 k3s 가 있으면 그 버전)에 맞춰 고른다. 재실행은 이미 있는
   `/etc/rancher/k3s/auth.yaml`·`config.yaml` 을 덮어쓰지 않는다 — `k3s-auth-config.sh` 가 넣은 Dex 신뢰가 지워지지 않게.
+  대신 내용(`authentication-config` 인자·Client ID·apiVersion)을 검사해, 이번 실행과 어긋나면 호스트를 건드리기 전에 멈춘다.
   고정되는 건 k3s **바이너리 버전**이다. 설치 스크립트(get.k3s.io)는 매번 원격에서 받는다(#221)
 - helm CLI
 - cert-manager + Let's Encrypt ClusterIssuer (`letsencrypt-prod`)
@@ -200,8 +201,8 @@ sudo systemctl restart k3s
 ```
 
 - `apiVersion` 은 k8s ≥ 1.34 면 `apiserver.config.k8s.io/v1`(GA), 1.30–1.33 이면
-  `apiserver.config.k8s.io/v1beta1`(beta). `bootstrap.sh` 는 `BOOTSTRAP_AUTH_API` 로 오버라이드 가능
-  (기본값 `v1`).
+  `apiserver.config.k8s.io/v1beta1`(beta). `bootstrap.sh` 는 apiserver 버전(이미 깔린 k3s 가 있으면 그 버전)에
+  맞춰 고른다. `BOOTSTRAP_AUTH_API` 로 덮을 수 있지만, 1.34 미만에 `v1` 을 주면 호스트를 건드리기 전에 거부한다.
 - ⚠️ **값은 반드시 큰따옴표로.** YAML 리스트 항목 값 끝에 콜론이 있으면 맵으로 잘못 파싱돼 k3s 가
   `Error: unknown flag: --[{...}]` 로 죽는다.
 - ⚠️ `audiences` 는 Google Client ID (backend `oidc.audience` 와 동일 값).
