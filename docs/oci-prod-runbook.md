@@ -66,6 +66,11 @@ echo "KEY=$KEY"
   스트림 수명을 정하는 entrypoint 타임아웃 기본값도 따라 바뀐다. 올릴 때는 `K3S_PINNED` 와 이 줄을 **한 커밋으로**
   바꾼다. 운영 VM 에 반영하는 것(k3s 재시작 동반)은 사용자 승인 사항이다 — `bootstrap.sh` 재실행은 이미 깔린 k3s 를
   바꾸지 않고, 고정 버전과 다르면 경고만 한다.
+  **언제 올리나**: 고정 전에는 VM 을 다시 만들면 그날의 최신 패치를 받았지만, 이제는 누가 핀을 올리기 전까지 그대로다 —
+  그리고 이 셸 문자열은 dependabot 이 추적하지 않는다. 그래서 같은 마이너(`v1.36.x`)의 k3s 보안 패치가 나오면 핀을 올리고,
+  **VM 을 재구성하기 전에는 핀이 그 마이너의 최신 패치인지 먼저 확인한다** —
+  [k3s releases](https://github.com/k3s-io/k3s/releases), [k8s CVE feed](https://kubernetes.io/docs/reference/issues-security/official-cve-feed/).
+  `BOOTSTRAP_K3S_VERSION` 오버라이드는 v1.30 이상만 받는다(1.34 미만 + OIDC 면 `BOOTSTRAP_AUTH_API=apiserver.config.k8s.io/v1beta1` 필요).
 - **traefik** ingress (`traefik` class), **cert-manager** + `letsencrypt-prod` ClusterIssuer (HTTP-01).
 - **Postgres** in-cluster (`kubeport-postgres-0`, local-path PVC).
 - backend(Go) / frontend(Next.js standalone) — TLS 는 traefik 종료, 파드엔 HTTP.

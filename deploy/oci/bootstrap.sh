@@ -20,8 +20,10 @@
 #   # 실제 배포까지 켜려면 (선택):
 #   sudo BOOTSTRAP_EMAIL=you@example.com \
 #        BOOTSTRAP_OIDC_CLIENT_ID=<google-client-id> bash bootstrap.sh
-#   # k3s 는 고정 버전(K3S_PINNED, Step 2)으로 깔린다 (#194). 복구 등으로 다른 버전이 필요할 때만:
+#   # k3s 는 고정 버전(K3S_PINNED)으로 깔린다 (#194). 복구 등으로 다른 버전이 필요할 때만:
 #   sudo BOOTSTRAP_EMAIL=you@example.com BOOTSTRAP_K3S_VERSION=v1.xx.y+k3s1 bash bootstrap.sh
+#   # v1.30 이상만 받는다. 1.34 미만에 BOOTSTRAP_OIDC_CLIENT_ID 를 주면
+#   # BOOTSTRAP_AUTH_API=apiserver.config.k8s.io/v1beta1 도 함께 준다 (아니면 시작 전에 거부).
 #
 # After this completes, run helm install separately (deploy/oci/README.md).
 
@@ -33,6 +35,45 @@ if [[ "${EUID}" -ne 0 ]]; then
 fi
 
 : "${BOOTSTRAP_EMAIL:?BOOTSTRAP_EMAIL env required (used for LetsEncrypt account)}"
+
+# Pinned rather than whatever get.k3s.io calls stable on the day this runs (#194).
+# k3s bundles Traefik, so an unpinned install silently changes the ingress in
+# front of kubeport as well — including the entrypoint timeout defaults that
+# bound how long a log stream can stay open. A VM rebuilt during recovery would
+# otherwise come up on a k3s/Traefik pair nobody has run.
+#
+# This is what production runs (measured 2026-09-10: v1.36.3+k3s1, Traefik
+# 3.7.8). Bump it in a commit of its own, together with docs/oci-prod-runbook.md
+# §2. BOOTSTRAP_K3S_VERSION overrides it — say, to rebuild at a known older
+# version — and an override is announced, never silent.
+K3S_PINNED="v1.36.3+k3s1"
+K3S_VERSION="${BOOTSTRAP_K3S_VERSION:-${K3S_PINNED}}"
+
+# An override is checked before anything on the host changes. It was passed to
+# the installer as given, so a typo or an old version installed quietly
+# (security review of #206):
+#   - below 1.30 there is no structured authentication, which Step 2 writes and
+#     deploy/oci/k3s-auth-config.sh needs for the Dex demo IdP — and such a k3s
+#     is long out of security support;
+#   - below 1.34 the default AuthenticationConfiguration apiVersion (v1) does not
+#     exist, and the apiserver never comes up. The node-Ready wait then fails
+#     without saying why.
+if [[ ! "${K3S_VERSION}" =~ ^v1\.([0-9]+)\.[0-9]+\+k3s[0-9]+$ ]]; then
+  echo "error: BOOTSTRAP_K3S_VERSION must look like v1.NN.P+k3sN (got ${K3S_VERSION})" >&2
+  exit 1
+fi
+k3s_minor="${BASH_REMATCH[1]}"
+if (( 10#${k3s_minor} < 30 )); then
+  echo "error: k3s ${K3S_VERSION} predates structured authentication; use v1.30 or later" >&2
+  exit 1
+fi
+if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" && -z "${BOOTSTRAP_AUTH_API:-}" ]] && (( 10#${k3s_minor} < 34 )); then
+  echo "error: k3s ${K3S_VERSION} is older than 1.34 and needs BOOTSTRAP_AUTH_API=apiserver.config.k8s.io/v1beta1" >&2
+  exit 1
+fi
+if [[ "${K3S_VERSION}" != "${K3S_PINNED}" ]]; then
+  echo "NOTE: BOOTSTRAP_K3S_VERSION=${K3S_VERSION} overrides the pinned ${K3S_PINNED}" >&2
+fi
 
 echo "== Step 1/4: OS firewall (iptables) — open 80/443 =="
 # OCI Ubuntu images ship with a default INPUT policy that DROPs most inbound
@@ -113,24 +154,7 @@ YAML
   echo "  Dex demo IdP trust is added later via deploy/oci/k3s-auth-config.sh (needs Dex ingress up first)"
 fi
 
-# Pinned rather than whatever get.k3s.io calls stable on the day this runs (#194).
-# k3s bundles Traefik, so an unpinned install silently changes the ingress in
-# front of kubeport as well — including the entrypoint timeout defaults that
-# bound how long a log stream can stay open. A VM rebuilt during recovery would
-# otherwise come up on a k3s/Traefik pair nobody has run. The structured
-# AuthenticationConfiguration above also needs k8s >= 1.34 for its default
-# apiserver.config.k8s.io/v1.
-#
-# This is what production runs (measured 2026-09-10: v1.36.3+k3s1, Traefik
-# 3.7.8). Bump it in a commit of its own, together with docs/oci-prod-runbook.md
-# §2. BOOTSTRAP_K3S_VERSION overrides it — say, to rebuild at a known older
-# version — and an override is announced, never silent.
-K3S_PINNED="v1.36.3+k3s1"
-K3S_VERSION="${BOOTSTRAP_K3S_VERSION:-${K3S_PINNED}}"
-if [[ "${K3S_VERSION}" != "${K3S_PINNED}" ]]; then
-  echo "  NOTE: BOOTSTRAP_K3S_VERSION=${K3S_VERSION} overrides the pinned ${K3S_PINNED}"
-fi
-
+# K3S_VERSION is the pin, or the override checked at the top of this script.
 if ! command -v k3s >/dev/null 2>&1; then
   # Keep the bundled klipper servicelb ENABLED: it is what binds host ports
   # 80/443 and forwards them to the traefik LoadBalancer Service. Disabling it
