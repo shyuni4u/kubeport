@@ -71,7 +71,16 @@ jobs:
         run: cd backend/migrations && atlas schema apply --env local --auto-approve
 
       - name: go vet
-        run: cd backend && go vet ./...
+        # The second pass is what keeps build-tagged tests honest. A tag hides a
+        # file from the compiler, so a tagged suite rots silently and does not
+        # even show up as a skip — backend/e2e and openapi_proxy sat outside CI
+        # this way (#121). openapi_proxy lost its tag; backend/e2e keeps `e2e`
+        # because its TestMain starts compose and a server, which must not
+        # happen inside `go test ./...`. Vet compiles it without running it.
+        # Adding a new build tag means adding it here too.
+        run: |
+          cd backend && go vet ./...
+          go vet -tags=e2e ./...
 
       - name: go test
         env:
@@ -82,10 +91,13 @@ jobs:
           # fresh clone isn't red. Here dex IS running, so an unreachable dex is
           # a failure — otherwise CI would go green on a silently skipped suite.
           KBP_REQUIRE_DEX: "1"
-        # The kind-backed suites (backend/e2e, openapi_proxy, internal/k8s) skip
-        # here because this workflow doesn't stand up a cluster — playwright.yml
-        # is their gate. Listing the skips in the step summary keeps that
-        # visible, so nobody reads a green check as "the k8s paths are covered".
+        # The kind-backed tests (openapi_proxy, internal/k8s) skip here because
+        # this workflow stands up no cluster — playwright.yml is their gate, and
+        # as of #121 it actually is one: it exports KIND_API/KIND_CA/DEX_TOKEN
+        # and runs them. Listing the skips in the step summary keeps that
+        # visible, so nobody reads a green check as "the k8s paths are covered"
+        # — which only works for suites the compiler can see, hence the vet
+        # pass above for backend/e2e.
         # -p 1: internal/api's TestMain deletes rows from the shared DB by name
         # pattern, and internal/store builds fixtures with the same timestamp
         # suffix — run in parallel they delete each other's rows. Locally store

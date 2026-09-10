@@ -1,5 +1,9 @@
-//go:build integration
-// +build integration
+// No build tag. kindAvail() below already skips when KIND_API / KIND_CA /
+// DEX_TOKEN are unset, so a fresh clone stays green without one — and a tag
+// costs what a skip does not: the file becomes invisible to the compiler, so
+// it rots unnoticed and never reaches the "Skipped Go tests" summary that is
+// supposed to make uncovered k8s paths visible (#121). playwright.yml sets
+// those three variables and runs these tests against its kind cluster.
 
 package api_test
 

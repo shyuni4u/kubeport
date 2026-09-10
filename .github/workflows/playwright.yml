@@ -240,6 +240,49 @@ jobs:
           }
           bind demo-admin admin demo-admin@demo.kubeport
           bind demo-user  edit  demo-user@demo.kubeport
+          # The Go step below applies a ConfigMap as this identity. dex
+          # authenticates it but nothing here granted it anything, so without
+          # this it is a 403. scripts/e2e/up.sh gives the same permission
+          # locally (as `edit` for system:authenticated), so this keeps the two
+          # harnesses telling the same story.
+          bind e2e-admin  edit  admin@example.com
+
+      # ci.yml claimed this workflow was the gate for the kind-backed Go tests
+      # while it ran no `go test` at all, so they had never executed anywhere
+      # (#121). Everything they need is already built above, so this is wiring,
+      # not new infrastructure. It runs before the seeder on purpose: at this
+      # point the database holds only the registered cluster and warmed users,
+      # so nothing these tests write can disturb the fixtures the specs assert
+      # on. internal/api's TestMain only deletes rows whose names end in the
+      # -HHMMSS.micros fixture suffix, which no seeded or workflow-created row
+      # has.
+      - name: Go tests that need a cluster
+        env:
+          TEST_DATABASE_URL: "postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable"
+          KIND_API: "https://127.0.0.1:6443"
+        run: |
+          set -o pipefail
+          DEX_TOKEN=$(curl -sk -X POST https://host.docker.internal:5556/token \
+            -d grant_type=password -d client_id=kubeport -d client_secret=local-dev-secret \
+            -d username=admin@example.com -d password=admin \
+            -d 'scope=openid email profile groups' | jq -r .id_token)
+          [ -n "$DEX_TOKEN" ] && [ "$DEX_TOKEN" != "null" ] || { echo "no admin id_token from dex" >&2; exit 1; }
+          export DEX_TOKEN
+          KIND_CA=$(kubectl --context kind-kubeport config view --raw --minify --flatten -o json \
+            | jq -r '.clusters[0].cluster."certificate-authority-data"' | base64 -d)
+          export KIND_CA
+          cd backend
+          go test -p 1 -run 'TestOpenAPI_|TestApplyAll_IntegrationWithKind' \
+            ./internal/api/ ./internal/k8s/ -v 2>&1 | tee /tmp/go-kind-test.log
+          # These tests skip themselves when their env is missing, which is what
+          # keeps a fresh clone green — and would quietly turn this gate back
+          # into nothing if a variable above ever stopped resolving. Same
+          # reasoning as KBP_REQUIRE_DEX in ci.yml: here they must actually run.
+          if grep -qE '^\s*--- SKIP' /tmp/go-kind-test.log; then
+            echo "kind-backed Go tests skipped despite a live cluster:" >&2
+            grep -E '^\s*--- SKIP' /tmp/go-kind-test.log >&2
+            exit 1
+          fi
 
       - name: Seed demo data
         env:
