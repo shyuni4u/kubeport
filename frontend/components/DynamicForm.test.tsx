@@ -41,8 +41,8 @@ describe("DynamicForm widget mapping", () => {
     expect(
       container.querySelector('input[type="range"]'),
     ).not.toBeNull();
-    // Numeric value display next to the slider.
-    expect(screen.getByText("3")).toBeInTheDocument();
+    // Numeric value readout — on the label row since #113.
+    expect(screen.getByTestId("slider-value")).toHaveTextContent("3");
   });
 
   it("renders numeric Input for integer without both min+max", () => {
@@ -542,6 +542,48 @@ describe("DynamicForm slider affordance", () => {
     renderWithIntl(<DynamicForm spec={rangeSpec} onSubmit={() => {}} />);
     expect(screen.getByTestId("slider-min")).toHaveTextContent("1");
     expect(screen.getByTestId("slider-max")).toHaveTextContent("10");
+  });
+
+  // #113 — the readout used to sit 8px from the max label on the same
+  // baseline, so the control read as "1 … 3 1": three numbers with nothing
+  // saying which is the scale and which is the answer.
+  //
+  // Asserted structurally rather than by distance. jsdom has no layout, but
+  // more importantly a fix that only widened the gap would come back the
+  // moment the row narrowed — the readout has to leave the scale row.
+  it("keeps the value readout out of the min/max scale row", () => {
+    const { container } = renderWithIntl(
+      <DynamicForm spec={rangeSpec} onSubmit={() => {}} />,
+    );
+    const value = screen.getByTestId("slider-value");
+    const max = screen.getByTestId("slider-max");
+    expect(value.parentElement).not.toBe(max.parentElement);
+    expect(value.parentElement).toContainElement(
+      container.querySelector("label"),
+    );
+  });
+
+  // The worst reading was value == max, which rendered a bare "10 10".
+  it("stays unambiguous when the value sits at the max", () => {
+    const atMax: UISpec = {
+      fields: [
+        {
+          path: "spec.replicas",
+          label: "Replicas",
+          type: "integer",
+          min: 1,
+          max: 10,
+          default: 10,
+          required: true,
+        },
+      ],
+    };
+    renderWithIntl(<DynamicForm spec={atMax} onSubmit={() => {}} />);
+    const value = screen.getByTestId("slider-value");
+    expect(value).toHaveTextContent("10");
+    expect(value.parentElement).not.toBe(
+      screen.getByTestId("slider-max").parentElement,
+    );
   });
 
   // Asserted as a whitelist, not as "not bg-muted": the negative form passes

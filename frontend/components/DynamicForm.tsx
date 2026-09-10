@@ -112,10 +112,39 @@ function encodeValues(values: Record<string, unknown>): Record<string, unknown> 
   return out;
 }
 
+type IntegerField = Extract<UISpecField, { type: "integer" }>;
+
+/**
+ * True for an integer field that gets a Slider rather than a number Input.
+ *
+ * A type predicate, not a boolean: `min`/`max` live only on the integer arm of
+ * the UISpecField union, so callers need the narrowing to read them.
+ */
+function isRangedInteger(field: UISpecField): field is IntegerField {
+  return (
+    field.type === "integer" &&
+    field.min !== undefined &&
+    field.max !== undefined
+  );
+}
+
+/**
+ * Current value of a ranged integer, with the same coercion the Slider uses.
+ *
+ * Shared so the readout beside the label and the thumb can never disagree —
+ * they are rendered in different parts of the tree (see the readout's comment
+ * in FieldRow).
+ */
+function rangedIntValue(field: IntegerField, value: unknown): number {
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && value !== "") return Number(value);
+  return field.min!;
+}
+
 /**
  * Widget selection:
  * - boolean → Switch
- * - integer with both min and max → Slider (+ numeric value display)
+ * - integer with both min and max → Slider (value shown on the label row)
  * - integer without full range → Input type="number"
  * - enum with ≤ 4 values → ToggleGroup (single-select)
  * - enum with > 4 values → Select
@@ -287,6 +316,27 @@ function FieldRow({
               ) : null}
             </FormLabel>
             {field.help ? <HelpHint text={field.help} /> : null}
+            {/*
+              The slider's readout lives here, not next to the max label where
+              it started: sitting 8px from it on the same baseline, "1 … 3 1"
+              read as two range ends and a stray number, and at value == max it
+              became "3 3" (#113). On the label row it is unambiguously "this
+              field's current value", and the row below is left as a clean
+              min/max scale.
+
+              A sibling of <FormLabel>, never a child — it must not join the
+              control's accessible name. Screen readers already get the value
+              from the thumb's <input type="range">.
+            */}
+            {isRangedInteger(field) ? (
+              <span
+                data-testid="slider-value"
+                aria-hidden="true"
+                className="ml-auto text-sm font-medium tabular-nums"
+              >
+                {rangedIntValue(field, rhf.value)}
+              </span>
+            ) : null}
           </div>
           <FormControl>{renderWidget(field, rhf)}</FormControl>
           {/*
@@ -343,12 +393,7 @@ function renderWidget(
       if (hasRange) {
         const min = field.min!;
         const max = field.max!;
-        const current =
-          typeof rhf.value === "number"
-            ? (rhf.value as number)
-            : typeof rhf.value === "string" && rhf.value !== ""
-              ? Number(rhf.value)
-              : min;
+        const current = rangedIntValue(field, rhf.value);
         // The end labels are not decoration: without them a slider whose
         // thumb sits at an end is indistinguishable from a disabled control,
         // and a non-k8s user has no way to know how far the range goes (#43).
@@ -375,9 +420,6 @@ function renderWidget(
               className="text-[11px] tabular-nums text-muted-foreground"
             >
               {max}
-            </span>
-            <span className="min-w-[2.5rem] text-right text-sm font-medium tabular-nums">
-              {current}
             </span>
           </div>
         );
