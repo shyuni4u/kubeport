@@ -43,6 +43,34 @@ func (h *Handlers) CreateTemplate(c *gin.Context) {
 		return
 	}
 
+	ctx := c.Request.Context()
+	u, _ := auth.UserFrom(ctx)
+
+	// Authorization first. It depends only on owning_team_id, never on
+	// ui_state, and serializing ui_state is the expensive part of this
+	// handler — so a caller headed for a 403 used to spend that work before
+	// being told no. CreateTemplateVersion and UpdateTemplateVersion already
+	// check before serializing; this brings the third in line.
+	var owning pgtype.UUID
+	if r.OwningTeamID != "" {
+		parsed, err := uuid.Parse(r.OwningTeamID)
+		if err != nil {
+			writeError(c, http.StatusBadRequest, "validation-error", "owning_team_id must be a uuid")
+			return
+		}
+		owning = pgtype.UUID{Bytes: parsed, Valid: true}
+	}
+	// Global templates (no owning team) require kubeport-admin. Team
+	// templates delegate to ensureTeamEditor (admin OR team editor).
+	if !owning.Valid {
+		if !isKubeportAdmin(u) {
+			writeError(c, http.StatusForbidden, "rbac-denied", "global template requires kubeport-admin")
+			return
+		}
+	} else if !h.ensureTeamEditor(c, owning) {
+		return
+	}
+
 	// authoring_mode / payload consistency.
 	switch r.AuthoringMode {
 	case "ui":
@@ -76,30 +104,6 @@ func (h *Handlers) CreateTemplate(c *gin.Context) {
 	// required-field enforcement (those are checked at release deploy time).
 	if err := template.ValidateSpec(r.ResourcesYAML, r.UISpecYAML); err != nil {
 		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
-		return
-	}
-
-	ctx := c.Request.Context()
-	u, _ := auth.UserFrom(ctx)
-
-	var owning pgtype.UUID
-	if r.OwningTeamID != "" {
-		parsed, err := uuid.Parse(r.OwningTeamID)
-		if err != nil {
-			writeError(c, http.StatusBadRequest, "validation-error", "owning_team_id must be a uuid")
-			return
-		}
-		owning = pgtype.UUID{Bytes: parsed, Valid: true}
-	}
-
-	// Auth: global templates (no owning team) require kubeport-admin.
-	// Team templates: delegate to ensureTeamEditor (admin OR team editor).
-	if !owning.Valid {
-		if !isKubeportAdmin(u) {
-			writeError(c, http.StatusForbidden, "rbac-denied", "global template requires kubeport-admin")
-			return
-		}
-	} else if !h.ensureTeamEditor(c, owning) {
 		return
 	}
 

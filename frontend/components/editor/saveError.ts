@@ -15,6 +15,12 @@ export async function saveErrorMessage(t: Translator, res: Response): Promise<st
       return t("errors.forbidden");
     case 400:
       return t("errors.invalid", { detail });
+    case 429:
+      // The authoring routes are rate limited (issue #135), so this is
+      // reachable on a real save. Without a case here it fell through to
+      // `generic`, which prints the status and the Problem document — and
+      // the one thing the author needs to know is that waiting fixes it.
+      return t("errors.rateLimited");
     default:
       return t("errors.generic", { status: res.status, detail });
   }
