@@ -499,6 +499,18 @@ paths:
       tags: [templates]
       operationId: previewTemplate
       summary: Convert UI-mode state to YAML without saving
+      description: |
+        Pure transform of the posted ui_state — reads no template, cluster or
+        database — so it is open to any authenticated caller.
+
+        400 when the ui_state would build a document far larger than the body
+        that described it: a path may not create more than 8192 objects across
+        one request, nor be more than 128 levels deep. Real manifest paths run
+        about nine deep and no template approaches the object budget; a request
+        that trips either is malformed rather than large (issue #135).
+
+        Rate limited separately from the control-plane routes, at a budget
+        sized for the editor's own typing rather than for apiserver fan-out.
       requestBody:
         required: true
         content:
@@ -520,6 +532,7 @@ paths:
                   ui_spec_yaml: { type: string }
         "400": { $ref: "#/components/responses/ValidationError" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/templates/{name}/render:
