@@ -162,6 +162,26 @@ describe("focus ring", () => {
   it("is never drawn at half alpha", () => {
     expect(hits(/(ring|outline)-ring\/\d/)).toEqual([]);
   });
+
+  /**
+   * Focus owns the `ring` property; selection may not touch it.
+   *
+   * The first version of the pressed toggle used `aria-pressed:ring-1
+   * ring-primary/40` alongside `focus-visible:ring-[3px] ring-ring`. Both are
+   * one pseudo-class deep, so which one paints is decided by the order Tailwind
+   * happens to emit them in — and if the pressed rule wins, a keyboard user
+   * focusing an already-selected toggle gets no focus indicator at all, since
+   * the base sets `outline-none`.
+   *
+   * Splitting the properties makes the question moot instead of answering it:
+   * selection is a border, focus is a ring, and no emit order can make one
+   * erase the other. Caught in cross-review.
+   */
+  it("is not overwritten by a selected state reusing the ring property", () => {
+    expect(hits(/(aria-pressed|data-\[state=on\]|data-active|aria-selected|aria-current):ring-/)).toEqual(
+      [],
+    );
+  });
 });
 
 describe("disabled state", () => {
@@ -182,6 +202,9 @@ describe("disabled state", () => {
     "components/ui/tabs.tsx",
     "components/ui/input.tsx",
     "components/ui/select.tsx",
+    // Not a ui/ primitive — a hand-rolled <button> in the kind picker. Listed
+    // because the defect follows the label, not the directory.
+    "components/KindPicker.tsx",
   ];
 
   it.each(LABEL_BEARING)("%s does not fade its label with opacity", (file) => {

@@ -42,7 +42,7 @@ function FieldBadge({ mode }: { mode: "fixed" | "exposed" }) {
 // Every node is a real <button> so keyboard users can Tab/Enter through the
 // tree; the ARIA tree roles let screen readers announce nesting + state.
 const NODE_CLASS =
-  "cursor-pointer rounded px-1 text-left hover:bg-hover focus-visible:outline-2 focus-visible:outline-ring";
+  "cursor-pointer rounded border border-transparent px-1 text-left hover:bg-hover focus-visible:outline-2 focus-visible:outline-ring";
 
 function renderNode(
   path: string, node: SchemaNode, depth: number,
@@ -71,7 +71,7 @@ function renderNode(
             role="treeitem"
             aria-selected={selectedPath === p}
             aria-expanded={hasKids ? isExp : undefined}
-            className={`${NODE_CLASS} ${selectedPath === p ? "bg-selected text-selected-foreground ring-1 ring-primary/40" : ""}`}
+            className={`${NODE_CLASS} ${selectedPath === p ? "bg-selected text-selected-foreground border-primary" : ""}`}
             onClick={() => {
               onSelect(p, child);
               if (hasKids) toggle(p);
@@ -102,7 +102,7 @@ function renderNode(
           role="treeitem"
           aria-selected={selectedPath === p}
           aria-expanded={isExp}
-          className={`${NODE_CLASS} ${selectedPath === p ? "bg-selected text-selected-foreground ring-1 ring-primary/40" : ""}`}
+          className={`${NODE_CLASS} ${selectedPath === p ? "bg-selected text-selected-foreground border-primary" : ""}`}
           onClick={() => {
             onSelect(p, node.items!);
             toggle(p);

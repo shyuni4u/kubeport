@@ -97,9 +97,9 @@ export function KindPicker({
               key={gv}
               type="button"
               onClick={() => { setSelectedGv(gv); setKindInput(""); }}
-              className={`block w-full text-left py-0.5 px-1 rounded hover:bg-hover ${
+              className={`block w-full text-left py-0.5 px-1 rounded border border-transparent hover:bg-hover ${
                 selectedGv === gv
-                  ? "bg-selected text-selected-foreground ring-1 ring-primary/40"
+                  ? "bg-selected text-selected-foreground border-primary"
                   : ""
               }`}
             >
@@ -122,7 +122,7 @@ export function KindPicker({
               type="button"
               onClick={pickFromGv}
               disabled={!kindInput.trim()}
-              className="px-2 py-1 border rounded hover:bg-hover disabled:opacity-50"
+              className="px-2 py-1 border rounded hover:bg-hover disabled:border-border disabled:bg-muted disabled:text-muted-foreground"
             >
               {t("add")}
             </button>

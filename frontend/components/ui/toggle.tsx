@@ -11,10 +11,17 @@ const toggleVariants = cva(
   // unpressed items were the same colour with the same label colour — the
   // selection existed for `aria-pressed` and nowhere else.
   //
-  // The pressed state now carries three: the tinted `--selected` fill, a ring
+  // The pressed state now carries three: the tinted `--selected` fill, a border
   // in --primary, and the label colour. A viewer who cannot separate the tint
-  // still has the ring.
-  "group/toggle inline-flex items-center justify-center gap-1 rounded-lg text-sm font-medium whitespace-nowrap transition-all outline-none hover:bg-hover hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:pointer-events-none disabled:border-border disabled:bg-muted disabled:text-muted-foreground aria-invalid:border-destructive aria-invalid:ring-destructive/20 aria-pressed:bg-selected aria-pressed:text-selected-foreground aria-pressed:ring-1 aria-pressed:ring-primary/40 data-[state=on]:bg-selected data-[state=on]:text-selected-foreground data-[state=on]:ring-1 data-[state=on]:ring-primary/40 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  // still has the border.
+  //
+  // A *border*, not a ring — `focus-visible` already owns the ring here, and
+  // both variants are one pseudo-class deep, so a pressed ring and a focus ring
+  // would be decided by whichever Tailwind emits later. With `outline-none` on
+  // the base, losing that coin toss means a keyboard user focusing an already
+  // selected toggle sees no focus indicator at all. `border border-transparent`
+  // is in the base so pressing one does not move it by a pixel.
+  "group/toggle inline-flex items-center justify-center gap-1 rounded-lg border border-transparent text-sm font-medium whitespace-nowrap transition-all outline-none hover:bg-hover hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:pointer-events-none disabled:border-border disabled:bg-muted disabled:text-muted-foreground aria-invalid:border-destructive aria-invalid:ring-destructive/20 aria-pressed:border-primary aria-pressed:bg-selected aria-pressed:text-selected-foreground data-[state=on]:border-primary data-[state=on]:bg-selected data-[state=on]:text-selected-foreground dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
