@@ -37,6 +37,9 @@ export default async function ReleaseOverviewPage({
         template={d.template.name}
         version={d.template.version}
         instances={d.instances}
+        // Same severity as the header chip: a red "오류" above an amber panel
+        // about the same failure made the reader guess which to believe (#114).
+        tone={d.status === "error" ? "danger" : "warning"}
       />
       {/* The backend does not report memory usage or a public address yet.
           `null` hides those cards and shows the "no public address" hint

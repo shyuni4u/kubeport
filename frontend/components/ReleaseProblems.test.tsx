@@ -22,13 +22,28 @@ const pod = (name: string, reason?: string): Instance => ({
   reason,
 });
 
-const panel = (instances: Instance[]) => (
-  <ReleaseProblems releaseId="r1" template="web-app" version={2} instances={instances} />
+const panel = (instances: Instance[], tone?: "danger" | "warning") => (
+  <ReleaseProblems releaseId="r1" template="web-app" version={2} instances={instances} tone={tone} />
 );
 
 describe("ReleaseProblems", () => {
   beforeEach(() => {
     useKubeTermsStore.setState({ showKubeTerms: false });
+  });
+
+  // #114 — a red chip above an amber panel about the same failure left the
+  // reader guessing which severity to believe.
+  it("takes the danger surface when the release is in error, amber otherwise", () => {
+    const { unmount } = render(panel([pulling], "danger"));
+    const region = screen.getByRole("region", { name: "무슨 일이 있었나요" });
+    expect(region.className).toContain("bg-destructive-surface");
+    expect(region.className).not.toContain("bg-amber-50");
+    unmount();
+
+    render(panel([pod("web-1", "Unschedulable")], "warning"));
+    expect(screen.getByRole("region", { name: "무슨 일이 있었나요" }).className).toContain(
+      "bg-amber-50",
+    );
   });
 
   it("renders nothing when no instance has a reason", () => {

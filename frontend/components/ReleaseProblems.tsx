@@ -67,17 +67,37 @@ export function groupProblems(instances: Instance[]): ProblemGroup[] {
   return [...groups.values()];
 }
 
+// Surface and icon colour per tone. Danger is the Badge danger pair, so the
+// panel reads as the same severity as the red chips beside it.
+const TONE = {
+  danger: {
+    section: "border-destructive/40 bg-destructive-surface",
+    icon: "text-destructive",
+  },
+  warning: {
+    section:
+      "border-amber-300/60 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10",
+    icon: "text-amber-600 dark:text-amber-400",
+  },
+} as const;
+
 export function ReleaseProblems({
   releaseId,
   template,
   version,
   instances,
+  tone = "warning",
 }: {
   releaseId: string;
   template: string;
   /** The template version the release is pinned to. */
   version: number;
   instances: Instance[];
+  /**
+   * Follows the release status: "danger" when it is `error`, so the panel
+   * never sits amber under a red chip about the same failure (#114).
+   */
+  tone?: keyof typeof TONE;
 }) {
   const t = useTranslations("releases.problems");
   const kube = useKubeTermsStore((s) => s.showKubeTerms);
@@ -87,11 +107,11 @@ export function ReleaseProblems({
   return (
     <section
       aria-labelledby="release-problems-heading"
-      className="flex gap-3 rounded-xl border border-amber-300/60 bg-amber-50 p-4 dark:border-amber-500/40 dark:bg-amber-500/10"
+      className={`flex gap-3 rounded-xl border p-4 ${TONE[tone].section}`}
     >
       <AlertTriangle
         aria-hidden
-        className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400"
+        className={`mt-0.5 h-5 w-5 shrink-0 ${TONE[tone].icon}`}
       />
       <div className="min-w-0 flex-1 space-y-3">
         <h2 id="release-problems-heading" className="font-medium">
