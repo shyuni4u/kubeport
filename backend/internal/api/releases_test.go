@@ -90,6 +90,8 @@ type fakeK8sApplier struct {
 	// deleteCalls records each DeleteByRelease's release id and whether the
 	// release was NameOnly (#195).
 	deleteCalls []deleteCall
+	// stampCalls records each StampLeftBehind (#195).
+	stampCalls []stampCall
 
 	// presence is what ReleasePresence reports once ListInstances has found no
 	// pods; presenceErr is returned alongside it. The zero value is
@@ -110,6 +112,16 @@ func (f *fakeK8sApplier) CheckApply(_ context.Context, ref k8s.ReleaseRef, _ []b
 		return k8s.ApplyCheck{}, f.applyCheckErr
 	}
 	return f.applyCheck, nil
+}
+
+func (f *fakeK8sApplier) StampLeftBehind(_ context.Context, ref k8s.ReleaseRef, previous, _ []byte) error {
+	f.stampCalls = append(f.stampCalls, stampCall{UID: ref.UID, Previous: string(previous)})
+	return nil
+}
+
+type stampCall struct {
+	UID      string
+	Previous string
 }
 
 func (f *fakeK8sApplier) ApplyAll(_ context.Context, _ string, y []byte) error {

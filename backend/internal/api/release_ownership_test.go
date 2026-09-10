@@ -2,15 +2,18 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 
 	"kubeport/internal/k8s"
+	"kubeport/internal/store"
 )
 
 func createReleaseBody(t *testing.T, cluster, tpl, namespace, name string) *bytes.Reader {
@@ -393,6 +396,40 @@ func TestUpdateRelease_StampsTheReleaseID(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Equal(t, []string{id, id}, fk.checkedUIDs)
 	require.Contains(t, string(fk.applied[len(fk.applied)-1]), "kubeport.io/release-uid: "+id)
+}
+
+// codex review: the first update of a release from before #195 ends its
+// name-only fallback, so objects its previous version had and the new one
+// drops are stamped first — with the YAML last applied as the previous
+// manifest. A release already stamped has nothing to migrate.
+func TestUpdateRelease_StampsWhatAReleaseFromBeforeTheIDLeavesBehind(t *testing.T) {
+	r, fk := newTestRouterWithK8s(t)
+	clusterName := seedCluster(t, r)
+	tplName := seedPublishedTemplate(t, r)
+	id := createRelease(t, r, tplName, clusterName, "legacy-"+randSuffix(), map[string]any{"Deployment[web].spec.replicas": 1})
+	body, err := json.Marshal(map[string]any{"version": 1, "values": map[string]any{"Deployment[web].spec.replicas": 2}})
+	require.NoError(t, err)
+
+	// Already stamped by its create: no migration.
+	w := do(t, r, http.MethodPut, "/v1/releases/"+id, bytes.NewReader(body))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Empty(t, fk.stampCalls)
+
+	// Make it look as it would after an upgrade: last applied without the id.
+	const legacyYAML = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  labels:\n    kubeport.io/release: x\n  name: dropped\n"
+	s := testStore(t)
+	var relID pgtype.UUID
+	require.NoError(t, relID.Scan(id))
+	rel, err := s.GetReleaseByID(context.Background(), relID)
+	require.NoError(t, err)
+	require.NoError(t, s.UpdateReleaseValuesAndVersion(context.Background(), store.UpdateReleaseValuesAndVersionParams{
+		ID: rel.ID, TemplateVersionID: rel.TemplateVersionID, ValuesJson: rel.ValuesJson, RenderedYaml: legacyYAML,
+	}))
+
+	w = do(t, r, http.MethodPut, "/v1/releases/"+id, bytes.NewReader(body))
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, []stampCall{{UID: id, Previous: legacyYAML}}, fk.stampCalls)
 }
 
 // A release created since #195 is deleted by its id only. Unstamped objects

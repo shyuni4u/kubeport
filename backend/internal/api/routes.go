@@ -27,6 +27,10 @@ type K8sApplier interface {
 	// another release, or to nothing kubeport created, before anything is
 	// applied (#161). creating is false for an update.
 	CheckApply(ctx context.Context, ref k8s.ReleaseRef, yaml []byte, creating bool) (k8s.ApplyCheck, error)
+	// StampLeftBehind gives a NameOnly release's id to objects of its previous
+	// manifest that the next one drops, before its first update since #195
+	// ends the name-only fallback (see k8s.Client.StampLeftBehind).
+	StampLeftBehind(ctx context.Context, ref k8s.ReleaseRef, previous, next []byte) error
 	// ReleasePresence reports whether a release's rendered objects are still
 	// in the cluster, for a release that has no pods (#33).
 	ReleasePresence(ctx context.Context, ref k8s.ReleaseRef, yaml []byte) (k8s.Presence, error)

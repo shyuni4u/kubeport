@@ -145,8 +145,20 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 	// create can (#161).
 	// NameOnly from what was last applied: a release from before #195 still
 	// owns its unstamped objects on this update, which stamps them.
-	if !h.checkOwnership(c, cli, "UpdateRelease", releaseRef(rel), rendered) {
+	ref := releaseRef(rel)
+	if !h.checkOwnership(c, cli, "UpdateRelease", ref, rendered) {
 		return
+	}
+	// This update ends the name-only fallback, and it stamps only what it
+	// applies. Objects of the previous version it drops are stamped first, so
+	// the release's delete still removes them (codex review). Before the apply:
+	// stamping them is harmless if the apply then fails, and a stamping error
+	// stops the update with nothing applied.
+	if ref.NameOnly {
+		if err := cli.StampLeftBehind(ctx, ref, []byte(rel.RenderedYaml), rendered); err != nil {
+			upstreamError(c, "UpdateRelease: stamp previous objects", err)
+			return
+		}
 	}
 	if err := cli.ApplyAll(ctx, rel.Namespace, rendered); err != nil {
 		upstreamError(c, "UpdateRelease: apply", err)
