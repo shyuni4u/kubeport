@@ -218,6 +218,7 @@
       "resourceConflictUpdate": "The release ''{owner}'' already uses the resources this version creates, so this release cannot be updated. An existing release cannot move to another area — ask an admin.",
       "resourceConflictUpdateForeign": "Resources this version creates already exist in this area, made outside kubeport, so this release cannot be updated. Ask an admin.",
       "templateNamespace": "This template is pinned to a different area, so it cannot be deployed here. Your input is fine — ask an admin to fix the template.",
+      "templateDefect": "This template version has an input kubeport cannot handle, so it cannot be deployed. Your input is fine — ask an admin to fix the template.",
       "resourceConflictUnreadable": "Resources this template creates already exist in this area, and this account may not see who holds them. A different name will not help — deploy into another area, or ask an admin.",
       "server": "Something went wrong on the server and the deployment failed. Try again shortly or contact an admin.",
       "generic": "The deployment failed. Please review your inputs and try again."
@@ -377,7 +378,8 @@
         "previewSubmit": "Deploy (preview — does nothing)",
         "parseFailed": "Failed to parse ui-spec: {detail}",
         "previewFailed": "Failed to build the preview (HTTP {status}). {detail}",
-        "skippedFields": "Left out of the preview: {fields}. The type is not valid yet.",
+        "skippedFields": "Left out of the preview: {fields}. Their type or values are not complete yet.",
+        "ignoredSettings": "Ignored in the preview: {parts}. The field stays; only this value is set aside until it is complete.",
         "renderFailed": "Could not draw the preview. The editor is untouched — undo the line you just changed. ({detail})"
       },
       "convert": {

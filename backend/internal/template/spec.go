@@ -55,18 +55,29 @@ func parseSpec(src string) (UISpec, error) {
 	return s, nil
 }
 
+// name is how a message refers to the field: its label, or its path when the
+// label is empty, so an error never starts with a bare ": not an integer".
+// ValidateSpec requires a label now, but versions saved before that can still
+// lack one (#152).
+func (f Field) name() string {
+	if f.Label != "" {
+		return f.Label
+	}
+	return f.Path
+}
+
 func (f Field) Validate(v any) error {
 	switch f.Type {
 	case TypeInteger:
 		n, ok := toInt(v)
 		if !ok {
-			return fmt.Errorf("%s: not an integer", f.Label)
+			return fmt.Errorf("%s: not an integer", f.name())
 		}
 		if f.Min != nil && n < *f.Min {
-			return fmt.Errorf("%s: below min %d", f.Label, *f.Min)
+			return fmt.Errorf("%s: below min %d", f.name(), *f.Min)
 		}
 		if f.Max != nil && n > *f.Max {
-			return fmt.Errorf("%s: above max %d", f.Label, *f.Max)
+			return fmt.Errorf("%s: above max %d", f.name(), *f.Max)
 		}
 	case TypeString, TypeAutocomplete:
 		// Autocomplete is a string with advisory suggestions in `Values` —
@@ -77,30 +88,71 @@ func (f Field) Validate(v any) error {
 		// where it would surface as a confusing k8s API error.
 		s, ok := v.(string)
 		if !ok {
-			return fmt.Errorf("%s: not a string", f.Label)
+			return fmt.Errorf("%s: not a string", f.name())
 		}
 		if f.patternRE == nil {
 			return nil
 		}
 		if !f.patternRE.MatchString(s) {
-			return fmt.Errorf("%s: does not match pattern %q", f.Label, f.Pattern)
+			return fmt.Errorf("%s: does not match pattern %q", f.name(), f.Pattern)
 		}
 	case TypeBoolean:
 		if _, ok := v.(bool); !ok {
-			return fmt.Errorf("%s: not a boolean", f.Label)
+			return fmt.Errorf("%s: not a boolean", f.name())
 		}
 	case TypeEnum:
+		// Membership is checked on the string form, so only a scalar may be
+		// compared that way. An array or object printed by fmt.Sprint could
+		// still match a listed value spelled like "[a]" and go into the manifest
+		// whole — the #136 class with a known type (security review).
+		// int and int64 as well as float64: a submitted value is JSON
+		// (float64), but a `default: 1` in the ui-spec is decoded from YAML as
+		// int, and it used to pass the string-form check (codex review).
+		switch v.(type) {
+		case string, float64, int, int64, bool:
+		default:
+			return fmt.Errorf("%s: not one of %v", f.name(), f.Values)
+		}
 		s := fmt.Sprint(v)
 		for _, vv := range f.Values {
 			if s == vv {
 				return nil
 			}
 		}
-		return fmt.Errorf("%s: not in %v", f.Label, f.Values)
+		return fmt.Errorf("%s: not in %v", f.name(), f.Values)
+	default:
+		// Without this an unknown or misspelled type ("str", "int", or none at
+		// all) fell through every case and returned nil, so whatever the caller
+		// sent — a whole object included — was written into the manifest
+		// unchecked (#136). ValidateSpec now refuses such a spec on save; this
+		// is what still stops a version saved before that.
+		return &UnsupportedTypeError{Path: f.Path, Field: f.name(), Type: f.Type}
 	}
 	return nil
 }
 
+// UnsupportedTypeError is a stored version whose ui-spec names a type kubeport
+// does not know. Unlike every other Validate error it is not the caller's
+// input: no value makes the version deploy, so the API marks it for the form
+// to send the user to an admin instead of back to their input.
+type UnsupportedTypeError struct {
+	Path  string
+	Field string
+	Type  FieldType
+}
+
+func (e *UnsupportedTypeError) Error() string {
+	return fmt.Sprintf("%s: unsupported field type %q", e.Field, e.Type)
+}
+
+// maxExactInt is the largest magnitude a float64 holds every integer up to.
+const maxExactInt = 1 << 53
+
+// toInt accepts a whole number only. Every JSON number arrives as float64, and
+// Render writes the value it was given, not this conversion: truncating 2.9 to
+// 2 let it pass max 2 while 2.9 went into the manifest, and converting an
+// out-of-range float is implementation-defined in Go (it saturates on arm64),
+// so 1e300 could pass a min and be written as 1e300 (security review of #136).
 func toInt(v any) (int, bool) {
 	switch x := v.(type) {
 	case int:
@@ -108,7 +160,14 @@ func toInt(v any) (int, bool) {
 	case int64:
 		return int(x), true
 	case float64:
-		return int(x), true
+		if x < -maxExactInt || x > maxExactInt {
+			return 0, false
+		}
+		i := int64(x)
+		if float64(i) != x {
+			return 0, false
+		}
+		return int(i), true
 	}
 	return 0, false
 }

@@ -24,6 +24,10 @@ type Problem struct {
 	// than the release's (#137), so a client can say "the template is wrong"
 	// instead of the generic "check your input" every other 400 means.
 	PinnedNamespace *ProblemObject `json:"pinned_namespace,omitempty"`
+	// TemplateDefect names the ui-spec field that makes a stored template
+	// version undeployable whatever the caller sends (#136). Same purpose as
+	// PinnedNamespace: the admin has to fix the template, not the user's input.
+	TemplateDefect *ProblemTemplateDefect `json:"template_defect,omitempty"`
 }
 
 // problemOption sets an extension member on a Problem.

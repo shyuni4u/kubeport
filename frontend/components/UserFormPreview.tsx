@@ -86,25 +86,32 @@ export function UserFormPreview(props: Props) {
   // its schema — may assume the UISpec type from here on, which is the point:
   // guarding the schema builder alone still left the widget renderer reading
   // `values.length` off an enum that had none.
-  const { spec: uiSpec, problems } = normalizeUISpec(parsed);
+  const { spec: uiSpec, dropped, ignored } = normalizeUISpec(parsed);
 
   // Fields left out are reported, not thrown on, and not silently dropped —
   // otherwise a field the admin just wrote simply fails to appear.
   //
+  // Two sentences, because they are two different things. A dropped field is
+  // missing from the form below; an ignored setting leaves its field in place.
+  // Calling the second "left out" sent the admin looking for a row that was
+  // still there, and blamed the type when the pattern was the problem (#197).
+  //
   // Muted rather than red: mid-edit is the normal state of a ui-spec, and a
   // warning that fires on the way to every valid field is one the reader
   // learns to ignore. Unparseable YAML is a different thing and stays red.
-  const note = problems.length > 0 && (
-    <p className="mb-3 text-xs text-muted-foreground">
-      {t("skippedFields", { fields: problems.join(", ") })}
-    </p>
+  const hasIssues = dropped.length > 0 || ignored.length > 0;
+  const note = hasIssues && (
+    <div className="mb-3 space-y-1 text-xs text-muted-foreground">
+      {dropped.length > 0 && <p>{t("skippedFields", { fields: dropped.join(", ") })}</p>}
+      {ignored.length > 0 && <p>{t("ignoredSettings", { parts: ignored.join(", ") })}</p>}
+    </div>
   );
 
   if (uiSpec.fields.length === 0) {
     // "Nothing exposed yet" is the wrong sentence when fields exist but none
     // of them survived — that reads as "you have not written any", which is
     // exactly the misunderstanding the note prevents.
-    if (problems.length > 0) return <div>{note}</div>;
+    if (hasIssues) return <div>{note}</div>;
     return (
       <div className="text-sm text-muted-foreground">
         {t.rich("noExposed", {

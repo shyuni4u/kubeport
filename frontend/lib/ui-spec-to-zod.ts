@@ -102,14 +102,23 @@ function safeRegExp(pattern: string): RegExp | null {
 }
 
 /**
- * Fields this spec cannot build a schema for, described for a human.
+ * One thing wrong with a ui-spec field. `dropped` means the field is left out
+ * of the form; `ignored` means the field stays and only that setting is set
+ * aside until it is complete. Both used to reach the admin as "left out, the
+ * type is not valid", which was wrong about the second kind twice over: the
+ * field was still there, and the type was fine (#197).
+ */
+export type UISpecIssue = { at: string; kind: "dropped" | "ignored" };
+
+/**
+ * What is wrong with this spec's fields, described for a human.
  *
  * `UISpec` is a compile-time type over YAML the admin is *currently typing*,
  * so nothing guarantees the runtime shape matches it. Rather than trust it,
  * the editor asks what is wrong and says so (#164).
  */
-export function uiSpecProblems(spec: UISpec): string[] {
-  const out: string[] = [];
+export function uiSpecIssues(spec: UISpec): UISpecIssue[] {
+  const out: UISpecIssue[] = [];
   // `fields:` with no value parses to null, and a spec with no `fields` key
   // parses to {}. The backend saves both — ValidateSpec only walks the list —
   // so they reach the deploy form, where neither is a list to walk.
@@ -118,24 +127,45 @@ export function uiSpecProblems(spec: UISpec): string[] {
     const at = `fields[${i}]`;
     const type: unknown = f?.type;
     if (!KNOWN_TYPES.includes(type as (typeof KNOWN_TYPES)[number])) {
-      out.push(`${at}.type: ${JSON.stringify(type ?? null)}`);
+      out.push({ at: `${at}.type: ${JSON.stringify(type ?? null)}`, kind: "dropped" });
       return;
     }
     if (f.type === "enum" && !(Array.isArray(f.values) && f.values.length > 0)) {
-      out.push(`${at}.values (enum)`);
+      out.push({ at: `${at}.values (enum)`, kind: "dropped" });
     }
     if (f.type === "autocomplete" && !Array.isArray(f.values)) {
-      out.push(`${at}.values (autocomplete)`);
+      out.push({ at: `${at}.values (autocomplete)`, kind: "ignored" });
     }
     if (
       (f.type === "string" || f.type === "autocomplete") &&
       f.pattern &&
       safeRegExp(f.pattern) === null
     ) {
-      out.push(`${at}.pattern`);
+      out.push({ at: `${at}.pattern`, kind: "ignored" });
     }
   });
   return out;
+}
+
+/** The same issues as plain strings, for callers that only list them. */
+export function uiSpecProblems(spec: UISpec): string[] {
+  return uiSpecIssues(spec).map((issue) => issue.at);
+}
+
+/**
+ * What to call a field whose label is blank: the last key of its path
+ * (`…metadata.labels` → "labels", `…containers[0].image` → "image",
+ * `data["nginx.conf"]` → "nginx.conf"). The editor refuses to save an exposed
+ * field without a label, and the API now does too, but a version saved before
+ * either can still carry one. A blank label left the input with nothing beside
+ * it, which read as "exposing did nothing" (#152); the editor's placeholder
+ * already promises this name.
+ */
+function labelFromPath(path: string): string {
+  const m = /(?:\.([A-Za-z_][A-Za-z0-9_]*)|\["([^"]*)"\]|\['([^']*)'\])(?:\[\d+\])*$/.exec(path);
+  // `||`, not `??`: the grammar allows an empty quoted key (`data[""]`), and
+  // falling back to "" would leave the field as blank as it started.
+  return m?.[1] || m?.[2] || m?.[3] || path;
 }
 
 /**
@@ -153,10 +183,15 @@ export function uiSpecProblems(spec: UISpec): string[] {
  */
 export function normalizeUISpec(spec: UISpec): {
   spec: UISpec;
+  /** Every issue, as uiSpecProblems lists them. */
   problems: string[];
+  /** Fields left out of the form. */
+  dropped: string[];
+  /** Settings set aside while their field stays in the form. */
+  ignored: string[];
 } {
-  const problems = uiSpecProblems(spec);
-  // Same document-level guard as uiSpecProblems: `fields:` → null, no key →
+  const issues = uiSpecIssues(spec);
+  // Same document-level guard as uiSpecIssues: `fields:` → null, no key →
   // {}. The deploy pages only substitute `{fields: []}` when the whole YAML is
   // empty, so these reach DynamicForm as-is.
   const list: UISpecField[] = Array.isArray(spec?.fields) ? spec.fields : [];
@@ -169,21 +204,36 @@ export function normalizeUISpec(spec: UISpec): {
     }
     return true;
   })
-    .map((f) => {
+    .map((f): UISpecField => {
+      let out: UISpecField = f;
       // A pattern that does not compile yet costs the pattern, not the field.
       // Dropping the whole row would make it blink out of the preview on the
       // way to every character class.
-      if ((f.type === "string" || f.type === "autocomplete") && f.pattern) {
-        if (safeRegExp(f.pattern) === null) return { ...f, pattern: undefined };
+      if (
+        (out.type === "string" || out.type === "autocomplete") &&
+        out.pattern &&
+        safeRegExp(out.pattern) === null
+      ) {
+        out = { ...out, pattern: undefined };
       }
       // `values` is advisory for autocomplete (datalist hints), but the
       // renderer spreads it — so give it an empty list rather than undefined.
-      if (f.type === "autocomplete" && !Array.isArray(f.values)) {
-        return { ...f, values: [] };
+      if (out.type === "autocomplete" && !Array.isArray(out.values)) {
+        out = { ...out, values: [] };
       }
-      return f;
+      // DynamicForm renders through here too, so this reaches the real
+      // deploy form and not only the editor preview (#152).
+      if (typeof out.label !== "string" || !out.label.trim()) {
+        out = { ...out, label: labelFromPath(out.path) };
+      }
+      return out;
     });
-  return { spec: { fields }, problems };
+  return {
+    spec: { fields },
+    problems: issues.map((issue) => issue.at),
+    dropped: issues.filter((issue) => issue.kind === "dropped").map((issue) => issue.at),
+    ignored: issues.filter((issue) => issue.kind === "ignored").map((issue) => issue.at),
+  };
 }
 
 /**

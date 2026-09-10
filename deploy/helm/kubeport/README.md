@@ -279,6 +279,17 @@ and rolling upgrade pauses, so old Pods stay live serving traffic.
 The frontend Pod has its own `wait-for-backend` initContainer (polls backend
 `/healthz`) so it doesn't open DB connections against an un-migrated schema.
 
+The queries in the sections below run against kubeport's database. With the
+embedded Postgres (the default):
+
+```bash
+kubectl -n kubeport exec -it kubeport-postgres-0 -- psql -U kubeport kubeport
+```
+
+The pod is `<release>-postgres-0`, or `<release>-kubeport-postgres-0` when the
+release name does not contain `kubeport`. With `postgres.embedded=false`, point
+your own `psql` at `postgres.externalUrl`.
+
 ### Behaviour changes when upgrading past #161
 
 kubeport now checks, before applying anything, whether a release's objects
@@ -311,6 +322,53 @@ already belong to something else. Upgrades change what used to happen silently:
   with a 409 naming the release that took them. Deleting that release deletes
   those objects too; update the affected release once more right after, and it
   recreates them.
+
+### Behaviour changes when upgrading past #136
+
+ui-spec fields are now checked the way the contract always described them:
+
+- **A field type other than `string`, `integer`, `boolean`, `enum` or
+  `autocomplete` is refused on save**, and so is a field without a type or with
+  a blank label. A misspelled type (`int`, `str`) used to skip every check, so
+  whatever a caller sent for it went into the manifest. Published versions with
+  a blank label still deploy — the form falls back to the path's last key — but
+  the next draft has to label every field. Saving reports one field at a time,
+  so fix the type, label and path of every field before saving.
+- **A published version with such a type cannot be deployed or updated** when
+  that field gets a value — sent, or its `default`. The response is 400
+  `validation-error` with `template_defect` naming the field, and the deploy
+  form tells the user to ask an admin. A field with no value and no default is
+  still skipped. Find these versions before upgrading, then publish one with a
+  valid type:
+
+  ```sql
+  SELECT t.name, tv.version, tv.id
+    FROM template_versions tv JOIN templates t ON t.id = tv.template_id
+   WHERE tv.ui_spec_yaml ~ '(?n)^\s*(-\s+)?type:(?![ \t]*[''"]?(string|integer|boolean|enum|autocomplete)[''"]?([ \t]+#.*)?[ \t\r]*$)'
+      OR (SELECT count(*) FROM regexp_matches(tv.ui_spec_yaml, '(?n)^[ \t]*(-[ \t]+)?path:', 'g'))
+         <> (SELECT count(*) FROM regexp_matches(tv.ui_spec_yaml, '(?n)^[ \t]*(-[ \t]+)?type:', 'g'));
+  ```
+
+  The second condition finds a field with no `type:` line at all — the case
+  most likely to surprise: if it has a `default`, it deployed before the upgrade
+  (the form never showed it) and fails every deploy after. The query reads YAML
+  line by line, so a spec written in flow style or as JSON is not matched; open
+  anything you know was sent that way in the editor.
+
+  Publishing a fixed version does not move existing releases, and a release
+  cannot be updated while it stays on the broken version. Update each one to the
+  fixed version (its values carry over). To list them, with the `id`s above:
+
+  ```sql
+  SELECT r.namespace, r.name AS release, t.name AS template, tv.version
+    FROM releases r
+    JOIN template_versions tv ON tv.id = r.template_version_id
+    JOIN templates t ON t.id = tv.template_id
+   WHERE tv.id IN (/* template_versions.id from the query above */);
+  ```
+- **`integer` fields take whole numbers only**, and `enum` values must be
+  scalars. A release whose stored values have `2.5` for an integer field, or a
+  list for an enum, fails to update until the value is corrected.
 
 ## Uninstall
 

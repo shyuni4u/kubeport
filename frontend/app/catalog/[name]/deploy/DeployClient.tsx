@@ -53,6 +53,7 @@ type ProblemBody = {
   title?: unknown;
   conflicts?: Array<{ owner?: unknown; owner_unknown?: unknown }>;
   pinned_namespace?: unknown;
+  template_defect?: unknown;
 };
 
 function parseProblem(body: string): ProblemBody | null {
@@ -101,13 +102,15 @@ export function DeployClient({
   // and is never shown to the user. The body is read only for structured fields
   // that exist to be shown: the release holding a resource-conflict (#161),
   // where "pick another name" cannot help, and a template object pinned to
-  // another namespace (#137), where "check your input" blames the one thing
-  // that is not wrong. An update gets its own wording, because an existing
-  // release cannot move to another area.
+  // another namespace (#137) or a ui-spec field type kubeport does not know
+  // (#136), where "check your input" blames the one thing that is not wrong. An
+  // update gets its own wording, because an existing release cannot move to
+  // another area.
   const errorMessageForStatus = useCallback(
     (status: number, body = ""): string => {
       const problem = parseProblem(body);
       if (status === 400 && problem?.pinned_namespace) return t("errors.templateNamespace");
+      if (status === 400 && problem?.template_defect) return t("errors.templateDefect");
       if (status === 403) return t("errors.forbidden");
       if (status === 409) {
         const held = resourceConflictOf(problem);

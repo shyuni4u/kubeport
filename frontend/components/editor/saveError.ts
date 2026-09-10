@@ -15,7 +15,9 @@ export async function saveErrorMessage(
   res: Response,
   { creating = false }: { creating?: boolean } = {},
 ): Promise<string> {
-  const detail = (await res.text().catch(() => "")).trim();
+  // The kind is read from the whole body; only the sentence shown is the detail.
+  const body = (await res.text().catch(() => "")).trim();
+  const detail = problemDetail(body);
   switch (res.status) {
     case 409:
       return t("errors.draftExists");
@@ -29,7 +31,7 @@ export async function saveErrorMessage(
       // refused only for templates the demo did not create. Telling someone
       // on the new-template screen that they "can only edit demo templates"
       // named a rule that was not what stopped them.
-      if (problemTitle(detail) === "demo-restricted") {
+      if (problemTitle(body) === "demo-restricted") {
         return creating ? t("errors.demoCreateRestricted") : t("errors.demoRestricted");
       }
       return t("errors.forbidden");
@@ -44,4 +46,20 @@ export async function saveErrorMessage(
     default:
       return t("errors.generic", { status: res.status, detail });
   }
+}
+
+// The BFF passes the Go API's body through unchanged, so a 400 arrives as a
+// Problem document. Printed whole, the one sentence the author needs —
+// "fields[0] (path `…`) has no label" — was buried in JSON; the preview had the
+// same problem and #151 fixed it there. A body that is not a Problem is kept.
+function problemDetail(body: string): string {
+  try {
+    const p: unknown = JSON.parse(body);
+    if (p && typeof p === "object" && typeof (p as { detail?: unknown }).detail === "string") {
+      return (p as { detail: string }).detail;
+    }
+  } catch {
+    // Not JSON: the text is the message.
+  }
+  return body;
 }

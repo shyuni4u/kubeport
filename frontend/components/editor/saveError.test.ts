@@ -57,6 +57,27 @@ describe("saveErrorMessage", () => {
     );
   });
 
+  // The BFF passes the Go API's Problem document through unchanged, so this —
+  // not the plain text above — is what a real 400 looks like. Printed whole,
+  // the sentence the author needs was buried inside the JSON.
+  it("shows only the Problem's detail on a real 400", async () => {
+    const body = JSON.stringify({
+      type: "https://kubeport.io/errors/validation-error",
+      title: "validation-error",
+      status: 400,
+      detail: "fields[0] (path `Deployment[web].spec.replicas`) has no label; the deploy form shows it beside the input",
+      request_id: "r-1",
+    });
+
+    const msg = await saveErrorMessage(t, res(400, body));
+
+    expect(msg).toBe(
+      "검증에 실패했습니다: fields[0] (path `Deployment[web].spec.replicas`) has no label; the deploy form shows it beside the input",
+    );
+    expect(msg).not.toContain("validation-error");
+    expect(msg).not.toContain("request_id");
+  });
+
   it("tells the author to wait on 429, rather than printing the Problem", async () => {
     // The authoring routes gained a rate limit with issue #135, so a save can
     // now be refused for a reason that fixes itself. Without its own case this
