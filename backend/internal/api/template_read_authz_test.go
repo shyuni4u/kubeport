@@ -39,8 +39,10 @@ func TestGetTemplateVersion_DraftRequiresEditor(t *testing.T) {
 	tplName := seedGlobalTemplate(t, adminRouter) // v1 starts as draft
 	userRouter := newPlainUserRouter(t, s, randSuffix())
 
+	// Never published, so "not found" like the list and GetTemplate answer —
+	// a 403 would confirm the name they hide (#238).
 	w := do(t, userRouter, http.MethodGet, "/v1/templates/"+tplName+"/versions/1", nil)
-	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
 	require.NotContains(t, w.Body.String(), "resources_yaml")
 
 	// The author still reads their own draft.
@@ -86,7 +88,7 @@ func TestPreviewRender_DraftVersionRequiresEditor(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{"values": demoValues})
 	w := do(t, userRouter, http.MethodPost, "/v1/templates/"+tplName+"/render?version=1", bytes.NewReader(body))
-	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
 	require.NotContains(t, w.Body.String(), "rendered_yaml")
 
 	w = do(t, adminRouter, http.MethodPost, "/v1/templates/"+tplName+"/render?version=1", bytes.NewReader(body))
@@ -118,10 +120,12 @@ func TestDemoAdmin_CannotReadNonDemoOwnedTemplateDraft(t *testing.T) {
 	adminRouter := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: s})
 	tplName := seedGlobalTemplate(t, adminRouter)
 
+	// The operator's template is on the other side of the demo line, and never
+	// published besides: "not found" either way (#238).
 	demoRouter := newDemoAdminRouter(t, s, &fakeK8sApplier{})
 	w := do(t, demoRouter, http.MethodGet, "/v1/templates/"+tplName+"/versions/1", nil)
-	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
-	require.Contains(t, w.Body.String(), "demo-restricted")
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+	require.NotContains(t, w.Body.String(), "resources_yaml")
 }
 
 // seedTeamMember creates a user, puts them in the team with the given role and
@@ -172,7 +176,8 @@ func TestGetTemplateVersion_TeamViewerCanReadOwnTeamDraft(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 }
 
-// A member of another team gets nothing.
+// A member of another team gets nothing — and for a template never published,
+// not even confirmation that the name exists (#238).
 func TestGetTemplateVersion_OtherTeamMemberDenied(t *testing.T) {
 	s := testStore(t)
 	adminR := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: s})
@@ -183,7 +188,29 @@ func TestGetTemplateVersion_OtherTeamMemberDenied(t *testing.T) {
 
 	outsiderR := seedTeamMember(t, s, adminR, otherTeam, "editor")
 	w := do(t, outsiderR, http.MethodGet, "/v1/templates/"+tplName+"/versions/1", nil)
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+}
+
+// Once a template has been published its name is catalog content, so a draft
+// of a later version may say why it is refused — the reason ("team membership
+// required") tells a reader what to do, and confirms nothing new.
+func TestGetTemplateVersion_DraftOfPublishedTemplateKeepsItsReason(t *testing.T) {
+	s := testStore(t)
+	adminRouter := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: s})
+	tplName := seedPublishedTemplate(t, adminRouter)
+	body, _ := json.Marshal(map[string]any{
+		"authoring_mode": "yaml",
+		"resources_yaml": minimalResources,
+		"ui_spec_yaml":   minimalUISpec,
+	})
+	w := do(t, adminRouter, http.MethodPost, "/v1/templates/"+tplName+"/versions", bytes.NewReader(body))
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+
+	userRouter := newPlainUserRouter(t, s, randSuffix())
+	w = do(t, userRouter, http.MethodGet, "/v1/templates/"+tplName+"/versions/2", nil)
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "unpublished draft")
+	require.NotContains(t, w.Body.String(), "resources_yaml")
 }
 
 // A never-published template must answer the same way everywhere: hidden from

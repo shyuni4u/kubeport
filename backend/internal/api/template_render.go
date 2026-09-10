@@ -111,6 +111,11 @@ func (h *Handlers) resolveTemplateVersion(c *gin.Context, name, versionQuery str
 			writeError(c, http.StatusNotFound, "not-found", "template version")
 			return store.TemplateVersion{}, false
 		}
+		// Rendering returns the template's substance, so it follows the same
+		// demo line as reading it (#238).
+		if h.versionHiddenByDemoScope(c, name, "template version") {
+			return store.TemplateVersion{}, false
+		}
 		// ?version=N can address a draft, so it needs the same read gate as
 		// GET /v1/templates/:name/versions/:v — rendering returns the
 		// substance of the draft's resources.yaml (issue #12).
@@ -131,7 +136,23 @@ func (h *Handlers) resolveTemplateVersion(c *gin.Context, name, versionQuery str
 		writeError(c, http.StatusInternalServerError, "internal", "failed to load template")
 		return store.TemplateVersion{}, false
 	}
+	if h.templateHiddenByDemoScope(c, tpl.OwnerUserID, "template") {
+		return store.TemplateVersion{}, false
+	}
 	if !tpl.CurrentVersionID.Valid {
+		// Never published: only those who may read its drafts learn that it
+		// exists. Everyone else gets the answer for a name that matches
+		// nothing, as the catalog and GET /v1/templates/:name already give
+		// them (#238).
+		canRead, err := h.canReadTemplate(ctx, nil, ownershipOf(tpl))
+		if err != nil {
+			internalError(c, "resolveTemplateVersion", err)
+			return store.TemplateVersion{}, false
+		}
+		if !canRead {
+			writeError(c, http.StatusNotFound, "not-found", "template")
+			return store.TemplateVersion{}, false
+		}
 		writeError(c, http.StatusNotFound, "not-found", "template has no published version; pass ?version=N")
 		return store.TemplateVersion{}, false
 	}

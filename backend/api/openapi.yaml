@@ -610,10 +610,16 @@ paths:
         The dry run to do before `POST /v1/releases`: same substitution, nothing
         written and nothing sent to a cluster.
 
-        Rendering an unpublished draft is authoring, not catalog browsing: it is
-        refused with 403 unless the caller owns the template (kubeport-admin for
-        a global template, a member of the owning team otherwise). Published and
-        deprecated versions are readable by any authenticated caller.
+        Rendering an unpublished draft is authoring, not catalog browsing: only
+        the template's owners may (kubeport-admin for a global template, a member
+        of the owning team otherwise). Published and deprecated versions are
+        readable by any authenticated caller the template list shows them to.
+
+        Everything the list hides answers 404, not 403, so the name is not
+        confirmed: on an install with a demo, a template on the other side of
+        the demo line (#238), and a draft of a template that has never been
+        published. Only a draft of an already-published template — whose name
+        is catalog content — is refused with a 403 that says why.
       parameters:
         - $ref: "#/components/parameters/TemplateName"
         - name: version
@@ -653,6 +659,12 @@ paths:
       tags: [templates]
       operationId: getTemplate
       summary: Get one template
+      description: |
+        A template the list does not show the caller answers 404, as if it did
+        not exist: one never published whose drafts the caller may not read
+        (kubeport-admin for a global template, a member of the owning team
+        otherwise), and on an install with a demo, one on the other side of the
+        demo line (#238).
       parameters: [{ $ref: "#/components/parameters/TemplateName" }]
       responses:
         "200":
@@ -698,6 +710,11 @@ paths:
       tags: [templates]
       operationId: listTemplateVersions
       summary: List versions, newest first
+      description: |
+        Drafts are listed only for the template's owners. A template the list
+        does not show the caller — never published and not theirs, or on the
+        other side of the demo line (#238) — answers 404, and so does a name
+        that matches no template, with the same body.
       parameters: [{ $ref: "#/components/parameters/TemplateName" }]
       responses:
         "200":
@@ -750,10 +767,16 @@ paths:
       summary: Get one version
       description: |
         Published and deprecated versions are catalog content that any
-        authenticated caller may read. A draft is unreleased authoring state —
-        the whole `resources.yaml`, Secrets included — so it is refused with 403
-        unless the caller owns the template (kubeport-admin for a global
-        template, a member of the owning team otherwise).
+        authenticated caller the template list shows them to may read. A draft is
+        unreleased authoring state — the whole `resources.yaml`, Secrets
+        included — so only the template's owners may read it (kubeport-admin for
+        a global template, a member of the owning team otherwise).
+
+        Everything the list hides answers 404, not 403, so the name is not
+        confirmed: on an install with a demo, a template on the other side of
+        the demo line (#238), and a draft of a template that has never been
+        published. Only a draft of an already-published template is refused
+        with a 403 that says why.
       parameters:
         - $ref: "#/components/parameters/TemplateName"
         - $ref: "#/components/parameters/VersionNumber"

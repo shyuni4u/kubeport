@@ -267,11 +267,51 @@ func (h *Handlers) inDemoScope(c *gin.Context, rc *reqCache, ownerID pgtype.UUID
 	return auth.IsDemoEmail(email, domain) == demoCaller, nil
 }
 
+// templateHiddenByDemoScope answers the item routes the way the list answers
+// by omission (#238): with a demo domain set, a template on the other side of
+// the demo line is "not found". Reading one used to return its full
+// resources.yaml — to a demo visitor, whose password is on the landing page,
+// for any operator template it could name. Reports true once it has written
+// that 404 (or a 500), so the caller stops.
+func (h *Handlers) templateHiddenByDemoScope(c *gin.Context, owner pgtype.UUID, detail string) bool {
+	if h.deps.DemoEmailDomain == "" {
+		return false
+	}
+	ok, err := h.inDemoScope(c, nil, owner)
+	if err != nil {
+		internalError(c, "template demo scope", err)
+		return true
+	}
+	if !ok {
+		writeError(c, http.StatusNotFound, "not-found", detail)
+		return true
+	}
+	return false
+}
+
+// versionHiddenByDemoScope is templateHiddenByDemoScope for routes that have
+// only the template's name in hand: it loads the owner first, and only when
+// there is a demo line to check.
+func (h *Handlers) versionHiddenByDemoScope(c *gin.Context, name, detail string) bool {
+	if h.deps.DemoEmailDomain == "" {
+		return false
+	}
+	tpl, err := h.deps.Store.GetTemplateByName(c.Request.Context(), name)
+	if err != nil {
+		writeError(c, http.StatusNotFound, "not-found", detail)
+		return true
+	}
+	return h.templateHiddenByDemoScope(c, tpl.OwnerUserID, detail)
+}
+
 func (h *Handlers) GetTemplate(c *gin.Context) {
 	ctx := c.Request.Context()
 	t, err := h.deps.Store.GetTemplateByName(ctx, c.Param("name"))
 	if err != nil {
 		writeError(c, http.StatusNotFound, "not-found", "template")
+		return
+	}
+	if h.templateHiddenByDemoScope(c, t.OwnerUserID, "template") {
 		return
 	}
 	// Same rule as ListTemplates, and the same answer: a never-published
@@ -295,6 +335,35 @@ func (h *Handlers) GetTemplate(c *gin.Context) {
 func (h *Handlers) ListTemplateVersions(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
+	// A name that matches no template answers exactly like a template the
+	// caller may not see — an empty 200 here would let anyone tell the two
+	// apart and confirm hidden names (#238). A lookup failure fails closed.
+	tpl, err := h.deps.Store.GetTemplateByName(ctx, name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(c, http.StatusNotFound, "not-found", "template")
+		return
+	}
+	if err != nil {
+		internalError(c, "ListTemplateVersions", err)
+		return
+	}
+	if h.templateHiddenByDemoScope(c, tpl.OwnerUserID, "template") {
+		return
+	}
+	// Never published: hidden from those who may not read its drafts, the
+	// same test ListTemplates and GetTemplate apply. It hangs on the template,
+	// not on its versions — deleting the only draft leaves none to look at.
+	if !tpl.CurrentVersionID.Valid {
+		canRead, err := h.canReadTemplate(ctx, nil, ownershipOf(tpl))
+		if err != nil {
+			internalError(c, "ListTemplateVersions", err)
+			return
+		}
+		if !canRead {
+			writeError(c, http.StatusNotFound, "not-found", "template")
+			return
+		}
+	}
 	vs, err := h.deps.Store.ListTemplateVersions(ctx, name)
 	if err != nil {
 		internalError(c, "ListTemplateVersions", err)
@@ -304,7 +373,7 @@ func (h *Handlers) ListTemplateVersions(c *gin.Context) {
 		vs = []store.TemplateVersion{}
 	}
 	if hasDraft(vs) {
-		denial, ok := h.templateDraftAccess(c, name)
+		denial, _, ok := h.templateDraftAccess(c, name)
 		if !ok {
 			return // response already written
 		}
@@ -314,13 +383,6 @@ func (h *Handlers) ListTemplateVersions(c *gin.Context) {
 				if v.Status != statusDraft {
 					published = append(published, v)
 				}
-			}
-			// Every version was a draft, so the template has never been
-			// published — answer exactly as ListTemplates/GetTemplate do
-			// instead of confirming its existence with an empty list.
-			if len(published) == 0 {
-				writeError(c, http.StatusNotFound, "not-found", "template")
-				return
 			}
 			vs = published
 		}
@@ -343,6 +405,9 @@ func (h *Handlers) GetTemplateVersion(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "not-found", "template version")
 		return
 	}
+	if h.versionHiddenByDemoScope(c, name, "template version") {
+		return
+	}
 	if !h.ensureCanReadVersion(c, name, tv.Status) {
 		return
 	}
@@ -361,23 +426,24 @@ func hasDraft(vs []store.TemplateVersion) bool {
 }
 
 // templateDraftAccess evaluates whether the caller may see the unpublished
-// versions of the named template — a nil denial means yes. ok=false means a
+// versions of the named template — a nil denial means yes. published reports
+// whether the template has ever had a published version. ok=false means a
 // response has already been written (template missing, or the rule could not
 // be evaluated).
-func (h *Handlers) templateDraftAccess(c *gin.Context, name string) (denial *accessDenial, ok bool) {
+func (h *Handlers) templateDraftAccess(c *gin.Context, name string) (denial *accessDenial, published bool, ok bool) {
 	ctx := c.Request.Context()
 	tpl, err := h.deps.Store.GetTemplateByName(ctx, name)
 	if err != nil {
 		writeError(c, http.StatusNotFound, "not-found", "template "+name)
-		return nil, false
+		return nil, false, false
 	}
 	d, err := h.evaluateTemplateAccess(ctx, nil, ownershipOf(tpl), false)
 	if err != nil {
 		log.Printf("templateDraftAccess(%q): %v", name, err)
 		writeError(c, http.StatusInternalServerError, "internal", "failed to authorize template read")
-		return nil, false
+		return nil, false, false
 	}
-	return d, true
+	return d, tpl.CurrentVersionID.Valid, true
 }
 
 // ensureCanReadVersion gates reads of a single template version. Published and
@@ -391,14 +457,23 @@ func (h *Handlers) ensureCanReadVersion(c *gin.Context, name, status string) boo
 	if status != statusDraft {
 		return true
 	}
-	denial, ok := h.templateDraftAccess(c, name)
+	denial, published, ok := h.templateDraftAccess(c, name)
 	if !ok {
 		return false
 	}
 	if denial != nil {
-		// Carry the rule's own reason through: "team membership required" and
-		// "demo accounts can only access demo-owned templates" call for very
-		// different next steps, and only one of them can be acted on.
+		// A template that has never been published is hidden from the list
+		// and from GetTemplate, so refusing one of its drafts with a 403 would
+		// confirm the name they just hid (#238). It answers like a version
+		// that does not exist.
+		if !published {
+			writeError(c, http.StatusNotFound, "not-found", "template version")
+			return false
+		}
+		// A published template's name is already catalog content, so a draft
+		// of a later version can carry the rule's own reason: "team membership
+		// required" and "demo accounts can only access demo-owned templates"
+		// call for very different next steps, and only one can be acted on.
 		writeError(c, denial.status, denial.code,
 			"version is an unpublished draft: "+denial.msg)
 		return false
