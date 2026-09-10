@@ -72,6 +72,16 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	// miss pulls up to 10MiB, and a caller can manufacture misses at will by
 	// varying the group/version.
 	upstream := newRateLimiter(60, 4096)
+	// Preview is CPU, not control plane, so it gets its own bucket rather than
+	// drawing on `upstream` — sharing would let an admin's typing starve the
+	// SSAR fan-out that the deploy form depends on.
+	//
+	// 600/min because the editor is the caller: both preview panes are mounted
+	// at once and each debounces at 300ms, so sustained typing is ~400/min and
+	// a 60/min bucket would refuse the admin mid-keystroke. What this bounds is
+	// the flood — 10/s of a bounded transform is a rounding error on 4 OCPUs,
+	// where an unmetered loop is not.
+	preview := newRateLimiter(600, 4096)
 	v := r.Group("/v1", requireAuth(deps.Verifier))
 	v.GET("/me", h.GetMe)
 	v.GET("/clusters", h.ListClusters)
@@ -91,7 +101,16 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 		noDemoAuthoring = func(c *gin.Context) { c.Next() }
 	}
 	v.POST("/templates", noDemoAuthoring, h.CreateTemplate)
-	v.POST("/templates/preview", h.PreviewTemplate)
+	// Deliberately NOT requireAdmin()/noDemoAuthoring, though issue #135 asked
+	// for both. Preview returns a pure function of the body the caller just
+	// sent — it reads no template, no cluster and no DB, so there is nothing
+	// for authorization to protect; what was dangerous was the cost, and that
+	// is bounded in SerializeUIMode now. requireAdmin would also be stricter
+	// than the save path it previews for: POST /templates admits a team editor
+	// who is not kubeport-admin, and gating preview would let them author
+	// without seeing what they are authoring. noDemoAuthoring would take the
+	// editor walkthrough away from the demo admin, which is the tour.
+	v.POST("/templates/preview", rateLimit(preview), h.PreviewTemplate)
 	v.POST("/templates/:name/render", h.PreviewRender)
 	v.GET("/templates/:name", h.GetTemplate)
 	v.PATCH("/templates/:name", h.UpdateTemplate)

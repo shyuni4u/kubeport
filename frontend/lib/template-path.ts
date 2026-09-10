@@ -21,6 +21,14 @@
 const PLAIN_SEGMENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const plainSegmentHead = /^[A-Za-z_][A-Za-z0-9_]*/;
 
+// Mirrors maxPathDepth in jsonpath.go, where it is a denial-of-service limit:
+// the backend builds a document from these paths, and depth costs it
+// quadratically (the YAML encoder indents). Here it is only about staying in
+// step — a path this side accepts and the backend refuses would surface as an
+// unexplained 400 on save, a long way from the document that caused it.
+// Real manifests run about nine segments deep.
+const MAX_PATH_DEPTH = 128;
+
 // The selector cannot open with a quote (it is an index or a DNS-1123 name),
 // which is what keeps `Kind["some.key"]` from being read as a resource
 // selector rather than a quoted first segment.
@@ -67,6 +75,7 @@ export function parsePathSegments(path: string): (string | number)[] | null {
   const keys: (string | number)[] = [];
   let rest = path;
   while (rest !== "") {
+    if (keys.length >= MAX_PATH_DEPTH) return null;
     if (rest.startsWith("[")) {
       const quote = rest[1];
       if (quote === '"' || quote === "'") {

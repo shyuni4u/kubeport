@@ -71,6 +71,28 @@ type pathSeg struct {
 	arr bool
 }
 
+// maxPathDepth bounds how many segments one path may hold.
+//
+// Depth is its own amplifier, separate from the container budget in
+// uimode.go, and it is quadratic twice over:
+//
+//   - CanonicalPath rebuilds the path a segment at a time with JoinPath, and
+//     each step copies the prefix. Refusing a 400KB path AFTER parsing it cost
+//     41GB of allocation, measured — the refusal was the denial of service.
+//   - The YAML encoder indents, so a document nested N deep writes ~N² bytes.
+//     8000 plain segments is only 8000 containers, well inside the container
+//     budget, and still produced 64MB of resources.yaml from 16KB of path.
+//
+// So the limit belongs here, in the one tokenizer every path goes through
+// (CanonicalPath, setInto's render walk, setJSONPathAbsolute), and it is
+// checked while scanning rather than after, so an abusive path never gets its
+// segment slice built at all.
+//
+// 128 is an order of magnitude past real manifests: the deepest field anyone
+// writes runs about nine segments, as in
+// spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.name.
+const maxPathDepth = 128
+
 var plainSegRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*`)
 
 func isDecimalDigits(s string) bool {
@@ -106,6 +128,11 @@ func parsePathSegments(path string) ([]pathSeg, error) {
 	var segs []pathSeg
 	rest := path
 	for rest != "" {
+		if len(segs) >= maxPathDepth {
+			return nil, fmt.Errorf(
+				"path is deeper than %d levels: %.60q…; a manifest field is about nine deep",
+				maxPathDepth, path)
+		}
 		if rest[0] == '[' {
 			if len(rest) > 1 && (rest[1] == '"' || rest[1] == '\'') {
 				quote := rest[1]
