@@ -63,7 +63,8 @@ jobs:
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Deploy step 45m + health wait 5m + resolve.
+    timeout-minutes: 60
     steps:
       - name: Resolve the sha to deploy
         id: target
@@ -125,7 +126,11 @@ jobs:
 
       - name: Deploy over SSH
         if: steps.target.outputs.skip != 'true'
-        timeout-minutes: 20
+        # Must outlast the worst case on the VM, or Actions kills the ssh
+        # session mid-`helm upgrade` and leaves the release pending-upgrade:
+        # lock wait 10m + helm --timeout 10m (plus --atomic's rollback, which
+        # waits again) + two 2m rollout checks + chart fetch. 45m covers it.
+        timeout-minutes: 45
         env:
           SHA: ${{ steps.target.outputs.sha }}
           DEPLOY_KEY: ${{ secrets.OCI_DEPLOY_SSH_KEY }}
@@ -134,6 +139,11 @@ jobs:
           # is a secret update rather than a commit.
           HOST: ${{ secrets.OCI_DEPLOY_HOST }}
         run: |
+          # Actions runs `bash -e`; `set -uo pipefail` alone keeps -e, so a
+          # nonzero ssh (a Dex refusal included) would end the step before
+          # rc is read — skipping the exit-code annotation, summary and key
+          # removal below. Turn errexit off explicitly.
+          set +e
           set -uo pipefail
           for v in DEPLOY_KEY KNOWN_HOSTS HOST; do
             if [ -z "${!v}" ]; then
