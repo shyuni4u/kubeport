@@ -34,3 +34,4 @@
 
 Chrome 확장 MCP: `mcp__claude-in-chrome__tabs_context_mcp` 로 시작 → `tabs_create_mcp` 로 새 탭 → `navigate` / `computer` / `read_page` / `find` / `form_input` / `get_page_text` / `read_console_messages`. 스크린샷은 `computer` 의 screenshot 액션. 확장이 파일을 자체 임시 경로(예: `%TEMP%\claude-chrome-screenshots-*\`)에 저장하므로 `SHOT_DIR` 에 직접 쓰지 못한다 — **툴이 돌려준 실제 경로를 그대로 evidence 에 적는다.** 끝나면 `tabs_close_mcp`.
 alert/confirm 다이얼로그를 띄우는 버튼(삭제 등)은 확장이 멈출 수 있으니, 누르기 전에 `javascript_tool` 로 `window.confirm = () => true` 를 심고 누른다.
+**편집기(Monaco)에 한 글자라도 입력했다면 그 탭은 앱 안 링크(사이드바·브레드크럼)로만 떠난다.** 미저장 가드(`frontend/components/editor/useDirtyGuard.ts`)는 두 갈래다 — 앱 안 링크 클릭은 `window.confirm` 이라 위 오버라이드로 통과하지만, **`navigate`·주소창 이동·새로고침·`tabs_close_mcp` 는 브라우저 기본 `beforeunload` 프롬프트**라 스크립트로 막을 수 없고 확장이 통째로 멈춘다(2026-09-10 admin 리뷰어가 실제로 멈췄고 사람이 탭을 닫았다). **값을 원문과 똑같이 되돌려도 가드는 풀리지 않는다**(같은 날 실측) — 되돌리기는 대책이 아니다.
