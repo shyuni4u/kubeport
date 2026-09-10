@@ -52,6 +52,9 @@ func TestRender_RefusesTheDefaultOfAnUnknownTypeField(t *testing.T) {
 	_, err := template.Render(fieldTypeResources, spec, json.RawMessage(`{}`), template.Labels{ReleaseName: "r"})
 
 	require.ErrorContains(t, err, `unsupported field type "int"`)
+	var ute *template.UnsupportedTypeError
+	require.ErrorAs(t, err, &ute, "the API tells this apart from a bad input by type")
+	require.Equal(t, "Deployment[web].spec.replicas", ute.Path)
 }
 
 // The other edge, pinned so a later change cannot move the check earlier

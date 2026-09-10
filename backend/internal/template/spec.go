@@ -126,9 +126,23 @@ func (f Field) Validate(v any) error {
 		// sent — a whole object included — was written into the manifest
 		// unchecked (#136). ValidateSpec now refuses such a spec on save; this
 		// is what still stops a version saved before that.
-		return fmt.Errorf("%s: unsupported field type %q", f.name(), f.Type)
+		return &UnsupportedTypeError{Path: f.Path, Field: f.name(), Type: f.Type}
 	}
 	return nil
+}
+
+// UnsupportedTypeError is a stored version whose ui-spec names a type kubeport
+// does not know. Unlike every other Validate error it is not the caller's
+// input: no value makes the version deploy, so the API marks it for the form
+// to send the user to an admin instead of back to their input.
+type UnsupportedTypeError struct {
+	Path  string
+	Field string
+	Type  FieldType
+}
+
+func (e *UnsupportedTypeError) Error() string {
+	return fmt.Sprintf("%s: unsupported field type %q", e.Field, e.Type)
 }
 
 // maxExactInt is the largest magnitude a float64 holds every integer up to.

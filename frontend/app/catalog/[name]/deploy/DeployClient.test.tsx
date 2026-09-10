@@ -312,6 +312,25 @@ describe("DeployClient", () => {
     expect(alert).not.toHaveTextContent(/입력한 값을 확인한 뒤/);
   });
 
+  // #136: a version saved before types were checked names one kubeport does
+  // not know, and no input deploys it.
+  it("does not blame the user's input for a template field kubeport cannot use", async () => {
+    const alert = await submitAndReadAlert(() =>
+      jsonResponse(
+        {
+          title: "validation-error",
+          status: 400,
+          detail: 'replicas: unsupported field type "int"',
+          template_defect: { path: "Deployment[web].spec.replicas", type: "int" },
+        },
+        400,
+      ),
+    );
+
+    expect(alert).toHaveTextContent(/입력한 값의 문제가 아니니/);
+    expect(alert).not.toHaveTextContent(/입력한 값을 확인한 뒤/);
+  });
+
   it("does not claim kubeport did not create a holder it cannot see", async () => {
     const alert = await submitAndReadAlert(() =>
       jsonResponse(

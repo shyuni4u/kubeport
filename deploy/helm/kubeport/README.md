@@ -312,6 +312,33 @@ already belong to something else. Upgrades change what used to happen silently:
   those objects too; update the affected release once more right after, and it
   recreates them.
 
+### Behaviour changes when upgrading past #136
+
+ui-spec fields are now checked the way the contract always described them:
+
+- **A field type other than `string`, `integer`, `boolean`, `enum` or
+  `autocomplete` is refused on save**, and so is a field without a type or with
+  a blank label. A misspelled type (`int`, `str`) used to skip every check, so
+  whatever a caller sent for it went into the manifest.
+- **A published version with such a type cannot be deployed or updated** when
+  that field gets a value — sent, or its `default`. The response is 400
+  `validation-error` with `template_defect` naming the field, and the deploy
+  form tells the user to ask an admin. A field with no value and no default is
+  still skipped. Find these versions before upgrading, then publish one with a
+  valid type:
+
+  ```sql
+  SELECT t.name, tv.version
+    FROM template_versions tv JOIN templates t ON t.id = tv.template_id
+   WHERE tv.ui_spec_yaml ~ '(?n)^\s*(-\s+)?type:(?![ \t]*[''"]?(string|integer|boolean|enum|autocomplete)[''"]?[ \t\r]*$)';
+  ```
+
+  (A field with no `type:` line at all does not match; the editor's preview
+  lists those.)
+- **`integer` fields take whole numbers only**, and `enum` values must be
+  scalars. A release whose stored values have `2.5` for an integer field, or a
+  list for an enum, fails to update until the value is corrected.
+
 ## Uninstall
 
 ```bash

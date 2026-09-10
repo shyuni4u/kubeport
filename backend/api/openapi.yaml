@@ -1694,6 +1694,22 @@ components:
             namespace:
               type: string
               description: The namespace the template pins.
+        template_defect:
+          type: object
+          description: |
+            Only on a `400 validation-error` from creating or updating a release
+            whose template version has a ui-spec field of a type kubeport does
+            not know (#136). Saving such a spec is refused now, but a version
+            saved before that still exists, and no request values deploy it —
+            the template has to change, as with `pinned_namespace`.
+          required: [path, type]
+          properties:
+            path:
+              type: string
+              description: The ui-spec path of the field.
+            type:
+              type: string
+              description: The field type as stored.
         request_id:
           type: string
           description: |

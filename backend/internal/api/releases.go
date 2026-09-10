@@ -173,7 +173,7 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		AppliedBy:       u.Email,
 	})
 	if err != nil {
-		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+		renderProblem(c, err)
 		return
 	}
 
