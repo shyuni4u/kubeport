@@ -129,6 +129,31 @@ cuts the tag, so the two never disagree.
 {{- end -}}
 
 {{/*
+Pull policy, derived from the tag unless the operator states one.
+
+The two halves of this pair have to agree and a single default cannot serve both.
+`latest` moves, so IfNotPresent makes a node keep the first build it ever pulled:
+the release is then neither current nor pinned, two nodes can run different code,
+and `helm upgrade` emits no rollout at all because the tag string is unchanged.
+A `sha-<7>` tag is immutable, so Always buys nothing there and costs real
+availability — a registry it cannot reach stops a Pod from restarting on an image
+already sitting on its disk, which is exactly when you least want that.
+
+So: rolling tag → Always, pinned tag → IfNotPresent. Setting
+images.<c>.pullPolicy explicitly still wins; the empty default means "derive".
+*/}}
+{{- define "kubeport.pullPolicy" -}}
+{{- $img := .img -}}
+{{- if $img.pullPolicy -}}
+{{- $img.pullPolicy -}}
+{{- else if eq ($img.tag | default "latest") "latest" -}}
+Always
+{{- else -}}
+IfNotPresent
+{{- end -}}
+{{- end -}}
+
+{{/*
 Secret name for shared auth + DB env. Either chart-managed or externally provided.
 */}}
 {{- define "kubeport.auth.secretName" -}}

@@ -22,11 +22,29 @@ kind create cluster --name kubeport-try     # or use any cluster you already hav
 helm install kubeport deploy/helm/kubeport \
   --namespace kubeport --create-namespace \
   -f deploy/helm/kubeport/ci/smoke-values.yaml \
+  --set auth.appEncryptionKeyB64=$(openssl rand -base64 32) \
+  --set auth.oidcClientSecret=$(openssl rand -hex 24) \
+  --set postgres.password=$(openssl rand -hex 24) \
   --wait --timeout 5m
 
 kubectl -n kubeport port-forward svc/kubeport-frontend 3000:3000
 # http://localhost:3000 — the landing page renders; login will not complete
 ```
+
+**The three `--set` lines are not optional.** `ci/smoke-values.yaml` carries
+secrets that are committed to this repository — `appEncryptionKeyB64` in it is
+32 zero bytes — and that key is what the frontend encrypts users' OIDC access
+and refresh tokens with before writing them to the `sessions` table. Installed
+as-is, the instance stores real tokens under a key anyone can read here, in a
+Postgres whose password is equally public and reachable from any Pod in the
+cluster. CI can use those values because its cluster is deleted minutes later;
+your cluster may not be.
+
+That matters beyond this throwaway install, because there is a documented route
+from here to a real one: "After install" below upgrades a release with
+`--reuse-values`, which keeps whatever secrets the install was given. Overriding
+them now means that route stays safe. Better still, `helm uninstall` this and
+install fresh when you move past evaluating.
 
 `ci/smoke-values.yaml` sets `ingress.enabled=false`, `tls.enabled=false` **and
 `tls.certManager.enabled=false`**. That third one is the reason this needs a
@@ -94,6 +112,12 @@ helm install kubeport deploy/helm/kubeport \
   --set auth.oidcClientSecret=$GOOGLE_OAUTH_CLIENT_SECRET \
   --set postgres.password=$PG_PASS
 ```
+
+This installs the `latest` tag, which is not a version — see the warning helm
+prints after install. Add `--set images.backend.tag=sha-<7>
+--set images.frontend.tag=sha-<7>` to pin the commit you meant. That is what
+[docs/oci-prod-runbook.md §3](../../../docs/oci-prod-runbook.md) does, and it is
+the reason rollback works there.
 
 `ingress.className` and `postgres.storage.storageClassName` above are the k3s
 values — substitute your cluster's from the "Cloud-specific values" table below
@@ -275,10 +299,15 @@ empties itself on schedule and never refills (#118, same symptom as #104).
 nothing can be validated at render time. Confirm it yourself before installing:
 
 ```bash
-kubectl -n kubeport get secret <name> -o jsonpath='{.data}' | tr ',' '\n' | cut -d'"' -f2
+kubectl -n kubeport describe secret <name>
+# lists key names and byte counts, never values
 # expect: APP_ENCRYPTION_KEY_B64, DATABASE_URL, OIDC_CLIENT_SECRET
 #         (+ DEMO_OIDC_CLIENT_SECRET when dex.enabled=true)
 ```
+
+`describe` rather than `get -o jsonpath='{.data}' | ...`: the values never leave
+kubectl at all, so there is no version of this command that is one truncation
+away from printing your encryption key into a terminal or a CI log.
 
 ### Postgres modes
 

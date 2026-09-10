@@ -97,6 +97,14 @@ sudo install -o root -g root -m 0755 linux-amd64/helm /usr/local/bin/helm && rm 
 # scripts/e2e/doctor.sh 도 이걸 검사한다.
 go install sigs.k8s.io/kind@v0.31.0     # $(go env GOPATH)/bin 이 PATH 에 있어야 한다
 
+# make + openssl — Ubuntu/WSL 기본 이미지에 make 가 없다. README 의 `make test`·`make e2e`,
+# 차트의 `make helm-sync`/`helm-snapshot`, CI(helm.yml)까지 전부 make 를 부른다.
+# openssl 은 dex 자체서명 인증서(§4 2번)와 설치 시크릿 생성에 필요하다.
+sudo apt-get update && sudo apt-get install -y make openssl
+
+# sqlc — 쿼리에서 Go 코드 생성. backend/ 를 건드릴 때만 필요하다.
+go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+
 # (선택) k3d — 로컬 k3s 클러스터. e2e 는 kind 를 쓰므로 필수는 아니다.
 curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
 ```
@@ -124,12 +132,15 @@ curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
 
 ```bash
 # macOS (Homebrew)
-brew install go node pnpm atlas-go kubectl kind
+brew install go node pnpm atlas-go kubectl kind make sqlc
 brew install --cask docker   # Docker Desktop
 
 # helm 은 버전을 고정한다 — `brew install helm` 은 helm 4 를 준다. 이유는 §2 Step 3.
-curl -fsSL https://get.helm.sh/helm-v3.20.2-darwin-arm64.tar.gz | tar xz
-sudo install -m 0755 darwin-arm64/helm /usr/local/bin/helm && rm -rf darwin-arm64
+# 아키텍처를 고정하지 말 것: Intel Mac 에 arm64 바이너리를 깔면 설치는 성공하고
+# 실행할 때 "Bad CPU type in executable" 로 죽는다.
+HELM_ARCH=$([ "$(uname -m)" = "arm64" ] && echo darwin-arm64 || echo darwin-amd64)
+curl -fsSL "https://get.helm.sh/helm-v3.20.2-${HELM_ARCH}.tar.gz" | tar xz
+sudo install -m 0755 "${HELM_ARCH}/helm" /usr/local/bin/helm && rm -rf "${HELM_ARCH}"
 
 # Ubuntu/Debian (상기 WSL 설치 스크립트 그대로)
 ```
@@ -153,6 +164,9 @@ atlas version
 kubectl version --client
 helm version --short    # v3.20.2 여야 한다 — helm 4 는 차트 스냅샷 CI 를 깨뜨린다
 kind version            # scripts/e2e/up.sh · doctor.sh 가 요구한다
+make --version          # README 의 `make test` · 차트의 `make helm-snapshot` 이 부른다
+openssl version         # 아래 2번의 dex 인증서 생성
+sqlc version            # backend/ 코드 생성용 (backend 를 건드릴 때만)
 
 # 2. 로컬 의존 서비스 기동 (postgres + dex — 이 둘뿐이다)
 #    ⚠️ dex 는 deploy/docker/certs/dex.{crt,key} 가 없으면 뜨지 않는다

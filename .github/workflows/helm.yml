@@ -8,6 +8,10 @@ on:
       - "backend/migrations/schema.hcl"
       - ".github/workflows/helm.yml"
       - "Makefile"
+      # The chart default is now a tag this workflow publishes. If the rules
+      # for publishing `latest` change, the chart default silently stops
+      # resolving -- so a change there has to wake this job too (#89).
+      - ".github/workflows/build-images.yml"
   pull_request:
     branches: [main]
     paths:
@@ -15,6 +19,10 @@ on:
       - "backend/migrations/schema.hcl"
       - ".github/workflows/helm.yml"
       - "Makefile"
+      # The chart default is now a tag this workflow publishes. If the rules
+      # for publishing `latest` change, the chart default silently stops
+      # resolving -- so a change there has to wake this job too (#89).
+      - ".github/workflows/build-images.yml"
   workflow_dispatch:
 
 # A new push supersedes the previous run on the same ref. Matches ci.yml.
@@ -72,6 +80,13 @@ jobs:
           # tag on main) is what gets pulled, which keeps this independent of
           # per-PR image builds AND makes the job fail if that default ever names
           # a tag ghcr does not have — the failure mode of #89.
+          #
+          # The trade: `latest` moves with main, so this is a guard, not a
+          # reproducible test. A red here can mean main published a broken image
+          # rather than anything in the PR under review. Check
+          # `docker pull ghcr.io/shyuni4u/kubeport-backend:latest` before blaming
+          # the diff — mistaking an environment failure for the PR's is exactly
+          # what #126 cost a reviewer.
           helm install kp deploy/helm/kubeport \
             --namespace kubeport --create-namespace \
             -f deploy/helm/kubeport/ci/smoke-values.yaml \

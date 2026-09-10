@@ -13,9 +13,9 @@ nameOverride: ""
 fullnameOverride: ""
 
 # ----- Images -------------------------------------------------------------
-# `latest` tracks main and is what makes a no-flags `helm install` work. It is the
-# right default for evaluating the chart and the wrong one for running it: nothing
-# pins it, so the next main commit silently changes what a restarted Pod runs.
+# `latest` is republished on every main commit, and is what makes a no-flags
+# `helm install` work — the right default for evaluating the chart, the wrong one
+# for running it, because nothing records which commit a given Pod is on.
 #
 # For anything you intend to keep, pin the immutable per-commit tag instead —
 # every main commit publishes one:
@@ -24,15 +24,20 @@ fullnameOverride: ""
 #
 # Do not put Chart.appVersion here: no semver image tag has ever been published
 # (see the note on the image helpers in templates/_helpers.tpl).
+#
+# pullPolicy is empty on purpose — it is derived from the tag: `latest` gets
+# Always, a pinned tag gets IfNotPresent. One fixed value cannot be right for
+# both; templates/_helpers.tpl "kubeport.pullPolicy" explains why. Set it here or
+# with --set to override the derivation.
 images:
   backend:
     repository: ghcr.io/shyuni4u/kubeport-backend
     tag: "latest"
-    pullPolicy: IfNotPresent
+    pullPolicy: ""
   frontend:
     repository: ghcr.io/shyuni4u/kubeport-frontend
     tag: "latest"
-    pullPolicy: IfNotPresent
+    pullPolicy: ""
 
 imagePullSecrets: []  # e.g. [{ name: ghcr-pull-secret }] when using private packages
 

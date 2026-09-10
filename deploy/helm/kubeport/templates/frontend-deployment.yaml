@@ -45,7 +45,7 @@ spec:
       containers:
         - name: frontend
           image: {{ include "kubeport.frontend.image" . }}
-          imagePullPolicy: {{ .Values.images.frontend.pullPolicy }}
+          imagePullPolicy: {{ include "kubeport.pullPolicy" (dict "img" .Values.images.frontend) }}
           ports:
             - name: http
               containerPort: {{ .Values.frontend.service.port }}

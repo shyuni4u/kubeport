@@ -80,6 +80,7 @@ Browser ── Next.js (k8s Pod, BFF) ── Go API (in k8s) ── Target k8s c
 git clone https://github.com/shyuni4u/kubeport && cd kubeport
 helm install kubeport deploy/helm/kubeport --namespace kubeport --create-namespace \
   --set host=kubeport.example.com \
+  --set ingress.className=nginx \
   --set oidc.issuer=https://accounts.google.com \
   --set oidc.clientId=$CLIENT_ID --set oidc.audience=$CLIENT_ID \
   --set-string auth.devAdminEmails=you@example.com \
@@ -87,6 +88,15 @@ helm install kubeport deploy/helm/kubeport --namespace kubeport --create-namespa
   --set auth.appEncryptionKeyB64=$(openssl rand -base64 32) \
   --set postgres.password=$(openssl rand -hex 24)
 ```
+
+`ingress.className` 은 클러스터에 맞는 값으로 바꾼다 — GKE `gce`, EKS `alb`,
+nginx-ingress `nginx`, k3s `traefik`. 차트 기본값이 `traefik` 이라, traefik 이 없는
+클러스터에서는 Ingress 가 만들어지되 **어떤 컨트롤러도 잡지 않는다.** 에러는 안 나고
+주소만 영원히 비어 있다.
+
+이 명령은 `latest` 태그를 설치한다. 계속 쓸 설치본이라면
+`--set images.backend.tag=sha-<7> --set images.frontend.tag=sha-<7>` 를 붙인다 —
+main 커밋마다 하나씩 발행되고, 핀해야 롤백이 가능하다.
 
 먼저 [deploy/helm/kubeport/README.md](deploy/helm/kubeport/README.md) 를 읽는다 —
 특히 **"After install — required on every cluster"**. 이 단계를 건너뛰면 앱은 뜨고
@@ -97,6 +107,14 @@ helm install kubeport deploy/helm/kubeport --namespace kubeport --create-namespa
 ## 빠른 시작
 
 ```bash
+# 머신당 한 번, 0단계보다 먼저: dex 의 issuer URL 이 host.docker.internal 이라는 이름
+# 그대로다. 따라서 이 이름이 이 호스트에서 127.0.0.1 로 풀려야 한다. Docker Desktop 이
+# 이 항목을 머신의 LAN IP 로 미리 넣어 두는 경우가 많은데, 그러면 **이름은 풀리는데**
+# 그 주소에 dex 가 없어서 계속 실패한다.
+grep -i host.docker.internal /etc/hosts    # Windows: C:\Windows\System32\drivers\etc\hosts
+# 정확히 이 한 줄이어야 한다: 127.0.0.1 host.docker.internal
+# 다른 주소로 잡힌 항목은 지운다. 전체 절차: docs/local-e2e.md §1
+
 # 0. dex 가 TLS 로 쓸 인증서 생성. 클론당 한 번 — 이 파일들은 gitignore 대상이라
 #    새로 클론하면 없고, 없으면 dex 가
 #    "open /config/certs/dex.crt: no such file or directory" 로 죽는다.
@@ -105,7 +123,10 @@ cd deploy/docker/certs
 openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
   -keyout dex.key -out dex.crt -subj "/CN=host.docker.internal" \
   -addext "subjectAltName=DNS:host.docker.internal,DNS:localhost,IP:127.0.0.1"
-chmod 644 dex.key      # dex 컨테이너가 비루트로 읽는다
+chmod 644 dex.key      # dex 컨테이너가 비루트로 읽어서 600 이면 안 뜬다. 644 가 안전한
+                       # 이유는 이게 폐기용 쌍이기 때문이다 — 아래 3단계가 dex.crt 를 CA 로
+                       # 신뢰하므로, 공용 머신이라면 이 키를 읽을 수 있는 사람은 당신의
+                       # 로컬 IdP 를 사칭할 수 있다. 이 compose 밖으로 재사용 금지.
 cd -
 # Windows Git Bash 라면 위 openssl 줄 앞에 MSYS_NO_PATHCONV=1 을 붙인다. MSYS 가
 # -subj 의 맨 앞 슬래시를 파일 경로로 바꿔 버려서 openssl 이 거부한다
@@ -126,20 +147,48 @@ LISTEN_ADDR=:8080 \
   OIDC_ISSUER=https://host.docker.internal:5556 \
   OIDC_AUDIENCE=kubeport \
   OIDC_CA_FILE="$PWD/../deploy/docker/certs/dex.crt" \
-  APP_ENCRYPTION_KEY_B64="$(openssl rand -base64 32)" \
+  APP_ENCRYPTION_KEY_B64="$KBP_KEY" \
   KBP_DEV_ADMIN_EMAILS=admin@example.com \
   go run ./cmd/server
-# 기동 로그의 "discovery failed ... context deadline exceeded (will retry on
-# first use)" 는 치명적이지 않다 — 이 셸에서 host.docker.internal 이 아직 안 풀린다는
-# 뜻일 뿐이다. `curl localhost:8080/healthz` 가 200 이면 정상이다.
+# $KBP_KEY: `export KBP_KEY=$(openssl rand -base64 32)` 로 한 번 만들고 4단계에서 같은
+# 값을 쓴다. 프론트엔드가 이 키로 세션 토큰을 암호화하고 백엔드도 같은 키로 설정되므로,
+# 값이 다르면 로그인할 때마다 한쪽이 쓴 것을 다른 쪽이 못 읽는다.
+# ↑ 로컬 전용: 그룹 검사 없이 이메일만으로 앱 관리자로 격상한다. 이 변수는 프로덕션에서도
+#   똑같이 동작한다. 절대 프로덕션에 넣지 말 것.
+#
+# 기동 로그의 "discovery failed ... (will retry on first use)" 는 dex 가 아직 안 떴을
+# 때도 나고, 위 hosts 항목이 틀렸으면 영원히 난다. **/healthz 로는 구분할 수 없다** —
+# DB 와 리스너만 보므로 어느 쪽이든 200 이다. dex 에 직접 물어라:
+#   curl -ks -o /dev/null -w '%{http_code}\n' \
+#     https://host.docker.internal:5556/.well-known/openid-configuration
+# 200 이면 정상. 000 이면 그 이름이 dex 가 없는 곳으로 풀린 것이고, 백엔드 로그가
+# 무슨 말을 하든 로그인은 되지 않는다.
 
-# 4. 웹 앱 실행 (다른 터미널에서)
+# 4. 웹 앱 실행 (다른 터미널에서). frontend/.env.local 은 gitignore 대상이고 복사할
+#    예시 파일도 없으니 직접 만든다. 모든 값의 의미가 붙은 전체 블록은
+#    docs/local-e2e.md §8. 이 빠른 시작에 필요한 최소값:
 cd ../frontend
-# .env.local 은 scripts/e2e/up.sh 가 만들어 준다 (docs/local-e2e.md §0)
-pnpm install && pnpm dev
+cat > .env.local <<EOF
+GO_API_BASE_URL=http://localhost:8080
+DATABASE_URL=postgres://kubeport:kubeport@localhost:5432/kubeport
+APP_ENCRYPTION_KEY_B64=$KBP_KEY
+OIDC_ISSUER=https://host.docker.internal:5556
+OIDC_CLIENT_ID=kubeport
+OIDC_CLIENT_SECRET=local-dev-secret
+OIDC_REDIRECT_URI=http://localhost:3000/api/auth/callback
+EOF
+pnpm install
+# NODE_EXTRA_CA_CERTS 는 선택이 아니다. openid-client 가 0단계의 자체서명 dex 인증서를
+# 신뢰해야 하고, 없으면 로그인 콜백이 인증서 검증에서 실패한다 — 원인을 알려 주는
+# 메시지 없이.
+NODE_EXTRA_CA_CERTS="$PWD/../deploy/docker/certs/dex.crt" pnpm dev
 
 # 5. http://localhost:3000 접속, alice / alice 로 로그인
 ```
+
+`scripts/e2e/up.sh` 가 이 `.env.local` 을 만들어 주긴 하지만 kind 클러스터까지 세우고
+인증서도 발급한다 — 그건 e2e 경로다. 스택 전체가 필요할 때 쓰고([docs/local-e2e.md §0](docs/local-e2e.md)),
+4단계를 건너뛰는 지름길로 쓰지 않는다.
 
 브라우저 → kind 배포까지 가는 전체 로컬 셋업(자체서명 dex cert, Windows hosts 함정, OIDC 일관성 등)은 [docs/local-e2e.md](docs/local-e2e.md) 참조. 위의 "빠른 시작"은 백엔드+프런트+DB 까지만 충분하고, 실제 k8s 클러스터 e2e 는 몇 단계가 더 필요하다.
 
@@ -164,8 +213,12 @@ make e2e
 - (설치 전용) [`helm`](https://helm.sh) 3.x — 차트 스냅샷을 재생성할 거라면 CI 와
   같은 **v3.20.2** 로 고정한다. helm 4 는 문서 구분자 앞에 빈 줄을 하나 더 넣어서,
   helm 4 로 갱신한 스냅샷은 내가 만들지도 않은 diff 로 CI 를 깨뜨린다.
-- (e2e 전용) [`kind`](https://kind.sigs.k8s.io) + `kubectl` — `scripts/e2e/up.sh` 가
-  kind 를 쓰고 `scripts/e2e/doctor.sh` 도 kind 를 검사한다
+- `kubectl` — 테스트 전용이 아니라 **모든 설치**에 필요하다. 차트 README 의
+  "After install" 단계와 아래 port-forward 가 전부 kubectl 이다
+- (e2e + 아래 "Try it first" 경로) [`kind`](https://kind.sigs.k8s.io) —
+  `scripts/e2e/up.sh` 가 쓰고 `scripts/e2e/doctor.sh` 도 검사한다
+- `make` — `make test` · `make e2e` · 차트의 `make helm-snapshot` 이 전부 이걸 쓴다.
+  Ubuntu/WSL 기본 이미지에는 없다
 
 "클러스터에 설치하기" 는 대상 클러스터에 Ingress 컨트롤러와 cert-manager 가 추가로
 필요하다. 둘 다 없이 그냥 띄워 보고 싶으면 차트 README 의

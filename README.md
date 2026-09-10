@@ -80,6 +80,7 @@ Self-hosting is a single Helm chart:
 git clone https://github.com/shyuni4u/kubeport && cd kubeport
 helm install kubeport deploy/helm/kubeport --namespace kubeport --create-namespace \
   --set host=kubeport.example.com \
+  --set ingress.className=nginx \
   --set oidc.issuer=https://accounts.google.com \
   --set oidc.clientId=$CLIENT_ID --set oidc.audience=$CLIENT_ID \
   --set-string auth.devAdminEmails=you@example.com \
@@ -87,6 +88,15 @@ helm install kubeport deploy/helm/kubeport --namespace kubeport --create-namespa
   --set auth.appEncryptionKeyB64=$(openssl rand -base64 32) \
   --set postgres.password=$(openssl rand -hex 24)
 ```
+
+Set `ingress.className` to your cluster's class — GKE `gce`, EKS `alb`,
+nginx-ingress `nginx`, k3s `traefik`. The chart's default is `traefik`, and on a
+cluster without it the Ingress is created and then simply never picked up by any
+controller. Nothing errors; the address stays empty.
+
+That command also installs the `latest` tag. For an install you intend to keep,
+add `--set images.backend.tag=sha-<7> --set images.frontend.tag=sha-<7>` — every
+main commit publishes one, and pinning is what makes a rollback possible.
 
 Read [deploy/helm/kubeport/README.md](deploy/helm/kubeport/README.md) first —
 especially **"After install — required on every cluster"**. Without those steps
@@ -97,6 +107,14 @@ The "Quick start" below is for local development only.
 ## Quick start
 
 ```bash
+# Once per machine, before step 0: dex's issuer URL is the literal name
+# host.docker.internal, so that name has to resolve to 127.0.0.1 on this host.
+# Docker Desktop often pre-seeds it with the machine's LAN IP instead, which
+# still resolves — and still fails, because dex is not listening there.
+grep -i host.docker.internal /etc/hosts    # Windows: C:\Windows\System32\drivers\etc\hosts
+# Want exactly: 127.0.0.1 host.docker.internal
+# Delete any other address for that name. Full procedure: docs/local-e2e.md §1
+
 # 0. Generate the cert dex serves TLS with. Once per clone — the files are
 #    gitignored, so a fresh clone has none and dex exits with
 #    "open /config/certs/dex.crt: no such file or directory".
@@ -105,7 +123,12 @@ cd deploy/docker/certs
 openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
   -keyout dex.key -out dex.crt -subj "/CN=host.docker.internal" \
   -addext "subjectAltName=DNS:host.docker.internal,DNS:localhost,IP:127.0.0.1"
-chmod 644 dex.key      # the dex container reads it as a non-root user
+chmod 644 dex.key      # the dex container reads it as a non-root user, so 600 will
+                       # not start. World-readable is deliberate and safe only
+                       # because this is a throwaway pair: step 3 below trusts
+                       # dex.crt as a CA, so on a shared machine anyone who can
+                       # read this key can impersonate your local IdP. Never
+                       # reuse the pair outside this compose stack.
 cd -
 # On Windows Git Bash, prefix that openssl line with MSYS_NO_PATHCONV=1 — MSYS
 # rewrites the leading slash of -subj into a filesystem path and openssl then
@@ -126,20 +149,51 @@ LISTEN_ADDR=:8080 \
   OIDC_ISSUER=https://host.docker.internal:5556 \
   OIDC_AUDIENCE=kubeport \
   OIDC_CA_FILE="$PWD/../deploy/docker/certs/dex.crt" \
-  APP_ENCRYPTION_KEY_B64="$(openssl rand -base64 32)" \
+  APP_ENCRYPTION_KEY_B64="$KBP_KEY" \
   KBP_DEV_ADMIN_EMAILS=admin@example.com \
   go run ./cmd/server
-# A "discovery failed ... context deadline exceeded (will retry on first use)"
-# line at startup is not fatal — it only means host.docker.internal does not
-# resolve from this shell yet. `curl localhost:8080/healthz` should return 200.
+# $KBP_KEY: generate it once with `export KBP_KEY=$(openssl rand -base64 32)` and
+# use the same value in step 4. The frontend encrypts session tokens with this key
+# and the backend is configured with it; two different values means every login is
+# written by one and unreadable by the other.
+# ^ dev only: grants in-app admin by email address, with no group check at all.
+#   The same variable behaves identically in production. Never set it there.
+#
+# "discovery failed ... (will retry on first use)" at startup is fine if dex was
+# merely slow to come up, and permanent if the hosts entry above is wrong. Do not
+# read /healthz as an answer — it returns 200 either way, because it checks the
+# DB and the listener, not the IdP. Ask dex directly:
+#   curl -ks -o /dev/null -w '%{http_code}\n' \
+#     https://host.docker.internal:5556/.well-known/openid-configuration
+# 200 = good. 000 = the name resolves somewhere dex is not, and login cannot
+# work no matter what the backend logs say.
 
-# 4. Run the web app (another terminal)
+# 4. Run the web app (another terminal). frontend/.env.local is gitignored and
+#    there is no example file to copy, so write it. Full block with every knob
+#    explained: docs/local-e2e.md §8. Minimum for this quick start:
 cd ../frontend
-# .env.local is generated for you by scripts/e2e/up.sh (see docs/local-e2e.md §0)
-pnpm install && pnpm dev
+cat > .env.local <<EOF
+GO_API_BASE_URL=http://localhost:8080
+DATABASE_URL=postgres://kubeport:kubeport@localhost:5432/kubeport
+APP_ENCRYPTION_KEY_B64=$KBP_KEY
+OIDC_ISSUER=https://host.docker.internal:5556
+OIDC_CLIENT_ID=kubeport
+OIDC_CLIENT_SECRET=local-dev-secret
+OIDC_REDIRECT_URI=http://localhost:3000/api/auth/callback
+EOF
+pnpm install
+# NODE_EXTRA_CA_CERTS is not optional: openid-client has to trust the self-signed
+# dex cert from step 0, and without it the login callback fails on certificate
+# verification rather than anything that names the cause.
+NODE_EXTRA_CA_CERTS="$PWD/../deploy/docker/certs/dex.crt" pnpm dev
 
 # 5. Open http://localhost:3000 and log in as alice / alice
 ```
+
+`scripts/e2e/up.sh` writes that `.env.local` for you, but it also builds a kind
+cluster and issues certs — that is the e2e path, not this one. Use it when you
+want the whole stack ([docs/local-e2e.md §0](docs/local-e2e.md)), not to shortcut
+step 4.
 
 For a full browser → deploy-to-kind walkthrough — self-signed dex cert, Windows hosts gotchas, the whole OIDC story — see [docs/local-e2e.md](docs/local-e2e.md). The quick start above is enough for backend + frontend + DB; e2e against a real k8s cluster needs a few more knobs.
 
@@ -165,8 +219,12 @@ make e2e
   regenerate the chart snapshot, which is the version CI runs. Helm 4 renders an
   extra blank line before each document separator, so a snapshot refreshed with
   it fails CI on a diff you did not make.
-- (e2e only) [`kind`](https://kind.sigs.k8s.io) and `kubectl` — `scripts/e2e/up.sh`
-  drives kind, and `scripts/e2e/doctor.sh` checks for it
+- `kubectl` — every install needs it, not just tests: the chart README's
+  "After install" steps and the port-forward below are all kubectl
+- (e2e, and the "Try it first" path below) [`kind`](https://kind.sigs.k8s.io) —
+  `scripts/e2e/up.sh` drives it and `scripts/e2e/doctor.sh` checks for it
+- `make` — `make test`, `make e2e` and the chart's `make helm-snapshot` all use it;
+  it is not in a stock Ubuntu/WSL image
 
 "Install on your cluster" additionally needs an Ingress controller and
 cert-manager on the target cluster. To try kubeport without either, use the
