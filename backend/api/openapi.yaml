@@ -65,9 +65,9 @@ info:
     Some routes are rate limited per caller. `POST /v1/selfsubjectaccessreview`,
     the two cluster-openapi reads and opening a log stream share one budget
     (60/min); `GET /v1/releases/{id}` has its own (240/min), because the UI
-    polls it; template preview (120/min) and template authoring (60/min) have
-    their own. Creating, updating and deleting a release are not rate limited
-    yet (issue #232). A 429 carries `Retry-After`.
+    polls it; creating, updating and deleting a release share one (30/min);
+    template preview (120/min) and template authoring (60/min) have their own.
+    A 429 carries `Retry-After`.
 
     ## Every error is a Problem
 
@@ -1008,6 +1008,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
         "502":
           description: |
@@ -1103,6 +1104,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "502": { $ref: "#/components/responses/UpstreamError" }
         "500": { $ref: "#/components/responses/InternalError" }
     delete:
@@ -1132,6 +1134,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "502": { $ref: "#/components/responses/UpstreamError" }
         "500": { $ref: "#/components/responses/InternalError" }
 
@@ -1546,8 +1549,10 @@ components:
 
         Budgets are per route group, not one per caller: reading a release
         (`GET /v1/releases/{id}`, 240/min) does not spend the budget shared by
-        the SSAR, cluster-openapi and log-stream routes (60/min), and the
-        template authoring and preview routes have their own. The route decides
+        the SSAR, cluster-openapi and log-stream routes (60/min); creating,
+        updating and deleting a release share one of their own (30/min), so
+        switching verbs does not reset it; and the template authoring and
+        preview routes have their own. The route decides
         the budget; `X-RateLimit-Limit` repeats its size, and two budgets are
         both 60/min. The `X-RateLimit-*` pair is sent only on a 429 — a
         successful response carries no remaining count, so a polling client
@@ -1789,7 +1794,8 @@ components:
                             # it: deploy into another namespace, or remove the
                             # holder first.
         - rate-limited      # 429 — over a per-caller budget: SSAR, cluster-openapi
-                            # and log-stream opens share one; release reads,
+                            # and log-stream opens share one; release writes
+                            # (create/update/delete) share one; release reads,
                             # template authoring and preview each have their own.
                             # Carries Retry-After.
         - too-many-streams  # 429 — the caller already holds as many log
