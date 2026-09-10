@@ -16,6 +16,13 @@
  * `color-contrast.test.ts` pins the conversion against colours measured on the
  * live site, so a mistake in here fails there instead of quietly moving every
  * threshold that depends on it.
+ *
+ * **Test-only.** Its importers are `globals.test.ts` and this file's own test;
+ * nothing in the product imports it, and nothing should. Contrast is not a
+ * value to compute at runtime — it is baked into the tokens and held there by
+ * tests. Wanting this module inside a component is the signal that the colour
+ * in question should become a token instead. (It sits in `lib/` because that is
+ * where the tests import from; it tree-shakes out of the bundle.)
  */
 
 export type Oklch = { l: number; c: number; h: number };

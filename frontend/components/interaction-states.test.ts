@@ -18,7 +18,16 @@ import path from "node:path";
  * for the surface token fails here on the day it is written.
  */
 
-const ROOTS = ["components", "app"] as const;
+/**
+ * The same roots `design-consistency.test.ts` walks, deliberately.
+ *
+ * A narrower list would have been true today — `lib/` and `stores/` hold no
+ * class strings — and false after one ordinary refactor: pulling `cva` variants
+ * into a `.ts` file is a common move, and this guard would have stopped seeing
+ * them without failing. That would quietly break the promise in the header
+ * above.
+ */
+const ROOTS = ["app", "components", "lib", "stores"] as const;
 
 function sources(): { file: string; text: string }[] {
   const out: { file: string; text: string }[] = [];
@@ -29,7 +38,7 @@ function sources(): { file: string; text: string }[] {
         walk(full);
         continue;
       }
-      if (!/\.tsx$/.test(entry) || /\.test\.tsx$/.test(entry)) continue;
+      if (!/\.tsx?$/.test(entry) || /\.test\.tsx?$/.test(entry)) continue;
       out.push({
         file: path.relative(path.resolve(__dirname, ".."), full).replace(/\\/g, "/"),
         text: readFileSync(full, "utf8"),
@@ -207,14 +216,23 @@ describe("selection", () => {
     expect(missing).toEqual([]);
   });
 
-  // The check above only sees the `variant:bg-selected` spelling. Selection is
-  // just as often a ternary on a plain class string (SchemaTree, KindPicker),
-  // which carries no prefix to match on — so the file as a whole has to show a
-  // second cue too. Coarser, but it is the spelling half the call sites use.
+  /**
+   * The check above only sees the `variant:bg-selected` spelling. Selection is
+   * just as often a ternary on a plain class string (SchemaTree, KindPicker),
+   * which carries no prefix to match on.
+   *
+   * Scoped to the string literal holding `bg-selected`, not the file. A
+   * file-wide search passes on any unrelated `border-` elsewhere in the
+   * component — a single `<div className="border-b">` was enough to let a bare
+   * `bg-selected` through, which is exactly the tint-alone state this is here
+   * to forbid. Found by a probe during review.
+   */
   it("pairs the fill with a second cue in ternary call sites too", () => {
-    const missing = FILES.filter(
-      ({ text }) => text.includes("bg-selected") && !SECOND_CUE.test(text),
-    ).map(({ file }) => file);
+    const missing = FILES.flatMap(({ file, text }) =>
+      [...text.matchAll(/"([^"\\]*(?:\\.[^"\\]*)*)"/g)]
+        .filter((m) => /bg-selected\b/.test(m[1]) && !SECOND_CUE.test(m[1]))
+        .map(() => `${file}: \`bg-selected\` alone in a class string`),
+    );
     expect(missing).toEqual([]);
   });
 });
