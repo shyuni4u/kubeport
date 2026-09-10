@@ -1035,7 +1035,12 @@ paths:
 
         Authentication failures before the stream opens are ordinary JSON
         Problems; once it is open, failures arrive as `error` events — and
-        since #82 the two are the same shape, so one parser covers both. The
+        since #82 the two are the same shape, so one parser covers both. A
+        cluster call that fails while listing the release's pods — before the
+        handshake — carries the same three kinds as the table above rather than
+        collapsing into `k8s-error`: the handshake is not supposed to change
+        what a failure is called, and a client that gates a retry on the kind
+        was being told a permanent refusal was worth retrying (#134). The
         frame carries `request_id`, which is the only way to reach the reason:
         `detail` is deliberately generic because client-go's text names the
         apiserver's address, the namespace and the pod, and this frame is
@@ -1063,10 +1068,13 @@ paths:
         "404":
           description: |
             No such release, or no pod matched `instance` — `title` is
-            `not-found` or `no-pods`.
+            `not-found` or `no-pods`. `no-pods` is an observation, not a
+            verdict: a pod that is still Pending or pulling, and a Job between
+            runs, both land here, so it is worth retrying.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "502": { $ref: "#/components/responses/UpstreamError" }
         "500": { $ref: "#/components/responses/InternalError" }
 

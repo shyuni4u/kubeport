@@ -211,13 +211,21 @@
       "k8s-error": "클러스터에서 로그를 가져오지 못했습니다. 잠시 후 다시 시도해 보세요.",
       "cluster-auth-denied": "클러스터가 접속을 거부했습니다. 다시 로그인해도 해결되지 않으니 관리자에게 문의하세요.",
       "rbac-denied": "이 릴리스의 로그를 볼 권한이 없습니다.",
+      "no-pods": "이 릴리스에는 아직 실행 중인 인스턴스가 없습니다. 파드가 뜬 뒤 [다시 연결]을 눌러 주세요.",
+      "not-found": "릴리스를 찾을 수 없습니다. 삭제됐을 수 있습니다.",
+      "unauthenticated": "로그인이 만료됐습니다. 다시 로그인한 뒤 시도해 주세요.",
+      "demo-restricted": "데모 계정은 데모에서 만든 릴리스의 로그만 볼 수 있습니다.",
+      "validation-error": "로그를 요청한 주소가 올바르지 않습니다.",
+      "internal": "kubeport 가 로그 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 보세요.",
       "unknown": "로그 스트림에 문제가 생겼습니다.",
-      "withId": "{message} (문의 시 요청 ID: {requestId})"
+      "withId": "{message} (문의 시 요청 ID: {requestId})",
+      "rate-limited": "요청이 너무 잦습니다. 잠시 기다렸다가 [다시 연결]을 눌러 주세요."
     },
     "status": {
       "connected": "연결됨",
       "connecting": "연결 중",
-      "disconnected": "끊김"
+      "disconnected": "끊김",
+      "failed": "연결 안 됨"
     }
   },
   "templates": {

@@ -31,6 +31,45 @@ type LogEntry = {
 // dead branch and a translation nobody reads.
 const KNOWN_STREAM_ERRORS = new Set(["k8s-error", "cluster-auth-denied", "rbac-denied"]);
 
+// The kinds that can come back *before* the stream opens — every writeError in
+// StreamReleaseLogs and authorizeReleaseAccess, plus the three the BFF answers
+// itself when it never reaches the Go API (app/api/v1/[...path]/route.ts).
+// Same rule as above: keep it in step with those call sites.
+const KNOWN_OPEN_ERRORS = new Set([
+  "no-pods",
+  "not-found",
+  "unauthenticated",
+  "demo-restricted",
+  "rbac-denied",
+  "cluster-auth-denied",
+  "validation-error",
+  "internal",
+  "k8s-error",
+  "rate-limited",
+]);
+
+// Kinds a retry can actually clear. `no-pods` belongs here even though it is
+// what #134 was reported against: it is an observation, not a verdict — the
+// backend writes it whenever ListInstances comes back empty, which is every
+// pod that is still Pending or pulling, and every Job between runs. Nothing
+// re-checks on its own (the stream is closed, the browser will not retry, the
+// page is a server component), so taking the button away left "deploy, open
+// logs" — the demo's most-walked path — with F5 as the only way forward.
+//
+// The rest are verdicts: not yours, gone, signed out, the cluster refused the
+// token. Those keep the button hidden, which is the half of #134 point 3 that
+// still holds.
+const RETRYABLE_OPEN_ERRORS = new Set([
+  "k8s-error",
+  "internal",
+  "no-pods",
+  "rate-limited",
+]);
+
+// EventSource.readyState. Read off the instance rather than the constructor so
+// the component does not depend on statics a stub may not define.
+const ES_CLOSED = 2;
+
 type Props = {
   releaseId: string;
   instances: { name: string }[];
@@ -39,7 +78,14 @@ type Props = {
   initialInstance?: string;
 };
 
-type Status = "connecting" | "connected" | "disconnected";
+// "disconnected" is a stream that was dropped and can be re-opened;
+// "failed" is one the server refused, with the refusal in `failure`.
+type Status = "connecting" | "connected" | "disconnected" | "failed";
+
+// The Problem the server answered with before the SSE handshake. Only `title`
+// and `request_id` are kept, for the reason spelled out at the error-frame
+// listener: `detail` may carry the cluster's own words (#108).
+type Failure = { title?: string; requestId?: string };
 
 const LINE_CAP = 2000;
 
@@ -145,15 +191,19 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
   const t = useTranslations("logs");
   const [lines, setLines] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<Status>("connecting");
+  const [failure, setFailure] = useState<Failure | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   // Monotonic id for stable React keys. Sliced lines (LINE_CAP) keep
   // their original id, so reconciliation only re-renders the new row.
   const seqRef = useRef(0);
 
   useEffect(() => {
-    const es = new EventSource(
-      `/api/v1/releases/${releaseId}/logs?instance=${encodeURIComponent(instance)}`,
-    );
+    const url = `/api/v1/releases/${releaseId}/logs?instance=${encodeURIComponent(instance)}`;
+    const es = new EventSource(url);
+    // Guards the probe below: it resolves after the effect may have been torn
+    // down by a remount (instance change, [Reconnect]).
+    const probe = new AbortController();
+    let live = true;
     const append = (entry: Omit<LogEntry, "id">) => {
       seqRef.current += 1;
       const next: LogEntry = { id: seqRef.current, ...entry };
@@ -198,25 +248,53 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
       }
     });
     es.onopen = () => setStatus("connected");
-    es.onerror = () => setStatus("disconnected");
+    // Two very different failures arrive here, and WHATWG is what tells them
+    // apart. A non-2xx response or a wrong MIME type "fails the connection":
+    // readyState goes to CLOSED and the browser will never retry. A drop on an
+    // already-open stream goes back to CONNECTING and it retries by itself.
+    //
+    // Only the first has a Problem waiting to be read — and EventSource does
+    // not hand us the response, so the body has to be fetched. Everything the
+    // endpoint refuses with (no-pods, not-found, demo-restricted, ...) used to
+    // collapse into "the connection dropped, press Reconnect", which named the
+    // wrong cause and pointed at a button that could not succeed (#134).
+    es.onerror = () => {
+      if (es.readyState !== ES_CLOSED) {
+        setStatus("disconnected");
+        return;
+      }
+      es.close();
+      void readRefusal(url, probe.signal).then((refusal) => {
+        if (!live) return;
+        // No refusal to read means the stream would open now, or we could not
+        // ask. Either way the honest offer is to let the reader try again.
+        setFailure(refusal);
+        setStatus(refusal ? "failed" : "disconnected");
+      });
+    };
     return () => {
+      live = false;
+      probe.abort();
       es.close();
     };
   }, [releaseId, instance]);
 
+  // `status` is in the deps because the refusal notice is appended by a status
+  // change, not by a new line — without it the one row that says why the stream
+  // stopped is the one row autoscroll does not bring into view.
   useEffect(() => {
     if (!autoscroll) return;
     const el = boxRef.current;
     if (el && typeof el.scrollTo === "function") {
       el.scrollTo({ top: el.scrollHeight });
     }
-  }, [lines, autoscroll]);
+  }, [lines, status, autoscroll]);
 
   return (
     <>
       <div className="flex items-center gap-3 text-xs">
         <ConnectionDot status={status} />
-        {status === "disconnected" && (
+        {canReconnect(status, failure) && (
           <Button size="sm" variant="outline" onClick={onReconnect}>
             {t("reconnect")}
           </Button>
@@ -234,7 +312,7 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
         ref={boxRef}
         className="h-[60vh] overflow-auto rounded bg-slate-950 p-3 font-mono text-[12px] leading-relaxed text-slate-100"
       >
-        {lines.length === 0 && (
+        {lines.length === 0 && status !== "failed" && (
           <p className="text-slate-400">
             {status === "disconnected" ? t("emptyDisconnected") : t("emptyWaiting")}
           </p>
@@ -251,6 +329,17 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
             {l.kind === "error" ? streamErrorText(t, l) : l.text}
           </div>
         ))}
+        {/*
+          Last row rather than an empty state: a refusal is not always the first
+          thing that happens. The stream can open, buffer lines, drop, and then
+          be refused on the browser's own reconnect — an expired session, a
+          release someone deleted. Hanging this off "the buffer is empty" hid
+          the reason in exactly that case, leaving stale logs under a bare
+          "Not connected".
+        */}
+        {status === "failed" && (
+          <p className="whitespace-pre-wrap text-red-300">{openErrorText(t, failure)}</p>
+        )}
       </div>
     </>
   );
@@ -265,6 +354,56 @@ function streamErrorText(t: ReturnType<typeof useTranslations>, l: LogEntry): st
   const key = l.errorTitle && KNOWN_STREAM_ERRORS.has(l.errorTitle) ? l.errorTitle : "unknown";
   const message = t(`error.${key}`);
   return l.requestId ? t("error.withId", { message, requestId: l.requestId }) : message;
+}
+
+// readRefusal re-asks for the stream the browser just refused, to read the
+// Problem body EventSource threw away.
+//
+// null means "we have nothing to show": either the refusal has already cleared
+// (the pod started between the two requests) or we could not ask at all
+// (offline, or a body that is not the Problem we expect).
+async function readRefusal(url: string, signal: AbortSignal): Promise<Failure | null> {
+  try {
+    const res = await fetch(url, { signal });
+    if (res.ok) {
+      // This is the log stream, not an error — releasing it matters, or the
+      // probe holds a second stream open for as long as the tab lives.
+      void res.body?.cancel();
+      return null;
+    }
+    const problem = (await res.json()) as { title?: string; request_id?: string };
+    return { title: problem.title, requestId: problem.request_id };
+  } catch {
+    return null;
+  }
+}
+
+// openErrorText turns a pre-stream refusal into the sentence the user reads.
+// Same rule as streamErrorText: our own words keyed by `title`, plus the
+// request id, never the server's `detail`.
+function openErrorText(
+  t: ReturnType<typeof useTranslations>,
+  failure: Failure | null,
+): string {
+  const key =
+    failure?.title && KNOWN_OPEN_ERRORS.has(failure.title) ? failure.title : "unknown";
+  const message = t(`error.${key}`);
+  return failure?.requestId
+    ? t("error.withId", { message, requestId: failure.requestId })
+    : message;
+}
+
+// A refused stream only gets a [Reconnect] button when a retry could plausibly
+// succeed. "No pods", "not yours" and "signed out" are verdicts, and the button
+// under them was an invitation to retry forever (#134, point 3).
+function canReconnect(status: Status, failure: Failure | null): boolean {
+  if (status === "disconnected") return true;
+  if (status !== "failed") return false;
+  const title = failure?.title;
+  // Only a kind we recognise as a verdict withholds the button. A kind we have
+  // no mapping for is a backend that moved ahead of this file — one wasted
+  // request beats stranding the reader with no way back.
+  return !title || !KNOWN_OPEN_ERRORS.has(title) || RETRYABLE_OPEN_ERRORS.has(title);
 }
 
 function ConnectionDot({ status }: { status: Status }) {

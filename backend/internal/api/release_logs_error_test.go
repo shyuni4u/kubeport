@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"kubeport/internal/api"
 	"kubeport/internal/config"
@@ -133,6 +135,154 @@ func TestStreamReleaseLogs_ErrorEventWithholdsClusterInternals(t *testing.T) {
 		require.NotContains(t, body, leak,
 			"the SSE error frame exposed %q; client-go's text belongs in the server log", leak)
 	}
+}
+
+// The same apiserver refusal was called two different things depending on
+// which side of the SSE handshake it landed on: `cluster-auth-denied` once the
+// stream was up (streamErrorKind, #82), `k8s-error` one instruction earlier,
+// because listing the pods went through upstreamError, which folds everything
+// into that one kind.
+//
+// Nothing noticed while no client branched on it. #134's client does: it hides
+// [Reconnect] for permanent refusals and keeps it for retryable ones, so a
+// cluster that will never accept the forwarded token arrived as the retryable
+// kind, under "try again in a moment", forever.
+func TestStreamReleaseLogs_ClusterRefusalKeepsItsKindBeforeTheHandshake(t *testing.T) {
+	applier := &fakeK8sApplier{instances: []k8s.Instance{{Name: "web-1"}}}
+	s := testStore(t)
+	r := api.NewRouter(config.Config{}, api.Deps{
+		Verifier: adminVerifier{}, Store: s,
+		K8sFactory: &fakeK8sFactory{applier: applier},
+	})
+	cluster := seedCluster(t, r)
+	tpl := seedPublishedTemplate(t, r)
+
+	body, _ := json.Marshal(map[string]any{
+		"template": tpl, "version": 1,
+		"cluster": cluster, "namespace": "default",
+		"name":   "logs-" + randSuffix(),
+		"values": map[string]any{"Deployment[web].spec.replicas": 1},
+	})
+	w := do(t, r, http.MethodPost, "/v1/releases", bytes.NewReader(body))
+	require.Equal(t, http.StatusCreated, w.Code, "seed release: %s", w.Body.String())
+	var created map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
+	logsPath := "/v1/releases/" + created["id"].(string) + "/logs"
+
+	forbidden := apierrors.NewForbidden(
+		schema.GroupResource{Resource: "pods"}, "web-1",
+		errors.New(`User "demo-admin@kubeport.local" cannot list resource "pods" in namespace "demo"`))
+
+	for _, tc := range []struct {
+		name   string
+		err    error
+		status int
+		kind   string
+	}{
+		// Re-authenticating against kubeport cannot help: it is the cluster
+		// that refused, the distinction #83 drew for the OpenAPI proxy.
+		{"apiserver 401", apierrors.NewUnauthorized("token expired"), http.StatusBadGateway, "cluster-auth-denied"},
+		// The caller may read the release but not its pods. Permanent until
+		// someone changes the cluster's RBAC.
+		{"apiserver 403", forbidden, http.StatusForbidden, "rbac-denied"},
+		// Transport and everything else: worth retrying.
+		{"transport failure", streamErr, http.StatusBadGateway, "k8s-error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			applier.instancesErr = tc.err
+			t.Cleanup(func() { applier.instancesErr = nil })
+
+			w := do(t, r, http.MethodGet, logsPath, nil)
+
+			require.Equal(t, tc.status, w.Code, "body: %s", w.Body.String())
+			var p map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &p), "body: %s", w.Body.String())
+			require.Equal(t, tc.kind, p["title"],
+				"the handshake must not change what this failure is called")
+			require.NotEmpty(t, p["request_id"])
+		})
+	}
+}
+
+// The pre-stream path used to hand back client-go's own text whenever the
+// apiserver had answered (upstreamError keeps it deliberately, so a deploy
+// refusal can explain itself). This endpoint made the opposite call in #108
+// and the two sides should not disagree about the same release.
+func TestStreamReleaseLogs_ListFailureWithholdsClusterInternals(t *testing.T) {
+	applier := &fakeK8sApplier{
+		instances:    []k8s.Instance{{Name: "web-7d9f8-x2k4l"}},
+		instancesErr: streamErr,
+	}
+	s := testStore(t)
+	r := api.NewRouter(config.Config{}, api.Deps{
+		Verifier: adminVerifier{}, Store: s,
+		K8sFactory: &fakeK8sFactory{applier: applier},
+	})
+	cluster := seedCluster(t, r)
+	tpl := seedPublishedTemplate(t, r)
+
+	body, _ := json.Marshal(map[string]any{
+		"template": tpl, "version": 1,
+		"cluster": cluster, "namespace": "default",
+		"name":   "logs-" + randSuffix(),
+		"values": map[string]any{"Deployment[web].spec.replicas": 1},
+	})
+	w := do(t, r, http.MethodPost, "/v1/releases", bytes.NewReader(body))
+	require.Equal(t, http.StatusCreated, w.Code, "seed release: %s", w.Body.String())
+	var created map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
+
+	w = do(t, r, http.MethodGet, "/v1/releases/"+created["id"].(string)+"/logs", nil)
+
+	require.Equal(t, http.StatusBadGateway, w.Code)
+	for _, leak := range []string{"10.43.0.1", "6443", "web-7d9f8-x2k4l", "connection refused"} {
+		require.NotContains(t, w.Body.String(), leak,
+			"the refusal exposed %q; client-go's text belongs in the server log", leak)
+	}
+}
+
+// Opening a stream lists the release's pods and follows one log per pod, so it
+// is the same control-plane fan-out #73 put a budget on — the route was simply
+// missed. #134 raised the cost of a refusal, because the client now re-asks for
+// the URL to read the Problem EventSource hid from it.
+func TestStreamReleaseLogs_IsOnTheUpstreamBudget(t *testing.T) {
+	applier := &fakeK8sApplier{instancesErr: streamErr}
+	s := testStore(t)
+	r := api.NewRouter(config.Config{}, api.Deps{
+		Verifier: adminVerifier{}, Store: s,
+		K8sFactory: &fakeK8sFactory{applier: applier},
+	})
+	cluster := seedCluster(t, r)
+	tpl := seedPublishedTemplate(t, r)
+
+	body, _ := json.Marshal(map[string]any{
+		"template": tpl, "version": 1,
+		"cluster": cluster, "namespace": "default",
+		"name":   "logs-" + randSuffix(),
+		"values": map[string]any{"Deployment[web].spec.replicas": 1},
+	})
+	applier.instancesErr = nil
+	w := do(t, r, http.MethodPost, "/v1/releases", bytes.NewReader(body))
+	require.Equal(t, http.StatusCreated, w.Code, "seed release: %s", w.Body.String())
+	var created map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
+	// Fail the list so each attempt ends immediately instead of opening a
+	// stream this test would then have to drain.
+	applier.instancesErr = streamErr
+	logsPath := "/v1/releases/" + created["id"].(string) + "/logs"
+
+	var limited bool
+	for i := 0; i < 70; i++ {
+		w := do(t, r, http.MethodGet, logsPath, nil)
+		if w.Code == http.StatusTooManyRequests {
+			require.Contains(t, w.Body.String(), "rate-limited")
+			require.NotEmpty(t, w.Header().Get("Retry-After"),
+				"a 429 must say how long to wait, or a program guesses")
+			limited = true
+			break
+		}
+	}
+	require.True(t, limited, "70 stream opens should have exhausted a 60/min budget")
 }
 
 // #82 also claims the stream stays open after an error. It does not: errCh
