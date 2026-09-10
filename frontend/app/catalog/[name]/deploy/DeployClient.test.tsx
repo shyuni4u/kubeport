@@ -293,6 +293,85 @@ describe("DeployClient", () => {
 
     expect(alert).toHaveTextContent(/같은 이름의 릴리스/);
   });
+
+  // A template pinned to another namespace is the template's fault. The
+  // generic 400 message told the user to check their own input.
+  it("does not blame the user's input for a template pinned elsewhere", async () => {
+    const alert = await submitAndReadAlert(() =>
+      jsonResponse(
+        {
+          title: "validation-error",
+          status: 400,
+          pinned_namespace: { kind: "Deployment", name: "web", namespace: "monitoring" },
+        },
+        400,
+      ),
+    );
+
+    expect(alert).toHaveTextContent(/입력한 값의 문제가 아니니/);
+    expect(alert).not.toHaveTextContent(/입력한 값을 확인한 뒤/);
+  });
+
+  it("does not claim kubeport did not create a holder it cannot see", async () => {
+    const alert = await submitAndReadAlert(() =>
+      jsonResponse(
+        {
+          title: "resource-conflict",
+          status: 409,
+          conflicts: [
+            { kind: "Secret", name: "app-secret", namespace: "demo", owner: "", owner_unknown: true },
+          ],
+        },
+        409,
+      ),
+    );
+
+    expect(alert).toHaveTextContent(/이 계정 권한으로 확인할 수 없습니다/);
+    expect(alert).not.toHaveTextContent(/kubeport 밖에서 만든 것/);
+  });
+
+  // An existing release cannot move to another area, so the create advice is
+  // impossible advice on an update.
+  it("does not suggest another area when an update is refused", async () => {
+    const user = userEvent.setup();
+    const base = routedFetch({});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) =>
+        url.startsWith("/api/v1/releases/")
+          ? jsonResponse(
+              {
+                title: "resource-conflict",
+                status: 409,
+                conflicts: [
+                  { kind: "ConfigMap", name: "web-config", namespace: "demo", owner: "web-app-demo" },
+                ],
+              },
+              409,
+            )
+          : base(url, init),
+      ),
+    );
+
+    render(
+      <DeployClient
+        templateName="web-app"
+        version={2}
+        team={null}
+        spec={spec}
+        updateReleaseId="rel-1"
+        initialValues={{ "spec.replicas": 1, "metadata.name": "nginx" }}
+      />,
+    );
+    const button = screen.getByRole("button", { name: /배포하기|업데이트/ });
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+    const alert = await screen.findByRole("alert");
+
+    expect(alert).toHaveTextContent("web-app-demo");
+    expect(alert).toHaveTextContent(/업데이트할 수 없습니다/);
+    expect(alert).not.toHaveTextContent(/다른 구역에 배포하거나/);
+  });
 });
 
 // #179 — the namespace field started on a hard-coded "default". The chart

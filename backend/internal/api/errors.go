@@ -20,6 +20,10 @@ type Problem struct {
 	// extension members, and this one exists so a client can name the holder
 	// without parsing detail, which is prose.
 	Conflicts []ProblemConflict `json:"conflicts,omitempty"`
+	// PinnedNamespace names the template object that pins a namespace other
+	// than the release's (#137), so a client can say "the template is wrong"
+	// instead of the generic "check your input" every other 400 means.
+	PinnedNamespace *ProblemObject `json:"pinned_namespace,omitempty"`
 }
 
 // problemOption sets an extension member on a Problem.

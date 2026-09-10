@@ -1050,7 +1050,16 @@ paths:
                 properties:
                   id: { type: string, format: uuid }
                   version: { type: integer }
-        "400": { $ref: "#/components/responses/ValidationError" }
+        "400":
+          description: |
+            The body failed validation, or the version is deprecated or
+            unknown, or the new rendering pins a `metadata.namespace` other
+            than the release's (#137). That last case carries
+            `pinned_namespace`; a release cannot change namespace, so it is the
+            template that has to change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1645,6 +1654,13 @@ components:
             Only on `409 resource-conflict` (#161): each object the release
             would have taken over, and what holds it. Name the holder from
             here, not by parsing `detail`.
+
+            Objects are checked with the caller's token. One the caller may
+            write but not read is still found on a create, because a server-side
+            dry run shows it exists, and appears with `owner_unknown`. On an
+            update it cannot be told apart from the release's own object, so it
+            is not checked, and a 200 does not prove no such object was taken
+            over.
           items:
             type: object
             required: [kind, name, namespace, owner]
@@ -1656,7 +1672,26 @@ components:
                 type: string
                 description: |
                   The release holding the object, or "" when kubeport did not
-                  create it.
+                  create it or when `owner_unknown` is set.
+              owner_unknown:
+                type: boolean
+                description: |
+                  The object exists but the caller may not read it, so its
+                  holder could not be looked up. Omitted when false.
+        pinned_namespace:
+          type: object
+          description: |
+            Only on a `400 validation-error` caused by a template object that
+            pins a `metadata.namespace` other than the release's (#137). The
+            template is what has to change, not the request, so a client can
+            say so instead of asking the user to check their input.
+          required: [kind, name, namespace]
+          properties:
+            kind: { type: string }
+            name: { type: string }
+            namespace:
+              type: string
+              description: The namespace the template pins.
         request_id:
           type: string
           description: |

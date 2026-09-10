@@ -23,8 +23,8 @@ type K8sApplier interface {
 	CheckAccess(ctx context.Context, spec k8s.AccessCheck) (k8s.AccessResult, error)
 	// CheckApply reports which objects in a rendered release already belong to
 	// another release, or to nothing kubeport created, before anything is
-	// applied (#161).
-	CheckApply(ctx context.Context, namespace, release string, yaml []byte) (k8s.ApplyCheck, error)
+	// applied (#161). creating is false for an update.
+	CheckApply(ctx context.Context, namespace, release string, yaml []byte, creating bool) (k8s.ApplyCheck, error)
 }
 
 // K8sClientFactory creates per-request k8s clients using the caller's token.

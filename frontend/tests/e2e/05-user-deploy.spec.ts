@@ -7,6 +7,25 @@ import { test, expect, demoUserStorage, autoAcceptDialogs } from "./fixtures";
 test.describe("demo user deploys and deletes a release", () => {
   test.use({ storageState: async ({}, provide) => provide(await demoUserStorage()) });
 
+  // #161: CI retries this spec, and an attempt that deployed and then timed out
+  // leaves its release behind. With the ownership check, the retry's deploy of
+  // the same fixed-name template into the same namespace is a 409 rather than
+  // the silent takeover that used to let it pass. So each attempt starts
+  // without web-app releases in `default` — this is the only spec that makes
+  // them, and a demo account lists only demo-owned releases.
+  test.beforeEach(async ({ page }) => {
+    const res = await page.request.get("/api/v1/releases");
+    if (!res.ok()) return;
+    const { releases = [] } = (await res.json()) as {
+      releases?: Array<{ id: string; template_name?: string; namespace?: string }>;
+    };
+    for (const r of releases) {
+      if (r.template_name === "web-app" && r.namespace === "default") {
+        await page.request.delete(`/api/v1/releases/${r.id}`);
+      }
+    }
+  });
+
   test("form validation, RBAC feedback, deploy, delete", async ({ page }) => {
     autoAcceptDialogs(page);
     await page.goto("/catalog/web-app/deploy");

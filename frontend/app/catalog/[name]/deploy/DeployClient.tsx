@@ -45,25 +45,40 @@ type Props = {
 type Meta = { name: string; cluster: string; namespace: string };
 
 /**
- * Who holds the objects behind a `resource-conflict` 409, read from the
- * Problem's structured `conflicts` list rather than from `detail`, which is
- * never shown. `owner` is "" when kubeport did not create what holds them.
- * Null for any other body, a malformed one included.
+ * The structured parts of a Problem body this form acts on. `detail` is never
+ * shown, so anything the user needs to see has to arrive as a field.
  */
-function resourceConflictOf(body: string): { owner: string } | null {
+type ProblemBody = {
+  title?: unknown;
+  conflicts?: Array<{ owner?: unknown; owner_unknown?: unknown }>;
+  pinned_namespace?: unknown;
+};
+
+function parseProblem(body: string): ProblemBody | null {
   try {
-    const p = JSON.parse(body) as {
-      title?: unknown;
-      conflicts?: Array<{ owner?: unknown }>;
-    };
-    if (p.title !== "resource-conflict") return null;
-    const held = Array.isArray(p.conflicts)
-      ? p.conflicts.find((c) => typeof c?.owner === "string" && c.owner !== "")
-      : undefined;
-    return { owner: typeof held?.owner === "string" ? held.owner : "" };
+    const p: unknown = JSON.parse(body);
+    return p && typeof p === "object" ? (p as ProblemBody) : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * Who holds the objects behind a `resource-conflict` 409. `owner` is the first
+ * release named; `unreadable` is set when an object exists but this account may
+ * not read who holds it. Both empty means kubeport did not create what holds
+ * them. Null for any other body.
+ */
+function resourceConflictOf(
+  p: ProblemBody | null,
+): { owner: string; unreadable: boolean } | null {
+  if (p?.title !== "resource-conflict") return null;
+  const conflicts = Array.isArray(p.conflicts) ? p.conflicts : [];
+  const held = conflicts.find((c) => typeof c?.owner === "string" && c.owner !== "");
+  return {
+    owner: typeof held?.owner === "string" ? held.owner : "",
+    unreadable: conflicts.some((c) => c?.owner_unknown === true),
+  };
 }
 
 export function DeployClient({
@@ -82,18 +97,28 @@ export function DeployClient({
 
   // Map a failed response to a non-technical, localized message. The raw
   // backend text is preserved only as the Error `cause` (for logs / debugging)
-  // and is never shown to the user. The one thing taken from the body is the
-  // name of a release holding a resource-conflict, which arrives as structured
-  // data so it can be shown: "a release with this name exists" is the wrong
-  // advice there, because a different name does not help (#161).
+  // and is never shown to the user. The body is read only for structured fields
+  // that exist to be shown: the release holding a resource-conflict (#161),
+  // where "pick another name" cannot help, and a template object pinned to
+  // another namespace (#137), where "check your input" blames the one thing
+  // that is not wrong. An update gets its own wording, because an existing
+  // release cannot move to another area.
   const errorMessageForStatus = useCallback(
     (status: number, body = ""): string => {
+      const problem = parseProblem(body);
+      if (status === 400 && problem?.pinned_namespace) return t("errors.templateNamespace");
       if (status === 403) return t("errors.forbidden");
       if (status === 409) {
-        const held = resourceConflictOf(body);
+        const held = resourceConflictOf(problem);
+        if (held?.owner) {
+          return isUpdate
+            ? t("errors.resourceConflictUpdate", { owner: held.owner })
+            : t("errors.resourceConflict", { owner: held.owner });
+        }
+        if (held?.unreadable) return t("errors.resourceConflictUnreadable");
         if (held) {
-          return held.owner
-            ? t("errors.resourceConflict", { owner: held.owner })
+          return isUpdate
+            ? t("errors.resourceConflictUpdateForeign")
             : t("errors.resourceConflictForeign");
         }
         return t("errors.conflict");
@@ -101,7 +126,7 @@ export function DeployClient({
       if (status >= 500) return t("errors.server");
       return t("errors.generic");
     },
-    [t],
+    [t, isUpdate],
   );
 
   // Where the namespace field starts (#179): a demo session's own namespace,

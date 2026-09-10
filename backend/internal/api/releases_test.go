@@ -84,10 +84,12 @@ type fakeK8sApplier struct {
 	applyCheck      k8s.ApplyCheck
 	applyCheckErr   error
 	checkedReleases []string
+	checkedCreating []bool
 }
 
-func (f *fakeK8sApplier) CheckApply(_ context.Context, _, release string, _ []byte) (k8s.ApplyCheck, error) {
+func (f *fakeK8sApplier) CheckApply(_ context.Context, _, release string, _ []byte, creating bool) (k8s.ApplyCheck, error) {
 	f.checkedReleases = append(f.checkedReleases, release)
+	f.checkedCreating = append(f.checkedCreating, creating)
 	if f.applyCheckErr != nil {
 		return k8s.ApplyCheck{}, f.applyCheckErr
 	}

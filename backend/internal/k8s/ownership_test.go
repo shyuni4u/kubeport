@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -43,6 +44,42 @@ func existing(apiVersion, kind, namespace, name, owner string) *unstructured.Uns
 	return u
 }
 
+// forbidGet makes reading resource fail the way the demo Role makes reading
+// Secrets fail: allowed to write, not to read.
+func forbidGet(dyn *dynamicfake.FakeDynamicClient, resource string) {
+	dyn.PrependReactor("get", resource, func(clientgotesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(
+			schema.GroupResource{Resource: resource}, "", errors.New("the role withholds get"))
+	})
+}
+
+// answerCreate answers every create on resource with err, and records each
+// call. It has to intercept: the fake ignores DryRun and would really create,
+// so an unintercepted probe would test nothing and leave an object behind.
+func answerCreate(dyn *dynamicfake.FakeDynamicClient, resource string, err error) *[]clientgotesting.Action {
+	var seen []clientgotesting.Action
+	dyn.PrependReactor("create", resource, func(a clientgotesting.Action) (bool, runtime.Object, error) {
+		seen = append(seen, a)
+		if err != nil {
+			return true, nil, err
+		}
+		return true, &unstructured.Unstructured{Object: map[string]any{"apiVersion": "v1", "kind": "Secret"}}, nil
+	})
+	return &seen
+}
+
+// requireDryRun fails unless every recorded create was a server-side dry run.
+// A probe that was not would create the object it is asking about.
+func requireDryRun(t *testing.T, creates []clientgotesting.Action) {
+	t.Helper()
+	require.NotEmpty(t, creates)
+	for _, a := range creates {
+		ca, ok := a.(clientgotesting.CreateActionImpl)
+		require.True(t, ok, "unexpected create action type %T", a)
+		require.Equal(t, []string{metav1.DryRunAll}, ca.CreateOptions.DryRun, "the probe must never persist anything")
+	}
+}
+
 // webApp is what the demo's web-app template renders for a release: three
 // objects whose names are fixed by the template, not by the release.
 const webApp = `apiVersion: v1
@@ -64,10 +101,16 @@ metadata:
   labels: {kubeport.io/release: verify-autorefresh}
 `
 
+const appSecret = `apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secret
+`
+
 func TestCheckApply_NothingThereIsNoConflict(t *testing.T) {
 	cli := k8s.NewForTest(cluster())
 
-	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp))
+	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp), true)
 
 	require.NoError(t, err)
 	require.Empty(t, got.Conflicts)
@@ -82,7 +125,7 @@ func TestCheckApply_OwnObjectsAreNotAConflict(t *testing.T) {
 		existing("apps/v1", "Deployment", "demo", "web", "verify-autorefresh"),
 	))
 
-	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp))
+	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp), false)
 
 	require.NoError(t, err)
 	require.Empty(t, got.Conflicts)
@@ -98,7 +141,7 @@ func TestCheckApply_AnotherReleasesObjectsAreConflicts(t *testing.T) {
 		// Service/web absent: creating it takes nothing from anyone.
 	))
 
-	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp))
+	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp), true)
 
 	require.NoError(t, err)
 	require.Equal(t, []k8s.Conflict{
@@ -114,7 +157,7 @@ func TestCheckApply_UnlabelledObjectIsAConflictWithNoOwner(t *testing.T) {
 		existing("apps/v1", "Deployment", "demo", "web", ""),
 	))
 
-	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp))
+	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp), true)
 
 	require.NoError(t, err)
 	require.Equal(t, []k8s.Conflict{
@@ -128,60 +171,100 @@ func TestCheckApply_SameNameInAnotherNamespaceIsNotAConflict(t *testing.T) {
 		existing("apps/v1", "Deployment", "other", "web", "web-app-demo"),
 	))
 
-	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp))
+	got, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp), true)
 
 	require.NoError(t, err)
 	require.Empty(t, got.Conflicts)
 }
 
-// The demo Role may write Secrets but not read them. Refusing on that would make
-// every template carrying a Secret undeployable for a demo user, so the object is
-// reported as unverified and left to apply as before.
-func TestCheckApply_UnreadableObjectIsUnverifiedNotAConflict(t *testing.T) {
+// On a create, a write-only caller can still be told an object exists: a
+// dry-run create needs only the create permission the apply needs anyway, and
+// what already exists cannot belong to a release that does not exist yet.
+// Without this, a failed create's label-based cleanup could delete another
+// release's Secret (security review of #161).
+func TestCheckApply_OnCreateAnUnreadableObjectThatExistsIsAConflict(t *testing.T) {
 	dyn := cluster()
-	dyn.PrependReactor("get", "secrets", func(clientgotesting.Action) (bool, runtime.Object, error) {
-		return true, nil, apierrors.NewForbidden(
-			schema.GroupResource{Resource: "secrets"}, "app-secret", errors.New("demo role withholds get"))
-	})
+	forbidGet(dyn, "secrets")
+	creates := answerCreate(dyn, "secrets",
+		apierrors.NewAlreadyExists(schema.GroupResource{Resource: "secrets"}, "app-secret"))
 	cli := k8s.NewForTest(dyn)
 
-	doc := `apiVersion: v1
-kind: Secret
-metadata:
-  name: app-secret
-`
-	got, err := cli.CheckApply(context.Background(), "demo", "cfg-demo", []byte(doc))
+	got, err := cli.CheckApply(context.Background(), "demo", "visitor-cfg", []byte(appSecret), true)
+
+	require.NoError(t, err)
+	require.Equal(t, []k8s.Conflict{
+		{ObjectRef: k8s.ObjectRef{Kind: "Secret", Name: "app-secret", Namespace: "demo"}, OwnerUnknown: true},
+	}, got.Conflicts)
+	require.Empty(t, got.Unverified)
+	requireDryRun(t, *creates)
+}
+
+func TestCheckApply_OnCreateAnUnreadableObjectThatIsAbsentIsFree(t *testing.T) {
+	dyn := cluster()
+	forbidGet(dyn, "secrets")
+	creates := answerCreate(dyn, "secrets", nil)
+	cli := k8s.NewForTest(dyn)
+
+	got, err := cli.CheckApply(context.Background(), "demo", "visitor-cfg", []byte(appSecret), true)
+
+	require.NoError(t, err)
+	require.Empty(t, got.Conflicts)
+	require.Empty(t, got.Unverified, "a clean dry run is an answer, not an unknown")
+	requireDryRun(t, *creates)
+}
+
+// A dry run refused for another reason — no create either, or admission — says
+// nothing about existence, so the object stays unverified rather than free.
+func TestCheckApply_OnCreateAnObjectTheProbeCannotAnswerIsUnverified(t *testing.T) {
+	dyn := cluster()
+	forbidGet(dyn, "secrets")
+	creates := answerCreate(dyn, "secrets",
+		apierrors.NewForbidden(schema.GroupResource{Resource: "secrets"}, "app-secret", errors.New("no create either")))
+	cli := k8s.NewForTest(dyn)
+
+	got, err := cli.CheckApply(context.Background(), "demo", "visitor-cfg", []byte(appSecret), true)
 
 	require.NoError(t, err)
 	require.Empty(t, got.Conflicts)
 	require.Equal(t, []k8s.ObjectRef{{Kind: "Secret", Name: "app-secret", Namespace: "demo"}}, got.Unverified)
+	requireDryRun(t, *creates)
 }
 
-// Letting an unreadable object through is safe only while it cannot hide a
-// readable conflict. app-with-config is the real case: its Secret is unreadable
-// to a demo user, but its ConfigMap and Deployment are not, and they must still
-// be reported even when the Secret comes first in the manifest.
+// On an update the release's own Secret already exists, so a dry-run create
+// would answer AlreadyExists every time and refuse the release its own update.
+// Unreadable objects are left unverified there, and not probed at all.
+func TestCheckApply_OnUpdateAnUnreadableObjectIsUnverifiedAndNotProbed(t *testing.T) {
+	dyn := cluster()
+	forbidGet(dyn, "secrets")
+	creates := answerCreate(dyn, "secrets", nil)
+	cli := k8s.NewForTest(dyn)
+
+	got, err := cli.CheckApply(context.Background(), "demo", "cfg-demo", []byte(appSecret), false)
+
+	require.NoError(t, err)
+	require.Empty(t, got.Conflicts)
+	require.Equal(t, []k8s.ObjectRef{{Kind: "Secret", Name: "app-secret", Namespace: "demo"}}, got.Unverified)
+	require.Empty(t, *creates, "an update must not probe")
+}
+
+// Letting an unverified object through is tolerable only while it cannot hide
+// a readable conflict. app-with-config is the real case: its Secret is
+// unreadable to a demo user, but its ConfigMap and Deployment are not, and they
+// must still be reported even when the Secret comes first in the manifest.
 func TestCheckApply_KeepsCheckingPastAnUnreadableObject(t *testing.T) {
 	dyn := cluster(
 		existing("v1", "ConfigMap", "demo", "app-config", "cfg-demo"),
 	)
-	dyn.PrependReactor("get", "secrets", func(clientgotesting.Action) (bool, runtime.Object, error) {
-		return true, nil, apierrors.NewForbidden(
-			schema.GroupResource{Resource: "secrets"}, "app-secret", errors.New("demo role withholds get"))
-	})
+	forbidGet(dyn, "secrets")
 	cli := k8s.NewForTest(dyn)
 
-	doc := `apiVersion: v1
-kind: Secret
-metadata:
-  name: app-secret
----
+	doc := appSecret + `---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: app-config
 `
-	got, err := cli.CheckApply(context.Background(), "demo", "visitor-cfg", []byte(doc))
+	got, err := cli.CheckApply(context.Background(), "demo", "visitor-cfg", []byte(doc), false)
 
 	require.NoError(t, err)
 	require.Equal(t, []k8s.Conflict{
@@ -198,7 +281,7 @@ func TestCheckApply_OtherErrorsSurface(t *testing.T) {
 	})
 	cli := k8s.NewForTest(dyn)
 
-	_, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp))
+	_, err := cli.CheckApply(context.Background(), "demo", "verify-autorefresh", []byte(webApp), true)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "connection reset")
@@ -222,7 +305,7 @@ metadata:
   name: web
   namespace: kube-system
 `
-	_, err := cli.CheckApply(context.Background(), "demo", "rel", []byte(doc))
+	_, err := cli.CheckApply(context.Background(), "demo", "rel", []byte(doc), true)
 
 	var mismatch *k8s.NamespaceMismatchError
 	require.ErrorAs(t, err, &mismatch)
@@ -242,7 +325,7 @@ metadata:
   name: web
   namespace: demo
 `
-	got, err := cli.CheckApply(context.Background(), "demo", "rel", []byte(doc))
+	got, err := cli.CheckApply(context.Background(), "demo", "rel", []byte(doc), true)
 
 	require.NoError(t, err)
 	require.Empty(t, got.Conflicts)

@@ -23,6 +23,7 @@ scripts/e2e/run.sh         # = pnpm exec playwright test. 특정 스펙: run.sh 
 | `dex not reachable` | hosts 에 `host.docker.internal` 이 없거나 LAN IP 로 잡힘 → §1. Docker Desktop 이 자동으로 넣은 항목은 지우고 `127.0.0.1 host.docker.internal` 로 |
 | 로그인 후 `/catalog` 로 안 감, 401 | `frontend/tests/e2e/.auth/*.json` 이 DB 리셋·dex 재시작 이후 stale → `run.sh --fresh` |
 | 05 스펙의 pattern 검증이 안 뜸 | 예전 시드 템플릿이 남아 있음 → `seed.sh -reset` |
+| 05 스펙 제출이 409 `resource-conflict` (`web-app-demo` 가 쓰고 있음) | #161 이전 시드가 kind 의 `default` 에 남긴 오브젝트다. `seed.sh -reset` 은 **DB 행만** 지운다(k8s 오브젝트는 운영에선 리셋 CronJob 이 지운다) → `kubectl --context kind-kubeport -n default delete deploy,svc,cm,secret,cronjob -l kubeport.io/release` 후 `seed.sh -reset` |
 | 06 스펙 `draft must exist` | 시드가 draft 를 못 만듦(두 번 실행 필요한 케이스) → `seed.sh` 한 번 더 |
 | kind 가 `EOF` / 503 | apiserver 재시작 중 → 10초 후 재시도. `kubectl --context kind-kubeport get --raw /readyz` |
 | Windows 에서 `jq: command not found` | 스크립트는 jq 를 안 쓴다. §9 의 수동 curl 예시만 jq 를 쓰므로 스크립트를 쓸 것 |

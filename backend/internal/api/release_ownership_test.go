@@ -253,3 +253,104 @@ func TestCreateRelease_RejectsANameTooLongForALabel(t *testing.T) {
 	require.Contains(t, detail, "label value")
 	require.Empty(t, fk.checkedReleases)
 }
+
+// A 400 for a template pinned to another namespace looked like every other 400
+// on the deploy form, which tells the user to check their input: the one thing
+// that is not wrong. The structured field is what lets it say otherwise.
+func TestCreateRelease_PinnedNamespaceIsStructured(t *testing.T) {
+	r, fk := newTestRouterWithK8s(t)
+	clusterName := seedCluster(t, r)
+	tplName := seedPublishedTemplate(t, r)
+	fk.applyCheckErr = &k8s.NamespaceMismatchError{
+		Object:           k8s.ObjectRef{Kind: "Deployment", Name: "web", Namespace: "kube-system"},
+		ReleaseNamespace: "default",
+	}
+
+	w := do(t, r, http.MethodPost, "/v1/releases", createReleaseBody(t, clusterName, tplName, "default", "rel-"+randSuffix()))
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	var p struct {
+		PinnedNamespace map[string]string `json:"pinned_namespace"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &p))
+	require.Equal(t, map[string]string{"kind": "Deployment", "name": "web", "namespace": "kube-system"}, p.PinnedNamespace)
+}
+
+// Only a create may probe objects the caller cannot read. A dry-run create
+// cannot tell an update's own object from anyone else's.
+func TestReleases_OnlyACreateProbesUnreadableObjects(t *testing.T) {
+	r, fk := newTestRouterWithK8s(t)
+	clusterName := seedCluster(t, r)
+	tplName := seedPublishedTemplate(t, r)
+	id := createRelease(t, r, tplName, clusterName, "probe-"+randSuffix(), map[string]any{
+		"Deployment[web].spec.replicas": 1,
+	})
+	require.Equal(t, []bool{true}, fk.checkedCreating)
+
+	body, err := json.Marshal(map[string]any{"version": 1, "values": map[string]any{"Deployment[web].spec.replicas": 2}})
+	require.NoError(t, err)
+	w := do(t, r, http.MethodPut, "/v1/releases/"+id, bytes.NewReader(body))
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, []bool{true, false}, fk.checkedCreating)
+}
+
+// An update cannot move namespace, so the advice that suits a create is
+// impossible there, for a conflict and for a pinned namespace alike.
+func TestUpdateRelease_AdviceFitsAnExistingRelease(t *testing.T) {
+	r, fk := newTestRouterWithK8s(t)
+	clusterName := seedCluster(t, r)
+	tplName := seedPublishedTemplate(t, r)
+	id := createRelease(t, r, tplName, clusterName, "advice-"+randSuffix(), map[string]any{
+		"Deployment[web].spec.replicas": 1,
+	})
+	body, err := json.Marshal(map[string]any{"version": 1, "values": map[string]any{"Deployment[web].spec.replicas": 2}})
+	require.NoError(t, err)
+
+	fk.applyCheck = k8s.ApplyCheck{Conflicts: []k8s.Conflict{
+		{ObjectRef: k8s.ObjectRef{Kind: "ConfigMap", Name: "web-config", Namespace: "default"}, Owner: "web-app-demo"},
+	}}
+	w := do(t, r, http.MethodPut, "/v1/releases/"+id, bytes.NewReader(body))
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	_, detail := problemOf(t, w.Body.Bytes())
+	require.NotContains(t, detail, "deploy into another namespace")
+	require.Contains(t, detail, "cannot move namespace")
+
+	fk.applyCheck = k8s.ApplyCheck{}
+	fk.applyCheckErr = &k8s.NamespaceMismatchError{
+		Object:           k8s.ObjectRef{Kind: "Deployment", Name: "web", Namespace: "kube-system"},
+		ReleaseNamespace: "default",
+	}
+	w = do(t, r, http.MethodPut, "/v1/releases/"+id, bytes.NewReader(body))
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	_, detail = problemOf(t, w.Body.Bytes())
+	require.NotContains(t, detail, "deploy the release into")
+	require.Contains(t, detail, "cannot change namespace")
+}
+
+// An object shown to exist by a dry-run create has no readable owner. Calling
+// it "not created by kubeport" would be a guess presented as fact.
+func TestCreateRelease_DoesNotGuessAnUnreadableHolder(t *testing.T) {
+	r, fk := newTestRouterWithK8s(t)
+	clusterName := seedCluster(t, r)
+	tplName := seedPublishedTemplate(t, r)
+	fk.applyCheck = k8s.ApplyCheck{Conflicts: []k8s.Conflict{
+		{ObjectRef: k8s.ObjectRef{Kind: "Secret", Name: "app-secret", Namespace: "default"}, OwnerUnknown: true},
+	}}
+
+	w := do(t, r, http.MethodPost, "/v1/releases", createReleaseBody(t, clusterName, tplName, "default", "rel-"+randSuffix()))
+
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	_, detail := problemOf(t, w.Body.Bytes())
+	require.Contains(t, detail, "cannot read who holds it")
+	require.NotContains(t, detail, "not created by kubeport")
+	var p struct {
+		Conflicts []struct {
+			OwnerUnknown bool `json:"owner_unknown"`
+		} `json:"conflicts"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &p))
+	require.Len(t, p.Conflicts, 1)
+	require.True(t, p.Conflicts[0].OwnerUnknown)
+	require.Empty(t, fk.applied)
+}
