@@ -572,6 +572,7 @@ port-forward 로 밖에서 잡는다.
 |---|---|
 | 리셋 Job 이 `preflight: admin token: … no route to host` 로 실패 | 파드가 공인 주소로 못 나간다(OCI 엣지 NAT). `demo.resetHostAliasIP` 를 인그레스 주소로 설정 (§5). **노드에서 `curl` 하면 200 이라 정상으로 보인다** — 파드에서 확인할 것 |
 | **로그인은 되는데** 릴리스가 전부 `cluster-unreachable` / 로그 탭이 `cluster-auth-denied` | Dex 를 재시작해 서명 키가 바뀌었고 apiserver 가 옛 JWKS 를 캐싱 중이다. `journalctl -u k3s | grep 'failed to verify id token signature'` 로 확인 → `sudo systemctl restart k3s` (§5). **`/healthz` 는 DB 만 보므로 이때도 초록이다** |
+| 데모 릴리스 상세가 "문제가 발생" 화면이고, 잠시 뒤 새로고침하면 복구된다 | 백엔드 액세스 로그에서 `GET /v1/releases/` 의 `429` 확인 — 응답 `title` 은 `rate-limited`, `X-RateLimit-Limit: 240`. 데모 계정 하나를 방문자 전원이 공유해 릴리스 읽기 버킷(호출자별 분당 240회, #212)이 비었다. 한도는 코드 고정(`routes.go` 의 `releaseRead`) — 한 방문자의 반복 호출이면 계정 공유 문제(#200) |
 | `Identity file ... not accessible` → `Permission denied (publickey)` | 키 경로가 이 머신 것이 아니거나, **이 머신엔 아직 키 자체가 없다.** §1 "SSH 키 위치" 의 `ls` 로 둘 다 없으면 먼저 gpg 번들을 풀어야 한다 — 만든 머신은 `~/.ssh/oci_kuberport`, 번들로 복원한 머신은 `~/.ssh/kuberport-oci/oci_kuberport` |
 | `helm`/`kubectl` 이 `Kubernetes cluster unreachable: ... localhost:8080` | ssh 명령에 `export KUBECONFIG=/etc/rancher/k3s/k3s.yaml` 을 안 넣었다 (§3-2). `ssh <host> "<cmd>"` 는 프로필을 안 읽는다 |
 | 배포할 `sha-<7>` 태그가 없다 | #122 이전 커밋이면 `push:` 쪽 `paths:` 필터에 걸려 이미지가 아예 안 만들어졌을 수 있다. `gh run list --workflow build-images.yml --branch main` 으로 확인 (§3-1). `--commit <sha>` 는 조용히 0건을 주고, `--limit` 이 작아도 0건이 된다 |

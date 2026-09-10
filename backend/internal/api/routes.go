@@ -88,11 +88,15 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	}
 	noDemo := denyDemo(deps.DemoEmailDomain)
 
-	// One budget shared by every route that makes kubeport call the target
-	// apiserver on the caller's behalf. Gating only the refresh (#97) would
-	// have left the reads that actually do the fetching unmetered: a cache
-	// miss pulls up to 10MiB, and a caller can manufacture misses at will by
-	// varying the group/version.
+	// One budget shared by the control-plane reads the deploy form and log
+	// tab fan out to: SSAR, the cluster OpenAPI reads and opening a log
+	// stream. Gating only the refresh (#97) would have left the reads that
+	// actually do the fetching unmetered: a cache miss pulls up to 10MiB, and
+	// a caller can manufacture misses at will by varying the group/version.
+	//
+	// Not every route that calls the apiserver is on a budget. Release reads
+	// have their own below, and creating, updating and deleting a release are
+	// still unmetered (#232).
 	upstream := newRateLimiter(60, 4096)
 	// Two buckets for the routes that run SerializeUIMode, split by who fires
 	// them rather than by what they compute.
@@ -123,6 +127,19 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	// loop pegs the limit and throttles every other route on the pod.
 	preview := newRateLimiter(120, 4096)
 	authoring := newRateLimiter(60, 4096)
+	// GET /releases/:id lists the release's pods on the target apiserver on
+	// every call, so it belongs under a budget like the reads on `upstream`
+	// (#212) — but not on that one. It is the route the UI polls: the release
+	// list probes one row per release (four at a time) and a settling detail
+	// page re-renders on a backoff, each render reading it for the layout and
+	// the page. On the demo's shared identity those reads would drain the
+	// 60/min bucket the log-stream opens and the deploy form's SSAR fan-out
+	// depend on, and a detail page refused with 429 shows an error screen.
+	//
+	// 240/min is four times that: a polling tab spends a few tokens a minute
+	// and a list view one per row, so several visitors fit, while a loop is
+	// held to 4 pod LISTs a second per caller.
+	releaseRead := newRateLimiter(240, 4096)
 	v := r.Group("/v1", requireAuth(deps.Verifier))
 	v.GET("/me", h.GetMe)
 	v.GET("/clusters", h.ListClusters)
@@ -165,7 +182,7 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	v.POST("/templates/:name/versions/:v/undeprecate", h.UndeprecateVersion)
 	v.GET("/releases", h.ListReleases)
 	v.POST("/releases", h.CreateRelease)
-	v.GET("/releases/:id", h.GetRelease)
+	v.GET("/releases/:id", rateLimit(releaseRead), h.GetRelease)
 	// Opening a stream lists the release's pods and then follows one log per
 	// pod, so it is a control-plane fan-out like the two above and belongs on
 	// the same budget — it was simply missed when #73 drew the line. #134 made

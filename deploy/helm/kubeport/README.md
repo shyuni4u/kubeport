@@ -445,6 +445,19 @@ once per demo account. The web UI closes a pane's stream after its tab has been
 hidden for five minutes. Raise the value if visitors report "Too many log panes
 are open".
 
+**Per-caller request budgets are fixed in code, not values.** Each is a token
+bucket keyed by OIDC subject: reading a release (`GET /v1/releases/{id}`)
+240/min; SSAR, cluster OpenAPI reads and opening a log stream share 60/min;
+template preview 120/min; template saves 60/min. Creating, updating and
+deleting a release are not limited yet
+([#232](https://github.com/shyuni4u/kubeport/issues/232)). A release detail
+page reads twice per render and re-renders every 3–15s while a rollout settles,
+so 240/min covers well over a dozen such tabs per identity. On a demo install
+every visitor of one Dex account shares that identity: when the budget runs out,
+release pages show the error screen and the backend answers `429 rate-limited`
+with `X-RateLimit-Limit: 240`. Changing a budget needs a code change
+(`backend/internal/api/routes.go`).
+
 ## Schema sync
 
 The chart embeds a copy of `backend/migrations/schema.hcl` at
