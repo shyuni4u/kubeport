@@ -1,25 +1,38 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { act, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithIntl as render } from "@/tests/intl-test-utils";
 import { LogsPanel } from "./LogsPanel";
 
 // A stub EventSource that hands the test the listeners the component
 // registered, so a server-sent `error` frame can be delivered on demand.
+//
+// `closed` is recorded because that is the whole subject of #157: the browser
+// keeps reconnecting until someone calls close(), and no assertion about what
+// the pane *says* can tell a stopped stream from one still retrying every 3s.
 type Listener = (e: MessageEvent) => void;
 const listeners = new Map<string, Listener>();
+type Stub = { closed: boolean; onerror: (() => void) | null };
+const sockets: Stub[] = [];
+/** The stream the component is currently on. */
+const socket = () => sockets.at(-1)!;
 
 beforeAll(() => {
   // @ts-expect-error — minimal shape used by the component.
   global.EventSource = class {
     onopen: (() => void) | null = null;
     onerror: (() => void) | null = null;
+    closed = false;
     constructor() {
       listeners.clear();
+      sockets.push(this);
     }
     addEventListener(type: string, fn: Listener) {
       listeners.set(type, fn);
     }
-    close() {}
+    close() {
+      this.closed = true;
+    }
   };
 });
 
@@ -28,6 +41,14 @@ function emitError(payload: unknown) {
   if (!fn) throw new Error("component registered no 'error' listener");
   act(() => {
     fn({ data: JSON.stringify(payload) } as MessageEvent);
+  });
+}
+
+// The connection-level "error" event that follows the server closing the
+// stream. Real EventSource dispatches it to the same handlers, without `data`.
+function dropConnection() {
+  act(() => {
+    socket().onerror?.();
   });
 }
 
@@ -82,5 +103,90 @@ describe("LogsPanel error frames", () => {
     });
 
     expect(screen.queryByText(/not json/)).not.toBeInTheDocument();
+  });
+});
+
+// #82 made the backend close the stream after an error frame so the client
+// would know it had ended. The client never learned: WHATWG gives EventSource
+// no way to tell a clean close from a dropped connection, so both land in
+// onerror with readyState back at CONNECTING and the browser retries on its
+// own timer. Live, one open tab re-hit the apiserver every 3 seconds with no
+// backoff and no cap — 18 requests in 53 seconds, each with a fresh request
+// id — while the pane said "Disconnected" and offered a Reconnect button that
+// was already, invisibly, being pressed (#157).
+describe("LogsPanel in-stream termination", () => {
+  it("stops the browser's retry loop after an error frame", () => {
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+
+    emitError({ title: "k8s-error", status: 502, request_id: "req-1" });
+    dropConnection();
+
+    // Nothing else can stop the retries: this exact call is the fix.
+    expect(socket().closed).toBe(true);
+  });
+
+  it("keeps retrying a drop that carried no error frame", () => {
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+
+    dropConnection();
+
+    // A bare drop is the case EventSource's own retry is *for* — a proxy
+    // timeout, a laptop lid. Closing here would turn a self-healing blip into
+    // a manual button press.
+    expect(socket().closed).toBe(false);
+    expect(screen.getByText("끊김")).toBeInTheDocument();
+  });
+
+  it("offers a retry for a transport failure", () => {
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+
+    emitError({ title: "k8s-error", status: 502, request_id: "req-2" });
+    dropConnection();
+
+    expect(screen.getByRole("button", { name: "다시 연결" })).toBeInTheDocument();
+  });
+
+  // The half of #134 that still holds: a verdict gets no button. These two
+  // kinds are the cluster refusing this user's token, and #157's live case —
+  // an apiserver that had stopped trusting Dex — was exactly this.
+  it.each(["cluster-auth-denied", "rbac-denied"])(
+    "withholds the retry for %s, which a retry cannot clear",
+    (title) => {
+      render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+
+      emitError({ title, status: 502, request_id: "req-3" });
+      dropConnection();
+
+      expect(socket().closed).toBe(true);
+      expect(screen.queryByRole("button", { name: "다시 연결" })).not.toBeInTheDocument();
+    },
+  );
+
+  // The error frame already put the reason on screen. Saying it again in the
+  // footer reads as two separate failures.
+  it("does not repeat the reason it already printed", () => {
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+
+    emitError({ title: "k8s-error", status: 502, request_id: "req-4" });
+    dropConnection();
+
+    expect(screen.getAllByText(/클러스터에서 로그를 가져오지 못했습니다/)).toHaveLength(1);
+  });
+
+  // Closing the socket is only half the deal. Having taken the browser's
+  // automatic retry away, the button that replaces it has to actually open a
+  // stream — otherwise the fix trades a loop nobody asked for for a dead end.
+  it("opens a fresh stream when the reader presses Reconnect", async () => {
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+
+    emitError({ title: "k8s-error", status: 502, request_id: "req-5" });
+    dropConnection();
+    const dead = socket();
+
+    await userEvent.click(screen.getByRole("button", { name: "다시 연결" }));
+
+    expect(socket()).not.toBe(dead);
+    expect(socket().closed).toBe(false);
+    expect(screen.getByText("연결 중")).toBeInTheDocument();
   });
 });

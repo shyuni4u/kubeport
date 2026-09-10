@@ -31,6 +31,13 @@ type LogEntry = {
 // dead branch and a translation nobody reads.
 const KNOWN_STREAM_ERRORS = new Set(["k8s-error", "cluster-auth-denied", "rbac-denied"]);
 
+// Of those, the ones another attempt could clear. `k8s-error` is the default
+// branch of streamErrorKind — transport, a dropped apiserver connection — and
+// is worth one more try. The other two are the cluster's verdict on the token
+// this user is holding: nothing changes until someone edits RBAC or signs in
+// again, so retrying is only load.
+const RETRYABLE_STREAM_ERRORS = new Set(["k8s-error"]);
+
 // The kinds that can come back *before* the stream opens — every writeError in
 // StreamReleaseLogs and authorizeReleaseAccess, plus the three the BFF answers
 // itself when it never reaches the Go API (app/api/v1/[...path]/route.ts).
@@ -192,6 +199,11 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
   const [lines, setLines] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<Status>("connecting");
   const [failure, setFailure] = useState<Failure | null>(null);
+  // The kind carried by the last in-stream error frame, once the stream has
+  // actually ended. Separate from `failure`, which is a refusal read back off
+  // the wire before the stream ever opened: this one has already been rendered
+  // as a row, so the footer must not say it a second time.
+  const [terminated, setTerminated] = useState<string | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   // Monotonic id for stable React keys. Sliced lines (LINE_CAP) keep
   // their original id, so reconciliation only re-renders the new row.
@@ -204,6 +216,10 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     // down by a remount (instance change, [Reconnect]).
     const probe = new AbortController();
     let live = true;
+    // Set by the error-frame listener, read by onerror. A ref rather than
+    // state because the two fire in the same task and onerror has to see the
+    // frame that just arrived, not the previous render's value.
+    let endedWith: string | null = null;
     const append = (entry: Omit<LogEntry, "id">) => {
       seqRef.current += 1;
       const next: LogEntry = { id: seqRef.current, ...entry };
@@ -233,6 +249,10 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     es.addEventListener("error", (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data) as { title?: string; request_id?: string };
+        // The backend closes the stream immediately after this frame (#82).
+        // Remember that, because the close itself is indistinguishable from a
+        // dropped connection by the time it reaches onerror.
+        endedWith = data.title ?? "unknown";
         append({
           time: Date.now(),
           pod: "kubeport",
@@ -259,6 +279,21 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     // collapse into "the connection dropped, press Reconnect", which named the
     // wrong cause and pointed at a button that could not succeed (#134).
     es.onerror = () => {
+      // An error frame arrived on this stream, so this is the server hanging
+      // up on purpose, not the network. Close the socket: EventSource has no
+      // other off switch, and left alone the browser re-opens every 3 seconds
+      // forever — including for the two kinds a retry can never clear (#157).
+      //
+      // No readRefusal here. It re-requests the same URL to read a Problem
+      // body, and we already have the reason: the frame said it, and the row
+      // is on screen. Probing would open another stream against whatever just
+      // failed, which is the load this branch exists to stop.
+      if (endedWith !== null) {
+        es.close();
+        setTerminated(endedWith);
+        setStatus("failed");
+        return;
+      }
       if (es.readyState !== ES_CLOSED) {
         setStatus("disconnected");
         return;
@@ -294,7 +329,7 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     <>
       <div className="flex items-center gap-3 text-xs">
         <ConnectionDot status={status} />
-        {canReconnect(status, failure) && (
+        {canReconnect(status, failure, terminated) && (
           <Button size="sm" variant="outline" onClick={onReconnect}>
             {t("reconnect")}
           </Button>
@@ -337,7 +372,7 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
           the reason in exactly that case, leaving stale logs under a bare
           "Not connected".
         */}
-        {status === "failed" && (
+        {status === "failed" && terminated === null && (
           <p className="whitespace-pre-wrap text-red-300">{openErrorText(t, failure)}</p>
         )}
       </div>
@@ -396,9 +431,19 @@ function openErrorText(
 // A refused stream only gets a [Reconnect] button when a retry could plausibly
 // succeed. "No pods", "not yours" and "signed out" are verdicts, and the button
 // under them was an invitation to retry forever (#134, point 3).
-function canReconnect(status: Status, failure: Failure | null): boolean {
+function canReconnect(
+  status: Status,
+  failure: Failure | null,
+  terminated: string | null,
+): boolean {
   if (status === "disconnected") return true;
   if (status !== "failed") return false;
+  // A stream that ended mid-flight is judged by its own vocabulary: the kinds
+  // an error frame can carry are not the kinds a pre-stream refusal can, and
+  // only one of the three is worth another attempt.
+  if (terminated !== null) {
+    return !KNOWN_STREAM_ERRORS.has(terminated) || RETRYABLE_STREAM_ERRORS.has(terminated);
+  }
   const title = failure?.title;
   // Only a kind we recognise as a verdict withholds the button. A kind we have
   // no mapping for is a backend that moved ahead of this file — one wasted
