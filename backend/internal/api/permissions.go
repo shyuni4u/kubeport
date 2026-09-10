@@ -241,6 +241,12 @@ func (h *Handlers) ensureTemplateEditor(c *gin.Context, name string) (store.GetT
 		writeError(c, http.StatusNotFound, "not-found", "template "+name)
 		return store.GetTemplateByNameRow{}, false
 	}
+	// The demo line comes first, as on the read routes: team roles do not
+	// cross it, so an editor of the owning team on the other side of the line
+	// must not write what they cannot read.
+	if h.templateHiddenByDemoScope(c, tpl.OwnerUserID, "template "+name) {
+		return store.GetTemplateByNameRow{}, false
+	}
 	d, err := h.evaluateTemplateAccess(c.Request.Context(), nil, ownershipOf(tpl), true)
 	if err != nil {
 		log.Printf("ensureTemplateEditor: %v", err)
@@ -248,7 +254,7 @@ func (h *Handlers) ensureTemplateEditor(c *gin.Context, name string) (store.GetT
 		return store.GetTemplateByNameRow{}, false
 	}
 	if d != nil {
-		hidden, err := h.templateHiddenFromCaller(c, tpl)
+		hidden, err := h.neverPublishedAndUnreadable(c, tpl)
 		if err != nil {
 			log.Printf("ensureTemplateEditor: %v", err)
 			writeError(c, http.StatusInternalServerError, "internal", "failed to authorize template access")
@@ -264,17 +270,10 @@ func (h *Handlers) ensureTemplateEditor(c *gin.Context, name string) (store.GetT
 	return tpl, true
 }
 
-// templateHiddenFromCaller reports whether the template list leaves tpl out for
-// this caller: it sits on the other side of the demo line, or it was never
-// published and the caller may not read its drafts.
-func (h *Handlers) templateHiddenFromCaller(c *gin.Context, tpl store.GetTemplateByNameRow) (bool, error) {
-	inScope, err := h.inDemoScope(c, nil, tpl.OwnerUserID)
-	if err != nil {
-		return false, err
-	}
-	if !inScope {
-		return true, nil
-	}
+// neverPublishedAndUnreadable reports whether the template list leaves tpl out
+// for this caller on the draft rule: it was never published and the caller may
+// not read its drafts.
+func (h *Handlers) neverPublishedAndUnreadable(c *gin.Context, tpl store.GetTemplateByNameRow) (bool, error) {
 	if tpl.CurrentVersionID.Valid {
 		return false, nil
 	}

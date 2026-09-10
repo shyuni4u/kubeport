@@ -232,8 +232,10 @@ LISTEN_ADDR=:8080 \
 see **Known limits**. Never set in prod.
 
 `KBP_DEMO_EMAIL_DOMAIN` marks any user whose email ends in that domain as a
-demo account — the backend then rejects mutating requests outside the
-seeded demo scope (`demo-restricted`, see `internal/api/middleware.go`).
+demo account — the backend then rejects management writes with 403
+`demo-restricted` (see `internal/api/middleware.go`), and a template outside
+the demo scope answers 404 on reads and writes alike, as if it did not exist
+(see `internal/api/permissions.go`).
 
 Leave unset to disable demo restrictions entirely.
 

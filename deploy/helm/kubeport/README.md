@@ -560,10 +560,11 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
   the form's starting namespace together.
 - Demo accounts get the `kubeport-admin` UX, but the backend refuses them with
   403 `demo-restricted` on cluster registration, OpenAPI refresh, team and
-  member changes, force-delete, and any template or release no demo account
-  owns — the UI says so on those screens. Deploying from such a template is a
-  404, like a missing version, and the line holds the other way too: a real
-  user who is not an admin cannot deploy a demo template. A real operator
+  member changes, force-delete, and any release no demo account owns — the UI
+  says so on those screens. A template no demo account owns is not a 403:
+  reading, changing or deploying it answers 404, as if it did not exist, and
+  the line holds the other way too: to a real user who is not an admin a demo
+  template does not exist either. A real operator
   (admin, not demo) still can — and that release keeps the demo reset from
   deleting the demo catalog until it is removed. Releases a non-admin created
   from a demo template before this check existed block it the same way. When

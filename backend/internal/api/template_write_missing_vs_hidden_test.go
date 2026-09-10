@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -10,7 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kubeport/internal/api"
+	"kubeport/internal/auth"
 	"kubeport/internal/config"
+	"kubeport/internal/store"
 )
 
 // Issue #244. #238 made every read route answer a template the caller may not
@@ -97,6 +100,30 @@ func TestTemplateWrites_AcrossTheDemoLineLookExactlyLikeMissing(t *testing.T) {
 	t.Run("real user writing a demo template", func(t *testing.T) {
 		demoTpl := seedDemoTemplate(t, s)
 		requireWritesLookMissing(t, demoScopeRouter(t, "real-"+randSuffix()+"@example.com", false), demoTpl)
+	})
+	// Team roles do not carry across the line: an operator who adds a demo
+	// account to one of their teams has not handed the demo visitors that
+	// team's templates.
+	t.Run("demo account editing its operator team's template", func(t *testing.T) {
+		suffix := randSuffix()
+		email := "demo-editor-" + suffix + "@" + demoDomain
+		subject := "stub-demo-editor-" + suffix
+		_, err := s.UpsertUser(context.Background(), store.UpsertUserParams{
+			OidcSubject: subject, Email: store.PgText(email), DisplayName: store.PgText("Demo Editor"),
+		})
+		require.NoError(t, err)
+		teamID := createTeam(t, adminRouter, "team-"+randSuffix())
+		addMember(t, adminRouter, teamID, email, "editor")
+		teamTpl := seedTemplateOwnedBy(t, adminRouter, teamID)
+		w := do(t, adminRouter, http.MethodPost, "/v1/templates/"+teamTpl+"/versions/1/publish", nil)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		demoEditor := api.NewRouter(config.Config{}, api.Deps{
+			Verifier:        customVerifier{claims: auth.Claims{Subject: subject, Email: email}},
+			Store:           s,
+			DemoEmailDomain: demoDomain,
+		})
+		requireWritesLookMissing(t, demoEditor, teamTpl)
 	})
 }
 
