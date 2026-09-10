@@ -27,7 +27,19 @@ sudo BOOTSTRAP_EMAIL=you@example.com bash bootstrap.sh
 - iptables 80/443 열기 + persist
 - k3s single-node 설치 — **버전 고정**(`v1.36.3+k3s1`, 스크립트의 `K3S_PINNED`). k3s 가 Traefik 을 번들하므로
   고정하지 않으면 설치한 날에 따라 인그레스까지 달라진다(#194). 이미 깔린 k3s 는 바꾸지 않고, 고정 버전과 다르면
-  경고만 한다. 복구 등으로 다른 버전이 필요하면 `BOOTSTRAP_K3S_VERSION=<버전>` (적용 시 로그에 표시)
+  경고만 한다. 복구 등으로 다른 버전이 필요하면 `BOOTSTRAP_K3S_VERSION=<버전>` (적용 시 로그에 표시).
+  `v1.NN.P+k3sN` 형식의 **v1.30 이상**만 받고, upstream 지원이 끝난 마이너(스크립트의 `K3S_MIN_SUPPORTED_MINOR` 미만)는
+  `BOOTSTRAP_K3S_ALLOW_EOL=1` 을 줄 때만 깐다 — 아니면 호스트를 건드리기 전에 거부한다. AuthenticationConfiguration 의
+  apiVersion 은 apiserver 버전(이미 깔린 k3s 가 있으면 그 버전)에 맞춰 고른다. 재실행은 이미 있는
+  `/etc/rancher/k3s/auth.yaml`·`config.yaml` 을 덮어쓰지 않는다 — `k3s-auth-config.sh` 가 넣은 Dex 신뢰가 지워지지 않게.
+  대신 **k3s 가 실제로 읽을 설정이 bootstrap 이 쓸 설정과 같은지** 검사해, 어긋나면 호스트를 건드리기 전에 멈춘다 —
+  `config.yaml` 은 `kube-apiserver-arg` 블록 리스트 하나에 활성 항목이 정확히 `authentication-config=/etc/rancher/k3s/auth.yaml`
+  하나(주석 처리된 줄·`.bak` 경로·스칼라 형식은 불일치), `config.yaml.d/` 드롭인에 apiserver 인자 없음, `auth.yaml` 은 최상위가
+  apiVersion·kind·jwt 뿐이고 apiVersion 이 맞으며, 요청한 issuer(`BOOTSTRAP_OIDC_ISSUER`) 항목의 Client ID audience·username
+  claim(`BOOTSTRAP_OIDC_USERNAME_CLAIM`)·빈 prefix·그 밖의 매핑 없음. 다른 issuer(Dex) 항목은 비교하지 않고 보존한다.
+  두 파일 모두 주석 줄과 줄끝 주석을 벗긴 뒤 **값**으로 비교한다(audiences 는 원소, 나머지는 따옴표를 뗀 값) — 주석 안의 값은
+  판정에 쓰이지 않고, 그렇게 읽을 수 없는 형식(블록 리스트 audiences, 블록 맵 username 등)은 거부한다.
+  고정되는 건 k3s **바이너리 버전**이다. 설치 스크립트(get.k3s.io)는 매번 원격에서 받는다(#221)
 - helm CLI
 - cert-manager + Let's Encrypt ClusterIssuer (`letsencrypt-prod`)
 
@@ -195,8 +207,8 @@ sudo systemctl restart k3s
 ```
 
 - `apiVersion` 은 k8s ≥ 1.34 면 `apiserver.config.k8s.io/v1`(GA), 1.30–1.33 이면
-  `apiserver.config.k8s.io/v1beta1`(beta). `bootstrap.sh` 는 `BOOTSTRAP_AUTH_API` 로 오버라이드 가능
-  (기본값 `v1`).
+  `apiserver.config.k8s.io/v1beta1`(beta). `bootstrap.sh` 는 apiserver 버전(이미 깔린 k3s 가 있으면 그 버전)에
+  맞춰 고른다. `BOOTSTRAP_AUTH_API` 로 덮을 수 있지만, 1.34 미만에 `v1` 을 주면 호스트를 건드리기 전에 거부한다.
 - ⚠️ **값은 반드시 큰따옴표로.** YAML 리스트 항목 값 끝에 콜론이 있으면 맵으로 잘못 파싱돼 k3s 가
   `Error: unknown flag: --[{...}]` 로 죽는다.
 - ⚠️ `audiences` 는 Google Client ID (backend `oidc.audience` 와 동일 값).

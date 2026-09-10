@@ -20,8 +20,10 @@
 #   # 실제 배포까지 켜려면 (선택):
 #   sudo BOOTSTRAP_EMAIL=you@example.com \
 #        BOOTSTRAP_OIDC_CLIENT_ID=<google-client-id> bash bootstrap.sh
-#   # k3s 는 고정 버전(K3S_PINNED, Step 2)으로 깔린다 (#194). 복구 등으로 다른 버전이 필요할 때만:
+#   # k3s 는 고정 버전(K3S_PINNED)으로 깔린다 (#194). 복구 등으로 다른 버전이 필요할 때만:
 #   sudo BOOTSTRAP_EMAIL=you@example.com BOOTSTRAP_K3S_VERSION=v1.xx.y+k3s1 bash bootstrap.sh
+#   # v1.30 미만은 거부, 지원 종료 마이너(K3S_MIN_SUPPORTED_MINOR 미만)는 BOOTSTRAP_K3S_ALLOW_EOL=1 일 때만.
+#   # AuthenticationConfiguration apiVersion 은 apiserver 버전에서 고른다 (BOOTSTRAP_AUTH_API 로 덮을 수 있음).
 #
 # After this completes, run helm install separately (deploy/oci/README.md).
 
@@ -33,6 +35,301 @@ if [[ "${EUID}" -ne 0 ]]; then
 fi
 
 : "${BOOTSTRAP_EMAIL:?BOOTSTRAP_EMAIL env required (used for LetsEncrypt account)}"
+
+# Pinned rather than whatever get.k3s.io calls stable on the day this runs (#194).
+# k3s bundles Traefik, so an unpinned install silently changes the ingress in
+# front of kubeport as well — including the entrypoint timeout defaults that
+# bound how long a log stream can stay open. A VM rebuilt during recovery would
+# otherwise come up on a k3s/Traefik pair nobody has run.
+#
+# This is what production runs (measured 2026-09-10: v1.36.3+k3s1, Traefik
+# 3.7.8). Bump it in a commit of its own, together with docs/oci-prod-runbook.md
+# §2. BOOTSTRAP_K3S_VERSION overrides it — say, to rebuild at a known older
+# version — and an override is announced, never silent.
+K3S_PINNED="v1.36.3+k3s1"
+# The oldest Kubernetes minor upstream still patches, and the day that support
+# ends (kubernetes.io/releases). This moves on its own schedule, not the pin's:
+# raise both whenever a new Kubernetes minor comes out (about every 4 months).
+K3S_MIN_SUPPORTED_MINOR=34
+K3S_MIN_SUPPORTED_UNTIL="2026-10-27"
+K3S_VERSION="${BOOTSTRAP_K3S_VERSION:-${K3S_PINNED}}"
+
+# The minor of a k3s version string, or nothing when it is not one.
+k3s_minor_of() {
+  [[ "$1" =~ ^v1\.([0-9]+)\.[0-9]+\+k3s[0-9]+$ ]] && echo "$((10#${BASH_REMATCH[1]}))"
+}
+
+# Everything below is checked before anything on the host changes. The override
+# used to go to the installer as given, so a typo or an old version installed
+# quietly (security review of #206).
+k3s_minor="$(k3s_minor_of "${K3S_VERSION}" || true)"
+if [[ -z "${k3s_minor}" ]]; then
+  echo "error: BOOTSTRAP_K3S_VERSION must look like v1.NN.P+k3sN (got ${K3S_VERSION})" >&2
+  exit 1
+fi
+# Below 1.30 there is no structured authentication, which Step 2 writes and
+# deploy/oci/k3s-auth-config.sh needs for the Dex demo IdP. No flag lifts this.
+if (( k3s_minor < 30 )); then
+  echo "error: k3s ${K3S_VERSION} predates structured authentication; use v1.30 or later" >&2
+  exit 1
+fi
+# A minor upstream no longer patches is refused unless asked for by name, for a
+# recovery that has to reproduce an old node. 1.30 above is where a feature
+# starts, not where support ends.
+if (( k3s_minor < K3S_MIN_SUPPORTED_MINOR )) && [[ "${BOOTSTRAP_K3S_ALLOW_EOL:-}" != 1 ]]; then
+  echo "error: k3s ${K3S_VERSION} is past upstream end of life (oldest supported minor: 1.${K3S_MIN_SUPPORTED_MINOR}); set BOOTSTRAP_K3S_ALLOW_EOL=1 to install it anyway (recovery only)" >&2
+  exit 1
+fi
+# Once that day passes, the floor above lets an unsupported minor through. Say
+# so loudly rather than stop: this script is what a recovery runs, and failing
+# it because of the date would bite at the worst moment.
+if [[ "$(date -u +%F)" > "${K3S_MIN_SUPPORTED_UNTIL}" ]]; then
+  echo "WARNING: K3S_MIN_SUPPORTED_MINOR=${K3S_MIN_SUPPORTED_MINOR} is stale (1.${K3S_MIN_SUPPORTED_MINOR} reached end of life ${K3S_MIN_SUPPORTED_UNTIL}); raise it in deploy/oci/bootstrap.sh" >&2
+fi
+if [[ "${K3S_VERSION}" != "${K3S_PINNED}" ]]; then
+  echo "NOTE: BOOTSTRAP_K3S_VERSION=${K3S_VERSION} overrides the pinned ${K3S_PINNED}" >&2
+fi
+
+# A re-run leaves an installed k3s as it is (Step 2), so the apiserver that will
+# read auth.yaml is the installed one, not K3S_VERSION.
+installed=""
+if command -v k3s >/dev/null 2>&1; then
+  installed="$(k3s --version 2>/dev/null | awk 'NR==1 {print $3}' || true)"
+fi
+auth_minor="$(k3s_minor_of "${installed}" || true)"
+auth_minor="${auth_minor:-${k3s_minor}}"
+# AuthenticationConfiguration is apiserver.config.k8s.io/v1 from k8s 1.34 and
+# v1beta1 from 1.30. v1 on an older apiserver does not exist: it never starts,
+# and the node-Ready wait fails without saying why. So the default follows the
+# apiserver, and v1 is refused below 1.34 (the rule deploy/oci/k3s-auth-config.sh
+# applies too). BOOTSTRAP_AUTH_API still overrides.
+if (( auth_minor >= 34 )); then
+  auth_api_default="apiserver.config.k8s.io/v1"
+else
+  auth_api_default="apiserver.config.k8s.io/v1beta1"
+fi
+AUTH_API="${BOOTSTRAP_AUTH_API:-${auth_api_default}}"
+
+# Existing auth config is never overwritten: deploy/oci/k3s-auth-config.sh adds
+# the Dex issuer to the same files, and replacing them with the Google-only form
+# removed that trust silently — the next k3s restart turned every demo cluster
+# call into a 401 (security review of #206). Keeping them is only right when they
+# already say what this run asks for, so their content is checked here, before
+# the host changes, rather than a warning scrolling past mid-run.
+AUTH_FILE=/etc/rancher/k3s/auth.yaml
+CFG_FILE=/etc/rancher/k3s/config.yaml
+skip_auth_write=""
+
+# Both existing files are read as values, never as raw text: a comment can hold
+# anything — the old client ID, the new one, a different argument — and text
+# matching let it satisfy the check (codex review, three times over). So every
+# line goes through strip() first, which drops a whole comment line or a `#`
+# that follows whitespace outside quotes, and values through unquote(). What
+# the two parsers below cannot read as the layout this script and
+# k3s-auth-config.sh write is reported, and a report refuses the files.
+YAML_AWK_LIB='
+function strip(s,   i, c, q, out, prev) {
+  q = ""; out = ""; prev = " "
+  for (i = 1; i <= length(s); i++) {
+    c = substr(s, i, 1)
+    if (q != "") { out = out c; if (c == q) q = ""; prev = c; continue }
+    if (c == "\"" || c == "\047") { q = c; out = out c; prev = c; continue }
+    if (c == "#" && (prev == " " || prev == "\t")) break
+    out = out c; prev = c
+  }
+  sub(/[ \t]+$/, "", out)
+  return out
+}
+function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+function unquote(v,   f) {
+  v = trim(v); f = substr(v, 1, 1)
+  if (length(v) >= 2 && (f == "\"" || f == "\047") && substr(v, length(v), 1) == f) return substr(v, 2, length(v) - 2)
+  return v
+}
+'
+
+# k3s_config_entries <config.yaml> — "arg <value>" for each active entry of a
+# block-list kube-apiserver-arg, and a line starting "!" for anything else that
+# is set: another top-level key, the key in scalar or flow form, or a line
+# outside the list.
+k3s_config_entries() {
+  awk "${YAML_AWK_LIB}"'
+    { line = strip($0) }
+    line == "" { next }
+    line ~ /^kube-apiserver-arg:$/ { inargs = 1; next }
+    line ~ /^[^ \t]/ { inargs = 0; k = line; sub(/:.*/, "", k); print "!key " k; next }
+    inargs && line ~ /^[ \t]+-[ \t]+/ { v = line; sub(/^[ \t]+-[ \t]+/, "", v); print "arg " unquote(v); next }
+    { print "!line " trim(line) }
+  ' "$1" 2>/dev/null
+}
+
+# auth_facts <auth.yaml> <issuer-url> — one fact per line:
+#   top <key> <value>   each top-level key (value unquoted, empty for a block)
+#   found               the jwt entry whose url is <issuer-url> exists
+#   aud <client>        each element of that entry's audiences list
+#   claim <v> / prefix <v>   that entry's username mapping
+#   other <key>         any other key that entry sets
+#   bad <reason>        a line in a shape this cannot read as values
+auth_facts() {
+  awk -v want="$2" "${YAML_AWK_LIB}"'
+    function items(inner, arr,   n, i, parts) {
+      n = split(inner, parts, ","); for (i = 1; i <= n; i++) arr[i] = trim(parts[i]); return n
+    }
+    { line = strip($0) }
+    line == "" { next }
+    line ~ /^[^ \t-]/ {
+      inentry = 0; matching = 0
+      k = line; sub(/:.*/, "", k); v = line; if (index(v, ":")) sub(/^[^:]*:/, "", v); else v = ""
+      print "top " k " " unquote(v); next
+    }
+    line ~ /^[ \t]*-[ \t]*issuer:$/ { inentry = 1; matching = 0; next }
+    !inentry { print "bad line outside a jwt issuer entry: " trim(line); next }
+    line ~ /^[ \t]*url:/ {
+      v = line; sub(/^[ \t]*url:/, "", v)
+      if (unquote(v) == want) {
+        if (found) print "bad more than one jwt entry for this issuer"
+        found = 1; matching = 1; print "found"
+      } else matching = 0
+      next
+    }
+    !matching { next }
+    line ~ /^[ \t]*audiences:/ {
+      v = line; sub(/^[ \t]*audiences:/, "", v); v = trim(v)
+      if (v !~ /^\[.*\]$/) { print "bad audiences is not a one-line [list]"; next }
+      n = items(substr(v, 2, length(v) - 2), a)
+      for (i = 1; i <= n; i++) if (a[i] != "") print "aud " unquote(a[i])
+      next
+    }
+    line ~ /^[ \t]*claimMappings:$/ { next }
+    line ~ /^[ \t]*username:/ {
+      v = line; sub(/^[ \t]*username:/, "", v); v = trim(v)
+      if (v !~ /^\{.*\}$/) { print "bad username is not a one-line {map}"; next }
+      n = items(substr(v, 2, length(v) - 2), a)
+      for (i = 1; i <= n; i++) {
+        if (a[i] == "") continue
+        if (!index(a[i], ":")) { print "bad username entry without a value: " a[i]; continue }
+        kk = a[i]; sub(/:.*/, "", kk); kk = unquote(kk)
+        vv = a[i]; sub(/^[^:]*:/, "", vv); vv = unquote(vv)
+        if (kk == "claim") print "claim " vv
+        else if (kk == "prefix") print "prefix " vv
+        else print "other username." kk
+      }
+      next
+    }
+    { k = trim(line); sub(/:.*/, "", k); print "other " k }
+  ' "$1" 2>/dev/null
+}
+if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
+  if (( auth_minor < 30 )); then
+    echo "error: installed k3s ${installed} (k8s 1.${auth_minor}) predates structured authentication; upgrade k3s first (a restart, so ask first — runbook §2)" >&2
+    exit 1
+  fi
+  # Whether this apiserver can read AUTH_API at all is its own check, before the
+  # existing files are compared with it — so a file written for the version
+  # this run selects passes, and a version the apiserver lacks is named as such.
+  if [[ "${AUTH_API}" == "apiserver.config.k8s.io/v1" ]] && (( auth_minor < 34 )); then
+    echo "error: k8s 1.${auth_minor} has no ${AUTH_API}; use BOOTSTRAP_AUTH_API=apiserver.config.k8s.io/v1beta1 or leave it unset" >&2
+    exit 1
+  fi
+  if [[ -e "${AUTH_FILE}" || -e "${CFG_FILE}" ]]; then
+    problems=()
+    # The files are kept only if what k3s will actually load is what Step 2
+    # would write — one post-condition, checked on both files, instead of
+    # looking for the right text somewhere in them (codex review: a
+    # commented-out argument or one naming auth.yaml.bak also contained it).
+    #
+    # config.yaml: the only key is a block list kube-apiserver-arg, whose one
+    # active entry is exactly authentication-config=<the auth.yaml checked
+    # below> — the file both scripts write. k3s also merges config.yaml.d/*.yaml,
+    # so a drop-in that passes apiserver arguments is a difference as well.
+    cfg_args=(); cfg_other=()
+    while IFS= read -r line; do
+      case "${line}" in
+        "arg "*) cfg_args+=("${line#arg }") ;;
+        *) cfg_other+=("${line}") ;;
+      esac
+    done < <(k3s_config_entries "${CFG_FILE}" || true)
+    if [[ ! -f "${CFG_FILE}" ]]; then
+      problems+=("${CFG_FILE} is missing, so k3s would not load ${AUTH_FILE}")
+    elif (( ${#cfg_other[@]} )); then
+      problems+=("${CFG_FILE} has more than the kube-apiserver-arg list bootstrap writes: ${cfg_other[*]}")
+    elif (( ${#cfg_args[@]} != 1 )) || [[ "${cfg_args[0]}" != "authentication-config=${AUTH_FILE}" ]]; then
+      problems+=("${CFG_FILE}'s active kube-apiserver-arg entries are [${cfg_args[*]}]; bootstrap writes exactly authentication-config=${AUTH_FILE}")
+    fi
+    for dropin in "${CFG_FILE}.d"/*.yaml; do
+      [[ -f "${dropin}" ]] || continue
+      grep -q 'kube-apiserver-arg' "${dropin}" 2>/dev/null &&
+        problems+=("${dropin} also passes kube-apiserver-arg, which k3s merges into ${CFG_FILE}")
+    done
+    # auth.yaml, as values:
+    #   - top level: apiVersion is AUTH_API (not the default — an override this
+    #     script accepted and wrote must pass on the rerun), kind is
+    #     AuthenticationConfiguration, jwt is a block list, and nothing else —
+    #     an `anonymous:` setting there changes what the apiserver accepts;
+    #   - the requested issuer's own entry (not the whole file, where the Dex
+    #     entry could supply a match) holds everything Step 2 would write:
+    #     audiences exactly [BOOTSTRAP_OIDC_CLIENT_ID], the username claim, an
+    #     empty prefix, and no other mapping (neither script writes groups).
+    # Entries for other issuers (Dex) are not compared, and are kept.
+    want_issuer="${BOOTSTRAP_OIDC_ISSUER:-https://accounts.google.com}"
+    want_claim="${BOOTSTRAP_OIDC_USERNAME_CLAIM:-email}"
+    top_api="<unset>"; top_kind="<unset>"; top_jwt="<unset>"; top_other=()
+    e_found=""; e_aud=(); e_claim="<unset>"; e_prefix="<unset>"; e_other=(); e_bad=()
+    while IFS= read -r line; do
+      case "${line}" in
+        "top apiVersion "*) top_api="${line#top apiVersion }" ;;
+        "top kind "*) top_kind="${line#top kind }" ;;
+        "top jwt "*) top_jwt="${line#top jwt }" ;;
+        "top "*) key="${line#top }"; top_other+=("${key%% *}") ;;
+        found) e_found=1 ;;
+        "aud "*) e_aud+=("${line#aud }") ;;
+        "claim "*) e_claim="${line#claim }" ;;
+        "prefix "*) e_prefix="${line#prefix }" ;;
+        "other "*) e_other+=("${line#other }") ;;
+        "bad "*) e_bad+=("${line#bad }") ;;
+      esac
+    done < <(auth_facts "${AUTH_FILE}" "${want_issuer}" || true)
+    if [[ ! -f "${AUTH_FILE}" ]]; then
+      problems+=("${AUTH_FILE} is missing")
+    else
+      [[ "${top_api}" == "${AUTH_API}" ]] ||
+        problems+=("${AUTH_FILE} is apiVersion ${top_api}, not ${AUTH_API}, which this run selects")
+      [[ "${top_kind}" == "AuthenticationConfiguration" ]] ||
+        problems+=("${AUTH_FILE} is not a kind: AuthenticationConfiguration")
+      [[ -z "${top_jwt}" ]] ||
+        problems+=("${AUTH_FILE} has no jwt block list, the layout bootstrap and k3s-auth-config.sh write")
+      (( ${#top_other[@]} == 0 )) ||
+        problems+=("${AUTH_FILE} also sets ${top_other[*]} at the top, which bootstrap does not write")
+      for reason in "${e_bad[@]}"; do
+        problems+=("${AUTH_FILE}: ${reason}")
+      done
+      if [[ -z "${e_found}" ]]; then
+        problems+=("${AUTH_FILE} has no jwt entry for issuer ${want_issuer} (BOOTSTRAP_OIDC_ISSUER)")
+      else
+        listed=""
+        for a in "${e_aud[@]}"; do [[ "${a}" == "${BOOTSTRAP_OIDC_CLIENT_ID}" ]] && listed=1; done
+        if [[ -z "${listed}" ]]; then
+          problems+=("the ${want_issuer} entry does not list BOOTSTRAP_OIDC_CLIENT_ID as an audience (it lists [${e_aud[*]}])")
+        elif (( ${#e_aud[@]} != 1 )); then
+          problems+=("the ${want_issuer} entry lists audiences [${e_aud[*]}], and bootstrap writes only BOOTSTRAP_OIDC_CLIENT_ID")
+        fi
+        [[ "${e_claim}" == "${want_claim}" ]] ||
+          problems+=("the ${want_issuer} entry maps usernames from claim '${e_claim}', and this run asks for '${want_claim}' (BOOTSTRAP_OIDC_USERNAME_CLAIM)")
+        [[ -z "${e_prefix}" ]] ||
+          problems+=("the ${want_issuer} entry gives usernames the prefix '${e_prefix}', and bootstrap writes none")
+        (( ${#e_other[@]} == 0 )) ||
+          problems+=("the ${want_issuer} entry also sets ${e_other[*]}, which bootstrap does not write")
+      fi
+    fi
+    if (( ${#problems[@]} )); then
+      echo "error: bootstrap keeps an existing k3s auth config as it is, and this one does not match the run:" >&2
+      printf '  - %s\n' "${problems[@]}" >&2
+      echo "  Fix it by hand, or re-run deploy/oci/k3s-auth-config.sh, which writes Google and Dex together." >&2
+      exit 1
+    fi
+    skip_auth_write=1
+  fi
+fi
 
 echo "== Step 1/4: OS firewall (iptables) — open 80/443 =="
 # OCI Ubuntu images ship with a default INPUT policy that DROPs most inbound
@@ -90,13 +387,15 @@ echo "== Step 2/4: k3s single-node install =="
 # bootstrap writes it directly to avoid a config-format migration afterwards.
 # NB: values MUST be quoted — a trailing ':' in a value makes YAML parse the list
 # item as a map and k3s dies with "unknown flag". See deploy/oci/README.md §7.1.
-# BOOTSTRAP_AUTH_API overrides the AuthenticationConfiguration apiVersion —
-# default apiserver.config.k8s.io/v1 (GA, k8s >= 1.34); k8s 1.30–1.33 needs
-# apiserver.config.k8s.io/v1beta1.
-if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
+# The apiVersion is AUTH_API, chosen from the apiserver version at the top.
+# Existing files were checked there and are kept (skip_auth_write) — they may
+# carry the Dex trust k3s-auth-config.sh adds.
+if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" && -n "${skip_auth_write}" ]]; then
+  echo "  /etc/rancher/k3s/auth.yaml + config.yaml already trust this client; leaving them unchanged"
+elif [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
   mkdir -p /etc/rancher/k3s
   cat > /etc/rancher/k3s/auth.yaml <<YAML
-apiVersion: ${BOOTSTRAP_AUTH_API:-apiserver.config.k8s.io/v1}
+apiVersion: ${AUTH_API}
 kind: AuthenticationConfiguration
 jwt:
   - issuer:
@@ -113,24 +412,7 @@ YAML
   echo "  Dex demo IdP trust is added later via deploy/oci/k3s-auth-config.sh (needs Dex ingress up first)"
 fi
 
-# Pinned rather than whatever get.k3s.io calls stable on the day this runs (#194).
-# k3s bundles Traefik, so an unpinned install silently changes the ingress in
-# front of kubeport as well — including the entrypoint timeout defaults that
-# bound how long a log stream can stay open. A VM rebuilt during recovery would
-# otherwise come up on a k3s/Traefik pair nobody has run. The structured
-# AuthenticationConfiguration above also needs k8s >= 1.34 for its default
-# apiserver.config.k8s.io/v1.
-#
-# This is what production runs (measured 2026-09-10: v1.36.3+k3s1, Traefik
-# 3.7.8). Bump it in a commit of its own, together with docs/oci-prod-runbook.md
-# §2. BOOTSTRAP_K3S_VERSION overrides it — say, to rebuild at a known older
-# version — and an override is announced, never silent.
-K3S_PINNED="v1.36.3+k3s1"
-K3S_VERSION="${BOOTSTRAP_K3S_VERSION:-${K3S_PINNED}}"
-if [[ "${K3S_VERSION}" != "${K3S_PINNED}" ]]; then
-  echo "  NOTE: BOOTSTRAP_K3S_VERSION=${K3S_VERSION} overrides the pinned ${K3S_PINNED}"
-fi
-
+# K3S_VERSION is the pin, or the override checked at the top of this script.
 if ! command -v k3s >/dev/null 2>&1; then
   # Keep the bundled klipper servicelb ENABLED: it is what binds host ports
   # 80/443 and forwards them to the traefik LoadBalancer Service. Disabling it
@@ -145,12 +427,15 @@ else
   # the control plane, which is a decision for a person (CLAUDE.md "사용자에게
   # 먼저 묻는 것"), not a side effect of re-running bootstrap. Say when it
   # differs from the pin, so a re-run on an old VM does not read as "on the
-  # pinned version".
-  installed="$(k3s --version 2>/dev/null | awk 'NR==1 {print $3}' || true)"
+  # pinned version". `installed` was read at the top.
   if [[ "${installed}" == "${K3S_VERSION}" ]]; then
     echo "  k3s ${installed} already installed (matches the pin), skipping"
   else
     echo "  WARNING: k3s ${installed:-of unknown version} is installed, but this script pins ${K3S_VERSION}; leaving it unchanged" >&2
+  fi
+  installed_minor="$(k3s_minor_of "${installed}" || true)"
+  if [[ -n "${installed_minor}" ]] && (( installed_minor < K3S_MIN_SUPPORTED_MINOR )); then
+    echo "  WARNING: the installed k8s 1.${installed_minor} is past upstream end of life; upgrading it restarts k3s, so it needs approval (runbook §2)" >&2
   fi
 fi
 
