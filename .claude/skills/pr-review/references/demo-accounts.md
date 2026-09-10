@@ -26,7 +26,7 @@
 
 - 허용: 데모 네임스페이스(`demo`) 안에서 UI 가 제공하는 모든 동작 — 템플릿 작성/발행, 배포, 삭제, 팀 페이지 열람. **만든 것은 직접 지운다** — 리셋은 하루 한 번(KST 06:00)뿐이라 남긴 것이 최대 하루,
   건너뛴 사이클이면 이틀 남는다. 삭제까지가 검증의 일부다.
-- **배포 폼의 구역은 데모 세션이면 `demo` 로 시작한다**([#179](https://github.com/shyuni4u/kubeport/issues/179) 에서 고침 — `DEMO_NAMESPACE`). 데모 계정 권한은 `demo` 에만 있으므로(`demo-rbac.yaml`) **폼이 `default` 로 열리거나 권한 확인이 거부하면 회귀다** — #179 에 코멘트하지 말고 새 이슈로 올린다. 구역을 다른 값으로 바꿨을 때 거부 문장이 방문자에게 다음에 뭘 해야 하는지 알려주는지는 여전히 볼 거리다.
+- **배포 폼의 구역은 데모 세션이면 그 설치의 `demo.namespace`(프론트엔드 env `DEMO_NAMESPACE`)로 시작한다**([#179](https://github.com/shyuni4u/kubeport/issues/179) 에서 고침). 라이브(`https://kubeport.enzo.kr`)는 차트 기본값이라 `demo`, 로컬 e2e 스택(`scripts/e2e/up.sh`·`seed.sh`)은 `DEMO_NAMESPACE=default` 라서 `default` 가 정상이다. 데모 계정 권한은 그 구역에만 있으므로(라이브는 `demo-rbac.yaml`, 로컬은 `seed.sh`), **폼이 그 값이 아닌 구역으로 열리거나 처음 열린 상태에서 권한 확인이 거부하면 회귀다** — #179 에 코멘트하지 말고 새 이슈로 올린다. 구역을 다른 값으로 바꿨을 때 거부 문장이 방문자에게 다음에 뭘 해야 하는지 알려주는지는 여전히 볼 거리다.
 - 금지: 실제 Google 계정 로그인. 데모 계정으로 UI 밖의 API 를 직접 호출해 대량 생성. 같은 동작 반복 5회 이상(부하).
 - 시드 데이터: 템플릿 3개(`web-app`, `nightly-job`, `app-with-config`), 릴리스 2개(`web-app-demo` 정상, `nightly-job-demo` 는 존재하지 않는 이미지로 의도적 실패 — 실패 설명 배너가 정상). 근거: 템플릿은 `backend/cmd/seed-demo/templates.go` + `cmd/seed-demo/fixtures/`, 릴리스는 `backend/cmd/seed-demo/seed.go`.
 

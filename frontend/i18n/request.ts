@@ -30,9 +30,12 @@ export default getRequestConfig(async () => {
     locale,
     messages: (await import(`../messages/${locale}.json`)).default,
     timeZone: TIME_ZONE,
-    // Pinned per request and handed to the client provider so relative times
-    // ("2시간 전") are computed against one clock. Left unset, the server and
-    // the browser each use their own `Date.now()` and disagree on hydration.
+    // Pinned per request and handed to the client provider so the server render
+    // and the hydrated render of relative times ("2시간 전") start from one
+    // clock. Left unset, the server and the browser each use their own
+    // `Date.now()` and disagree on hydration. RelativeTime advances from this
+    // value with useNow, because the root layout — and so this value — does not
+    // re-render on a client-side navigation (#100).
     now: new Date(),
   };
 });

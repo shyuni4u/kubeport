@@ -18,8 +18,9 @@ export const RELATIVE_TIME_UPDATE_MS = 30_000;
  * `new Date(x).toLocaleString()` — what this replaces — follows the runtime's
  * locale and zone rather than the app's, so a Korean UI rendered
  * "9/9/2026, 12:00:05 AM" (#40). next-intl's formatter uses the locale, the
- * pinned TIME_ZONE, and the request's pinned `now`, so the server render and
- * the hydrated render agree.
+ * pinned TIME_ZONE, and a clock that starts at the request's pinned `now` — so
+ * the server render and the hydrated render agree — then advances every
+ * RELATIVE_TIME_UPDATE_MS (#100).
  *
  * The absolute time used to live in `title` alone, with nothing to suggest it
  * was there: no underline, no cursor change, and — because `title` opens on
