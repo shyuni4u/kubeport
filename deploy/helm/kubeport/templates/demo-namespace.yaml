@@ -2,6 +2,61 @@
 {{- if not .Values.dex.enabled -}}
 {{- fail "demo.enabled requires dex.enabled=true" -}}
 {{- end -}}
+{{- /*
+The demo account emails are checked at render time, not first at the reset
+Job. An account outside demo.emailDomain is not a demo account to the backend:
+it skips demo scoping and is a full kubeport-admin whose password the landing
+page prints (#208). An account Dex does not know is one the landing page tells
+visitors to sign in with (#209). The domain is compared case-insensitively, as
+the backend's IsDemoEmail does; the Dex account must match exactly, because the
+same address is rendered into RBAC subjects and admin emails that are compared
+with the token's email as-is.
+*/ -}}
+{{- /*
+Each value must be one address (or one domain) before anything else is
+compared: the admin email is joined into the comma-separated
+KBP_DEV_ADMIN_EMAILS, so "ops@example.org,demo-admin@<domain>" would end in the
+demo domain here and still hand ops@example.org kubeport-admin there.
+*/ -}}
+{{- $domain := required "demo.emailDomain is required when demo.enabled=true" .Values.demo.emailDomain -}}
+{{- if not (regexMatch "^[^@,\\s]+$" (toString $domain)) -}}
+{{- fail (printf "demo.emailDomain (%v) must be a single domain: no @, commas or whitespace" $domain) -}}
+{{- end -}}
+{{- range $key, $email := dict "demo.adminEmail" .Values.demo.adminEmail "demo.userEmail" .Values.demo.userEmail -}}
+{{- if not (regexMatch "^[^@,\\s]+@[^@,\\s]+$" (toString ($email | default ""))) -}}
+{{- fail (printf "%s (%v) must be a single address: no commas, whitespace or extra @" $key $email) -}}
+{{- end -}}
+{{- end -}}
+{{- $suffix := printf "@%s" (lower $domain) -}}
+{{- $dexEmails := list -}}
+{{- range .Values.dex.staticPasswords -}}
+{{- $dexEmails = append $dexEmails (.email | default "") -}}
+{{- end -}}
+{{- /*
+For the mismatch message: name only the Dex accounts under the demo domain,
+which the landing page shows anyway, and count the rest. A failed deploy's
+render error lands in the public Actions log, and other static accounts may be
+personal addresses.
+*/ -}}
+{{- $dexInDomain := list -}}
+{{- $dexWithoutEmail := 0 -}}
+{{- range $dexEmails -}}
+{{- if eq . "" -}}
+{{- $dexWithoutEmail = add1 $dexWithoutEmail -}}
+{{- else if hasSuffix $suffix (lower .) -}}
+{{- $dexInDomain = append $dexInDomain . -}}
+{{- end -}}
+{{- end -}}
+{{- range $key, $email := dict "demo.adminEmail" .Values.demo.adminEmail "demo.userEmail" .Values.demo.userEmail -}}
+{{- $email = $email | default "" -}}
+{{- if not (hasSuffix $suffix (lower $email)) -}}
+{{- $why := ternary "skips demo scoping and, appended to KBP_DEV_ADMIN_EMAILS, is a full kubeport-admin" "skips demo scoping" (eq $key "demo.adminEmail") -}}
+{{- fail (printf "%s (%s) must end in %s: an account outside the demo domain %s, while the landing page prints its password" $key $email $suffix $why) -}}
+{{- end -}}
+{{- if not (has $email $dexEmails) -}}
+{{- fail (printf "%s (%s) must match one of dex.staticPasswords[].email exactly (Dex has %d account(s), %d without an email; under the demo domain: %s): the landing page tells visitors to sign in with it. A --set of only dex.staticPasswords[N].hash replaces the whole entry and drops its email — set email, username, userID and hash together" $key $email (len $dexEmails) $dexWithoutEmail (default "none" (join ", " $dexInDomain))) -}}
+{{- end -}}
+{{- end -}}
 apiVersion: v1
 kind: Namespace
 metadata:

@@ -523,10 +523,23 @@ dex:
 
 demo:
   enabled: true
+  emailDomain: demo.kubeport      # accounts under it are demo accounts to the backend
+  adminEmail: demo-admin@demo.kubeport  # one of dex.staticPasswords[].email
+  userEmail: demo-user@demo.kubeport    # one of dex.staticPasswords[].email
   adminPassword: <random>         # --set; used by the reset CronJob only
   userPassword: <random>          # --set
   passwordHint: ""                # shown on the landing page — public by design
 ```
+
+Changing a demo account's email is two edits, not one: `dex.staticPasswords[].email`
+is the account Dex accepts, and `demo.adminEmail`/`demo.userEmail` are what the
+landing page tells visitors to type, the RBAC subjects, and the reset Job's
+logins. Both must sit under `demo.emailDomain`. An account outside it is not a
+demo account to the backend: it skips demo scoping while the landing page prints
+its password, and `demo.adminEmail` is also appended to `KBP_DEV_ADMIN_EMAILS`,
+which makes it a full `kubeport-admin`. The chart refuses to
+render when `demo.adminEmail` or `demo.userEmail` is outside the domain or
+matches no Dex account (#208, #209).
 
 Generate a static-password bcrypt hash:
 

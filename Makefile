@@ -33,8 +33,24 @@ e2e-ui:
 helm-sync:
 	cp backend/migrations/schema.hcl $(HELM_CHART_DIR)/files/schema.hcl
 
+# Besides linting, prove the demo email guard in templates/demo-namespace.yaml
+# still refuses what it must (#208, #209) and still accepts a differently cased
+# demo.emailDomain, which the backend compares case-insensitively.
 helm-lint:
 	helm lint $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml
+	@helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
+		--set demo.adminEmail=ops@example.org 2>&1 | grep -q "must end in @demo.kubeport" \
+		|| { echo "demo email guard: an admin email outside demo.emailDomain rendered"; exit 1; }
+	@helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
+		--set demo.userEmail=someone-else@demo.kubeport 2>&1 | grep -q "must match one of dex.staticPasswords" \
+		|| { echo "demo email guard: a user email Dex does not know rendered"; exit 1; }
+	@helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
+		--set-string "demo.adminEmail=ops@example.org\,demo-admin@demo.kubeport" 2>&1 | grep -q "must be a single address" \
+		|| { echo "demo email guard: a comma-joined admin email rendered"; exit 1; }
+	@helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
+		--set demo.emailDomain=DEMO.kubeport >/dev/null \
+		|| { echo "demo email guard: refused a demo.emailDomain that differs only in case"; exit 1; }
+	@echo "demo email guard: ok"
 
 # Diff the rendered chart against the checked-in golden snapshot. Fails
 # (non-zero exit) if they differ — that is the CI signal.
