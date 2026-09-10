@@ -98,6 +98,25 @@ nginx-ingress `nginx`, k3s `traefik`. 차트 기본값이 `traefik` 이라, trae
 `--set images.backend.tag=sha-<7> --set images.frontend.tag=sha-<7>` 를 붙인다 —
 main 커밋마다 하나씩 발행되고, 핀해야 롤백이 가능하다.
 
+TLS 는 cert-manager 가 맡는다. 차트는 **`letsencrypt-prod` 라는 ClusterIssuer** 를 가리키는
+`Certificate` 를 만들지만, 그 issuer 자체는 만들지 않는다. 그 이름의 issuer 가 없으면
+`helm install` 은 성공하고 파드도 전부 Ready 인데 **인증서만 끝내 발급되지 않아** 사이트에
+유효한 TLS 가 없다. 드러나는 건 `kubectl -n kubeport get certificate` 의 `READY False` 뿐이다.
+그러니 설치 전에 그 ClusterIssuer 를 만들거나(차트 README
+[Quick install](deploy/helm/kubeport/README.md#quick-install-any-cluster) 의 2단계에 예시가 있다 —
+solver 의 `class: traefik` 을 내 `ingress.className` 으로 바꿀 것. 그대로 두면 HTTP-01 챌린지를 아무도
+받지 않아 똑같이 조용히 실패한다), 가진 것으로 차트를 돌린다:
+
+- 다른 ClusterIssuer: `--set tls.certManager.issuerName=<이름>`
+- 이미 있는 TLS Secret: `--set tls.certManager.enabled=false --set tls.existingSecret=<secret>`
+- 클러스터 안에서 TLS 를 안 쓸 때: `--set tls.enabled=false --set tls.certManager.enabled=false`.
+  이때 차트가 만드는 로그인·로그아웃 주소가 `http://` 가 된다. 클러스터 앞(로드밸런서,
+  Cloudflare)에서 TLS 를 끝낸다면 브라우저가 보는 `https://` 주소를 차트에 알려 준다:
+  `--set oidc.redirectUri=https://<host>/api/auth/callback`. 이 값은 IdP 에 등록한
+  redirect URI 와 같아야 하고(다르면 IdP 가 로그인을 거절한다), `frontend.publicOrigins` 가
+  비어 있으면 로그아웃이 검사하는 origin 도 이 값에서 나온다 — `http://` 로 두면 로그아웃이
+  403 으로 거절된다.
+
 먼저 [deploy/helm/kubeport/README.md](deploy/helm/kubeport/README.md) 를 읽는다 —
 특히 **"After install — required on every cluster"**. 이 단계를 건너뛰면 앱은 뜨고
 로그인도 되지만 **아무것도 배포하지 못한다.**
