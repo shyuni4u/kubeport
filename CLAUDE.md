@@ -11,7 +11,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 > - **라이브 = `sha-269a198`, Helm rev 10** (2026-09-09 08:19 UTC **기준 — 재배포마다 썩는 값이다**. 지금 라이브가 뭔지는 [runbook §3-3](docs/oci-prod-runbook.md#3-3-배포-확인) 의 `helm history` 로 직접 본다). 재배포 절차·함정은 [runbook §3](docs/oci-prod-runbook.md#3-재배포-이미지-갱신).
 > - **실제 k8s 배포까지 동작**: k3s 가 Google OIDC 신뢰 + RBAC 바인딩 + 클러스터 `oci-a1` 등록 (runbook §5). backend 가 사용자 Google 토큰을 k8s API 로 포워딩.
 > - **로그인/로그아웃 정상**, admin 부트스트랩(`auth.devAdminEmails`). **운영 하드닝**: idle-reclaim ping(GHA 10분) + 주간 백업 정책 + 만료 세션 자동 정리.
-> - **데모 모드(Plan 13) 라이브** — `/` 에서 관리자/사용자 체험 버튼(Dex 로그인, 비밀번호 화면 표기), `demo` 네임스페이스 격리, 6시간 리셋, k3s 가 Google+Dex 구조화 인증. 운영: runbook §5.
+> - **데모 모드(Plan 13) 라이브** — `/` 에서 관리자/사용자 체험 버튼(Dex 로그인, 비밀번호 화면 표기), `demo` 네임스페이스 격리, **하루 1회 리셋(21:00 UTC = 06:00 KST)**, k3s 가 Google+Dex 구조화 인증. 운영: runbook §5.
 > - **2026-09-09 머지분 (PR 23건)** — 페르소나 리뷰어가 연 이슈를 하루에 50건 닫은 날. 주제별로:
 >   - **보안 하드닝** (#47 #79 #101): OpenAPI 프록시 path traversal, 템플릿 읽기 인가 부재, BFF catch-all 경로 검증(#51), 빈 `ca_bundle` 이 배포 경로에서만 TLS 검증을 끄던 것, `openapi/refresh` admin·demo 게이트, 500 응답의 DB·업스트림 원문 노출, `/v1/clusters` 접속정보 노출, SSAR 화이트리스트·레이트리밋, 거부된 배포의 액세스 로그. 보안 헤더(HSTS·nosniff·`frame-ancestors 'none'`)는 라이브에서 확인됨.
 >   - **에러 계약 완성** (#79 #98 #123): `/v1` 전체가 `Problem{type,title,status,detail,request_id}` 하나로 통일. 라우터에 없는 경로·메서드도 Problem 404/405, SSE 인스트림 에러도 같은 스키마의 `error` 프레임. **`title` 이 분기 키**이고 닫힌 목록은 `openapi.yaml` 의 `ErrorKind` enum — 새 kind 는 `error_shape_test.go`·`openapi_spec_test.go` 가 빌드로 막는다. 기계 클라이언트 가이드: [docs/machine-clients.md](docs/machine-clients.md).

@@ -230,7 +230,10 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
 - **데모 비밀번호 회전**: [deploy/oci/README.md §7.6](../deploy/oci/README.md) 의 `--set` 목록을
   새 `DEMO_PW`/`HASH` 로 다시 실행 (`staticPasswords[N]` 네 필드 전부, `--reset-then-reuse-values`).
   `DEX_SECRET` 은 유지해도 된다. Dex 는 `storage: memory` 라 재시작 시 서명 키가 바뀐다 (§5 주의 참조).
-- **리셋**: CronJob `kubeport-demo-reset` 6시간 주기. 수동 실행은 잡 이름을 매번 다르게 준다 —
+- **리셋**: CronJob `kubeport-demo-reset`, **하루 한 번 21:00 UTC = 06:00 KST**
+  (`demo.resetSchedule`). 한국 시간 새벽이라 방문자 작업을 뺏을 확률이 가장 낮다. 6시간
+  주기였을 때와 달리 **실패해도 몇 시간 뒤 자동 재시도가 없다** — 한 번 건너뛰면 이틀 공백이다
+  ([#148](https://github.com/shyuni4u/kubeport/issues/148)). 수동 실행은 잡 이름을 매번 다르게 준다 —
   성공한 수동 잡은 CronJob 의 `successfulJobsHistoryLimit` 대상이 아니라 남으므로 고정 이름은
   두 번째 실행에서 `already exists` 로 실패한다:
   ```bash
@@ -246,12 +249,12 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
   데모 계정은 `kubeport-admin` 을 갖지만, 저작은 결과물이 방문자의 세션보다 오래 남고 남에게 보이는
   유일한 관리자 권한이라서다. 저작 체험까지 보여주려면 `--set demo.allowTemplateCreate=true`
   (backend `KBP_DEMO_ALLOW_TEMPLATE_CREATE`). 켜도 데모가 만든 템플릿은 실제 사용자 카탈로그에
-  안 보이지만, 누군가 그걸로 배포하면 6시간 리셋이 그 템플릿을 건너뛴다(`tolerateFK`).
+  안 보이지만, 누군가 그걸로 배포하면 리셋이 그 템플릿을 건너뛴다(`tolerateFK`).
   결정 근거: [brainstorming-summary §14](brainstorming-summary.md).
   **리셋 CronJob 은 이 플래그와 무관하다** — 시드는 API 가 아니라 DB 로 직접 쓴다
-  (`cmd/seed-demo/templates.go`). 한때 API 를 타서, 게이트가 닫힌 상태로 배포하자 6시간마다
+  (`cmd/seed-demo/templates.go`). 한때 API 를 타서, 게이트가 닫힌 상태로 배포하자 리셋마다
   데모가 비워졌다([#104](https://github.com/shyuni4u/kubeport/issues/104)). 시드가 실패하면
-  wipe 만 끝난 상태(빈 카탈로그)로 6시간 방치되고 자동 알림은 없다. 배포 직후와 리셋 직후에 확인:
+  wipe 만 끝난 상태(빈 카탈로그)로 다음 리셋까지 방치되고 자동 알림은 없다. 배포 직후와 리셋 직후에 확인:
   ```bash
   kubectl -n kubeport get job -l app.kubernetes.io/instance=kubeport   # COMPLETIONS 1/1
   kubectl -n kubeport logs job/<최근 demo-reset 잡> -c seed | tail -5   # 마지막 줄 `seed-demo: done`

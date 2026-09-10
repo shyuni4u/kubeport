@@ -65,7 +65,7 @@
     "tryAdmin": "Try as admin",
     "tryUser": "Try as user",
     "loginPrimary": "Sign in with Google",
-    "demoNote": "Deploys to a real cluster · resets every 6 hours · don't leave personal data",
+    "demoNote": "Deploys to a real cluster · resets daily · don't leave personal data",
     "demoCreds": "Demo password: {password}",
     "goCatalog": "Go to catalog",
     "compare": {

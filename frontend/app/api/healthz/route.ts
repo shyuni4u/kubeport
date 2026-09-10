@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  *
  * Why anything outside needs to read it: the demo reset CronJob wipes first
  * and re-seeds second, so a failed seed leaves an empty catalog that nothing
- * notices for up to six hours (#104 was found only because a browser review
+ * notices until the next reset (#104 was found only because a browser review
  * happened to run just after a reset). `uptime-ping.yml` already runs every
  * ten minutes; giving it something to assert turns it into the alert channel
  * for #119 without new infrastructure.

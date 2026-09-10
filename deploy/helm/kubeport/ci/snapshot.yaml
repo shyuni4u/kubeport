@@ -1415,7 +1415,7 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     app.kubernetes.io/managed-by: Helm
 spec:
-  schedule: "0 */6 * * *"
+  schedule: "0 21 * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
@@ -1438,7 +1438,7 @@ spec:
             # governs the seed container: wipe-k8s used to empty the demo
             # namespace with no idea whether the re-seed could succeed, so a
             # Dex outage still destroyed the workloads and left the releases
-            # pointing at nothing until the next run six hours later (#105).
+            # pointing at nothing until the next scheduled run (#105).
             # Failing here fails the Job before anything is destroyed.
             - name: preflight
               image: ghcr.io/shyuni4u/kubeport-backend:0.1.0

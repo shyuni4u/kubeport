@@ -223,7 +223,17 @@ demo:
   adminPassword: ""               # --set; used by the reset job only
   userPassword: ""                # --set
   cluster: oci-a1
-  resetSchedule: "0 */6 * * *"
+  # 21:00 UTC = 06:00 KST — the quietest hour for a Korean-audience demo, so a
+  # reset is least likely to take a visitor's work away mid-session, and the
+  # demo is freshly seeded when the day starts.
+  #
+  # Daily rather than every six hours because a reset is destructive: it wipes
+  # whatever a visitor built. The cost of the longer window is that junk (or a
+  # demo someone broke) now sits for up to a day, and a skipped cycle leaves a
+  # 48-hour gap instead of 12 — which is exactly why #148 asks for the last
+  # successful seed time on /healthz: nothing else can tell a skipped cycle
+  # from a healthy one.
+  resetSchedule: "0 21 * * *"
   # bitnami/kubectl tags were pulled from Docker Hub (2025); alpine/k8s ships
   # sh + kubectl for amd64/arm64. The init container needs a shell (sh -c).
   kubectlImage: alpine/k8s:1.31.9

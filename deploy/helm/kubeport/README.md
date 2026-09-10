@@ -315,7 +315,7 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
   plus a cluster-scoped `ClusterRole`/`ClusterRoleBinding` granting
   `selfsubjectaccessreviews` (create) — the RBAC panel needs this even for
   non-admin demo users.
-- A `demo-reset` `CronJob` (`demo.resetSchedule`, default every 6 hours) that
+- A `demo-reset` `CronJob` (`demo.resetSchedule`, default daily at 21:00 UTC) that
   wipes all objects in the demo namespace and re-seeds it via
   `/seed-demo --reset` (shipped in the backend image).
 
