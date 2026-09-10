@@ -279,6 +279,39 @@ and rolling upgrade pauses, so old Pods stay live serving traffic.
 The frontend Pod has its own `wait-for-backend` initContainer (polls backend
 `/healthz`) so it doesn't open DB connections against an un-migrated schema.
 
+### Behaviour changes when upgrading past #161
+
+kubeport now checks, before applying anything, whether a release's objects
+already belong to something else. Upgrades change what used to happen silently:
+
+- **A second release of a template with fixed object names, in the same
+  namespace, is refused** (409 `resource-conflict`, naming the release holding
+  them). It used to take the first release's objects over, and deleting it
+  deleted them. Such templates allow one release per namespace for now (#190).
+- **Objects kubeport did not create are no longer adopted.** If a template's
+  objects already exist in the target namespace without a
+  `kubeport.io/release` label, the first deploy is a 409 instead of a takeover.
+  Delete or rename them, or deploy elsewhere.
+- **Templates that pin `metadata.namespace`** to a namespace other than the
+  release's can no longer be deployed or updated (400 `validation-error`, with
+  `pinned_namespace` naming the object). They used to be applied there and left
+  behind on delete. Find them before upgrading, then publish a version without
+  `metadata.namespace`:
+
+  ```sql
+  SELECT t.name, tv.version
+    FROM template_versions tv JOIN templates t ON t.id = tv.template_id
+   WHERE tv.resources_yaml ~ '(?n)^\s+namespace:';
+  ```
+
+- **ui-spec fields at `metadata.namespace`, `metadata`, `kind` or `apiVersion`
+  are refused on save.** Published versions still deploy; the next draft has to
+  drop the field.
+- **A release whose objects were already taken before #161** fails to update
+  with a 409 naming the release that took them. Deleting that release deletes
+  those objects too; update the affected release once more right after, and it
+  recreates them.
+
 ## Uninstall
 
 ```bash

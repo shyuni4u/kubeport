@@ -81,7 +81,37 @@ func validatePath(path string) error {
 		return fmt.Errorf("path is not canonical: write it as `%s` (quote a key only when the bare form cannot express it)",
 			strings.TrimSuffix(path, rest)+canon)
 	}
+	if reservedPath(canon) {
+		return fmt.Errorf("path sets %s, which kubeport decides: a release's objects live in the release's namespace and keep the kind and apiVersion the template gives them (#137)", canon)
+	}
 	return nil
+}
+
+// reservedPath reports whether a canonical resource-relative path writes a
+// field kubeport's release model depends on. An exposed field's value comes
+// from whoever deploys, not from the template author.
+//
+// metadata.namespace matters most: an object sent to another namespace is
+// orphaned as soon as it is applied, because deletion and status look only in
+// the release's. kind and apiVersion change what is being applied at all, and
+// setting `metadata` whole reaches the namespace by the back door. Templates
+// saved before this check are still caught at deploy time, where CheckApply
+// refuses a pinned namespace.
+//
+// metadata.name is deliberately not reserved. Exposing it is how a template
+// lets two releases share a namespace, and the ownership check at deploy time
+// (#161) is what makes a user-chosen name safe.
+func reservedPath(canon string) bool {
+	switch canon {
+	case "kind", "apiVersion", "metadata", "metadata.namespace":
+		return true
+	}
+	for _, prefix := range []string{"kind.", "apiVersion.", "metadata.namespace."} {
+		if strings.HasPrefix(canon, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func Render(resourcesYAML, uiSpecYAML string, values json.RawMessage, l Labels) ([]byte, error) {
@@ -119,10 +149,47 @@ func Render(resourcesYAML, uiSpecYAML string, values json.RawMessage, l Labels) 
 	}
 
 	for _, d := range docs {
+		stringifyStringMaps(d)
 		stampLabels(d, l)
 	}
 
 	return marshalMultiDoc(docs)
+}
+
+// stringifyStringMaps turns scalar values in the fields the API types as
+// map[string]string into strings. A ui-spec field keeps its own type — a
+// boolean for a feature flag, an integer for a port — which is right almost
+// everywhere and wrong in exactly these maps: rendered as a YAML bool or number,
+// the apiserver refuses the whole object at apply ("expected string").
+// app-with-config exposes a boolean into ConfigMap data, so every deploy of it
+// failed with a 502; it surfaced when #161 made it the demo's seed release.
+//
+// Only ConfigMap data and Secret stringData. Secret data is base64, where a
+// stringified scalar would be a wrong value instead of a refused one, and
+// binaryData is bytes. Scalars anywhere else keep their type.
+func stringifyStringMaps(doc map[string]any) {
+	var field string
+	switch doc["kind"] {
+	case "ConfigMap":
+		field = "data"
+	case "Secret":
+		field = "stringData"
+	default:
+		return
+	}
+	m, ok := doc[field].(map[string]any)
+	if !ok {
+		return
+	}
+	for k, v := range m {
+		switch v.(type) {
+		case string, nil, map[string]any, []any:
+			// Already a string, or null or a composite value: the template's own
+			// mistake, left for the apiserver to name rather than guessed at.
+		default:
+			m[k] = fmt.Sprint(v)
+		}
+	}
 }
 
 func parseMultiDoc(src string) ([]map[string]any, error) {

@@ -238,6 +238,28 @@ helm upgrade kubeport deploy/helm/kubeport --reuse-values \
 `backend/internal/api/error_shape_test.go` 와 `openapi_spec_test.go` 가 빌드를 깬다. `detail` 은 사람이
 읽는 문장이라 바뀔 수 있다.
 
+**409 는 `title` 로 셋이 갈린다.** `conflict` 는 같은 이름의 릴리스가 이미 있다는 뜻이라 다른 이름으로
+풀린다. 같은 `conflict` 라도 `detail: version not published` 는 이름으로 안 풀린다. `resource-conflict` 는
+**템플릿이 만드는 오브젝트를 같은 네임스페이스의 다른 릴리스가 이미 쥐고 있다**는 뜻이라, 역시 이름을
+바꿔도 안 풀린다([#161](https://github.com/shyuni4u/kubeport/issues/161)). 다른 네임스페이스에 배포하거나
+그 릴리스를 먼저 지워야 한다. 이 kind 만 확장 필드 `conflicts[]`(`kind`·`name`·`namespace`·`owner`)를
+달고 온다. 붙잡고 있는 릴리스 이름은 `detail` 을 파싱하지 말고 `owner` 에서 읽는다(kubeport 가 만든 게
+아니면 빈 문자열). 이 응답을 받았다면 **아무것도 적용되지 않았고 릴리스도 기록되지 않았다.**
+
+**읽기 권한이 없는 오브젝트**(쓰기 전용 Role 의 Secret 등)는 읽어서 확인할 수 없다. **생성**에서는 서버측
+dry-run create 로 존재 여부만 확인해, 있으면 `owner` 없이 `owner_unknown: true` 로 충돌에 넣는다(누가 쥐었는지는
+볼 수 없다 — "kubeport 밖에서 만든 것" 으로 안내하지 말 것). **업데이트**에서는 자기 오브젝트와 구별할 수 없어
+검사하지 못하고 통과시키므로, 200 이 "그런 오브젝트를 빼앗지 않았다" 는 보장은 아니다.
+
+템플릿 오브젝트가 릴리스와 다른 `metadata.namespace` 를 박고 있으면 `400 validation-error` 에 `pinned_namespace`
+(`kind`·`name`·`namespace`)가 붙는다([#137](https://github.com/shyuni4u/kubeport/issues/137)). 요청이 아니라
+**템플릿**을 고쳐야 하는 경우라, 이 필드가 있으면 "입력값을 확인하라" 고 안내하지 말 것.
+
+**#161 이전에 오브젝트를 빼앗긴 릴리스**는 업데이트가 `resource-conflict`(`owner` = 빼앗은 릴리스)로 거절된다.
+빼앗은 릴리스를 지우면 그 오브젝트, 즉 **피해 릴리스가 실제로 돌리던 워크로드도 함께 지워진다.** 지운 직후 피해
+릴리스를 같은 값으로 한 번 업데이트하면 다시 만들어진다. `owner` 가 어느 화면에도 없는 이름이면 강제 삭제
+(`?force=true`)나 로컬 `seed.sh -reset` 이 남긴 고아다 — `kubectl -n <ns> delete <kind>/<name>` 로 정리한다.
+
 여기엔 **kubeport 의 두 진입점 어디에도 핸들러가 없는 응답까지 포함된다**
 ([#81](https://github.com/shyuni4u/kubeport/issues/81)):
 

@@ -947,6 +947,10 @@ paths:
         "400":
           description: |
             The body failed validation, or the target version is deprecated.
+            Also: a `namespace` that is not a DNS-1123 label, a `name` longer
+            than a label value allows (63), or a template object that pins a
+            `metadata.namespace` other than `namespace` — `detail` names the
+            object and what to change (#125, #137).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -960,10 +964,19 @@ paths:
               schema: { $ref: "#/components/schemas/Problem" }
         "409":
           description: |
-            Either a release of that name already exists in the cluster and
-            namespace, **or the target version is not published**
-            (`detail: version not published`). Retrying with a different name
-            will not fix the second one, so read `detail` before retrying.
+            Branch on `title`; 409 means three different things here.
+
+            - `resource-conflict`: an object the template creates already
+              exists in the namespace and belongs to another release, or was
+              not created by kubeport (#161). **A different name will not fix
+              it.** `conflicts` lists each object with its `owner` (empty when
+              kubeport did not create it). Nothing was applied and no release
+              was recorded.
+            - `conflict` with `detail: version not published`: the target
+              version cannot back a release. A different name will not fix it
+              either.
+            - `conflict` otherwise: a release of that name already exists in
+              the cluster and namespace. Pick another name.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -1037,13 +1050,27 @@ paths:
                 properties:
                   id: { type: string, format: uuid }
                   version: { type: integer }
-        "400": { $ref: "#/components/responses/ValidationError" }
+        "400":
+          description: |
+            The body failed validation, or the version is deprecated or
+            unknown, or the new rendering pins a `metadata.namespace` other
+            than the release's (#137). That last case carries
+            `pinned_namespace`; a release cannot change namespace, so it is the
+            template that has to change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409":
           description: |
-            The target version is not published, so it cannot back a release.
+            Branch on `title`. `conflict`: the target version is not published,
+            so it cannot back a release. `resource-conflict`: the new rendering
+            would take over an object another release holds, or one kubeport
+            did not create. A new version can add such an object, and an exposed
+            `metadata.name` can rename one onto it (#161). `conflicts` lists
+            them; nothing was applied and the release is unchanged.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
@@ -1623,6 +1650,50 @@ components:
         title: { $ref: "#/components/schemas/ErrorKind" }
         status: { type: integer }
         detail: { type: string }
+        conflicts:
+          type: array
+          description: |
+            Only on `409 resource-conflict` (#161): each object the release
+            would have taken over, and what holds it. Name the holder from
+            here, not by parsing `detail`.
+
+            Objects are checked with the caller's token. One the caller may
+            write but not read is still found on a create, because a server-side
+            dry run shows it exists, and appears with `owner_unknown`. On an
+            update it cannot be told apart from the release's own object, so it
+            is not checked, and a 200 does not prove no such object was taken
+            over.
+          items:
+            type: object
+            required: [kind, name, namespace, owner]
+            properties:
+              kind: { type: string }
+              name: { type: string }
+              namespace: { type: string }
+              owner:
+                type: string
+                description: |
+                  The release holding the object, or "" when kubeport did not
+                  create it or when `owner_unknown` is set.
+              owner_unknown:
+                type: boolean
+                description: |
+                  The object exists but the caller may not read it, so its
+                  holder could not be looked up. Omitted when false.
+        pinned_namespace:
+          type: object
+          description: |
+            Only on a `400 validation-error` caused by a template object that
+            pins a `metadata.namespace` other than the release's (#137). The
+            template is what has to change, not the request, so a client can
+            say so instead of asking the user to check their input.
+          required: [kind, name, namespace]
+          properties:
+            kind: { type: string }
+            name: { type: string }
+            namespace:
+              type: string
+              description: The namespace the template pins.
         request_id:
           type: string
           description: |
@@ -1656,6 +1727,12 @@ components:
                             # folded this into 404 until #81; an agent reading
                             # "not found" concluded the resource was gone.
         - conflict          # 409 — name taken, or version in the wrong state
+        - resource-conflict # 409 — an object the release would create already
+                            # belongs to another release, or was not created by
+                            # kubeport (#161). `detail` names the objects and what
+                            # holds them. A different release name does not fix
+                            # it: deploy into another namespace, or remove the
+                            # holder first.
         - rate-limited      # 429 — over the per-caller budget on the SSAR and
                             # cluster-openapi routes. Carries Retry-After.
         - too-many-streams  # 429 — the caller already holds as many log

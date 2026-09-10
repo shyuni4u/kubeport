@@ -20,9 +20,19 @@ type releaseSpec struct {
 
 // releaseSpecs: one healthy release, one that fails to pull (bad tag) so the
 // failure explainer UX is visible to demo visitors (spec §4.1 seed data).
+//
+// The healthy one is deliberately not web-app. Visitors, and the reviewer
+// persona scripts, are sent to deploy web-app into this same namespace, and
+// web-app's object names are fixed by the template. A seeded web-app release
+// holds Deployment/web, Service/web and ConfigMap/web-config, so since #161
+// every visitor's web-app deploy would be refused for taking them over.
+// Before #161 it was worse: the visitor's release silently took them, and
+// deleting it deleted the seed's. nightly-job's seed release keeps
+// CronJob/nightly the same way, which is acceptable because it exists to fail,
+// and the 409 names it.
 func releaseSpecs() []releaseSpec {
 	return []releaseSpec{
-		{Name: "web-app-demo", Template: "web-app", Values: json.RawMessage(`{"Deployment[web].spec.replicas":1,"Deployment[web].spec.template.spec.containers[0].env[0].value":"Hello from the kubeport demo"}`)},
+		{Name: "app-with-config-demo", Template: "app-with-config", Values: json.RawMessage(`{"ConfigMap[app-config].data.REGION":"kr","Secret[app-secret].stringData.API_KEY":"demo-placeholder-not-a-secret"}`)},
 		{Name: "nightly-job-demo", Template: "nightly-job", Values: json.RawMessage(`{"CronJob[nightly].spec.jobTemplate.spec.template.spec.containers[0].image":"ghcr.io/does-not-exist/nightly:0.0.0"}`)},
 	}
 }
@@ -100,7 +110,7 @@ type Seeder struct {
 // runs as are barred from authoring into the shared catalog; releases stay
 // here because creating one applies manifests to the demo cluster.
 func (s *Seeder) Run(ctx context.Context) error {
-	// 201 or 409 (already seeded) are both fine.
+	// 201, or a 409 saying the release is already there, are both fine.
 	for _, r := range releaseSpecs() {
 		code, b, err := s.user.do(ctx, http.MethodPost, "/v1/releases", map[string]any{
 			"template": r.Template, "version": 1, "cluster": s.cluster, "namespace": s.ns, "name": r.Name, "values": r.Values,
@@ -112,6 +122,14 @@ func (s *Seeder) Run(ctx context.Context) error {
 		case http.StatusCreated:
 			log.Printf("release %s created", r.Name)
 		case http.StatusConflict:
+			// Only a name clash means "already seeded". resource-conflict means
+			// something else holds the objects this release would create, a
+			// visitor's release say, and the seed release was NOT created.
+			// Skipping that as done would leave a demo that reports itself seeded
+			// while missing a release, which is #117 over again.
+			if problemTitle(b) == "resource-conflict" {
+				return fmt.Errorf("create release %s: its objects belong to something else: %s", r.Name, b)
+			}
 			log.Printf("release %s exists, skipping", r.Name)
 		default:
 			// Anything else is a real failure (bad values, cluster unreachable,
@@ -123,4 +141,16 @@ func (s *Seeder) Run(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// problemTitle returns the error kind of an RFC 7807 body, or "" when b is not
+// one.
+func problemTitle(b []byte) string {
+	var p struct {
+		Title string `json:"title"`
+	}
+	if json.Unmarshal(b, &p) != nil {
+		return ""
+	}
+	return p.Title
 }

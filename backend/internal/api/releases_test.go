@@ -76,6 +76,24 @@ type fakeK8sApplier struct {
 	accessChecks []k8s.AccessCheck
 	accessResult k8s.AccessResult
 	accessErr    error
+
+	// applyCheck is what CheckApply reports; applyCheckErr overrides it.
+	// checkedReleases records the release each call was made for, so a test
+	// can assert the check ran, or that a request refused earlier never
+	// reached it.
+	applyCheck      k8s.ApplyCheck
+	applyCheckErr   error
+	checkedReleases []string
+	checkedCreating []bool
+}
+
+func (f *fakeK8sApplier) CheckApply(_ context.Context, _, release string, _ []byte, creating bool) (k8s.ApplyCheck, error) {
+	f.checkedReleases = append(f.checkedReleases, release)
+	f.checkedCreating = append(f.checkedCreating, creating)
+	if f.applyCheckErr != nil {
+		return k8s.ApplyCheck{}, f.applyCheckErr
+	}
+	return f.applyCheck, nil
 }
 
 func (f *fakeK8sApplier) ApplyAll(_ context.Context, _ string, y []byte) error {

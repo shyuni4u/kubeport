@@ -17,9 +17,12 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// ApplyAll server-side applies every doc in a multi-document YAML stream.
-// Objects without metadata.namespace inherit the namespace argument.
-// All documents are attempted even if some fail; errors are aggregated.
+// ApplyAll server-side applies every doc in a multi-document YAML stream into
+// namespace. An object without metadata.namespace is placed there; one that
+// names a different namespace is refused (see placeInNamespace). All documents
+// are attempted even if some fail; errors are aggregated.
+//
+// It does not look at who owns what it overwrites. Call CheckApply first.
 func (c *Client) ApplyAll(ctx context.Context, namespace string, multiDoc []byte) error {
 	objs, err := splitYAML(multiDoc)
 	if err != nil {
@@ -46,8 +49,11 @@ func (c *Client) ApplyAll(ctx context.Context, namespace string, multiDoc []byte
 			Version:  gvk.Version,
 			Resource: plural,
 		}
-		if o.GetNamespace() == "" {
-			o.SetNamespace(namespace)
+		// Enforced here as well as in CheckApply because not every apply is
+		// preceded by a check: UpdateRelease's rollback re-applies stored YAML.
+		if err := placeInNamespace(o, namespace); err != nil {
+			errs = append(errs, err)
+			continue
 		}
 		buf, err := yaml.Marshal(o.Object)
 		if err != nil {

@@ -40,6 +40,8 @@ type updateReleaseReq struct {
 //  2. Resolve the target template version by (template_id, version). Reject
 //     deprecated (400) / unpublished (409) / unknown (400).
 //  3. Render the new YAML — validation errors surface as 400.
+//     Check the rendered objects' ownership — another release's objects →
+//     409 resource-conflict, a pinned foreign namespace → 400 (#161, #137).
 //  4. Apply new YAML to k8s — failure → 502 (DB untouched).
 //  5. Update DB. If the UPDATE fails after a successful apply, re-apply
 //     the old YAML to keep k8s and DB consistent, then return 500.
@@ -129,6 +131,12 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 	cli, err := h.deps.K8sFactory.NewWithToken(rel.ClusterApiUrl, rel.ClusterCaBundle.String, u.IDToken)
 	if err != nil {
 		internalError(c, "UpdateRelease: k8s client", err)
+		return
+	}
+	// A new version can add an object, and an exposed metadata.name can rename
+	// one, so an update can land on another release's objects as readily as a
+	// create can (#161).
+	if !h.checkOwnership(c, cli, "UpdateRelease", rel.Namespace, rel.Name, rendered) {
 		return
 	}
 	if err := cli.ApplyAll(ctx, rel.Namespace, rendered); err != nil {

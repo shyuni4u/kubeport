@@ -267,6 +267,13 @@ ssh -i "$KEY" ubuntu@168.107.55.95 \
   이 값이 빠지면 `/healthz?verbose=1` 이 카탈로그 수를 내지 않고,
   `uptime-ping.yml` 이 10분 안에 "카탈로그 필드 없음" 으로 실패한다 — 데모가 멀쩡해도.
   그건 오탐이 아니라 설계된 신호다(감시가 꺼진 것을 감시가 알린다). 배포 직후 확인할 것.
+- ⚠️ **시드 릴리스 구성이 바뀐 버전을 올렸으면 롤아웃 직후 데모 리셋을 한 번 수동 실행한다.**
+  해당: #161 (`web-app-demo` → `app-with-config-demo`). 안 하면 다음 21:00 UTC 까지 옛
+  `web-app-demo` 가 `Deployment/web`·`Service/web`·`ConfigMap/web-config` 를 쥐고 있어
+  **방문자의 `web-app` 배포가 전부 409 `resource-conflict`** 다. 리셋은 `kubectl delete --all` 로
+  오브젝트를, `seed-demo --reset` 으로 행을 비운 뒤 새로 시드하므로 한 번이면 된다. 절차는 §5
+  "리셋" 의 수동 실행 블록, 확인은 로그 마지막 줄 `seed-demo: done` 과 `/releases` 에
+  `app-with-config-demo` 가 보이는지.
 - 롤아웃 직후 잠깐 `502` 가 날 수 있음(구 파드 종료↔신 파드 준비) — 30초 뒤 정상.
 
 ### 3-3. 배포 확인
@@ -465,6 +472,7 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
   kubectl -n kubeport logs "job/$JOB" -c seed -f    # 마지막 줄 `seed-demo: done`
   ```
   wipe 단계가 `demo` ns 의 configmap 을 전부 지우므로 `kube-root-ca.crt deleted` 가 찍히는 건 정상(자동 재생성).
+  **시드 릴리스 구성을 바꾸는 배포 뒤에는 이 수동 실행이 필수다** (§3-2).
 - **오너 RBAC**: 오너 Google 이메일의 cluster-admin 바인딩 이름은 `kubeport-owner-admin`
   (예전 이름 `kubeport-demo-admin` 은 이름과 달리 오너 바인딩이었음 — 삭제 전 subject 확인).
   데모 계정은 chart 의 `demo` ns RoleBinding 만 갖는다. 검증: `kubectl auth can-i create deployments --as=dex:demo-user@demo.kubeport -n default` → **no**.

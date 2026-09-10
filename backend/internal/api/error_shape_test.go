@@ -75,6 +75,12 @@ var allowedErrorKinds = map[string]bool{
 	// the right client response differs: signing in again fixes the second
 	// kind of 401 and never fixes this one.
 	"cluster-auth-denied": true,
+	// 409 when an object a release would create already belongs to another
+	// release, or to nothing kubeport created (#161). Not folded into
+	// `conflict`: a name clash is fixed by choosing another name and this is
+	// not, and the demo seeder treats `conflict` as "already seeded", which
+	// would turn a refused seed release into a silently missing one.
+	"resource-conflict": true,
 	// 429 from the SSAR proxy's per-caller budget (#73). Distinct from
 	// rbac-denied on purpose: the caller is allowed, just too fast, and the
 	// right client response is to back off rather than to give up.
