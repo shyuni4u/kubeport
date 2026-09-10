@@ -126,3 +126,36 @@ func TestField_ValidateNamesAnUnlabelledFieldByPath(t *testing.T) {
 
 	require.EqualError(t, err, "Deployment[web].spec.replicas: not an integer")
 }
+
+// Security review of #136: Validate checked a converted copy, while Render
+// writes the value it was sent. A fractional number was truncated to pass
+// max, and an enormous one saturated past min; both were then written as sent.
+func TestField_ValidateIntegerChecksTheValueThatIsWritten(t *testing.T) {
+	two, one := 2, 1
+	cases := map[string]struct {
+		field template.Field
+		value any
+	}{
+		"fraction under max":   {template.Field{Label: "cpu", Type: template.TypeInteger, Max: &two}, 2.9},
+		"huge number past min": {template.Field{Label: "n", Type: template.TypeInteger, Min: &one}, 1e300},
+		"negative huge":        {template.Field{Label: "n", Type: template.TypeInteger}, -1e300},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			require.Error(t, tc.field.Validate(tc.value))
+		})
+	}
+
+	// Whole numbers, as JSON delivers them, still pass.
+	require.NoError(t, template.Field{Label: "n", Type: template.TypeInteger, Max: &two}.Validate(float64(2)))
+}
+
+// An enum is matched on the value's string form, so a composite value printed
+// the same way as a listed value must not slip through.
+func TestField_ValidateEnumRefusesCompositeValues(t *testing.T) {
+	f := template.Field{Label: "mode", Type: template.TypeEnum, Values: []string{"[a]", "map[]"}}
+
+	require.Error(t, f.Validate([]any{"a"}))
+	require.Error(t, f.Validate(map[string]any{}))
+	require.NoError(t, f.Validate("[a]"), "the listed string itself is fine")
+}

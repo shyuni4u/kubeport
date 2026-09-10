@@ -101,6 +101,15 @@ func (f Field) Validate(v any) error {
 			return fmt.Errorf("%s: not a boolean", f.name())
 		}
 	case TypeEnum:
+		// Membership is checked on the string form, so only a scalar may be
+		// compared that way. An array or object printed by fmt.Sprint could
+		// still match a listed value spelled like "[a]" and go into the manifest
+		// whole — the #136 class with a known type (security review).
+		switch v.(type) {
+		case string, float64, bool:
+		default:
+			return fmt.Errorf("%s: not one of %v", f.name(), f.Values)
+		}
 		s := fmt.Sprint(v)
 		for _, vv := range f.Values {
 			if s == vv {
@@ -119,6 +128,14 @@ func (f Field) Validate(v any) error {
 	return nil
 }
 
+// maxExactInt is the largest magnitude a float64 holds every integer up to.
+const maxExactInt = 1 << 53
+
+// toInt accepts a whole number only. Every JSON number arrives as float64, and
+// Render writes the value it was given, not this conversion: truncating 2.9 to
+// 2 let it pass max 2 while 2.9 went into the manifest, and converting an
+// out-of-range float is implementation-defined in Go (it saturates on arm64),
+// so 1e300 could pass a min and be written as 1e300 (security review of #136).
 func toInt(v any) (int, bool) {
 	switch x := v.(type) {
 	case int:
@@ -126,7 +143,14 @@ func toInt(v any) (int, bool) {
 	case int64:
 		return int(x), true
 	case float64:
-		return int(x), true
+		if x < -maxExactInt || x > maxExactInt {
+			return 0, false
+		}
+		i := int64(x)
+		if float64(i) != x {
+			return 0, false
+		}
+		return int(i), true
 	}
 	return 0, false
 }
