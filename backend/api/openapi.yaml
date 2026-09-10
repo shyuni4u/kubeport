@@ -679,7 +679,18 @@ paths:
       tags: [templates]
       operationId: updateTemplate
       summary: Edit template metadata
-      description: Only the fields present in the body are changed.
+      description: |
+        Only the fields present in the body are changed.
+
+        Every change to an existing template — this route,
+        createTemplateVersion, updateTemplateVersion, deleteTemplateVersion,
+        publishTemplateVersion, deprecateTemplateVersion and
+        undeprecateTemplateVersion — refuses a template the caller cannot see
+        (one the template list leaves out for them) with the same 404 as a name
+        that matches no template (#244). A 403 with its reason is only for a
+        template the caller can see but may not change. Creating a template is
+        different: names are unique across the install, so createTemplate's 409
+        also collides with a name the caller cannot see.
       parameters: [{ $ref: "#/components/parameters/TemplateName" }]
       requestBody:
         required: true
@@ -1538,15 +1549,22 @@ components:
         `title` says who refused: `rbac-denied` is kubeport's own check or the
         cluster's RBAC; `demo-restricted` is the demo gate — a management write
         demo accounts never get, template creation on an install without
-        demo.allowTemplateCreate, or a read or change of a template or release
-        that no demo account owns.
+        demo.allowTemplateCreate, or a read or change of a release that no demo
+        account owns. A template on the other side of the demo line is not a
+        403: reading, changing or deploying it answers 404 like a missing one
+        (#238, #244).
       headers:
         X-Request-Id: { $ref: "#/components/headers/RequestId" }
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Problem" }
     NotFound:
-      description: No such resource.
+      description: |
+        No such resource. On template routes this is also the answer for a
+        template the caller cannot see — one the template list leaves out for
+        them — whether they read, render or change it, or deploy one across
+        the demo line (#226, #238, #244); a 403 on those routes means the
+        caller can see the template.
       headers:
         X-Request-Id: { $ref: "#/components/headers/RequestId" }
       content:

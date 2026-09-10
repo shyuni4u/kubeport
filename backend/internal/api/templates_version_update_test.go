@@ -122,6 +122,6 @@ func TestUpdateDraftTemplateVersion_NonAdminGlobalDenied(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{"resources_yaml": minimalResources})
 	w := do(t, nonAdmin, http.MethodPatch, "/v1/templates/"+name+"/versions/1", bytes.NewReader(body))
-	require.Equal(t, http.StatusForbidden, w.Code, "body=%s", w.Body.String())
-	require.Contains(t, w.Body.String(), "global template requires kubeport-admin")
+	require.Equal(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
+	require.Contains(t, w.Body.String(), "not-found")
 }

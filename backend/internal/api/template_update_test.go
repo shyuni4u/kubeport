@@ -90,7 +90,7 @@ func TestUpdateTemplate_NonAdminDeniedOnGlobal(t *testing.T) {
 
 	w := do(t, userR, http.MethodPatch, "/v1/templates/"+name,
 		bytes.NewReader([]byte(`{"display_name":"x"}`)))
-	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestUpdateTemplate_TeamEditorAllowed(t *testing.T) {
@@ -167,7 +167,7 @@ func TestUpdateTemplate_OtherTeamEditorDenied(t *testing.T) {
 
 	w := do(t, userR, http.MethodPatch, "/v1/templates/"+name,
 		bytes.NewReader([]byte(`{"display_name":"hacked"}`)))
-	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
 }
 
 func TestUpdateTemplate_ClearTagsWithEmptyArray(t *testing.T) {

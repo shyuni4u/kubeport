@@ -227,13 +227,24 @@ func (h *Handlers) evaluateTemplateAccess(ctx context.Context, rc *reqCache, own
 	return h.evaluateTeamRole(ctx, rc, own.OwningTeamID, requireEditor)
 }
 
-// ensureTemplateEditor loads the template by name from the URL and writes a
-// 403 response if the caller can't mutate it. Returns (template, true) when
-// allowed, or (zero, false) when the response has already been written.
+// ensureTemplateEditor loads the template by name from the URL and refuses a
+// caller who can't mutate it. Returns (template, true) when allowed, or
+// (zero, false) when the response has already been written.
+//
+// A template the caller may not even see is refused exactly as a name that
+// does not exist (#244): the reason for refusing would confirm the name the
+// list and the read routes hide. The reasoned 403 is for templates the caller
+// can see — published ones, or a team viewer's own team's.
 func (h *Handlers) ensureTemplateEditor(c *gin.Context, name string) (store.GetTemplateByNameRow, bool) {
 	tpl, err := h.deps.Store.GetTemplateByName(c, name)
 	if err != nil {
 		writeError(c, http.StatusNotFound, "not-found", "template "+name)
+		return store.GetTemplateByNameRow{}, false
+	}
+	// The demo line comes first, as on the read routes: team roles do not
+	// cross it, so an editor of the owning team on the other side of the line
+	// must not write what they cannot read.
+	if h.templateHiddenByDemoScope(c, tpl.OwnerUserID, "template "+name) {
 		return store.GetTemplateByNameRow{}, false
 	}
 	d, err := h.evaluateTemplateAccess(c.Request.Context(), nil, ownershipOf(tpl), true)
@@ -243,15 +254,34 @@ func (h *Handlers) ensureTemplateEditor(c *gin.Context, name string) (store.GetT
 		return store.GetTemplateByNameRow{}, false
 	}
 	if d != nil {
-		if d == denyDemoScope {
-			// Keep the pre-existing wording for the mutation path.
-			writeError(c, d.status, d.code, "demo accounts can only edit demo-owned templates")
+		hidden, err := h.neverPublishedAndUnreadable(c, tpl)
+		if err != nil {
+			log.Printf("ensureTemplateEditor: %v", err)
+			writeError(c, http.StatusInternalServerError, "internal", "failed to authorize template access")
+			return store.GetTemplateByNameRow{}, false
+		}
+		if hidden {
+			writeError(c, http.StatusNotFound, "not-found", "template "+name)
 			return store.GetTemplateByNameRow{}, false
 		}
 		d.write(c)
 		return store.GetTemplateByNameRow{}, false
 	}
 	return tpl, true
+}
+
+// neverPublishedAndUnreadable reports whether the template list leaves tpl out
+// for this caller on the draft rule: it was never published and the caller may
+// not read its drafts.
+func (h *Handlers) neverPublishedAndUnreadable(c *gin.Context, tpl store.GetTemplateByNameRow) (bool, error) {
+	if tpl.CurrentVersionID.Valid {
+		return false, nil
+	}
+	canRead, err := h.canReadTemplate(c.Request.Context(), nil, ownershipOf(tpl))
+	if err != nil {
+		return false, err
+	}
+	return !canRead, nil
 }
 
 // canReadTemplate is the soft form of the read rule, for callers that filter
