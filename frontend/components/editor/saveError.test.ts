@@ -36,6 +36,15 @@ describe("saveErrorMessage", () => {
     expect(msg).not.toBe(ko.templates.editor.errors.forbidden);
   });
 
+  // On the new-template screen the demo gate refuses creation itself — "can
+  // only edit demo templates" would name a rule that did not apply.
+  it("says creation is turned off when a new template is refused as demo-restricted", async () => {
+    const msg = await saveErrorMessage(t, res(403, '{"title":"demo-restricted","status":403}'), {
+      creating: true,
+    });
+    expect(msg).toBe(ko.templates.editor.errors.demoCreateRestricted);
+  });
+
   it("keeps the permission sentence for a 403 of any other kind", async () => {
     expect(await saveErrorMessage(t, res(403, '{"title":"rbac-denied","status":403}'))).toBe(
       ko.templates.editor.errors.forbidden,

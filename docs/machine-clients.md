@@ -125,8 +125,10 @@ curl -ks -X POST https://host.docker.internal:5556/token \
 운영에서도 통한다.** 다만 쓸모가 제한된다:
 
 - `dex.clientSecret` 이 필요하다 — 클러스터 Secret 이라 `kubectl` 을 가진 사람만 얻는다.
-- 얻은 신원은 데모 도메인이라 `denyDemo` 가 걸린 라우트(`POST /v1/clusters`, `POST /v1/teams`,
-  팀 멤버 추가·삭제)에서 **403 `demo-restricted`** 다.
+- 얻은 신원은 데모 도메인이라 다음에서 **403 `demo-restricted`** 다: 항상 막히는 관리 쓰기(`POST /v1/clusters`,
+  `POST /v1/clusters/:name/openapi/refresh`, `POST /v1/teams`, 팀 멤버 추가·삭제, `DELETE /v1/releases/:id?force=true`),
+  설치가 `demo.allowTemplateCreate=true` 를 켜지 않았을 때의 `POST /v1/templates`, 그리고 데모 계정이 만들지 않은
+  템플릿·릴리스의 읽기·변경.
 - k8s 쪽 권한도 `demo` 네임스페이스로 묶여 있다(`templates/demo-rbac.yaml`).
 
 그래서 **데모 범위의 스모크 자동화는 가능하고, 실사용자 권한으로 운영을 자동화하는 경로는 여전히

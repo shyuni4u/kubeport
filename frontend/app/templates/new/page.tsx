@@ -205,7 +205,7 @@ function UIModeNew({ onDirty }: ModeProps) {
           ui_state: uiState,
         }),
       });
-      if (!res.ok) { setErr(await saveErrorMessage(t, res)); return; }
+      if (!res.ok) { setErr(await saveErrorMessage(t, res, { creating: true })); return; }
       onDirty(false);
       // The detail page is where the new draft gets published.
       router.push(`/templates/${meta.name}`);
@@ -425,7 +425,7 @@ function YamlModeNew({ onDirty }: ModeProps) {
           ui_spec_yaml: uispecYaml,
         }),
       });
-      if (!res.ok) { setErr(await saveErrorMessage(t, res)); return; }
+      if (!res.ok) { setErr(await saveErrorMessage(t, res, { creating: true })); return; }
       onDirty(false);
       // The detail page is where the new draft gets published.
       router.push(`/templates/${meta.name}`);
