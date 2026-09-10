@@ -138,7 +138,18 @@ paths:
     get:
       tags: [meta]
       operationId: healthz
-      summary: Liveness probe
+      summary: Liveness probe, build version, and (opt-in) catalog size
+      description: |
+        The bare path is what the kubelet probes hit: a constant, no database.
+
+        `version` is on every response. It is the short git sha the image was
+        built from — the same seven characters as the image's `sha-<7>` tag —
+        or `dev` for a binary built without one. The deploy workflow polls it
+        to confirm a rollout actually landed.
+
+        `?verbose=1` adds `catalog` only where the operator opted in
+        (`KBP_HEALTH_PUBLIC_CATALOG`); otherwise it is the same body as the bare
+        path. The status is 200 either way — callers branch on the body.
       security: []
       parameters:
         - name: verbose
@@ -148,19 +159,37 @@ paths:
             `1` adds detail to the body — on a demo install with a public
             catalog, the published template count, which the uptime ping
             asserts is non-zero so an empty demo is noticed. Any other value,
-            or none, returns just `{"status": "ok"}`. The status is 200 either
-            way: this path backs the readiness probe, and failing it over a
-            reporting problem would take the pod out of service.
+            or none, returns the bare body `{"status": "ok", "version": "<sha7>"}`.
+            The status is 200 either way: this path backs the readiness probe,
+            and failing it over a reporting problem would take the pod out of
+            service.
           schema: { type: string, enum: ["1"] }
       responses:
         "200":
-          description: Process is up. Does not check the database.
+          description: Process is up. The bare path does not check the database.
           content:
             application/json:
               schema:
                 type: object
+                required: [status, version]
                 properties:
-                  status: { type: string, const: ok }
+                  status:
+                    type: string
+                    enum: [ok, degraded]
+                    description: "`degraded` only on `?verbose=1`, when the catalog count could not be read."
+                  version:
+                    type: string
+                    description: Short git sha of the build, or `dev`.
+                    examples: [c9b1404]
+                  catalog:
+                    type: object
+                    description: Present only on `?verbose=1` when catalog reporting is opted in.
+                    required: [available]
+                    properties:
+                      available: { type: boolean }
+                      templates:
+                        type: integer
+                        description: Published, demo-owned templates. Absent when `available` is false.
 
   /v1/me:
     get:

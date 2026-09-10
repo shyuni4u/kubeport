@@ -1,0 +1,250 @@
+name: deploy
+
+# Deploys main to production (https://kubeport.enzo.kr) once its images exist.
+#
+# The workflow holds no cluster credentials. It holds an SSH key that the VM
+# pins to one program — deploy/oci/kubeport-deploy.sh, via
+# `restrict,command="... --forced"` in authorized_keys — which accepts exactly
+# `deploy <40-hex sha>` and `status`, checks the sha is on main and no older
+# than what is live, takes the same lock a manual deploy takes, refuses anything
+# that would restart Dex, and lets helm roll back on failure. What the key can
+# do is what that script does. It cannot roll back: that is the admin key's
+# `kubeport-deploy deploy <sha>` (docs/oci-prod-runbook.md §3-2).
+#
+# Runs only in shyuni4u/kubeport: a fork or a self-hosted copy has no VM and no
+# `production` environment, and would otherwise go red on every main push.
+#
+# Setup (keys, environment secrets, VM install): deploy/oci/README.md "자동 배포 설치".
+# Operating it, and the manual path: docs/oci-prod-runbook.md §3.
+
+on:
+  workflow_run:
+    workflows: [build-images]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Full 40-char sha of a main commit, equal to or newer than live (redeploy, or catch up). Rolling back is not possible here — use the admin key: runbook §3-2. `git rev-parse origin/main` after a fetch."
+        required: true
+        type: string
+      verify_version:
+        description: "Wait for /api/healthz to report this sha. Turn off only if the build predates the `version` field."
+        required: false
+        type: boolean
+        default: true
+
+# contents: read — nothing is checked out; it is the floor.
+# actions: read — ask whether build-images succeeded for a dispatched sha.
+permissions:
+  contents: read
+  actions: read
+
+# One deploy at a time, and a running deploy is never cancelled: killing the
+# ssh session mid-`helm upgrade` would leave the release in pending-upgrade,
+# which blocks every later upgrade until someone runs `helm rollback` by hand.
+# GitHub keeps only the newest *pending* run per group, so a burst of merges
+# collapses to "the one running" + "the newest waiting" — which is what we want.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+env:
+  REPO: ${{ github.repository }}
+  HEALTH_URL: https://kubeport.enzo.kr/api/healthz
+
+jobs:
+  deploy:
+    # workflow_run fires for every completed build-images run. Only a
+    # successful build of a push to main in this repository publishes the
+    # `sha-<7>` images a deploy needs: a PR run builds without pushing, a tag
+    # build is a release rather than main, and a dispatched build may be of any
+    # branch. `branches: [main]` above already filters head_branch; it is
+    # repeated here so the condition reads completely in one place.
+    #
+    # The repository check comes first: in a fork every clause after it would
+    # pass, and the job would fail on the missing secrets (see the header).
+    if: >-
+      github.repository == 'shyuni4u/kubeport' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    # The OCI_DEPLOY_* secrets are environment secrets of `production`, whose
+    # deployment-branch policy allows main only — a workflow run on any other
+    # ref cannot read the deploy key even if this file is edited on a branch.
+    environment: production
+    runs-on: ubuntu-latest
+    # Deploy step 45m + health wait 5m + resolve.
+    timeout-minutes: 60
+    steps:
+      - name: Resolve the sha to deploy
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          # Passed through env, never interpolated into the script: an input
+          # is user-controlled text.
+          INPUT_SHA: ${{ inputs.sha }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = workflow_dispatch ]; then sha=$INPUT_SHA; else sha=$RUN_SHA; fi
+          if ! printf '%s' "$sha" | grep -Eqx '[0-9a-f]{40}'; then
+            echo "::error title=Bad sha::Expected a full 40-character lowercase sha, got '$sha'."
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "short=${sha:0:7}" >> "$GITHUB_OUTPUT"
+
+          head=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          echo "origin/main is $head"
+
+          if [ "$EVENT" = workflow_run ] && [ "$sha" != "$head" ]; then
+            # Skip when main has already moved past this commit.
+            #
+            # A newer commit means a newer build-images run, and its completion
+            # triggers its own deploy, which carries this commit's changes too.
+            # Deploying this one first would roll out twice for nothing — and
+            # because builds finish in any order, a slow build of an OLDER
+            # commit finishing after a newer deploy would roll production
+            # backwards. Checking at run time (not trigger time) also covers a
+            # run that waited in the concurrency queue while main moved.
+            #
+            # The cost: if the newer build fails, nothing deploys until it is
+            # fixed. That build's red run is the signal, and this sha can still
+            # be shipped with workflow_dispatch, which never skips.
+            echo "::notice title=Skipped::main is at ${head:0:7}, newer than ${sha:0:7}; that commit's build will deploy both."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+          if [ "$EVENT" = workflow_dispatch ]; then
+            # workflow_run already proves the images exist. A dispatched sha
+            # proves nothing, and a missing tag ends in ImagePullBackOff, a
+            # 10-minute helm timeout and a rollback. Ask first.
+            status=$(gh api "repos/$REPO/compare/main...$sha" --jq .status)
+            case $status in
+              behind|identical) ;;
+              *) echo "::error title=Not on main::$sha is not a main commit (compare: $status)."; exit 1 ;;
+            esac
+            ok=$(gh api "repos/$REPO/actions/workflows/build-images.yml/runs?head_sha=$sha&event=push&status=success&per_page=1" --jq .total_count)
+            if [ "$ok" = 0 ]; then
+              echo "::error title=No images::No successful push build of build-images for $sha, so sha-${sha:0:7} may not exist in ghcr."
+              exit 1
+            fi
+          fi
+
+      - name: Deploy over SSH
+        if: steps.target.outputs.skip != 'true'
+        # Must outlast the worst case on the VM, or Actions kills the ssh
+        # session mid-`helm upgrade` and leaves the release pending-upgrade:
+        # lock wait 10m + helm --timeout 10m (plus --atomic's rollback, which
+        # waits again) + two 2m rollout checks + chart fetch. 45m covers it.
+        timeout-minutes: 45
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+          DEPLOY_KEY: ${{ secrets.OCI_DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.OCI_DEPLOY_KNOWN_HOSTS }}
+          # The public IP is ephemeral (runbook §1) — a secret, so a stop/start
+          # is a secret update rather than a commit.
+          HOST: ${{ secrets.OCI_DEPLOY_HOST }}
+        run: |
+          # Actions runs `bash -e`; `set -uo pipefail` alone keeps -e, so a
+          # nonzero ssh (a Dex refusal included) would end the step before
+          # rc is read — skipping the exit-code annotation, summary and key
+          # removal below. Turn errexit off explicitly.
+          set +e
+          set -uo pipefail
+          for v in DEPLOY_KEY KNOWN_HOSTS HOST; do
+            if [ -z "${!v}" ]; then
+              echo "::error title=Missing secret::OCI_DEPLOY_* secrets are not set. See deploy/oci/README.md \"자동 배포 설치\"."
+              exit 1
+            fi
+          done
+          key="$RUNNER_TEMP/deploy_key"
+          kh="$RUNNER_TEMP/known_hosts"
+          ( umask 077 && printf '%s\n' "$DEPLOY_KEY" > "$key" && printf '%s\n' "$KNOWN_HOSTS" > "$kh" )
+
+          # StrictHostKeyChecking=yes against a pinned known_hosts: a changed
+          # host key (or a reused IP) fails the deploy instead of handing a
+          # stranger the request. The command sent is only a request — the
+          # forced command on the VM decides what runs.
+          ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$kh" \
+              -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 \
+              "ubuntu@$HOST" "deploy $SHA" 2>&1 | tee "$RUNNER_TEMP/deploy.log"
+          rc=${PIPESTATUS[0]}
+          rm -f "$key"
+
+          # Branch on the script's result line, not the exit code: exit 1
+          # covers "nothing changed", "rolled back" and "new revision live but
+          # unverified", which need opposite responses. Anchored, so log text
+          # (the script prefixes its own lines) cannot pass for a result.
+          result=$(grep -Eo '^KUBEPORT_DEPLOY_RESULT=[a-z-]+$' "$RUNNER_TEMP/deploy.log" | tail -1 | cut -d= -f2)
+          case $result in
+            deployed) echo "::notice title=Deployed::sha-${SHA:0:7} is rolled out." ;;
+            dex-guard-refused)
+              echo "::error title=Refused: this deploy would restart Dex::Nothing was changed. Dex keeps its signing keys in memory, and after a restart the apiserver keeps the old ones (demo logins work, cluster calls 401, /healthz stays green). Deploy by hand with --allow-dex-restart and restart k3s right after — the exact commands are in the log above and in docs/oci-prod-runbook.md §3-4."
+              ;;
+            refused-not-forward)
+              echo "::error title=Refused: not forward of live::Nothing was changed. $SHA is older than (or not comparable with) what production runs, and the deploy key only moves forward. To roll back, use the admin key: kubeport-deploy deploy <sha> (docs/oci-prod-runbook.md §3-2)."
+              ;;
+            rejected) echo "::error title=Rejected::Nothing was changed. The VM refused the request's format — or its authorized_keys line lacks --forced (deploy/oci/README.md \"자동 배포 설치\" step 3)." ;;
+            lock-busy) echo "::error title=Lock busy::Nothing was changed. Another deploy (probably a manual one) held the lock for 10 minutes. Re-run once it finishes: 'kubeport-deploy status'." ;;
+            unverified) echo "::error title=Unverified::Nothing was changed. The VM could not confirm $SHA is on main, or could not fetch its chart from GitHub." ;;
+            aborted-before-upgrade) echo "::error title=Stopped before upgrade::Nothing was changed on the cluster. The script stopped before helm upgrade (values, chart render, Dex comparison or a pending release) — the reason is the ERROR line above." ;;
+            failed-rolled-back) echo "::error title=Deploy failed, rolled back::helm upgrade failed and helm rolled the release back. Production is on the previous revision (see the history above)." ;;
+            failed-rollout|failed-image-mismatch|failed-values-drift|failed-after-upgrade)
+              echo "::error title=Live but not verified ($result)::The NEW revision is running and was NOT rolled back. Read the history and the ERROR above, then keep it or roll back with the admin key (docs/oci-prod-runbook.md §3-0)."
+              ;;
+            failed-during-upgrade) echo "::error title=Ended during upgrade::The state is unknown. Run 'kubeport-deploy status'; a pending-upgrade release is fixed by runbook §7." ;;
+            "")
+              if [ "$rc" = 255 ]; then
+                echo "::error title=SSH failed::No result from the VM. If the log above never reached the script, the VM was unreachable: after a stop/start its public IP changed — update OCI_DEPLOY_HOST and OCI_DEPLOY_KNOWN_HOSTS. If it shows helm upgrade starting, the session dropped mid-deploy: run 'kubeport-deploy status'."
+              else
+                echo "::error title=No result::The VM ended without a result line (exit $rc). The state is unknown: run 'kubeport-deploy status'."
+              fi
+              ;;
+            *) echo "::error title=Unknown result::'$result' (exit $rc) — deploy.yml does not know this result; read the log above." ;;
+          esac
+          {
+            echo "### deploy ${SHA:0:7}"
+            echo
+            echo "exit: \`$rc\` — result: \`${result:-none}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$rc" = 0 ] && [ "$result" != deployed ]; then rc=1; fi
+          exit "$rc"
+
+      # helm reported ready; this confirms the public URL actually serves the
+      # new build (ingress, endpoints, the BFF in front of the backend).
+      #
+      # uptime-ping.yml runs every 10 minutes against the same host. A rollout
+      # can put one of its pings on the brief 502 window (runbook §3-2), so a
+      # single red uptime-ping right after a deploy should be read against this
+      # run's timestamp before anyone goes looking for an outage.
+      - name: Wait for /api/healthz to report the new version
+        if: steps.target.outputs.skip != 'true' && (github.event_name != 'workflow_dispatch' || inputs.verify_version)
+        env:
+          SHORT: ${{ steps.target.outputs.short }}
+        run: |
+          set -uo pipefail
+          deadline=$((SECONDS + 300))
+          seen=""
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            body=$(curl -sS --max-time 10 "$HEALTH_URL" || true)
+            version=$(printf '%s' "$body" | jq -r '.version // empty' 2>/dev/null || true)
+            if [ "$version" != "$seen" ]; then
+              echo "$(date -u +%H:%M:%S) version=${version:-<none>} body=${body:0:200}"
+              seen=$version
+            fi
+            if [ "$version" = "$SHORT" ]; then
+              echo "::notice title=Live::$HEALTH_URL reports $SHORT."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error title=Version not live::helm finished, but $HEALTH_URL still reports '${seen:-<none>}' after 5 minutes, not $SHORT. Check the ingress and pods (runbook §3-3)."
+          exit 1

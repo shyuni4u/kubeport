@@ -26,9 +26,39 @@ func healthBody(t *testing.T, h gin.HandlerFunc, target string) map[string]any {
 // The kubelet probes hit the bare path every 10 and 20 seconds. They must stay
 // a constant — no database, no catalog key to parse.
 func TestHealthz_BarePathStaysAConstant(t *testing.T) {
+	body := healthBody(t, healthz(Deps{Version: "abc1234"}, &catalogGauge{}), "/healthz")
+
+	require.Equal(t, map[string]any{"status": "ok", "version": "abc1234"}, body)
+}
+
+// The deploy workflow polls /api/healthz until `version` equals the sha it
+// just shipped, so the field has to be on every shape of the response — the
+// bare probe path and the verbose one, catalog or not.
+func TestHealthz_VersionIsAlwaysPresent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		deps Deps
+		url  string
+	}{
+		{"bare", Deps{Version: "abc1234"}, "/healthz"},
+		{"verbose", Deps{Version: "abc1234"}, "/healthz?verbose=1"},
+		{"verbose, catalog opted in without store", Deps{Version: "abc1234", HealthPublicCatalog: true}, "/healthz?verbose=1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := healthBody(t, healthz(tc.deps, &catalogGauge{}), tc.url)
+
+			require.Equal(t, "abc1234", body["version"])
+		})
+	}
+}
+
+// A binary built without -ldflags (go run, go test, a local docker build that
+// forgot the arg) still answers with a non-empty version, so a consumer never
+// has to tell "missing" from "empty".
+func TestHealthz_UnsetVersionReportsDev(t *testing.T) {
 	body := healthBody(t, healthz(Deps{}, &catalogGauge{}), "/healthz")
 
-	require.Equal(t, map[string]any{"status": "ok"}, body)
+	require.Equal(t, "dev", body["version"])
 }
 
 // #119: without a store the endpoint must still answer, so a misconfigured
@@ -45,7 +75,7 @@ func TestHealthz_VerboseWithoutStoreOmitsCatalog(t *testing.T) {
 func TestHealthz_CatalogIsWithheldUnlessOptedIn(t *testing.T) {
 	body := healthBody(t, healthz(Deps{}, &catalogGauge{}), "/healthz?verbose=1")
 
-	require.Equal(t, map[string]any{"status": "ok"}, body)
+	require.Equal(t, map[string]any{"status": "ok", "version": "dev"}, body)
 	require.NotContains(t, body, "catalog")
 }
 
@@ -56,7 +86,7 @@ func TestHealthz_OnlyVerboseOneOptsIn(t *testing.T) {
 		t.Run(q, func(t *testing.T) {
 			body := healthBody(t, healthz(Deps{}, &catalogGauge{}), q)
 
-			require.Equal(t, map[string]any{"status": "ok"}, body)
+			require.Equal(t, map[string]any{"status": "ok", "version": "dev"}, body)
 		})
 	}
 }

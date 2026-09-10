@@ -20,7 +20,8 @@
 | DNS | **GoDaddy** (`enzo.kr`, ns `domaincontrol.com`). A 레코드 2개: `kubeport` · `dex.kubeport` → 공인 IP. IP 변경 시 둘 다 갱신 |
 | prod 시크릿 | `~/.ssh/kuberport-oci/kuberport-prod-secrets.env` (600). **password manager 로 옮길 것.** 담긴 것: `APP_ENCRYPTION_KEY_B64`(분실=DB 복호화 불가), `POSTGRES_PASSWORD`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` |
 | kubeconfig (VM 내) | `/etc/rancher/k3s/k3s.yaml` (`export KUBECONFIG=...` 후 `kubectl`) |
-| Helm 릴리스 | `kubeport` (ns `kubeport`), 차트 VM 사본 `~/kubeport-chart/kubeport` |
+| Helm 릴리스 | `kubeport` (ns `kubeport`), 차트 VM 사본 `~/kubeport-chart/kubeport` (배포 스크립트가 배포할 때마다 그 sha 의 chart 로 갱신 — `.deployed-sha` 파일) |
+| 배포 | **자동**: `.github/workflows/deploy.yml` → VM `/usr/local/bin/kubeport-deploy` (forced command). 락 `/run/lock/kubeport-deploy.lock`. 지금 라이브: `curl -s https://kubeport.enzo.kr/api/healthz \| jq -r .version` (§3) |
 | 이미지 | `ghcr.io/shyuni4u/kubeport-{backend,frontend}` 멀티아치(amd64+arm64), 태그 `sha-<shortsha>` |
 | OCI 자격증명 (로컬) | `~/.oci/config`, `~/oci-capacity-retry/config.env` (compartment/AD/subnet OCID) |
 
@@ -68,8 +69,9 @@ echo "KEY=$KEY"
 ## 3. 재배포 (이미지 갱신)
 
 새 이미지는 `main` push 시 `build-images` 워크플로가 빌드·푸시(`sha-<sha>` + `latest`).
-브랜치에서 미리 빌드하려면 `gh workflow run build-images.yml --ref <branch>` (dispatch 는 push
-취급이라 이미지가 실제로 올라감).
+**ghcr 에 올리는 것은 push 이벤트뿐이다** — main push 와 `v*` 태그 push. `gh workflow run build-images.yml --ref <branch>`
+는 두 아키텍처로 **빌드만** 하고 올리지 않는다("브랜치가 arm64 로도 빌드되나" 확인용). dispatch 로 올리게 두면
+main 에 없는 커밋이 배포 스크립트가 쓰는 `sha-<7>` 태그를 차지할 수 있어서다. 브랜치 이미지를 미리 배포해 볼 길은 없다 — main 에 넣는다.
 
 **PR 에서는 이미지가 만들어지지 않는다** — `build-images` 는 PR 에서도 돈다. #122 가 트리거를
 없앤 게 아니라 `paths:` 필터를 붙였고(Dockerfile·lockfile·`next.config.ts` 등 11개 경로), 빌드
@@ -78,7 +80,74 @@ echo "KEY=$KEY"
 이제 **모든 main 커밋에 `sha-<7>` 태그가 생긴다** — 예전에는 docs 만 바뀐 커밋이 HEAD 면 태그가
 없어서 배포할 sha 가 없었다.
 
+### 3-0. 자동 배포 (기본)
+
+main 에 머지하면 사람 손 없이 라이브까지 간다. 설치 절차는
+[deploy/oci/README.md "자동 배포 설치"](../deploy/oci/README.md#자동-배포-설치-github-actions--vm).
+
+```
+main push → build-images (sha-<7> 이미지 push)
+          → deploy.yml (workflow_run — 성공한 main push 빌드만)
+          → 전용 배포 키로 ssh → VM forced command: kubeport-deploy "deploy <40자리 sha>"
+          → helm upgrade (실패 시 helm 이 자동 롤백)
+          → https://kubeport.enzo.kr/api/healthz 의 version 이 sha 7자리가 될 때까지 대기 (5분)
+```
+
+- **지금 라이브가 어느 커밋인가**: `curl -s https://kubeport.enzo.kr/api/healthz | jq -r .version` —
+  ssh 없이 누구나 본다. backend 빌드의 sha 다(frontend 는 같은 커밋·같은 배포로 함께 올라간다).
+- **건너뛰기**: 워크플로가 실제로 돌 때 그 sha 가 이미 main HEAD 가 아니면 배포하지 않고 notice 만
+  남긴다. 더 새 커밋의 빌드가 끝나면 그쪽 배포가 두 커밋을 함께 올린다. 빌드는 끝나는 순서가
+  섞이므로, 이게 없으면 늦게 끝난 **옛 커밋의 배포가 라이브를 뒤로 되돌린다.** 대가: 새 커밋의
+  빌드가 실패하면 아무것도 안 올라간다 — 그 빌드의 빨간 불이 신호이고, 필요하면 아래 dispatch.
+- **동시성**: `concurrency: deploy-prod`, 진행 중인 배포는 취소하지 않는다(ssh 가 끊겨 helm 이
+  `pending-upgrade` 로 남으면 이후 모든 upgrade 가 막힌다). 수동 배포와는 VM 의 같은 락으로 직렬화된다.
+- **재배포 (앞으로만)**: Actions → deploy → Run workflow, 또는
+  `gh workflow run deploy.yml -f sha=<main 커밋 40자리>`. dispatch 는 HEAD 검사를 하지 않는 대신
+  그 sha 가 main 에 있고 build-images 가 성공했는지 먼저 확인한다. 그리고 VM 이 **지금 라이브와 같거나
+  그보다 새 커밋만** 받는다(`deploy/kubeport-backend` 의 `sha-<7>` 태그 기준, GitHub compare 가
+  `ahead`/`identical`). 유출된 배포 키로 보안 수정 이전 빌드를 되살리지 못하게 하려는 것이다.
+- **롤백은 관리자 키로 `kubeport-deploy deploy <sha>`** (§3-2). 배포 키 경로로 옛 sha 를 주면
+  `refused-not-forward`(exit 2)로 아무것도 안 바뀐다. 롤백 전에 `gh workflow disable deploy.yml` — 안 그러면
+  다음 main 커밋의 자동 배포가 다시 앞으로 간다. `version` 필드가 생기기 전 빌드로 되돌렸다면 그 빌드는
+  version 을 보고하지 않는다(dispatch 의 `verify_version=false` 는 그 상태에서 다시 앞으로 갈 때만 쓸 일이 있다).
+  - ⚠️ 롤백은 **이미지·템플릿만** 되돌린다. backend 의 `migrate` initContainer 가 이미 적용한
+    스키마 변경은 그대로다 — 스키마를 바꾼 커밋 이전으로 갈 때는 옛 코드가 새 스키마에서 도는지 먼저 본다.
+    helm 의 자동 롤백도 같은 한계를 갖는다.
+- **실패 읽기** — Actions 요약의 `result:` (스크립트의 `KUBEPORT_DEPLOY_RESULT=` 줄). 워크플로 메시지도
+  exit 코드가 아니라 이 줄로 갈린다 — exit 1 에는 "아무것도 안 바뀜" 과 "새 리비전이 롤백 없이 떠 있음" 이
+  함께 들어 있어서다:
+
+  | result (exit) | 클러스터 | 뜻 | 할 일 |
+  |---|---|---|---|
+  | `deployed` (0) | 새 리비전 | 배포 완료 | 다음 단계가 healthz version 으로 한 번 더 확인 |
+  | `dex-guard-refused` (10) | 안 바뀜 | **Dex 가드 거절** | §3-4 수동 절차 |
+  | `refused-not-forward` (2) | 안 바뀜 | 요청 sha 가 라이브보다 옛것·갈라짐, 또는 라이브 태그가 `sha-<7>` 이 아님, 또는 GitHub 조회 실패 | 롤백이 목적이면 관리자 키(§3-2). 라이브 태그가 `latest` 등이면 관리자 키로 한 번 배포해 `sha-<7>` 로 맞춘다 |
+  | `rejected` (2) | 안 바뀜 | 요청 형식 거절, 또는 authorized_keys 줄에 `--forced` 가 없음 | README "자동 배포 설치" 3단계 |
+  | `lock-busy` (3) | 안 바뀜 | 락 10분 대기 초과 (수동 배포 진행 중) | 끝난 뒤 re-run |
+  | `unverified` (4) | 안 바뀜 | sha 가 main 에 없음 / GitHub 확인·chart 다운로드 실패 / 그 커밋에 chart 없음 | sha, GitHub 상태 |
+  | `aborted-before-upgrade` (1) | 안 바뀜 | upgrade 전에 멈춤 — 릴리스 값 없음, `helm template` 실패, Dex 비교 불가, 릴리스가 `pending-*`, helm 버전 미인식 | 로그의 `ERROR:` 줄. `pending-*` 면 §7 "another operation" |
+  | `failed-rolled-back` (1) | **이전 리비전** | helm upgrade 실패 → helm 이 자동 롤백 | 로그의 `helm history`, `kubectl get events -n kubeport` |
+  | `failed-rollout` / `failed-image-mismatch` / `failed-values-drift` / `failed-after-upgrade` (1) | **새 리비전, 롤백 안 됨** | upgrade 는 성공했는데 rollout·이미지 태그·값 확인이 실패 | `helm history` 로 새 리비전 확인 → 유지하거나 관리자 키로 롤백(§3-2) |
+  | `failed-during-upgrade` (1) | 알 수 없음 | helm upgrade 도중 스크립트가 끝남 | `kubeport-deploy status`, `pending-upgrade` 면 §7 |
+  | 없음 (255) | 알 수 없음 | ssh 접속 실패, 또는 도중에 세션이 끊김 | 로그가 스크립트까지 못 갔으면 IP 변경 → `OCI_DEPLOY_HOST`·`OCI_DEPLOY_KNOWN_HOSTS` 갱신. `helm upgrade` 가 찍혔으면 `kubeport-deploy status` |
+
+- **자동 배포 멈추기**: `gh workflow disable deploy.yml` (다시 `enable`). 다음 런부터 막는다. 키 자체를
+  막으려면 VM 의 `~/.ssh/authorized_keys` 에서 `kubeport-gha-deploy` 줄을 지운다.
+  - ⚠️ **진행 중인 deploy 런은 Cancel 하지 않는다.** Cancel 은 ssh 세션을 끊고, `helm upgrade` 도중이면
+    릴리스가 `pending-upgrade` 로 남아 이후 **모든** upgrade(자동·수동·비밀번호 회전)가
+    `another operation (install/upgrade/rollback) is in progress` 로 막힌다. disable 해 두고 런이 끝나기를
+    기다린다 — 최대 45분(Deploy 스텝 timeout: 락 대기 10분 + helm 10분 + 롤백 대기 + rollout 확인).
+    이미 끊겼다면 §7 의 그 증상 행.
+- **VM 의 스크립트는 자동 갱신되지 않는다.** main 의 `deploy/oci/kubeport-deploy.sh` 가 바뀌어도
+  `/usr/local/bin/kubeport-deploy` 는 그대로다 — 커밋 하나로 배포 키가 할 수 있는 일이 바뀌지 않게
+  하려는 의도다. 스크립트가 바뀌면 README "자동 배포 설치" 2단계를 다시 실행한다.
+- **uptime-ping 과**: 롤아웃 순간의 짧은 502 창(§3-2 끝)에 10분 핑이 걸리면 uptime-ping 이 한 번
+  빨갛게 될 수 있다. 배포 직후의 빨간 핑 1회는 deploy 런 시각과 먼저 대조한다.
+
 ### 3-1. 태그가 실제로 있는지 먼저 확인
+
+(자동 배포는 workflow_run 이 곧 "빌드 성공" 이고, dispatch 는 워크플로가 이 확인을 대신한다.
+아래는 수동 배포할 때.)
 
 없는 태그로 `helm upgrade` 하면 `ImagePullBackOff` 로 끝나고 롤아웃이 타임아웃까지 매달린다.
 
@@ -103,23 +172,66 @@ gh run list --workflow build-images.yml --branch main --limit 30 \
 (`gh api user/packages/container/.../versions` 로 ghcr 를 직접 보는 길은 `read:packages` 스코프가
 없으면 403 이다. 워크플로 잡 결과가 스코프 없이 확인 가능한 근거다.)
 
-### 3-2. 업그레이드
+### 3-2. 수동 배포 (예외)
+
+자동 배포가 거절했거나(§3-4 Dex), **롤백할 때**, 워크플로를 쓸 수 없을 때(GitHub 장애, 시크릿 미설정).
+**같은 스크립트를 관리자 키로 부른다** — 락·main 검증·Dex 가드·자동 롤백을 그대로 탄다. 배포 키와 다른
+점은 둘뿐이다: `--allow-dex-restart` 를 받고, 라이브보다 옛 커밋(롤백)도 받는다:
 
 ```bash
-# $KEY 는 §1 "SSH 키 위치" 참조
+# $KEY 는 §1 "SSH 키 위치" 참조. 7자리가 아니라 40자리 전체 sha 를 준다.
+git fetch origin main          # 빠뜨리면 옛 sha 로 "조용한 롤백" (§3-1)
+FULLSHA=$(git rev-parse origin/main)
+ssh -i "$KEY" ubuntu@168.107.55.95 kubeport-deploy deploy "$FULLSHA"
+```
+
+`sudo` 를 붙이지 않는다 — kubeconfig 가 0644 라 필요 없고, 붙이면 락·작업 파일이 root 소유로 남는다.
+스크립트가 하는 일(원본은 `deploy/oci/kubeport-deploy.sh` 머리 주석):
+
+1. `/run/lock/kubeport-deploy.lock` 을 `flock` 으로 잡는다(최대 10분 대기). 워크플로와 수동이 같은 락이다.
+2. GitHub compare API 로 sha 가 main 에 있는지 확인. 아니면 거절(exit 4). 배포 키가 새도 "이미 머지된
+   커밋 재배포" 이상은 못 하게 하는 장치다 — GitHub 은 포크에만 있는 커밋도 원 리포 archive URL 로 내준다.
+   **배포 키 경로(`--forced`)는 여기에 더해 앞으로만 간다**: 라이브 `deploy/kubeport-backend` 의 태그
+   `sha-<7>` 과 요청 sha 를 compare 해 `ahead`/`identical` 이 아니면 exit 2(`refused-not-forward`,
+   "rollback needs the admin key"). 라이브 태그가 `sha-<7hex>` 모양이 아니어도 거절한다. 관리자 키 경로는
+   이 검사를 하지 않는다 — 롤백은 이 경로로 한다.
+   이어서 릴리스가 `pending-*` 면 upgrade 전에 멈춘다(`aborted-before-upgrade`, §7).
+3. **chart 는 그 sha 의 GitHub tarball 에서 받는다.** VM 사본이 아니다 — 이미지와 템플릿이 같은
+   커밋으로 짝지어지므로 "scp 를 잊어 옛 템플릿으로 배포" 가 없어지고, sha 로 롤백하면 둘 다 되돌아간다.
+   성공하면 `~/kubeport-chart/kubeport` 를 그 chart 로 갱신한다(아래 값 변경 절차가 옛 템플릿을 안 쓰게).
+4. 값은 `helm get values`(릴리스에 저장된 사용자 값 — 시크릿·데모 게이트·install 때의 phase2 값)를
+   **새 chart 의 기본값 위에** 얹는다. `--reset-then-reuse-values` 와 같은 의미를 파일로 명시한 것이라,
+   Dex 가드가 업그레이드와 글자 하나 다르지 않은 입력으로 렌더한다. **아래 `--reuse-values` 새 키 함정이
+   이 경로엔 없다** (`--reuse-values` 는 옛 chart 의 기본값을 쓰기 때문에 새 키가 비는 것이다).
+5. Dex 가드(§3-4) → `helm upgrade` + helm 3 `--atomic` / helm 4 `--rollback-on-failure`(런타임 판별,
+   timeout 10m) → `rollout status` → `helm history | tail -3` + 배포된 이미지 태그 출력 + 태그 대조.
+6. **배포 후 `helm get values` 재확인.** `demo.resetHostAliasIP`(빠지면 리셋 Job preflight 실패 §5)·
+   `demo.publicHealthCatalog`(빠지면 uptime-ping 이 눈을 감음)·`demo.allowTemplateCreate`(데모 저작 게이트)
+   를 `이전 -> 이후` 로 찍고, `images.*.tag` 외의 사용자 값이 하나라도 바뀌었으면 exit 1
+   (`failed-values-drift`, 바뀐 최상위 키 이름만 출력). 롤백은 자동으로 하지 않는다 — 릴리스는 떠 있고
+   유지 여부는 사람이 판단한다. 셋 중 하나가 `<unset>` 이면 경고.
+
+VM 사본을 쓰지 않는 이유의 실례: 2026-09-10 rev 19 수동 배포 때 사본이 main 과 34파일 전부 일치했는데,
+그건 배포하던 세션이 막 `scp` 로 맞춰 놨기 때문이었다. 사본은 그렇게 사람이 기억할 때만 맞는다.
+
+**raw `helm upgrade` 에는 락도 가드도 없다.** 스크립트가 못 하는 일 — 값 바꾸기(데모 비밀번호 회전 §5,
+새 `--set`) — 만 직접 치고, 그때도 같은 락을 잡는다:
+
+```bash
 ssh -i "$KEY" ubuntu@168.107.55.95 \
   "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; \
-   helm upgrade kubeport ~/kubeport-chart/kubeport --namespace kubeport --reuse-values \
-     --set images.frontend.tag=sha-$NEWSHA --set images.backend.tag=sha-$NEWSHA; \
-   kubectl rollout status deploy/kubeport-frontend -n kubeport; \
-   kubectl rollout status deploy/kubeport-backend -n kubeport"
+   flock -w 600 /run/lock/kubeport-deploy.lock \
+     helm upgrade kubeport ~/kubeport-chart/kubeport --namespace kubeport --reuse-values --set <키>=<값>"
 ```
+
+직접 칠 때의 함정:
 
 - ⚠️ **`export KUBECONFIG=...` 를 ssh 명령마다 넣어야 한다.** 빠뜨리면 `helm`·`kubectl` 이
   `Kubernetes cluster unreachable: Get "http://localhost:8080/version"` 로 죽는다. 로그인 셸이
-  아니라 `ssh <host> "<command>"` 형태라 프로필이 안 읽힌다.
-- 차트 **템플릿 자체**를 바꿨으면 먼저 `scp -r deploy/helm/kubeport ubuntu@...:~/kubeport-chart/`
-  로 VM 사본을 갱신한 뒤 upgrade.
+  아니라 `ssh <host> "<command>"` 형태라 프로필이 안 읽힌다. (배포 스크립트는 스스로 설정한다.)
+- `~/kubeport-chart/kubeport` 는 마지막 **스크립트 배포**의 chart 다(`cat ~/kubeport-chart/kubeport/.deployed-sha`).
+  raw helm 으로 이미지 태그를 올리지 말 것 — 그 사본과 이미지가 어긋난다.
+- raw helm 이 Dex 값을 건드리면(비밀번호 회전) 가드가 없으므로 **곧바로 `sudo systemctl restart k3s`** (§5).
 - `--reuse-values` 가 시크릿(enc key, pg pass, oidc)을 유지한다. 특정 값만 `--set` 으로 덮어씀.
   **데모 게이트도 유지된다** — 2026-09-09 rev 10 에서 `demo.allowTemplateCreate=false` 가 그대로
   남는 것을 확인했다. 완화 플래그가 재배포로 조용히 켜지지 않는다는 뜻이다.
@@ -139,6 +251,20 @@ ssh -i "$KEY" ubuntu@168.107.55.95 \
 
 ### 3-3. 배포 확인
 
+먼저 ssh 없이:
+
+```bash
+curl -s https://kubeport.enzo.kr/api/healthz | jq -r .version    # → 배포한 sha 7자리
+```
+
+VM 쪽 상태(락·helm history·이미지 태그·chart 사본 sha)는 한 줄로:
+
+```bash
+ssh -i "$KEY" ubuntu@168.107.55.95 kubeport-deploy status
+```
+
+스크립트가 아직 설치되지 않은 VM 이면 예전 방식:
+
 ```bash
 ssh -i "$KEY" ubuntu@168.107.55.95 \
   "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; \
@@ -147,6 +273,34 @@ ssh -i "$KEY" ubuntu@168.107.55.95 \
 ```
 
 `helm history` 의 최신 리비전이 `deployed` 이고 두 deployment 의 이미지 태그가 `$NEWSHA` 면 끝.
+
+### 3-4. Dex 가 바뀌는 배포 (자동 거절 → 수동)
+
+스크립트는 업그레이드 **전에** 지금 적용된 매니페스트(`helm get manifest`)와 새 렌더(`helm template`,
+업그레이드와 똑같은 values·`--set`)에서 Dex 의 Deployment·ConfigMap·Secret 을 비교한다. 하나라도
+다르면 Dex 파드가 재시작되고, 서명 키가 바뀌고, apiserver 의 JWKS 캐시 때문에 **데모 로그인은 되는데
+클러스터 호출이 전부 401** 이 된다(§5, 2026-09-10 사고 — `/healthz` 는 초록). 워크플로는 k3s 재시작을
+안전하게 할 수 없으므로 **아무것도 바꾸지 않고 exit 10** 으로 멈춘다.
+
+잡히는 것: Dex 템플릿·`dex.*` 값의 변화, 그리고 **chart `version` bump** — 파드 템플릿 라벨
+`helm.sh/chart` 에 들어가므로 실제로 Dex 가 재시작된다. 로그에는 바뀐 문서의 kind/이름만 찍히고 내용
+(클라이언트 시크릿·비밀번호 해시)은 찍히지 않는다. 비교할 수 없으면(렌더 실패 등) 배포하지 않는다.
+
+수동 절차 — **두 명령을 이어서**, 사이에 다른 일을 끼우지 않는다:
+
+```bash
+ssh -i "$KEY" ubuntu@168.107.55.95 kubeport-deploy deploy "$FULLSHA" --allow-dex-restart
+ssh -i "$KEY" ubuntu@168.107.55.95 'sudo systemctl restart k3s && sleep 30 && sudo k3s kubectl get --raw=/readyz; echo; \
+  START=$(systemctl show k3s -p ActiveEnterTimestamp --value); \
+  sudo journalctl -u k3s --since "$START" --no-pager | grep -c "failed to verify id token signature"'
+# → ok, 그리고 0. 이어서 데모 사용자로 로그인해 릴리스 상세가 인스턴스를 읽는지 본다.
+```
+
+- `--allow-dex-restart` 는 **관리자 키(argv 경로)에서만** 받는다. 배포 키의 forced command
+  (`kubeport-deploy --forced`)로 오면 형식 거절(exit 2)이다 — 뒷단계(k3s 재시작)를 못 하는 쪽에 앞단계만
+  허용하면 그 사고를 무인으로 재현한다.
+- 가드는 "직전 적용본 대비" 비교라, 한 번 수동으로 올린 Dex 변경은 다음 커밋부터 차이가 아니다 —
+  이후 main 커밋은 다시 자동으로 간다.
 
 ## 4. 인증 / RBAC (핵심 함정 모음)
 
@@ -247,10 +401,14 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
 
 - **구성**: Helm revision ≥ 4 에 `dex.enabled=true` / `demo.enabled=true`, `demo.kubectlImage=alpine/k8s:1.31.9`.
   k3s 는 `/etc/rancher/k3s/auth.yaml` 로 Google + Dex 를 신뢰(`config.yaml.bak` 이 전환 전 백업).
-- **데모 비밀번호 회전** — **2단계다. 두 번째를 빼면 데모가 멈춘다.**
+- **데모 비밀번호 회전** — **2단계다(앞에 준비 0단계). 두 번째를 빼면 데모가 멈춘다.**
+  0. **자동 배포와 겹치지 않게 한다.** `ssh -i "$KEY" ubuntu@168.107.55.95 kubeport-deploy status` 로 락이
+     `free` 인지 본다(`HELD` 면 끝날 때까지 기다린다 — 런을 Cancel 하지 않는다, §3-0). 회전 중에 main 머지가
+     있을 수 있으면 `gh workflow disable deploy.yml` — 1단계 직후 자동 배포가 락을 잡으면 2단계의 k3s 재시작이
+     그 `helm upgrade` 한가운데에 떨어진다. **2단계와 확인까지 끝나면 `gh workflow enable deploy.yml`.**
   1. [deploy/oci/README.md §7.6](../deploy/oci/README.md) 의 `--set` 목록을 새 `DEMO_PW`/`HASH` 로
-     다시 실행 (`staticPasswords[N]` 네 필드 전부, `--reset-then-reuse-values`).
-     `DEX_SECRET` 은 유지해도 된다.
+     다시 실행 (`staticPasswords[N]` 네 필드 전부, `--reset-then-reuse-values`, `flock` 락 포함 — 이미지
+     태그는 올리지 않는다). `DEX_SECRET` 은 유지해도 된다.
   2. **`sudo systemctl restart k3s`.** 1 단계가 Dex pod 를 재시작시키고, Dex 는 `storage: memory`
      라 서명 키가 새로 생긴다. apiserver 의 JWKS 캐시를 비우지 않으면 **새 비밀번호로 로그인은
      되는데 클러스터 호출이 전부 401** 이다 (§5 위 주의 참조).
@@ -371,6 +529,12 @@ port-forward 로 밖에서 잡는다.
 | `helm`/`kubectl` 이 `Kubernetes cluster unreachable: ... localhost:8080` | ssh 명령에 `export KUBECONFIG=/etc/rancher/k3s/k3s.yaml` 을 안 넣었다 (§3-2). `ssh <host> "<cmd>"` 는 프로필을 안 읽는다 |
 | 배포할 `sha-<7>` 태그가 없다 | #122 이전 커밋이면 `push:` 쪽 `paths:` 필터에 걸려 이미지가 아예 안 만들어졌을 수 있다. `gh run list --workflow build-images.yml --branch main` 으로 확인 (§3-1). `--commit <sha>` 는 조용히 0건을 주고, `--limit` 이 작아도 0건이 된다 |
 | 배포했는데 고친 게 라이브에 없다 (오류는 없음) | §3-1 에서 `git fetch` 를 빠뜨려 `origin/main` 이 옛 sha 였다. 그 sha 에도 이미지가 있어 전 단계가 다 초록으로 통과한다. `helm history` 의 태그와 `git rev-parse --short=7 origin/main` 을 fetch 후 대조 (§3-3) |
+| deploy 워크플로가 `Refused: this deploy would restart Dex` (exit 10) | 결함이 아니라 가드다. 아무것도 바뀌지 않았다. §3-4 수동 절차 |
+| deploy 워크플로가 `Refused: not forward of live` (exit 2) | 결함이 아니라 가드다. 배포 키는 라이브보다 옛 커밋으로 못 간다. 롤백이 목적이면 관리자 키로 `kubeport-deploy deploy <sha>` (§3-2) |
+| `helm upgrade`/`rollback` 이 `another operation (install/upgrade/rollback) is in progress`, 또는 deploy 가 `aborted-before-upgrade` + `release kubeport is pending-upgrade` | 이전 helm 작업이 끝나지 못했다 — deploy 런 Cancel, ssh 끊김, VM 재부팅 중 upgrade. 락을 잡고 마지막 `deployed` 리비전으로 되돌린다: `ssh -i "$KEY" ubuntu@168.107.55.95 "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; helm history kubeport -n kubeport \| tail -5"` 로 `deployed` 인 rev 를 찾고 → `ssh ... "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; flock -w 600 /run/lock/kubeport-deploy.lock helm rollback kubeport <마지막 deployed rev> -n kubeport"`. 그 뒤 원래 하려던 배포를 다시 한다 |
+| deploy 워크플로가 `SSH failed` (exit 255) | 인스턴스 stop/start 로 공인 IP 가 바뀌었다. `OCI_DEPLOY_HOST`·`OCI_DEPLOY_KNOWN_HOSTS` 시크릿 갱신 ([README "자동 배포 설치"](../deploy/oci/README.md#자동-배포-설치-github-actions--vm)) |
+| deploy 워크플로가 `Version not live` | helm 은 끝났는데 `/api/healthz` 의 version 이 안 바뀐다. `kubeport-deploy status` 로 이미지 태그, 파드·ingress 확인 (§3-3). `version` 필드가 생기기 전 빌드를 배포한 거라면(관리자 키로 그 빌드까지 롤백한 뒤에만 가능) dispatch 에 `verify_version=false` |
+| deploy 런이 `Skipped` notice 로 초록 | 그 사이 main 이 더 나아갔다. 새 커밋의 build-images → deploy 가 함께 올린다 (§3-0) |
 | 새 파드가 `ImagePullBackOff` | 존재하지 않는 태그로 upgrade 했다. §3-1 로 태그부터 확인하고 `helm rollback kubeport <이전rev> -n kubeport` |
 | backend 파드에 `kubectl exec` 이 `failed to exec in container` | 이미지에 셸이 없다. 정상이다 — port-forward 로 밖에서 잡는다 (§6 "Go API 를 직접 찔러 보기") |
 | `/api/v1/<경로>` 가 404·405 대신 401 | 설계된 동작이다. BFF 세션 게이트가 라우팅보다 먼저다 ([machine-clients.md §5](machine-clients.md#5-호출할-때-알아두면-좋은-것)). `/api/v1` 루트만 예외로 세션 검사 없이 404 |
