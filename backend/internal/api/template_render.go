@@ -111,6 +111,11 @@ func (h *Handlers) resolveTemplateVersion(c *gin.Context, name, versionQuery str
 			writeError(c, http.StatusNotFound, "not-found", "template version")
 			return store.TemplateVersion{}, false
 		}
+		// Rendering returns the template's substance, so it follows the same
+		// demo line as reading it (#238).
+		if h.versionHiddenByDemoScope(c, name, "template version") {
+			return store.TemplateVersion{}, false
+		}
 		// ?version=N can address a draft, so it needs the same read gate as
 		// GET /v1/templates/:name/versions/:v — rendering returns the
 		// substance of the draft's resources.yaml (issue #12).
@@ -129,6 +134,9 @@ func (h *Handlers) resolveTemplateVersion(c *gin.Context, name, versionQuery str
 		}
 		log.Printf("resolveTemplateVersion: GetTemplateByName(%q): %v", name, err)
 		writeError(c, http.StatusInternalServerError, "internal", "failed to load template")
+		return store.TemplateVersion{}, false
+	}
+	if h.templateHiddenByDemoScope(c, tpl.OwnerUserID, "template") {
 		return store.TemplateVersion{}, false
 	}
 	if !tpl.CurrentVersionID.Valid {
