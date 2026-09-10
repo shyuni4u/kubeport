@@ -3,8 +3,8 @@ import { ReleaseAutoRefresh } from "@/components/ReleaseAutoRefresh";
 import { ReleaseHeader, type ReleaseHeaderData } from "@/components/ReleaseHeader";
 import { ReleaseTabs } from "@/components/ReleaseTabs";
 import { ReleaseStaleBanner, isStaleStatus } from "@/components/ReleaseStaleBanner";
+import { releaseReadFailed } from "@/lib/release-read";
 import { roleFromGroups } from "@/lib/role";
-import { notFound } from "next/navigation";
 
 export default async function ReleaseDetailLayout({
   children,
@@ -21,7 +21,7 @@ export default async function ReleaseDetailLayout({
     apiFetch(`/v1/releases/${id}`),
     apiFetch("/v1/me"),
   ]);
-  if (!relRes.ok) notFound();
+  if (!relRes.ok) releaseReadFailed(relRes.status, id);
   const data = (await relRes.json()) as ReleaseHeaderData;
   const me = meRes.ok
     ? ((await meRes.json()) as { groups?: string[] })

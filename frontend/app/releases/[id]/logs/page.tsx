@@ -1,5 +1,5 @@
 import { apiFetch } from "@/lib/api-server";
-import { notFound } from "next/navigation";
+import { releaseReadFailed } from "@/lib/release-read";
 import { LogsPanel } from "@/components/LogsPanel";
 
 export default async function ReleaseLogsPage({
@@ -11,7 +11,7 @@ export default async function ReleaseLogsPage({
 }) {
   const [{ id }, sp] = await Promise.all([params, searchParams]);
   const res = await apiFetch(`/v1/releases/${id}`);
-  if (!res.ok) notFound();
+  if (!res.ok) releaseReadFailed(res.status, id);
   const d = (await res.json()) as { id: string; instances: { name: string }[] };
   // `?instance=` comes from the instance row's "Logs →" link. Only honour it
   // when it names a known instance — anything else falls back to "all".

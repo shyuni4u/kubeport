@@ -1,5 +1,5 @@
 import { apiFetch } from "@/lib/api-server";
-import { notFound } from "next/navigation";
+import { releaseReadFailed } from "@/lib/release-read";
 import { getTranslations } from "next-intl/server";
 import { MetricCards } from "@/components/MetricCards";
 import { InstancesTable, type Instance } from "@/components/InstancesTable";
@@ -21,7 +21,7 @@ export default async function ReleaseOverviewPage({
   const { id } = await params;
   const t = await getTranslations("releases.overview");
   const res = await apiFetch(`/v1/releases/${id}`);
-  if (!res.ok) notFound();
+  if (!res.ok) releaseReadFailed(res.status, id);
   const d = (await res.json()) as ReleaseOverview;
   const restarts = d.instances.reduce((s, i) => s + i.restarts, 0);
 
