@@ -354,3 +354,31 @@ func TestCreateRelease_DoesNotGuessAnUnreadableHolder(t *testing.T) {
 	require.True(t, p.Conflicts[0].OwnerUnknown)
 	require.Empty(t, fk.applied)
 }
+
+// Codex review: re-creating a release that already exists, as the demo seeder
+// does on every re-run, must be the plain name clash the seeder skips. With the
+// ownership check first, the release's own Secret — unreadable to a demo user,
+// shown to exist by the dry-run probe — came back as a resource-conflict, and
+// the seeder, which fails on that kind, stopped seeding.
+func TestCreateRelease_AnExistingReleaseIsANameClashNotAResourceConflict(t *testing.T) {
+	r, fk := newTestRouterWithK8s(t)
+	clusterName := seedCluster(t, r)
+	tplName := seedPublishedTemplate(t, r)
+	name := "seeded-" + randSuffix()
+
+	w := do(t, r, http.MethodPost, "/v1/releases", createReleaseBody(t, clusterName, tplName, "default", name))
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	appliedAfterFirst := len(fk.applied)
+
+	// What the probe reports for the release's own Secret on the second try.
+	fk.applyCheck = k8s.ApplyCheck{Conflicts: []k8s.Conflict{
+		{ObjectRef: k8s.ObjectRef{Kind: "Secret", Name: "app-secret", Namespace: "default"}, OwnerUnknown: true},
+	}}
+	w = do(t, r, http.MethodPost, "/v1/releases", createReleaseBody(t, clusterName, tplName, "default", name))
+
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	title, _ := problemOf(t, w.Body.Bytes())
+	require.Equal(t, "conflict", title, "an existing release is a name clash, which the seeder skips")
+	require.Equal(t, []string{name}, fk.checkedReleases, "the duplicate never reaches the ownership check")
+	require.Len(t, fk.applied, appliedAfterFirst)
+}

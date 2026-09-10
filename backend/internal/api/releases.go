@@ -177,19 +177,10 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		return
 	}
 
-	// The client, and the ownership check it makes, come before the row. A
-	// refused create then leaves nothing to roll back. More to the point,
-	// nothing has been applied yet, which is the only state in which the
-	// failed-apply cleanup below cannot delete another release's objects: that
-	// cleanup deletes by label, and an apply that got partway had already
-	// relabelled whatever it overwrote (#161).
 	caBundle := cluster.CaBundle.String
 	cli, err := h.deps.K8sFactory.NewWithToken(cluster.ApiUrl, caBundle, u.IDToken)
 	if err != nil {
 		internalError(c, "CreateRelease: k8s client", err)
-		return
-	}
-	if !h.checkOwnership(c, cli, "CreateRelease", r.Namespace, r.Name, rendered) {
 		return
 	}
 
@@ -198,6 +189,21 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		return
 	}
 
+	// The row comes before the ownership check, and the check before the first
+	// apply (#161). In that order:
+	//
+	//   - A release that already exists is answered by the unique constraint as
+	//     the name clash it is (409 conflict). The other way round, its own
+	//     objects answered first: for a caller who may write a Secret but not
+	//     read it, the dry-run probe reports AlreadyExists, that reads as a
+	//     resource-conflict, and the demo seeder's ordinary re-run failed
+	//     instead of skipping the release it had already made (codex review).
+	//     The constraint also settles two creates of the same name racing.
+	//   - Nothing has been applied when the check refuses, so undoing the
+	//     refusal is deleting this row. That is the only state in which the
+	//     failed-apply cleanup below cannot delete another release's objects:
+	//     it deletes by label, and an apply that got partway had already
+	//     relabelled whatever it overwrote.
 	rel, err := h.deps.Store.InsertRelease(ctx, store.InsertReleaseParams{
 		Name:              r.Name,
 		TemplateVersionID: tv.ID,
@@ -215,6 +221,16 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		}
 		log.Printf("InsertRelease error: %v", err)
 		writeError(c, http.StatusInternalServerError, "internal", "failed to create release")
+		return
+	}
+	if !h.checkOwnership(c, cli, "CreateRelease", r.Namespace, r.Name, rendered) {
+		// checkOwnership has answered. Remove the row it refused, so no release
+		// is left claiming objects that were never applied.
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if delErr := h.deps.Store.DeleteRelease(rollbackCtx, rel.ID); delErr != nil {
+			log.Printf("rollback: failed to delete refused release %s from DB: %v", rel.Name, delErr)
+		}
 		return
 	}
 	if err := cli.ApplyAll(ctx, r.Namespace, rendered); err != nil {
