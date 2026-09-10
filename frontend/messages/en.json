@@ -1,4 +1,16 @@
 {
+  "kinds": {
+    "Deployment": "App server",
+    "Service": "Internal address",
+    "Ingress": "Public address",
+    "ConfigMap": "Settings",
+    "Secret": "Secret values",
+    "StatefulSet": "Server with storage",
+    "DaemonSet": "Program on every machine",
+    "Job": "One-off task",
+    "CronJob": "Scheduled task",
+    "PersistentVolumeClaim": "Storage"
+  },
   "logout": {
     "title": "Sign out?",
     "body": "You reached this by URL. Signing out takes a confirmation — that's what stops another site from signing you out with nothing but a link.",
@@ -470,7 +482,8 @@
       "httpError": "Permission check failed (HTTP {status}).",
       "skipped": "Not checked: {kinds} — these may still be denied at deploy time.",
       "deniedRow": "{resource}: {message}",
-      "deniedNext": "The deploy will fail like this. Ask an admin for permission to deploy into this cluster and area."
+      "deniedNext": "The deploy will fail like this. Ask an admin for permission to deploy into this cluster and area.",
+      "scope": "Create in {namespace}"
     }
   },
   "admin": {

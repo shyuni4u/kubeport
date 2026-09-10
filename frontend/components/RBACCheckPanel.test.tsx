@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, waitFor, cleanup } from "@testing-library/react";
 import { renderWithIntl as render } from "@/tests/intl-test-utils";
 import { RBACCheckPanel } from "./RBACCheckPanel";
+import { useKubeTermsStore } from "@/stores/kube-terms-store";
 
 function okResponse(body: { allowed: boolean; reason?: string }): Response {
   return {
@@ -22,6 +23,7 @@ function httpResponse(status: number): Response {
 describe("RBACCheckPanel", () => {
   beforeEach(() => {
     vi.useRealTimers();
+    useKubeTermsStore.setState({ showKubeTerms: false, touched: false });
   });
 
   afterEach(() => {
@@ -76,10 +78,12 @@ describe("RBACCheckPanel", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("shows the check scope (verb · namespace) in the header", async () => {
+  // #39 — "create · team-a" was the one line of the panel still in k8s words.
+  it("shows the check scope in plain words in the header", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => okResponse({ allowed: true })));
     render(<RBACCheckPanel cluster="dev" namespace="team-a" kinds={["Deployment"]} />);
-    expect(screen.getByText("create · team-a")).toBeInTheDocument();
+    expect(screen.getByText("team-a 구역에 만들기")).toBeInTheDocument();
+    expect(screen.queryByText("create · team-a")).not.toBeInTheDocument();
   });
 
   it("renders a plain-language denied row (raw reason only as title) plus next step", async () => {
@@ -101,12 +105,12 @@ describe("RBACCheckPanel", () => {
     );
     // The icon is a lucide <svg> sibling since #114, so the sentence is its
     // own element and the admin-only raw reason stays on the <li>.
-    const row = await screen.findByText("Service: 권한이 거부되었습니다.");
+    const row = await screen.findByText("내부 주소: 권한이 거부되었습니다.");
     expect(row.closest("li")).toHaveAttribute("title", raw);
     expect(screen.queryByText(/is forbidden/)).not.toBeInTheDocument();
     expect(screen.getByText(/이 상태로는 배포가 실패합니다/)).toBeInTheDocument();
     // Deployment (allowed) should not be in the denied list.
-    expect(screen.queryByText(/Deployment:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/서버:/)).not.toBeInTheDocument();
     expect(screen.queryByText("모든 리소스 생성 권한 확인됨.")).not.toBeInTheDocument();
   });
 
@@ -118,7 +122,7 @@ describe("RBACCheckPanel", () => {
     );
     await waitFor(() => {
       expect(
-        screen.getByText("Deployment: 권한 확인에 실패했습니다 (HTTP 403)."),
+        screen.getByText("서버: 권한 확인에 실패했습니다 (HTTP 403)."),
       ).toBeInTheDocument();
     });
   });
@@ -132,10 +136,10 @@ describe("RBACCheckPanel", () => {
       <RBACCheckPanel cluster="dev" namespace="default" kinds={["Deployment"]} />,
     );
     const row = await screen.findByText(
-      "Deployment: 권한 확인에 실패했습니다 (HTTP 0).",
+      "서버: 권한 확인에 실패했습니다 (HTTP 0).",
     );
     expect(row.closest("li")).toHaveAttribute("title", "network down");
-    expect(screen.queryByText(/Deployment: network down/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/network down/)).not.toBeInTheDocument();
   });
 
   it("reports unknown kinds as not-checked instead of allowed, without fetching them", async () => {
@@ -223,12 +227,39 @@ describe("RBACCheckPanel", () => {
   });
 });
 
+// #39 — an admin who turns raw terms on gets the verb and kinds k8s uses.
+describe("RBACCheckPanel with raw k8s terms on", () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+    useKubeTermsStore.setState({ showKubeTerms: true, touched: true });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the raw verb and namespace in the header", () => {
+    vi.stubGlobal("fetch", vi.fn(async () => okResponse({ allowed: true })));
+    render(<RBACCheckPanel cluster="dev" namespace="team-a" kinds={["Deployment"]} />);
+    expect(screen.getByText("create · team-a")).toBeInTheDocument();
+  });
+
+  it("names the denied kind as k8s does", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => okResponse({ allowed: false, reason: "nope" })));
+    render(<RBACCheckPanel cluster="dev" namespace="default" kinds={["Service"]} />);
+    expect(await screen.findByText("Service: 권한이 거부되었습니다.")).toBeInTheDocument();
+  });
+});
+
 // #30 — the deploy form disables its submit button when k8s definitively
 // denies a create. The panel is the only place that knows, so it reports
 // upwards. "denied" must mean *k8s said no*, never "we could not ask".
 describe("RBACCheckPanel onResult", () => {
   beforeEach(() => {
     vi.useRealTimers();
+    useKubeTermsStore.setState({ showKubeTerms: false, touched: false });
   });
 
   afterEach(() => {

@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api-server";
+import { KubeTermsDefault } from "@/components/KubeTermsDefault";
 import { ReleaseAutoRefresh } from "@/components/ReleaseAutoRefresh";
 import { ReleaseHeader, type ReleaseHeaderData } from "@/components/ReleaseHeader";
 import { ReleaseTabs } from "@/components/ReleaseTabs";
@@ -30,6 +31,8 @@ export default async function ReleaseDetailLayout({
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Admins start with raw k8s terms, users with plain words (#39). */}
+      <KubeTermsDefault isAdmin={isAdmin} />
       {/* Keeps the header, banner and overview current while the rollout is
           still settling, instead of until the reader reloads (#183). */}
       <ReleaseAutoRefresh status={data.status} />

@@ -1,5 +1,7 @@
 import { apiFetch } from "@/lib/api-server";
 import { isDemoEmail, withDemoSuffix } from "@/lib/demo";
+import { roleFromGroups } from "@/lib/role";
+import { KubeTermsDefault } from "@/components/KubeTermsDefault";
 import { notFound } from "next/navigation";
 import YAML from "yaml";
 
@@ -61,14 +63,18 @@ export default async function VersionPinnedDeployPage({
     isDemoEmail(me?.email) && !updateReleaseId ? withDemoSuffix(name, true) : "";
 
   return (
-    <DeployClient
-      templateName={name}
-      version={version}
-      team={ver.owning_team_name ?? null}
-      spec={spec}
-      updateReleaseId={updateReleaseId}
-      initialValues={initialValues}
-      defaultName={defaultName}
-    />
+    <>
+      {/* Admins start with raw k8s terms, users with plain words (#39). */}
+      <KubeTermsDefault isAdmin={roleFromGroups(me?.groups ?? null) === "admin"} />
+      <DeployClient
+        templateName={name}
+        version={version}
+        team={ver.owning_team_name ?? null}
+        spec={spec}
+        updateReleaseId={updateReleaseId}
+        initialValues={initialValues}
+        defaultName={defaultName}
+      />
+    </>
   );
 }

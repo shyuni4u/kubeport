@@ -1,4 +1,16 @@
 {
+  "kinds": {
+    "Deployment": "서버",
+    "Service": "내부 주소",
+    "Ingress": "외부 주소",
+    "ConfigMap": "설정",
+    "Secret": "비밀값",
+    "StatefulSet": "저장 공간이 붙은 서버",
+    "DaemonSet": "서버마다 도는 프로그램",
+    "Job": "일회성 작업",
+    "CronJob": "예약 작업",
+    "PersistentVolumeClaim": "저장 공간"
+  },
   "logout": {
     "title": "로그아웃할까요?",
     "body": "주소로 직접 들어오셨습니다. 로그아웃은 확인을 거칩니다 — 다른 사이트가 링크만으로 여러분을 로그아웃시키지 못하게 하기 위해서입니다.",
@@ -470,7 +482,8 @@
       "httpError": "권한 확인에 실패했습니다 (HTTP {status}).",
       "skipped": "확인하지 못한 종류: {kinds} — 이 리소스는 배포 시점에 권한 오류가 날 수 있습니다.",
       "deniedRow": "{resource}: {message}",
-      "deniedNext": "이 상태로는 배포가 실패합니다. 관리자에게 '이 클러스터·구역에 배포 권한' 을 요청하세요."
+      "deniedNext": "이 상태로는 배포가 실패합니다. 관리자에게 '이 클러스터·구역에 배포 권한' 을 요청하세요.",
+      "scope": "{namespace} 구역에 만들기"
     }
   },
   "admin": {

@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { kindLabel } from "@/lib/kube-kinds";
+import { useKubeTermsStore } from "@/stores/kube-terms-store";
 
 /**
  * What the preflight can conclude about this deploy.
@@ -168,13 +170,26 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
     onResult?.(status);
   }, [status, onResult]);
 
+  // Kinds and the verb in the viewer's words unless they asked for the raw
+  // terms (#39). The deploy form's user meets "ConfigMap" or "create" nowhere
+  // else on the page.
+  const kube = useKubeTermsStore((s) => s.showKubeTerms);
+  const tKinds = useTranslations("kinds");
+  const kind = (k: string) => kindLabel(k, kube, (key) => tKinds(key));
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-baseline justify-between gap-3 text-sm font-medium">
         <span>{t("title")}</span>
         {hasInputs && (
-          <span className="font-mono text-xs font-normal text-muted-foreground">
-            create · {namespace}
+          <span
+            className={
+              kube
+                ? "font-mono text-xs font-normal text-muted-foreground"
+                : "text-xs font-normal text-muted-foreground"
+            }
+          >
+            {kube ? `create · ${namespace}` : t("scope", { namespace })}
           </span>
         )}
       </CardHeader>
@@ -223,7 +238,7 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
                       aria-hidden="true"
                     />
                     <span>
-                      {t("deniedRow", { resource: r.resource, message })}
+                      {t("deniedRow", { resource: kind(r.resource), message })}
                     </span>
                   </li>
                 );
@@ -240,7 +255,7 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
             />
             <span>
               {t("skipped", {
-                kinds: skipped.map((r) => r.resource).join(", "),
+                kinds: skipped.map((r) => kind(r.resource)).join(", "),
               })}
             </span>
           </p>
