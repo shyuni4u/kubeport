@@ -181,6 +181,26 @@ describe("LogsPanel pre-stream refusals", () => {
     expect(screen.getByRole("button", { name: "다시 연결" })).toBeInTheDocument();
   });
 
+  // #169 — the cap on log streams held open has its own kind. Under the shared
+  // `rate-limited` a visitor who had clicked once was told they were asking too
+  // often. What clears it is a stream closing, not time, and on the demo's
+  // shared accounts that stream may be someone else's.
+  it("says too many log panes are open, not that the reader asked too often", async () => {
+    fetchMock.mockResolvedValue(problem("too-many-streams", 429));
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+
+    refuse();
+
+    expect(await screen.findByText(/열려 있는 로그 창이 너무 많습니다/)).toBeInTheDocument();
+    expect(screen.queryByText(/요청이 너무 잦습니다/)).toBeNull();
+    // The way back stays on screen, and nothing retries by itself: one stream
+    // and one probe, then it waits for the reader — a refusal loop against a
+    // full cap would only spend the caller's rate budget.
+    expect(screen.getByRole("button", { name: "다시 연결" })).toBeInTheDocument();
+    expect(sockets).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   // The ErrorKind enum is a machine vocabulary. A kind we have no sentence for
   // must not be printed at the user, and it must not silently become "no pods".
   it("falls back for a kind it has no sentence for", async () => {

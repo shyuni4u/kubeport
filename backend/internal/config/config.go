@@ -23,4 +23,13 @@ type Config struct {
 	// the anonymous internet's business. The public demo turns it on so an
 	// external cron can tell that a reset wiped and failed to re-seed (#119).
 	HealthPublicCatalog bool
+	// LogStreamsPerCaller — KBP_LOG_STREAMS_PER_CALLER. How many log streams one
+	// caller (OIDC subject) may hold open at once. Zero uses the api package's
+	// default. The demo's shared accounts share this cap too (#169).
+	LogStreamsPerCaller int
+	// LogStreamMaxLifetime — KBP_LOG_STREAM_MAX_LIFETIME. How long one log
+	// stream stays open before the server ends it and the client reconnects
+	// through a fresh token and authorization. Zero uses the api package's
+	// default (#169).
+	LogStreamMaxLifetime time.Duration
 }

@@ -238,7 +238,8 @@
       "internal": "kubeport could not handle the log request. Try again in a moment.",
       "unknown": "Something went wrong with the log stream.",
       "withId": "{message} (request ID for support: {requestId})",
-      "rate-limited": "Too many requests. Wait a moment, then reconnect."
+      "rate-limited": "Too many requests. Wait a moment, then reconnect.",
+      "too-many-streams": "Too many log panes are open. Close one you left open in another tab, or wait a moment and reconnect."
     },
     "status": {
       "connected": "Connected",

@@ -54,6 +54,19 @@ type fakeK8sApplier struct {
 	// means StreamLogs was called with a zero time.
 	sinceSeen *time.Time
 
+	// streamStarted, when set, receives a value as soon as StreamLogs is called
+	// — that is, once the handler has passed every check and is committed to
+	// streaming. A test holding one stream open waits on it before sending the
+	// next request; without it the second request races the first to the slot.
+	// Buffered by the test; a full channel is skipped rather than blocked on.
+	streamStarted chan struct{}
+
+	// logFeed, when set, makes StreamLogs a pod that is still running and writes
+	// whatever the test sends it: each value is one line, and the stream stays
+	// open until the client leaves. It lets a test make the handler write at a
+	// moment of its choosing instead of waiting out the 15s ping.
+	logFeed chan string
+
 	// accessChecks records every CheckAccess call for assertions.
 	// accessResult is the stub response; accessErr overrides it when non-nil.
 	accessChecks []k8s.AccessCheck
@@ -86,6 +99,12 @@ func (f *fakeK8sApplier) StreamLogs(ctx context.Context, _ string, _ []string, s
 		s := since
 		f.sinceSeen = &s
 	}
+	if f.streamStarted != nil {
+		select {
+		case f.streamStarted <- struct{}{}:
+		default:
+		}
+	}
 	ch := make(chan k8s.LogLine)
 	errCh := make(chan error, 1)
 	if f.logStreamErr != nil {
@@ -97,6 +116,20 @@ func (f *fakeK8sApplier) StreamLogs(ctx context.Context, _ string, _ []string, s
 	go func() {
 		defer close(ch)
 		defer close(errCh)
+		if f.logFeed != nil {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case text := <-f.logFeed:
+					select {
+					case <-ctx.Done():
+						return
+					case ch <- k8s.LogLine{Pod: "web-7d9f8-x2k4l", Text: text}:
+					}
+				}
+			}
+		}
 		for i, text := range f.logLines {
 			at := f.logLineAt
 			if i < len(f.logLineAts) {
