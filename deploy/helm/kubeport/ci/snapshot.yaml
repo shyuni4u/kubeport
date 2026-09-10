@@ -1420,6 +1420,12 @@ metadata:
     app.kubernetes.io/managed-by: Helm
 spec:
   schedule: "0 21 * * *"
+  # Never leave this empty: with no timeZone k8s reads the schedule in
+  # kube-controller-manager's local zone, while the banner
+  # (frontend/lib/demo-reset.ts) computes it in UTC. On a node set to
+  # Asia/Seoul the two would be nine hours apart — #153 again, from the
+  # other end. Ignored by API servers below 1.27, which behave as before.
+  timeZone: "Etc/UTC"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3

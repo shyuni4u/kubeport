@@ -43,6 +43,12 @@ metadata:
     {{- include "kubeport.labels" . | nindent 4 }}
 spec:
   schedule: {{ .Values.demo.resetSchedule | quote }}
+  # Never leave this empty: with no timeZone k8s reads the schedule in
+  # kube-controller-manager's local zone, while the banner
+  # (frontend/lib/demo-reset.ts) computes it in UTC. On a node set to
+  # Asia/Seoul the two would be nine hours apart — #153 again, from the
+  # other end. Ignored by API servers below 1.27, which behave as before.
+  timeZone: {{ .Values.demo.resetTimeZone | default "Etc/UTC" | quote }}
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3

@@ -217,8 +217,8 @@ demo:
   # front of it) report how many templates the catalog holds. Off by default:
   # on a self-hosted install the catalog's size is not the anonymous internet's
   # business. The public demo turns it on so an external cron can tell that a
-  # reset wiped and then failed to re-seed — which is otherwise invisible for
-  # six hours (#119; #104 was caught only by luck).
+  # reset wiped and then failed to re-seed — which is otherwise invisible
+  # until the next daily reset (#119; #104 was caught only by luck).
   publicHealthCatalog: false
   adminPassword: ""               # --set; used by the reset job only
   userPassword: ""                # --set
@@ -234,6 +234,15 @@ demo:
   # successful seed time on /healthz: nothing else can tell a skipped cycle
   # from a healthy one.
   resetSchedule: "0 21 * * *"
+  # The banner derives its "next reset" from this same value, and reads only
+  # `<minute> <hour|*/N|comma list> * * *`. Forms k8s accepts but the banner
+  # does not — `@daily`, ranges like `0-23/6`, `?`, a list of minutes — make
+  # it omit the time rather than print a wrong one (#153).
+  #
+  # The zone the schedule is read in. Leaving it empty hands that decision to
+  # whichever zone kube-controller-manager runs in; the banner always assumes
+  # UTC, so the two must be pinned together.
+  resetTimeZone: "Etc/UTC"
   # bitnami/kubectl tags were pulled from Docker Hub (2025); alpine/k8s ships
   # sh + kubectl for amd64/arm64. The init container needs a shell (sh -c).
   kubectlImage: alpine/k8s:1.31.9
