@@ -12,7 +12,11 @@ import { LogsPanel } from "./LogsPanel";
 // the pane *says* can tell a stopped stream from one still retrying every 3s.
 type Listener = (e: MessageEvent) => void;
 const listeners = new Map<string, Listener>();
-type Stub = { closed: boolean; onerror: ((e?: Event) => void) | null };
+type Stub = {
+  closed: boolean;
+  onerror: ((e?: Event) => void) | null;
+  onopen: (() => void) | null;
+};
 const sockets: Stub[] = [];
 /** The stream the component is currently on. */
 const socket = () => sockets.at(-1)!;
@@ -65,6 +69,15 @@ function emitEnd() {
   if (!fn) throw new Error("component registered no 'end' listener");
   act(() => {
     fn({ data: JSON.stringify({ reason: "all pods stopped emitting" }) } as MessageEvent);
+  });
+}
+
+// The browser reconnecting by itself after a drop. Same EventSource object, new
+// HTTP stream — which is exactly why anything remembered from the last one has
+// to be cleared here.
+function reopen() {
+  act(() => {
+    socket().onopen?.();
   });
 }
 
@@ -223,6 +236,27 @@ describe("LogsPanel in-stream termination", () => {
 
     expect(screen.getByText(/로그를 모두 보냈습니다/)).toBeInTheDocument();
     expect(screen.queryByText(/아직 출력이 없습니다/)).not.toBeInTheDocument();
+  });
+
+  // The browser's automatic reconnect opens a new HTTP stream on the *same*
+  // EventSource, so anything remembered from the previous one outlives it
+  // unless it is cleared. An error from the stream before last was describing
+  // this one: a clean finish reported as a failure, and a permission that has
+  // since been granted still hiding the button.
+  it("forgets a previous stream's error when the browser reconnects", () => {
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }, { name: "p2" }]} />);
+
+    emitError({ title: "rbac-denied", status: 403, request_id: "req-stale" });
+    dropConnection();
+    reopen();
+    emitLog("p1", "second stream, all fine");
+    emitEnd();
+
+    // The old error row stays — it is history, and it is what the reader saw.
+    // What must not survive is its verdict over the stream that replaced it.
+    expect(screen.getByText("전송 완료")).toBeInTheDocument();
+    expect(screen.queryByText("연결 안 됨")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "다시 연결" })).toBeInTheDocument();
   });
 
   it("keeps retrying a drop that carried no end frame", () => {

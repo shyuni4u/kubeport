@@ -289,7 +289,15 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
       // finished, and calling that "failed" would be a lie about a completed Job.
       setStatus(lastError ? "failed" : "ended");
     });
-    es.onopen = () => setStatus("connected");
+    es.onopen = () => {
+      // A new HTTP stream on the same EventSource — the browser reconnected by
+      // itself after a drop. `lastError` belongs to the stream that just ended,
+      // so carrying it over would let an old pod failure describe this one: a
+      // clean finish reported as a failure, and an rbac-denied that has since
+      // been granted still hiding the Reconnect button.
+      lastError = null;
+      setStatus("connected");
+    };
     // Two very different failures arrive here, and WHATWG is what tells them
     // apart. A non-2xx response or a wrong MIME type "fails the connection":
     // readyState goes to CLOSED and the browser will never retry. A drop on an
