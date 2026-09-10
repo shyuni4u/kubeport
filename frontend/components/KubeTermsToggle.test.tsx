@@ -13,7 +13,7 @@ describe("KubeTermsToggle", () => {
   it("names Kubernetes in full as the switch's name", () => {
     render(<KubeTermsToggle />);
     expect(
-      screen.getByRole("switch", { name: "Kubernetes 원래 이름으로 보기" }),
+      screen.getByRole("switch", { name: "Kubernetes 용어로 보기" }),
     ).toBeInTheDocument();
   });
 

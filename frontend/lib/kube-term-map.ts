@@ -7,12 +7,16 @@ const KUBE = {
   readyInstances: "Ready Pods",
   restarts: "Restart Count",
   memory: "Memory Usage",
-  // The friendly label is "외부 주소" — a public address, which in k8s terms
-  // is an Ingress, not a Service's in-cluster DNS name (#250).
-  accessURL: "Ingress URL",
+  // "외부 주소" can be an Ingress host or a LoadBalancer Service's external IP,
+  // and nothing fills this card yet, so the raw name does not pick one (#250).
+  // Not "Service DNS": a ClusterIP's svc.cluster.local name is not external.
+  accessURL: "External Address",
   instances: "Pods",
   instanceId: "Pod Name",
-  status: "Phase",
+  // What `kubectl get pods` calls the column. The cell shows a container's
+  // waiting reason (CrashLoopBackOff…) when there is one, which is not
+  // `.status.phase` — a "Phase" header pointed at the wrong field.
+  status: "Status",
   namespace: "Namespace",
 } as const;
 

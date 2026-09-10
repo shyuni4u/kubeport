@@ -130,19 +130,20 @@
     "table": {
       "name": "Name",
       "template": "Template",
+      "namespace": "Area",
       "empty": "No releases yet.",
       "emptyCta": "Deploy from the catalog →"
     },
     "overview": {
       "instancesHeading": "Instances ({count})",
-      "noAccessUrlHint": "This template does not expose a public address. Check the 'Logs' tab to see it working."
+      "noAccessUrlHint": "Public addresses are not shown here yet. Check the 'Logs' tab to see it working."
     },
     "tabs": {
       "overview": "Overview",
       "logs": "Logs"
     },
-    "kubeTermsToggle": "Show Kubernetes names",
-    "kubeTermsHelp": "Shows the names admins use in Kubernetes. Applies to the deploy form and release pages alike.",
+    "kubeTermsToggle": "Show Kubernetes terms",
+    "kubeTermsHelp": "Relabels this screen with the Kubernetes terms admins use (e.g. Area → Namespace, Instance → Pod). Only the wording changes — nothing you deployed is touched. Applies to the deploy form and release pages alike.",
     "terms": {
       "readyInstances": "Ready instances",
       "restarts": "Restarts",

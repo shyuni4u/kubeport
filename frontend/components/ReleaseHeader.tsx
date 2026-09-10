@@ -32,7 +32,7 @@ export async function ReleaseHeader({ data }: { data: ReleaseHeaderData }) {
       {/* Wraps: the terms switch label grew and gained a (?) hint (#249), and
           with a long release name the row ran off a 390px screen. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <h1 className="min-w-0 break-all font-mono text-xl font-medium">{data.name}</h1>
+        <h1 className="min-w-0 break-words font-mono text-xl font-medium">{data.name}</h1>
         <StatusChip variant={statusChipVariantFromRelease(data.status)}>
           {label}
         </StatusChip>

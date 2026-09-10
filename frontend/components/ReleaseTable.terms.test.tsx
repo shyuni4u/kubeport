@@ -9,7 +9,9 @@ const rows = [
 ];
 
 // #250 — a release deployed into a "구역" came back under a "네임스페이스"
-// column. The column follows the raw-terms switch like the rest of the pages.
+// column. The list page has no terms switch, so the column does not follow
+// one: following it named the column after whichever page the reader came
+// from (review of #250).
 describe("ReleaseTable namespace column", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 404 }) as unknown as Response));
@@ -27,9 +29,9 @@ describe("ReleaseTable namespace column", () => {
     expect(screen.queryByRole("columnheader", { name: "네임스페이스" })).toBeNull();
   });
 
-  it("calls it Namespace with raw terms on", () => {
+  it("keeps the same name when raw terms were turned on elsewhere", () => {
     useKubeTermsStore.setState({ showKubeTerms: true });
     render(<ReleaseTable rows={rows} />);
-    expect(screen.getByRole("columnheader", { name: "Namespace" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "구역" })).toBeInTheDocument();
   });
 });

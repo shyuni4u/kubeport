@@ -130,19 +130,20 @@
     "table": {
       "name": "이름",
       "template": "템플릿",
+      "namespace": "구역",
       "empty": "아직 배포된 릴리스가 없습니다.",
       "emptyCta": "카탈로그에서 배포하기 →"
     },
     "overview": {
       "instancesHeading": "인스턴스 ({count})",
-      "noAccessUrlHint": "이 템플릿은 외부 주소를 열지 않습니다. 동작 확인은 '로그' 탭에서 할 수 있습니다."
+      "noAccessUrlHint": "외부 주소는 아직 이 화면에 표시하지 않습니다. 동작 확인은 '로그' 탭에서 할 수 있습니다."
     },
     "tabs": {
       "overview": "개요",
       "logs": "로그"
     },
-    "kubeTermsToggle": "Kubernetes 원래 이름으로 보기",
-    "kubeTermsHelp": "관리자가 쓰는 원래 이름(Kubernetes 용어)으로 바꿔 보여 줍니다. 배포 폼과 릴리스 화면에 모두 적용됩니다.",
+    "kubeTermsToggle": "Kubernetes 용어로 보기",
+    "kubeTermsHelp": "화면의 항목 이름을 관리자가 쓰는 Kubernetes 용어로 바꿔 보여 줍니다(예: 구역 → Namespace, 인스턴스 → Pod). 보이는 말만 바뀌고, 배포한 것에는 아무 영향이 없습니다. 배포 폼과 릴리스 화면에 함께 적용됩니다.",
     "terms": {
       "readyInstances": "준비된 인스턴스",
       "restarts": "재시작",

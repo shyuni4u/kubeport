@@ -414,7 +414,7 @@ const form = useForm({
 - 릴리스 이름 (mono, 20px/500)
 - StatusChip (정상 / 배포 중 / 실패)
 - UpdateAvailableBadge (선택적) — "업데이트 가능 · v2 → v3"
-- 우측: "Kubernetes 원래 이름으로 보기" Switch + (?) 도움말 ("배포 폼과 릴리스 화면에 모두 적용", #249). 좁은 화면에서는 헤더 행이 줄바꿈된다.
+- 우측: "Kubernetes 용어로 보기" Switch + (?) 도움말 ("배포 폼과 릴리스 화면에 모두 적용", #249). 좁은 화면에서는 헤더 행이 줄바꿈된다.
 - 메타 줄: "Web Service v2 · dev / team-beta · 2시간 전 배포"
 - Tabs: 개요 · 로그 · 활동 · 설정
 
@@ -455,7 +455,7 @@ useEffect(() => {
   ```ts
   { showKubeTerms: boolean, touched: boolean, toggle: () => void, applyDefault: (show: boolean) => void }
   ```
-- ON: 라벨 `인스턴스` → `Pods`, `외부 주소` → `Ingress URL`, `재시작` → `Restart Count`, `구역` → `Namespace` (#250)
+- ON: 라벨 `인스턴스` → `Pods`, `외부 주소` → `External Address`, `재시작` → `Restart Count`, `구역` → `Namespace` (#250)
 - 번역 맵은 `lib/kube-term-map.ts` 로 분리
 - 시작값은 역할로 정한다 (#39): 서버 컴포넌트가 `roleFromGroups(me.groups)` 로 판정해 `KubeTermsDefault` 에 넘기고, admin 은 ON·user 는 OFF. 사용자가 토글을 한 번 누르면(`touched`) 그 뒤로는 기본값을 적용하지 않는다.
 - 적용 화면: 릴리스 상세 헤더·인스턴스 소제목, 릴리스 목록의 구역 컬럼, 배포 폼의 리소스 미리보기·권한 확인 패널. kind 이름은 `messages/*.json` 의 `kinds.*` 로 번역하고(`lib/kube-kinds.ts`), 목록 밖 kind 는 원문 그대로 둔다.
@@ -471,7 +471,7 @@ useEffect(() => {
 - [ ] SSE 연결 상태 실시간 반영 (끊기면 빨간 인디케이터)
 - [ ] 삭제는 shadcn `AlertDialog` 로 확인 모달
 - [ ] 업데이트 가능 뱃지는 현재 버전 < 최신 non-deprecated published 일 때만
-- [ ] "Kubernetes 원래 이름으로 보기" 토글 상태는 **세션 단위**로만 (페이지 리로드 시 리셋). persist 하면 사용자 레벨 선호도 API 필요 → v1.1 범위
+- [ ] "Kubernetes 용어로 보기" 토글 상태는 **세션 단위**로만 (페이지 리로드 시 리셋). persist 하면 사용자 레벨 선호도 API 필요 → v1.1 범위
 
 ---
 
