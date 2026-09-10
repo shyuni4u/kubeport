@@ -64,14 +64,14 @@ docker compose -f deploy/docker/docker-compose.yml down -v     # pgdata 볼륨�
 **사용법** — 세션을 시작할 때 한 번:
 
 ```bash
-eval "$(scripts/test-db.sh)"        # kubeport_test_<워크트리 디렉터리명> 생성 + 스키마 적용 + TEST_DATABASE_URL export
+out=$(scripts/test-db.sh) && eval "$out"        # kubeport_test_<워크트리 디렉터리명> 생성 + 스키마 적용 + TEST_DATABASE_URL export
 cd backend && go test -p 1 ./internal/store/...
 ```
 
 | 명령 | 동작 |
 |------|------|
 | `scripts/test-db.sh [name]` | DB `kubeport_test_<name>` 이 없으면 만들고 스키마 적용(멱등 — 최신이면 no-op). stdout 에는 `export TEST_DATABASE_URL=...` **한 줄만**, 안내는 stderr. `name` 생략 시 워크트리 디렉터리명을 소문자·영숫자·밑줄로 정규화해 쓴다. 63바이트 식별자 한도를 넘으면 잘라 체크섬을 붙인다 |
-| `eval "$(scripts/test-db.sh --drop [name])"` | 그 DB(와 atlas dev DB)를 삭제하고 `TEST_DATABASE_URL` 을 unset. **공유 DB `kubeport` 는 이름 규칙상 대상이 될 수 없고, 추가로 명시적 가드가 있다** |
+| `out=$(scripts/test-db.sh --drop [name]) && eval "$out"` | 그 DB(와 atlas dev DB)를 삭제하고 `TEST_DATABASE_URL` 을 unset. **공유 DB `kubeport` 는 이름 규칙상 대상이 될 수 없고, 추가로 명시적 가드가 있다** |
 | `scripts/test-db.sh --list` | 이 postgres 에 남아 있는 세션별 DB 목록 — 지운 워크트리의 DB 청소용 |
 
 - **스키마 적용은 CI 와 같은 경로다.** `backend/migrations/atlas.hcl` 의 `env "local"` + `schema.hcl` 을 그대로 쓰고 `--var url=…` 로 대상만 바꾼다. `url`·`dev` 가 변수가 됐지만 기본값이 예전 값이라 CI·`up.sh` 의 `atlas schema apply --env local` 은 그대로다.
@@ -87,7 +87,7 @@ cd backend && go test -p 1 ./internal/store/...
 
 - **고치는 동안은 파일·패키지·테스트 단위로 돈다.**
   ```bash
-  cd frontend && pnpm vitest run src/components/Foo.test.tsx
+  cd frontend && pnpm vitest run components/DemoBanner.test.tsx
   cd backend  && go test ./internal/api -run TestClusters_Register
   ```
 - **전체 스위트(`pnpm test`, `go test -p 1 ./...`)는 푸시 직전 1회.** 그 사이 바뀐 게 테스트 대상 밖으로 번졌는지 확인하는 용도다.
@@ -97,7 +97,7 @@ cd backend && go test -p 1 ./internal/store/...
 
 | 이름 | 기본값 | 목적 |
 |------|--------|------|
-| `TEST_DATABASE_URL` | `postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable` | 통합 테스트 DB DSN. CI 에서 주입 가능. 로컬에서 세션이 여럿이면 `eval "$(scripts/test-db.sh)"` 로 세션별 DB 를 가리킨다 (§3.4) |
+| `TEST_DATABASE_URL` | `postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable` | 통합 테스트 DB DSN. CI 에서 주입 가능. 로컬에서 세션이 여럿이면 `out=$(scripts/test-db.sh) && eval "$out"` 로 세션별 DB 를 가리킨다 (§3.4) |
 | `TEST_DEX_ISSUER` (예정, Task 7) | `http://localhost:5556` | OIDC 테스트용 dex 이슈어 |
 | `TEST_KUBECONFIG` (예정, Task 12) | `$HOME/.kube/config` | k8s 테스트용 kubeconfig |
 | `OIDC_ISSUER` | `http://localhost:5556` | `internal/auth` 가 붙을 dex. HTTPS dex 는 `https://host.docker.internal:5556` |

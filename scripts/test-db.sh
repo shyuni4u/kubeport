@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Per-session / per-worktree test database on the compose postgres (docs/testing.md §3.4).
 #
-#   eval "$(scripts/test-db.sh)"          # create kubeport_test_<worktree> + apply schema, export TEST_DATABASE_URL
-#   eval "$(scripts/test-db.sh foo)"      # same, kubeport_test_foo
-#   eval "$(scripts/test-db.sh --drop)"   # drop this worktree's DB, unset TEST_DATABASE_URL
-#   scripts/test-db.sh --list             # show every per-session DB on the compose postgres
+#   out=$(scripts/test-db.sh) && eval "$out"          # create kubeport_test_<worktree> + apply schema, export TEST_DATABASE_URL
+#   out=$(scripts/test-db.sh foo) && eval "$out"      # same, kubeport_test_foo
+#   out=$(scripts/test-db.sh --drop) && eval "$out"   # drop this worktree's DB, unset TEST_DATABASE_URL
+#   scripts/test-db.sh --list                         # show every per-session DB on the compose postgres
+#
+# Not `eval "$(scripts/test-db.sh)"`: on failure the script prints nothing to
+# stdout, eval of an empty string succeeds, and the tests that follow fall back
+# to the shared `kubeport` DB — the one this script exists to keep them off.
 #
 # Why: internal/api's TestMain deletes rows by name pattern from whatever
 # TEST_DATABASE_URL points at. `go test -p 1` serialises packages inside one
@@ -35,21 +39,24 @@ need() { command -v "$1" >/dev/null 2>&1 || die "missing tool: $1 — see docs/d
 
 usage() { sed -n '2,7p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit "${1:-0}"; }
 
-# name → [a-z0-9_], collapsed, trimmed. Postgres truncates identifiers at 63
-# bytes, silently — two long names would then share a DB. Keep the result
-# within 63 (under the longer prefix) by cutting and appending a checksum of
-# the full name.
+# name → [a-z0-9_], collapsed, trimmed. That mapping is lossy: worktrees
+# `fix+a` and `fix-a` would both become `fix_a` and share a DB — the exact
+# cross-session deletion this script exists to prevent, and `--drop` from one
+# would force-drop the other's. So whenever normalising changed the name, a
+# checksum of the ORIGINAL name is appended. Postgres also truncates
+# identifiers at 63 bytes silently, so a long name is cut to fit (under the
+# longer prefix) with the same checksum.
 normalize() {
-  local n
-  n="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_' '_' | tr -s '_')"
+  local raw="${1#"$PREFIX"}"    # accept a full DB name too
+  local n sum=""
+  n="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_' '_' | tr -s '_')"
   n="${n#_}"; n="${n%_}"
-  n="${n#"$PREFIX"}"            # accept a full DB name too
   [[ -n "$n" ]] || die "cannot derive a DB name from '$1' — pass one: scripts/test-db.sh <name>"
   local max=$(( 63 - ${#DEV_PREFIX} ))
-  if (( ${#n} > max )); then
-    local sum
-    sum="$(printf '%s' "$n" | cksum | cut -d' ' -f1)"
-    n="${n:0:$(( max - ${#sum} - 1 ))}"
+  if [[ "$n" != "$raw" ]] || (( ${#n} > max )); then
+    sum="$(printf '%s' "$raw" | cksum | cut -d' ' -f1)"
+    local keep=$(( max - ${#sum} - 1 ))
+    (( ${#n} <= keep )) || n="${n:0:$keep}"
     n="${n%_}_$sum"
   fi
   printf '%s' "$n"
