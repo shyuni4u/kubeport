@@ -62,9 +62,11 @@ info:
     line. Send your own and it is kept, as long as it matches
     `^[A-Za-z0-9._-]{1,64}$`.
 
-    Two paths are rate limited per caller: `POST /v1/selfsubjectaccessreview`
-    and the two cluster-openapi reads, which share one budget. A 429 carries
-    `Retry-After`.
+    The routes that make kubeport call a cluster's control plane are rate
+    limited per caller. `POST /v1/selfsubjectaccessreview`, the two
+    cluster-openapi reads and opening a log stream share one budget (60/min);
+    `GET /v1/releases/{id}` has its own (240/min), because the UI polls it. A
+    429 carries `Retry-After`.
 
     ## Every error is a Problem
 
@@ -1035,6 +1037,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
     put:
       tags: [releases]
@@ -1533,6 +1536,12 @@ components:
         retrying at once or sleeping an arbitrary constant. The demo's two Dex
         accounts are static, so concurrent demo visitors share one bucket.
 
+        Budgets are per route group, not one per caller: reading a release
+        (`GET /v1/releases/{id}`, 240/min) does not spend the budget shared by
+        the SSAR, cluster-openapi and log-stream routes (60/min), and the
+        template authoring and preview routes have their own. `X-RateLimit-Limit`
+        says which budget refused.
+
         `too-many-streams` is the other 429, and only
         `GET /v1/releases/{id}/logs` gives it: the caller already holds as many
         log streams **open** as it may (#169). The bucket above prices opening a
@@ -1751,8 +1760,10 @@ components:
                             # holds them. A different release name does not fix
                             # it: deploy into another namespace, or remove the
                             # holder first.
-        - rate-limited      # 429 — over the per-caller budget on the SSAR and
-                            # cluster-openapi routes. Carries Retry-After.
+        - rate-limited      # 429 — over a per-caller budget: SSAR, cluster-openapi
+                            # and log-stream opens share one; release reads,
+                            # template authoring and preview each have their own.
+                            # Carries Retry-After.
         - too-many-streams  # 429 — the caller already holds as many log
                             # streams open as it may (#169). Clears when one of
                             # them closes, not with time. Carries Retry-After as
