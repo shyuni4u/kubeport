@@ -79,6 +79,22 @@ describe("DynamicForm widget mapping", () => {
     expect(screen.queryByText("Choice")).toBeNull();
   });
 
+  // The document-level shapes, one level above the field-level ones. The
+  // deploy pages fall back to `{fields: []}` only when the whole YAML is
+  // empty, so `fields:` with no value (null) and a spec with no `fields` key
+  // at all ({}) arrive here as-is — and the backend accepts both on save.
+  it.each([
+    ["fields: null", { fields: null }],
+    ["no fields key", {}],
+    ["fields not a list", { fields: "nope" }],
+  ])("renders an empty form for a ui-spec with %s", (_label, raw) => {
+    expect(() =>
+      renderWithIntl(
+        <DynamicForm spec={raw as unknown as UISpec} onSubmit={() => {}} />,
+      ),
+    ).not.toThrow();
+  });
+
   it("renders numeric Input for integer without both min+max", () => {
     const spec: UISpec = {
       fields: [

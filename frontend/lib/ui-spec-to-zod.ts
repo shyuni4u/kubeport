@@ -110,7 +110,11 @@ function safeRegExp(pattern: string): RegExp | null {
  */
 export function uiSpecProblems(spec: UISpec): string[] {
   const out: string[] = [];
-  spec.fields.forEach((f, i) => {
+  // `fields:` with no value parses to null, and a spec with no `fields` key
+  // parses to {}. The backend saves both — ValidateSpec only walks the list —
+  // so they reach the deploy form, where neither is a list to walk.
+  const list: UISpecField[] = Array.isArray(spec?.fields) ? spec.fields : [];
+  list.forEach((f, i) => {
     const at = `fields[${i}]`;
     const type: unknown = f?.type;
     if (!KNOWN_TYPES.includes(type as (typeof KNOWN_TYPES)[number])) {
@@ -152,7 +156,11 @@ export function normalizeUISpec(spec: UISpec): {
   problems: string[];
 } {
   const problems = uiSpecProblems(spec);
-  const fields = spec.fields.filter((f) => {
+  // Same document-level guard as uiSpecProblems: `fields:` → null, no key →
+  // {}. The deploy pages only substitute `{fields: []}` when the whole YAML is
+  // empty, so these reach DynamicForm as-is.
+  const list: UISpecField[] = Array.isArray(spec?.fields) ? spec.fields : [];
+  const fields = list.filter((f) => {
     if (!KNOWN_TYPES.includes(f?.type as (typeof KNOWN_TYPES)[number])) {
       return false;
     }
