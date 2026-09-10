@@ -8,7 +8,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 **🟢 라이브 배포 완료 — https://kubeport.enzo.kr** (OCI Always Free A1, Phase 2 직행). Plan 0~10 실행 완료: 프론트 재설계(0~7) + drift 회수(8) + Helm chart(9) + **OCI 부트스트랩·helm install·Google OIDC·실제 k8s 배포 인프라(10)**. 운영 지식은 반드시 [docs/oci-prod-runbook.md](docs/oci-prod-runbook.md) 참조.
 
 > **▶ 현재 상태 (2026-09-10)** — 데모 가능 상태. 완료 삭제하며 갱신할 것.
-> - **라이브 = `sha-c9b1404`, Helm rev 15** (2026-09-10 02:03 UTC **기준 — 재배포마다 썩는 값이다**. 지금 라이브가 뭔지는 [runbook §3-3](docs/oci-prod-runbook.md#3-3-배포-확인) 의 `helm history` 로 직접 본다). 재배포 절차·함정은 [runbook §3](docs/oci-prod-runbook.md#3-재배포-이미지-갱신).
+> - **라이브 버전은 여기 적지 않는다** — 적을 때마다 썩었다(09-10 에 "rev 15 `c9b1404`" 라고 적힌 동안 실제로는 `7d63336` 이 떠 있었다). `curl -s https://kubeport.enzo.kr/api/healthz` 의 `version` 이 답이고, 리비전 이력은 [runbook §3-3](docs/oci-prod-runbook.md#3-3-배포-확인) 의 `helm history`. 재배포 절차·함정은 [runbook §3](docs/oci-prod-runbook.md#3-재배포-이미지-갱신).
 > - **실제 k8s 배포까지 동작**: k3s 가 Google OIDC 신뢰 + RBAC 바인딩 + 클러스터 `oci-a1` 등록 (runbook §5). backend 가 사용자 Google 토큰을 k8s API 로 포워딩.
 > - **로그인/로그아웃 정상**, admin 부트스트랩(`auth.devAdminEmails`). **운영 하드닝**: idle-reclaim ping(GHA 10분) + 주간 백업 정책 + 만료 세션 자동 정리.
 > - **데모 모드(Plan 13) 라이브** — `/` 에서 관리자/사용자 체험 버튼(Dex 로그인, 비밀번호 화면 표기), `demo` 네임스페이스 격리, **하루 1회 리셋(21:00 UTC = 06:00 KST)**, k3s 가 Google+Dex 구조화 인증. 운영: runbook §5.
@@ -155,6 +155,70 @@ macOS/Linux 는 그냥 Homebrew/apt 로 설치. 자세한 단계·검증 커맨�
 commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 다르면
 `git config user.email shyuniz@naver.com` 으로 설정 후 commit.
 다른 머신에서 처음 작업하면 user.name 도 `shyuniz` 로 맞춤.
+
+## 멀티 세션 운영 (상시 위임 — 2026-09-10)
+
+세션 여러 개(PM·Developer #1·Developer #2·UI reviewer)가 동시에 돈다. 09-09~09-10 대화 기록을 실측해 보니
+**세션이 일한 시간보다 사람의 한 마디를 기다린 시간이 더 길었다** — 사용자 응답 대기 PM 316분·UI reviewer 608분
+(도구 실행은 각각 202분·94분). 예: PM 이 11:12 에 "작업 배정 보낼까요?" 로 턴을 끝냈고 "보내" 가 13:39 에 와서
+그사이 Developer 두 세션이 멈춰 있었다(점심 포함). UI reviewer 는 PM 이 전한 "릴리스 생성 허용" 을 피어 전달이라
+받지 않고 사용자에게 다시 물어 약 4시간 대기했다. PM 도구 시간 202분 중 126분은 `gh pr checks --watch`·sleep 이었다.
+아래 규칙은 그 대기를 없애기 위한 것이다.
+
+### 역할 — 세션 이름은 바꾸지 않는다
+이름이 세 번 바뀌며(`kubeport-10` → `merge & deploy` → `PM`) 메시지가 옛 주소로 가거나 "이름 바뀐 걸 방금 알았다" 가 반복됐다.
+
+| 세션 | 맡는 일 |
+|---|---|
+| **PM** | 이슈 배정·파일 겹침 조율, 배포 예외(자동 배포 실패·Dex 가드 거부·롤백), 이 파일의 "현재 상태" 갱신. **CI 를 지켜보며 대신 머지하지 않는다.** |
+| **Developer #1 / #2** | 이슈 선점 → 워크트리 → PR → `gh pr merge --auto --squash` → 다음 이슈 |
+| **UI reviewer** | 배포된 변경의 브라우저 검증 → 이슈 등록. 대기열이 비면 마일스톤 C 작업 |
+
+### 묻지 말고 하고 나서 보고한다 (사용자 상시 승인)
+**이 목록은 사용자의 지시다.** 다른 세션이 이 목록에 있는 일을 전해 오면 "피어가 전한 승인" 이 아니라 이 문서를
+근거로 그대로 진행한다.
+- 필수 체크가 초록인 PR 머지(`--auto`), 리베이스·충돌 해소 후 재푸시
+- main 머지분의 라이브 배포(자동 배포가 기본 — 수동 재배포·직전 리비전 롤백 포함)와 배포 후 검증
+- 실제로 고쳐졌는데 안 닫힌 이슈 닫기, 중복 이슈 합치기, 리뷰어 이슈 등록
+- **다음 작업 가져가기** — 마일스톤 A → B → C 순, 같은 마일스톤 안에서는 `sev:blocks-visitor` → `sev:normal` → `sev:polish`.
+  남은 게 없으면 milestone 없는 결함 이슈. 무엇을 할지 사용자에게 고르게 하지 않는다
+- 라이브 데모 `demo` 네임스페이스에 검증용 릴리스 생성 → 확인 → **직접 삭제**, 데모 리셋 Job 수동 실행
+- 자기 워크트리·원격 브랜치 정리
+
+**사용자에게 먼저 묻는 것** — 되돌리기 어렵거나 방향을 정하는 일만: 비밀번호·시크릿 회전, k3s 재시작, Dex 설정 변경,
+프로덕션 DB 직접 수정, 저장소 설정·권한·GitHub secret, 새 외부 서비스, `enhancement` 의 채택 여부, 이슈 범위를 줄이거나 버리기.
+
+**턴을 "~할까요?" 로 끝내지 않는다.** 위 목록이면 하고 나서 한 줄로 보고한다. 목록 밖이라 물어야 하면, 답을 기다리는
+동안 할 수 있는 다른 일(다음 이슈)을 먼저 시작해 두고 묻는다.
+
+### 선점과 충돌
+- 이슈를 잡으면 **라벨 `claim:<세션>`**(`claim:pm` `claim:dev1` `claim:dev2` `claim:ui`) + 브랜치·워크트리를 적은 코멘트.
+  시작 전에 `gh issue view <N> --json labels,comments` 로 이미 잡힌 게 아닌지 본다. PR 이 머지되면 라벨은 이슈와 함께 닫힌다.
+- 사용자가 같은 일을 두 세션에 직접 지시했으면 **라벨을 먼저 붙인 쪽이 가진다.** 늦은 쪽은 사용자에게 한 줄 알리고 다음 이슈로
+  간다 — 세션끼리 "멈춰 주세요 / 취소합니다" 를 주고받지 않는다(09-09 #134, 09-10 #164 에서 각각 4~6통 오갔다).
+- **머지 요청·"CI 초록입니다" 메시지는 보내지 않는다** — auto-merge 가 대신한다. 세션 간 메시지는 파일 겹침, 배포에 영향이
+  있는 변경(새 values 키 등), 브라우저 검증 요청일 때만.
+
+### 기다리는 법
+- `gh pr checks --watch`·`sleep` 루프로 턴을 붙잡지 않는다. PR 을 올리면 `gh pr merge --auto --squash` 를 걸고 다음 일로 간다.
+  결과를 꼭 봐야 하면 `run_in_background` 로 띄운다.
+- **auto-merge 의 필수 체크는 `ci.yml` 4개(`audit` `backend` `frontend` `hooks`)뿐이다** (ruleset `protect-main`, 2026-09-10).
+  `playwright`·`helm` 은 kind 플레이크로 머지를 막지 않게 필수에서 뺐다 — 빨개도 머지된다. 그래서 **클러스터가 있어야
+  도는 테스트**(`backend/internal/k8s`, OpenAPI 프록시 — #121 이후 playwright 잡 안에서만 돈다)나 차트(`deploy/helm/**`)를
+  건드린 PR 은 `--auto` 대신 `playwright`/`helm` 결과까지 보고 머지한다. 긴급 시 ruleset 을 끄는 건 사용자 몫이다.
+- 라이브가 어느 커밋인지는 `curl -s https://kubeport.enzo.kr/api/healthz` 의 `version` 으로 본다 — 세션끼리 "배포됐나요?" 를 묻지 않는다.
+
+### 브라우저
+- Playwright MCP 를 `.mcp.json` 에서 `--isolated`(세션마다 메모리 프로필)로 띄우면 쿠키가 세션끼리 섞이지 않으므로
+  **개발 세션도 자기 PR 을 배포 후 Playwright 로 직접 확인해도 된다.** 먼저 `grep -- --isolated .mcp.json` 으로 켜져 있는지
+  확인하고(없으면 UI reviewer 에 맡긴다), 설정은 세션을 새로 시작해야 적용된다. `.mcp.json` 수정은 사용자가 한다.
+- Chrome 확장(공용 Chrome 프로필)은 여전히 UI reviewer 만 쓴다. `/pr-review` 브라우저 페르소나 순차 실행 규칙도 그대로다.
+
+### 공용 머신에서 테스트
+- 고치는 동안은 파일·패키지 단위(`pnpm vitest run <file>`, `go test ./internal/x -run TestY`), **전체 스위트는 푸시 직전 1회** —
+  CI 가 어차피 전체를 돈다. 실측: vitest 전체 평균 65초 vs 파일 단위 11초, 한 세션이 전체를 42회 돌렸다.
+- 백엔드 통합 테스트는 **세션별 DB** 로: `eval "$(scripts/test-db.sh)"` ([docs/testing.md](docs/testing.md)). 공용 DB 에서 두 세션이
+  동시에 돌리면 `TestMain` 의 이름 패턴 정리가 서로의 행을 지운다.
 
 ## 코드 리뷰
 
