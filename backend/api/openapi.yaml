@@ -2079,7 +2079,12 @@ components:
         namespace: { type: string }
         name:
           type: string
-          description: RFC 1123 hostname. Unique within cluster + namespace.
+          maxLength: 63
+          description: |
+            An RFC 1123 hostname that is also a Kubernetes label value — at most
+            63 characters, uppercase and dots accepted. Unique within cluster +
+            namespace. The web deploy form is stricter and accepts only a
+            lowercase DNS-1123 label (lowercase letters, digits, hyphens).
         values:
           type: object
           additionalProperties: true
