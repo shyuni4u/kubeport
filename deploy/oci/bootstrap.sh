@@ -22,6 +22,10 @@
 #        BOOTSTRAP_OIDC_CLIENT_ID=<google-client-id> bash bootstrap.sh
 #   # k3s 는 고정 버전(K3S_PINNED)으로 깔린다 (#194). 복구 등으로 다른 버전이 필요할 때만:
 #   sudo BOOTSTRAP_EMAIL=you@example.com BOOTSTRAP_K3S_VERSION=v1.xx.y+k3s1 bash bootstrap.sh
+#   # 오버라이드 버전에는 그 태그의 install.sh 와 k3s 바이너리 sha256 을 함께 준다 (#221 — 내용으로 고정):
+#   #   BOOTSTRAP_K3S_INSTALL_SHA256=$(curl -fsSL https://raw.githubusercontent.com/k3s-io/k3s/v1.xx.y%2Bk3s1/install.sh | sha256sum | cut -d' ' -f1)
+#   #   BOOTSTRAP_K3S_BIN_SHA256=<릴리스 sha256sum-<arch>.txt 의 k3s(-arm64) 줄 — 자산 digest 와 대조>
+#   #   (먼저 그 파일들을 확인하고 나서.) 이미 k3s 가 깔린 노드에서는 설치하지 않으므로 필요 없다.
 #   # v1.30 미만은 거부, 지원 종료 마이너(K3S_MIN_SUPPORTED_MINOR 미만)는 BOOTSTRAP_K3S_ALLOW_EOL=1 일 때만.
 #   # AuthenticationConfiguration apiVersion 은 apiserver 버전에서 고른다 (BOOTSTRAP_AUTH_API 로 덮을 수 있음).
 #
@@ -53,6 +57,34 @@ K3S_PINNED="v1.36.3+k3s1"
 K3S_MIN_SUPPORTED_MINOR=34
 K3S_MIN_SUPPORTED_UNTIL="2026-10-27"
 K3S_VERSION="${BOOTSTRAP_K3S_VERSION:-${K3S_PINNED}}"
+
+# What bootstrap downloads and runs as root is pinned by content, not only by
+# version (#221). A version tag names a release; it does not fix what the
+# release serves. The script used to pipe https://get.k3s.io and helm's
+# get-helm-3 from its main branch into a root shell, and the k3s binary was
+# checked only against a sha256sum file from the same release — replace both
+# assets and the check still passes. Each file below is now fetched from a
+# release-tagged URL and checked against the sha256 written here before
+# anything runs or is applied (Step 0). If upstream changes one, the hash stops
+# matching and bootstrap stops — it never falls back to an unpinned URL.
+#
+# Not covered: container images. The cert-manager manifest and k3s's bundled
+# components (traefik, coredns, ...) pull their images by tag at run time.
+#
+# Bump a version and its hashes in the same commit (docs/oci-prod-runbook.md §2):
+#   k3s install.sh: curl -fsSL "https://raw.githubusercontent.com/k3s-io/k3s/<ver with + as %2B>/install.sh" | sha256sum
+#   k3s binary:     the k3s / k3s-arm64 lines of the release's sha256sum-<arch>.txt, cross-checked with the
+#                   asset digest: gh api repos/k3s-io/k3s/releases/tags/<ver> --jq '.assets[]|.name+" "+.digest'
+#   helm:           https://get.helm.sh/helm-<ver>-linux-<arch>.tar.gz.sha256sum (published next to the tarball)
+#   cert-manager:   curl -fsSL https://github.com/cert-manager/cert-manager/releases/download/<ver>/cert-manager.yaml | sha256sum
+K3S_INSTALL_SHA256_PINNED="46177d4c99440b4c0311b67233823a8e8a2fc09693f6c89af1a7161e152fbfad"  # install.sh @ v1.36.3+k3s1
+K3S_BIN_SHA256_ARM64_PINNED="c9a209103f480f163b7c6a56f00862b4481927b284dc29a3716bb70d886691a8"  # k3s-arm64 @ v1.36.3+k3s1
+K3S_BIN_SHA256_AMD64_PINNED="2f98a9f8fe5782479ee2d54e70a1b10a7f6fd4cae8d38ed3098452dc6eed76b5"  # k3s @ v1.36.3+k3s1
+HELM_VERSION="v3.20.2"  # CI's helm (.github/workflows/helm.yml)
+HELM_SHA256_ARM64="5ea2d6bc2cda3f8edf985e028809f5a9278f404fb8ab24044de9b7cb9b79a691"
+HELM_SHA256_AMD64="258e830a9e613c8a7a302d6059b4bb3b9758f2f3e1bb8ea0d707ce10a9a72fea"
+CERT_MANAGER_VERSION="v1.16.1"
+CERT_MANAGER_SHA256="ad09a35d3dd404f98f4e16555b01b89bdf7a499932b4567f3e2eddb4ef3cab15"
 
 # The minor of a k3s version string, or nothing when it is not one.
 k3s_minor_of() {
@@ -93,8 +125,62 @@ fi
 # A re-run leaves an installed k3s as it is (Step 2), so the apiserver that will
 # read auth.yaml is the installed one, not K3S_VERSION.
 installed=""
+k3s_present=""
 if command -v k3s >/dev/null 2>&1; then
+  k3s_present=1
   installed="$(k3s --version 2>/dev/null | awk 'NR==1 {print $3}' || true)"
+fi
+
+# The CPU architecture picks the k3s binary and the helm tarball. Only a node
+# that will install one of them needs a pinned build for it.
+helm_present=""
+command -v helm >/dev/null 2>&1 && helm_present=1
+ARCH=""
+if [[ -z "${k3s_present}" || -z "${helm_present}" ]]; then
+  case "$(uname -m)" in
+    aarch64|arm64) ARCH=arm64 ;;
+    x86_64|amd64)  ARCH=amd64 ;;
+    *)
+      echo "error: no pinned k3s/helm build for $(uname -m); add its downloads and sha256 to bootstrap.sh" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+# Which k3s hashes Step 0 checks — the installer script and the binary. Only a
+# node that will install k3s needs them. The pin's hashes come with the pin; an
+# override has none in this file, so it must bring both — otherwise it would run
+# whatever the tag serves, which is the unpinned install this replaced (#221).
+K3S_INSTALL_SHA256=""; K3S_BIN_SHA256=""; K3S_BIN_ASSET=""
+if [[ -z "${k3s_present}" ]]; then
+  if [[ "${ARCH}" == arm64 ]]; then K3S_BIN_ASSET=k3s-arm64; pinned_bin="${K3S_BIN_SHA256_ARM64_PINNED}"
+  else K3S_BIN_ASSET=k3s; pinned_bin="${K3S_BIN_SHA256_AMD64_PINNED}"; fi
+  if [[ "${K3S_VERSION}" == "${K3S_PINNED}" ]]; then
+    K3S_INSTALL_SHA256="${K3S_INSTALL_SHA256_PINNED}"
+    K3S_BIN_SHA256="${pinned_bin}"
+    for given in INSTALL:"${BOOTSTRAP_K3S_INSTALL_SHA256:-}":"${K3S_INSTALL_SHA256}" BIN:"${BOOTSTRAP_K3S_BIN_SHA256:-}":"${K3S_BIN_SHA256}"; do
+      IFS=: read -r which value pinned <<<"${given}"
+      if [[ -n "${value}" && "${value}" != "${pinned}" ]]; then
+        echo "error: BOOTSTRAP_K3S_${which}_SHA256 differs from the pinned hash for ${K3S_PINNED}; leave it unset, or change the pin in bootstrap.sh" >&2
+        exit 1
+      fi
+    done
+  else
+    K3S_INSTALL_SHA256="${BOOTSTRAP_K3S_INSTALL_SHA256:-}"
+    K3S_BIN_SHA256="${BOOTSTRAP_K3S_BIN_SHA256:-}"
+    if [[ ! "${K3S_INSTALL_SHA256}" =~ ^[0-9a-f]{64}$ || ! "${K3S_BIN_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+      echo "error: BOOTSTRAP_K3S_VERSION=${K3S_VERSION} needs BOOTSTRAP_K3S_INSTALL_SHA256 and BOOTSTRAP_K3S_BIN_SHA256 — the sha256 (64 lowercase hex) of" >&2
+      echo "  https://raw.githubusercontent.com/k3s-io/k3s/${K3S_VERSION//+/%2B}/install.sh (after reading it) and of" >&2
+      echo "  https://github.com/k3s-io/k3s/releases/download/${K3S_VERSION//+/%2B}/${K3S_BIN_ASSET} (check it against the release's asset digest)" >&2
+      exit 1
+    fi
+  fi
+fi
+
+HELM_ARCH=""; HELM_SHA256=""
+if [[ -z "${helm_present}" ]]; then
+  HELM_ARCH="${ARCH}"
+  if [[ "${ARCH}" == arm64 ]]; then HELM_SHA256="${HELM_SHA256_ARM64}"; else HELM_SHA256="${HELM_SHA256_AMD64}"; fi
 fi
 auth_minor="$(k3s_minor_of "${installed}" || true)"
 auth_minor="${auth_minor:-${k3s_minor}}"
@@ -356,6 +442,56 @@ if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
   fi
 fi
 
+echo "== Step 0/4: download and verify the pinned installers =="
+# Before the host changes: a changed or unreachable artifact stops the run here,
+# with nothing installed and the firewall untouched.
+WORK="$(mktemp -d)"
+trap 'rm -rf "${WORK}"' EXIT
+
+# fetch_verified <url> <sha256> <dest> — download, then keep the file only if
+# its sha256 is the pinned one. A mismatch removes it and stops; there is no
+# fallback to an unpinned source.
+fetch_verified() {
+  local url="$1" want="$2" dest="$3" got
+  # The file check as well as curl's status: a download that reports success
+  # but leaves nothing must fail here with this message, not in sha256sum.
+  if ! curl -fsSL --retry 3 --max-time 180 -o "${dest}" "${url}" || [[ ! -s "${dest}" ]]; then
+    rm -f "${dest}"
+    echo "error: could not download ${url}; nothing was installed" >&2
+    exit 1
+  fi
+  got="$(sha256sum "${dest}" | awk '{print $1}')"
+  if [[ "${got}" != "${want}" ]]; then
+    rm -f "${dest}"
+    echo "error: ${url} is not the pinned file (sha256 ${got}, pinned ${want})." >&2
+    echo "  Upstream changed it, or the download was tampered with. Nothing was run or installed from it." >&2
+    echo "  Read the new file before trusting it, then update the pin in deploy/oci/bootstrap.sh (runbook §2)." >&2
+    exit 1
+  fi
+  echo "  verified $(basename "${dest}") (${got})"
+}
+
+if [[ -z "${k3s_present}" ]]; then
+  fetch_verified "https://raw.githubusercontent.com/k3s-io/k3s/${K3S_VERSION//+/%2B}/install.sh" \
+    "${K3S_INSTALL_SHA256}" "${WORK}/k3s-install.sh"
+  fetch_verified "https://github.com/k3s-io/k3s/releases/download/${K3S_VERSION//+/%2B}/${K3S_BIN_ASSET}" \
+    "${K3S_BIN_SHA256}" "${WORK}/k3s"
+fi
+if [[ -n "${HELM_ARCH}" ]]; then
+  fetch_verified "https://get.helm.sh/helm-${HELM_VERSION}-linux-${HELM_ARCH}.tar.gz" \
+    "${HELM_SHA256}" "${WORK}/helm.tar.gz"
+fi
+# Only when Step 4 will apply it: a re-run on a node that already has
+# cert-manager must not fail here because GitHub is unreachable. The local
+# kubeconfig, as Step 4 uses: an inherited KUBECONFIG (sudo -E) would ask
+# another cluster, skip the download, and leave Step 4 without the file
+# (codex review).
+if [[ -z "${k3s_present}" ]] || ! KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s kubectl get ns cert-manager >/dev/null 2>&1; then
+  fetch_verified "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml" \
+    "${CERT_MANAGER_SHA256}" "${WORK}/cert-manager.yaml"
+fi
+
+echo
 echo "== Step 1/4: OS firewall (iptables) — open 80/443 =="
 # OCI Ubuntu images ship with a default INPUT policy that DROPs most inbound
 # traffic past SSH. Insert ACCEPT rules above the catch-all REJECT.
@@ -445,7 +581,26 @@ if ! command -v k3s >/dev/null 2>&1; then
   # and nothing listening on the host — traefik does NOT self-bind hostPorts.
   # traefik is the only LB Service here, so there is no port contention.
   # --write-kubeconfig-mode 644: lets non-root user read kubeconfig.
-  curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${K3S_VERSION}" INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" sh -s -
+  # The binary and installer verified in Step 0 — not https://get.k3s.io (#221).
+  # The binary goes in first and the installer only sets up the service around
+  # it. INSTALL_K3S_SKIP_DOWNLOAD=true, not =binary: left to itself install.sh
+  # fetches the binary again (checked only against the release's own sha256sum),
+  # and with =binary it still asks api.github.com for k3s-selinux and, on a
+  # RHEL-family host, installs an unpinned rpm. With =true it downloads nothing
+  # and only checks that /usr/local/bin/k3s runs.
+  #
+  # env -i with an allowlist, not a list of variables to drop: install.sh reads
+  # INSTALL_K3S_PR/COMMIT before VERSION, ARTIFACT_URL/GITHUB_URL move its
+  # downloads, and it copies every inherited K3S_*, CONTAINERD_* and proxy
+  # variable into the service's env file — K3S_URL + K3S_TOKEN would even turn
+  # this server into an agent of another cluster. Inherited through sudo -E,
+  # any of these would silently replace what this script verified and writes.
+  # A host that needs a proxy puts it in /etc/default/k3s (runbook §2).
+  install -m 0755 -o root -g root "${WORK}/k3s" /usr/local/bin/k3s
+  env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" HOME=/root \
+      INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_VERSION="${K3S_VERSION}" \
+      INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" \
+      sh "${WORK}/k3s-install.sh"
   echo "  k3s ${K3S_VERSION} installed"
 else
   # An existing install is left as it is. Changing the k3s version restarts
@@ -488,9 +643,12 @@ chmod 600 /home/ubuntu/.kube/config
 
 echo
 echo "== Step 3/4: helm CLI =="
-if ! command -v helm >/dev/null 2>&1; then
-  curl -sSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-  echo "  helm installed"
+if [[ -n "${HELM_ARCH}" ]]; then
+  # The release tarball verified in Step 0, instead of running get-helm-3 from
+  # helm's main branch (#221).
+  tar -xzf "${WORK}/helm.tar.gz" -C "${WORK}"
+  install -m 0755 "${WORK}/linux-${HELM_ARCH}/helm" /usr/local/bin/helm
+  echo "  helm ${HELM_VERSION} installed"
 else
   echo "  helm already installed, skipping"
 fi
@@ -500,7 +658,8 @@ echo "== Step 4/4: cert-manager + LetsEncrypt ClusterIssuer =="
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 if ! kubectl get ns cert-manager >/dev/null 2>&1; then
-  kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.1/cert-manager.yaml
+  # The manifest verified in Step 0 (#221).
+  kubectl apply -f "${WORK}/cert-manager.yaml"
 fi
 echo "  waiting for cert-manager to be Available..."
 kubectl wait --for=condition=Available --timeout=180s deploy -n cert-manager --all
