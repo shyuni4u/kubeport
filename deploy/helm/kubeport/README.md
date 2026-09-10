@@ -214,6 +214,15 @@ OCI-specific.
    Ordinary users need only namespace-scoped Roles; the deploy form's RBAC panel
    shows whatever `SelfSubjectAccessReview` reports for that user.
 
+   Give those Roles `get` on the kinds your templates render, not only
+   `create`/`patch`. When a release has no pods — a CronJob between runs, a
+   Deployment scaled to zero — kubeport reads each rendered object with the
+   viewer's token to tell "nothing running right now" from "deleted outside
+   kubeport". If the viewer can `get` none of them, the release stays `unknown`
+   instead of `resources missing`, and the admin force-delete banner does not
+   appear for that viewer. (The demo `demo-user` Role withholds `get` on Secrets
+   on purpose; that is fine as long as some other rendered kind is readable.)
+
    Because the binding above is on a raw email address, it is only as strong as
    the username prefix and `email_verified` rules in step 1.
 
