@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { SchemaNode } from "@/lib/openapi";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 export type SchemaFieldMode = { mode: "fixed" | "exposed" };
 
@@ -44,6 +45,15 @@ function FieldBadge({ mode }: { mode: "fixed" | "exposed" }) {
 const NODE_CLASS =
   "cursor-pointer rounded border border-transparent px-1 text-left hover:bg-hover focus-visible:outline-2 focus-visible:outline-ring";
 
+/**
+ * Applied through `cn()`, never concatenated. `border-primary` and the base's
+ * `border-transparent` are both plain utilities in the same Tailwind group, so
+ * a template literal leaves both in the class attribute and the browser picks
+ * by emit order — which paints the transparent one and erases the selection.
+ * twMerge is what makes the later value win.
+ */
+const SELECTED_CLASS = "border-primary bg-selected text-selected-foreground";
+
 function renderNode(
   path: string, node: SchemaNode, depth: number,
   expanded: Set<string>, setExpanded: React.Dispatch<React.SetStateAction<Set<string>>>,
@@ -71,7 +81,7 @@ function renderNode(
             role="treeitem"
             aria-selected={selectedPath === p}
             aria-expanded={hasKids ? isExp : undefined}
-            className={`${NODE_CLASS} ${selectedPath === p ? "bg-selected text-selected-foreground border-primary" : ""}`}
+            className={cn(NODE_CLASS, selectedPath === p && SELECTED_CLASS)}
             onClick={() => {
               onSelect(p, child);
               if (hasKids) toggle(p);
@@ -102,7 +112,7 @@ function renderNode(
           role="treeitem"
           aria-selected={selectedPath === p}
           aria-expanded={isExp}
-          className={`${NODE_CLASS} ${selectedPath === p ? "bg-selected text-selected-foreground border-primary" : ""}`}
+          className={cn(NODE_CLASS, selectedPath === p && SELECTED_CLASS)}
           onClick={() => {
             onSelect(p, node.items!);
             toggle(p);

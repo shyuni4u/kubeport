@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { parseIndex, OpenAPIIndex } from "@/lib/openapi";
+import { cn } from "@/lib/utils";
 
 export interface KindRef {
   group: string;
@@ -97,11 +98,15 @@ export function KindPicker({
               key={gv}
               type="button"
               onClick={() => { setSelectedGv(gv); setKindInput(""); }}
-              className={`block w-full text-left py-0.5 px-1 rounded border border-transparent hover:bg-hover ${
-                selectedGv === gv
-                  ? "bg-selected text-selected-foreground border-primary"
-                  : ""
-              }`}
+              // cn(), not a template literal: `border-primary` and the base's
+              // `border-transparent` are the same Tailwind group, so
+              // concatenating leaves both in the attribute and emit order
+              // decides — painting the transparent one and erasing the
+              // selection outline entirely.
+              className={cn(
+                "block w-full text-left py-0.5 px-1 rounded border border-transparent hover:bg-hover",
+                selectedGv === gv && "border-primary bg-selected text-selected-foreground",
+              )}
             >
               {gv}
             </button>
