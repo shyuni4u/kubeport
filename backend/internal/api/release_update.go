@@ -143,7 +143,9 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 	// A new version can add an object, and an exposed metadata.name can rename
 	// one, so an update can land on another release's objects as readily as a
 	// create can (#161).
-	if !h.checkOwnership(c, cli, "UpdateRelease", rel.Namespace, rel.Name, uid, rendered) {
+	// NameOnly from what was last applied: a release from before #195 still
+	// owns its unstamped objects on this update, which stamps them.
+	if !h.checkOwnership(c, cli, "UpdateRelease", releaseRef(rel), rendered) {
 		return
 	}
 	if err := cli.ApplyAll(ctx, rel.Namespace, rendered); err != nil {

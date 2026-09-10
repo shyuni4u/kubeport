@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -282,7 +283,10 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 	}
 	rel.RenderedYaml = string(rendered)
 
-	if !h.checkOwnership(c, cli, "CreateRelease", r.Namespace, r.Name, uid, rendered) {
+	// Never NameOnly: an object without an id cannot belong to a release that
+	// did not exist until now.
+	ref := k8s.ReleaseRef{Namespace: r.Namespace, Name: r.Name, UID: uid}
+	if !h.checkOwnership(c, cli, "CreateRelease", ref, rendered) {
 		// checkOwnership has answered.
 		dropRow()
 		return
@@ -290,12 +294,11 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 	if err := cli.ApplyAll(ctx, r.Namespace, rendered); err != nil {
 		// Clean up partially created k8s resources with an independent context
 		// and a timeout so cleanup doesn't hang indefinitely. Only objects with
-		// this release's id: nothing applied for a release that did not exist
-		// until now lacks it, and an unstamped object with the same name is an
-		// earlier release's.
+		// this release's id (ref is not NameOnly): an unstamped object with the
+		// same name is an earlier release's.
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if delErr := cli.DeleteByRelease(cleanupCtx, r.Namespace, r.Name, uid, false); delErr != nil {
+		if delErr := cli.DeleteByRelease(cleanupCtx, ref); delErr != nil {
 			log.Printf("rollback: failed to delete k8s resources for release %s: %v", r.Name, delErr)
 		}
 		if delErr := h.deps.Store.DeleteRelease(cleanupCtx, rel.ID); delErr != nil {
@@ -414,8 +417,8 @@ func (h *Handlers) GetRelease(c *gin.Context) {
 		return
 	}
 
-	uid := releaseUID(rel.ID)
-	instances, err := cli.ListInstances(ctx, rel.Namespace, rel.Name, uid)
+	ref := releaseRef(rel)
+	instances, err := cli.ListInstances(ctx, ref)
 	if err != nil {
 		respondReleaseOverview(c, rel, nil, "cluster-unreachable")
 		return
@@ -425,7 +428,7 @@ func (h *Handlers) GetRelease(c *gin.Context) {
 		// Deployment scaled to zero (#33). Only a cluster that shows the
 		// objects gone earns resources-missing, whose banner says they were
 		// deleted outside kubeport; a cluster that cannot tell leaves it unknown.
-		presence, err := cli.ReleasePresence(ctx, rel.Namespace, rel.Name, uid, []byte(rel.RenderedYaml))
+		presence, err := cli.ReleasePresence(ctx, ref, []byte(rel.RenderedYaml))
 		if err == nil && presence == k8s.PresenceMissing {
 			respondReleaseOverview(c, rel, instances, "resources-missing")
 			return
@@ -558,10 +561,9 @@ func (h *Handlers) DeleteRelease(c *gin.Context) {
 			internalError(c, "DeleteRelease: k8s client", err)
 			return
 		}
-		// withUnstamped: objects applied before #195 carry the name and no id,
-		// and are this release's — the name is unique in its cluster and
-		// namespace. Objects with the name and another release's id are not.
-		if err := cli.DeleteByRelease(ctx, rel.Namespace, rel.Name, releaseUID(rel.ID), true); err != nil {
+		// A release not updated since #195 also has its unstamped objects
+		// deleted (see releaseRef); any other keeps its hands off them.
+		if err := cli.DeleteByRelease(ctx, releaseRef(rel)); err != nil {
 			upstreamError(c, "DeleteRelease: delete resources", err)
 			return
 		}
@@ -588,6 +590,24 @@ func (h *Handlers) DeleteRelease(c *gin.Context) {
 func releaseUID(id pgtype.UUID) string {
 	b := id.Bytes
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// stampedWithID matches the id label in stored rendered YAML, which is what
+// was last applied for a release.
+var stampedWithID = regexp.MustCompile(`(?m)^\s+kubeport\.io/release-uid: `)
+
+// releaseRef identifies a stored release's objects. It is NameOnly while the
+// YAML last applied for it carries no id: a release from before #195 that has
+// not been updated since, whose objects carry only its name. Once an update
+// stamps them, that stops — and with it the name-only fallback that would let
+// a same-named release elsewhere be mistaken for this one (security review).
+func releaseRef(rel store.GetReleaseByIDRow) k8s.ReleaseRef {
+	return k8s.ReleaseRef{
+		Namespace: rel.Namespace,
+		Name:      rel.Name,
+		UID:       releaseUID(rel.ID),
+		NameOnly:  !stampedWithID.MatchString(rel.RenderedYaml),
+	}
 }
 
 func parseUUID(s string) (pgtype.UUID, error) {

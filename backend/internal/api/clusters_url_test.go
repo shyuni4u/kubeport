@@ -7,7 +7,7 @@ import "testing"
 func TestNormalizeAPIURL(t *testing.T) {
 	same := [][]string{
 		{"https://kube.example.com:6443", "https://KUBE.example.com:6443/", "  https://kube.example.com:6443  "},
-		{"https://kube.example.com", "https://kube.example.com:443", "HTTPS://kube.example.com/"},
+		{"https://kube.example.com", "https://kube.example.com:443", "HTTPS://kube.example.com/", "https://kube.example.com.:443"},
 		{"http://10.0.0.1", "http://10.0.0.1:80"},
 		{"https://[::1]:6443", "https://[::1]:6443/"},
 		{"https://kube.example.com/k8s/clusters/c-1", "https://kube.example.com/k8s/clusters/c-1/"},

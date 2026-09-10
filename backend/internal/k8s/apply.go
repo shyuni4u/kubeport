@@ -161,21 +161,28 @@ func MVPResourceNames() []string {
 // the same cluster, or one created after this release's delete left objects
 // behind.
 //
-// withUnstamped also deletes objects that carry the name and no id at all,
-// which is how every object applied before #195 looks. A release being deleted
-// needs it; the cleanup of a create that failed does not, since nothing applied
-// for a release that did not exist yet lacks the id.
+// A NameOnly release also has its objects with the name and no id deleted —
+// how everything applied before #195 looks. For any other release those are
+// someone else's (see ReleaseRef.NameOnly), including the cleanup of a create
+// that failed.
 //
 // Still a delete-collection by label, not a list and a delete per object: the
 // demo Role may delete Secrets it may not list.
-func (c *Client) DeleteByRelease(ctx context.Context, namespace, release, releaseUID string, withUnstamped bool) error {
+//
+// Background propagation: batch/v1 Jobs orphan their pods by default, and a
+// Job's pods carry no id (its pod template is immutable), so an orphaned pod
+// would outlive the release under its name alone.
+func (c *Client) DeleteByRelease(ctx context.Context, ref ReleaseRef) error {
+	namespace, release, releaseUID := ref.Namespace, ref.Name, ref.UID
 	if releaseUID == "" {
 		return errors.New("delete by release: no release id")
 	}
 	selectors := []string{ReleaseLabel + "=" + release + "," + ReleaseUIDLabel + "=" + releaseUID}
-	if withUnstamped {
+	if ref.NameOnly {
 		selectors = append(selectors, ReleaseLabel+"="+release+",!"+ReleaseUIDLabel)
 	}
+	background := metav1.DeletePropagationBackground
+	opts := metav1.DeleteOptions{PropagationPolicy: &background}
 	errs := make([]error, 0, len(mvpResources))
 	for _, r := range mvpResources {
 		for _, sel := range selectors {
@@ -183,7 +190,7 @@ func (c *Client) DeleteByRelease(ctx context.Context, namespace, release, releas
 				return errors.Join(append(errs, err)...)
 			}
 			if err := c.dyn.Resource(r).Namespace(namespace).
-				DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: sel}); err != nil {
+				DeleteCollection(ctx, opts, metav1.ListOptions{LabelSelector: sel}); err != nil {
 				// RBAC-scoped callers (e.g. demo accounts, see
 				// deploy/helm/kubeport/templates/demo-rbac.yaml) may lack access
 				// to resource groups/kinds this release never actually used

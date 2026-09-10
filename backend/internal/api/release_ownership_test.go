@@ -395,10 +395,10 @@ func TestUpdateRelease_StampsTheReleaseID(t *testing.T) {
 	require.Contains(t, string(fk.applied[len(fk.applied)-1]), "kubeport.io/release-uid: "+id)
 }
 
-// Deleting a release removes its objects by id, and those from before #195 by
-// name — they carry no id and are this release's, the name being unique in its
-// cluster and namespace.
-func TestDeleteRelease_DeletesByIDAndUnstampedObjects(t *testing.T) {
+// A release created since #195 is deleted by its id only. Unstamped objects
+// with its name belong to an earlier release of that name, or to one under
+// another registration of the cluster (security review).
+func TestDeleteRelease_ANewReleaseDeletesByIDOnly(t *testing.T) {
 	r, fk := newTestRouterWithK8s(t)
 	clusterName := seedCluster(t, r)
 	tplName := seedPublishedTemplate(t, r)
@@ -407,7 +407,7 @@ func TestDeleteRelease_DeletesByIDAndUnstampedObjects(t *testing.T) {
 	w := do(t, r, http.MethodDelete, "/v1/releases/"+id, nil)
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.Equal(t, []deleteCall{{UID: id, WithUnstamped: true}}, fk.deleteCalls)
+	require.Equal(t, []deleteCall{{UID: id, NameOnly: false}}, fk.deleteCalls)
 }
 
 // Objects with the release's own name under another release's id: naming the

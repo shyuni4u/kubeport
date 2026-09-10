@@ -87,8 +87,8 @@ type fakeK8sApplier struct {
 	checkedUIDs     []string
 	checkedCreating []bool
 
-	// deleteCalls records each DeleteByRelease's release id and whether it
-	// asked for unstamped objects too (#195).
+	// deleteCalls records each DeleteByRelease's release id and whether the
+	// release was NameOnly (#195).
 	deleteCalls []deleteCall
 
 	// presence is what ReleasePresence reports once ListInstances has found no
@@ -98,13 +98,13 @@ type fakeK8sApplier struct {
 	presenceErr error
 }
 
-func (f *fakeK8sApplier) ReleasePresence(context.Context, string, string, string, []byte) (k8s.Presence, error) {
+func (f *fakeK8sApplier) ReleasePresence(context.Context, k8s.ReleaseRef, []byte) (k8s.Presence, error) {
 	return f.presence, f.presenceErr
 }
 
-func (f *fakeK8sApplier) CheckApply(_ context.Context, _, release, releaseUID string, _ []byte, creating bool) (k8s.ApplyCheck, error) {
-	f.checkedReleases = append(f.checkedReleases, release)
-	f.checkedUIDs = append(f.checkedUIDs, releaseUID)
+func (f *fakeK8sApplier) CheckApply(_ context.Context, ref k8s.ReleaseRef, _ []byte, creating bool) (k8s.ApplyCheck, error) {
+	f.checkedReleases = append(f.checkedReleases, ref.Name)
+	f.checkedUIDs = append(f.checkedUIDs, ref.UID)
 	f.checkedCreating = append(f.checkedCreating, creating)
 	if f.applyCheckErr != nil {
 		return k8s.ApplyCheck{}, f.applyCheckErr
@@ -118,20 +118,20 @@ func (f *fakeK8sApplier) ApplyAll(_ context.Context, _ string, y []byte) error {
 }
 
 type deleteCall struct {
-	UID           string
-	WithUnstamped bool
+	UID      string
+	NameOnly bool
 }
 
-func (f *fakeK8sApplier) DeleteByRelease(_ context.Context, _, release, releaseUID string, withUnstamped bool) error {
-	f.deleteCalls = append(f.deleteCalls, deleteCall{UID: releaseUID, WithUnstamped: withUnstamped})
+func (f *fakeK8sApplier) DeleteByRelease(_ context.Context, ref k8s.ReleaseRef) error {
+	f.deleteCalls = append(f.deleteCalls, deleteCall{UID: ref.UID, NameOnly: ref.NameOnly})
 	if f.deleteErr != nil {
 		return f.deleteErr
 	}
-	f.deleted = append(f.deleted, release)
+	f.deleted = append(f.deleted, ref.Name)
 	return nil
 }
 
-func (f *fakeK8sApplier) ListInstances(ctx context.Context, _, _, _ string) ([]k8s.Instance, error) {
+func (f *fakeK8sApplier) ListInstances(ctx context.Context, _ k8s.ReleaseRef) ([]k8s.Instance, error) {
 	if f.instancesStall {
 		<-ctx.Done()
 		return nil, ctx.Err()

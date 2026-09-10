@@ -6,6 +6,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -25,20 +26,22 @@ type Instance struct {
 	Message string `json:"message,omitempty"`
 }
 
-// ListInstances returns pod status for the release's pods: those carrying its
-// name, except any that carry another release's id (#195). Pods from before
-// the id existed carry none and still count.
-func (c *Client) ListInstances(ctx context.Context, namespace, release, releaseUID string) ([]Instance, error) {
+// ListInstances returns pod status for the release's pods (#195): pods with
+// its name and id, pods with its name and no id when it is a NameOnly release,
+// and pods of a Job that is the release's (see podBelongs).
+func (c *Client) ListInstances(ctx context.Context, ref ReleaseRef) ([]Instance, error) {
 	gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
-	list, err := c.dyn.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: ReleaseLabel + "=" + release,
+	list, err := c.dyn.Resource(gvr).Namespace(ref.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: ReleaseLabel + "=" + ref.Name,
 	})
 	if err != nil {
 		return nil, err
 	}
 	out := make([]Instance, 0, len(list.Items))
-	for _, p := range list.Items {
-		if !belongsTo(p.GetLabels(), release, releaseUID) {
+	jobs := map[string]bool{}
+	for i := range list.Items {
+		p := list.Items[i]
+		if !c.podBelongs(ctx, &p, ref, jobs) {
 			continue
 		}
 		ins := Instance{Name: p.GetName()}
@@ -53,6 +56,36 @@ func (c *Client) ListInstances(ctx context.Context, namespace, release, releaseU
 		out = append(out, ins)
 	}
 	return out, nil
+}
+
+// podBelongs is belongsTo for a pod. A Job's pod carries no id, because a
+// Job's pod template is immutable (the Job carries it instead), so such a pod
+// counts when the Job that owns it is ref's. Otherwise a Job pod left by an
+// earlier release of the same name — or one under another registration of the
+// cluster — would show up in this release's status and logs. jobs caches the
+// verdict per Job name.
+func (c *Client) podBelongs(ctx context.Context, p *unstructured.Unstructured, ref ReleaseRef, jobs map[string]bool) bool {
+	labels := p.GetLabels()
+	if belongsTo(labels, ref) {
+		return true
+	}
+	if labels[ReleaseLabel] != ref.Name || labels[ReleaseUIDLabel] != "" {
+		return false
+	}
+	for _, owner := range p.GetOwnerReferences() {
+		if owner.Kind != "Job" {
+			continue
+		}
+		own, seen := jobs[owner.Name]
+		if !seen {
+			job, err := c.dyn.Resource(schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "jobs"}).
+				Namespace(ref.Namespace).Get(ctx, owner.Name, metav1.GetOptions{})
+			own = err == nil && belongsTo(job.GetLabels(), ref)
+			jobs[owner.Name] = own
+		}
+		return own
+	}
+	return false
 }
 
 // allContainersReady returns true if every container in the pod reports ready.
@@ -217,9 +250,10 @@ const (
 // Objects are looked up in the release's namespace: one that pins another is
 // refused before it is ever applied (#137).
 //
-// An object with the release's name and another release's id is someone
-// else's (#195), so it does not count as present.
-func (c *Client) ReleasePresence(ctx context.Context, namespace, release, releaseUID string, multiDoc []byte) (Presence, error) {
+// An object counts only when it is ref's by id, or by name for a NameOnly
+// release (#195).
+func (c *Client) ReleasePresence(ctx context.Context, ref ReleaseRef, multiDoc []byte) (Presence, error) {
+	namespace := ref.Namespace
 	objs, err := splitYAML(multiDoc)
 	if err != nil {
 		return PresenceUnknown, fmt.Errorf("split yaml: %w", err)
@@ -239,7 +273,7 @@ func (c *Client) ReleasePresence(ctx context.Context, namespace, release, releas
 		switch {
 		case err == nil:
 			readable = true
-			if belongsTo(got.GetLabels(), release, releaseUID) {
+			if belongsTo(got.GetLabels(), ref) {
 				return PresenceFound, nil
 			}
 		case apierrors.IsNotFound(err):

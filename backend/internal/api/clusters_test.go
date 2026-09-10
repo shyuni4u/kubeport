@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -146,6 +148,43 @@ func TestClusters_Register_SameAPIURLUnderAnotherNameReturns409(t *testing.T) {
 
 	w = register("alias-c-"+randSuffix(), "https://"+host+":6444")
 	require.Equal(t, http.StatusCreated, w.Code, "another port is another apiserver: %s", w.Body.String())
+}
+
+// Codex review: checked and then inserted, two registrations of one apiserver
+// arriving together both passed the check. Under the registration lock exactly
+// one of them wins.
+func TestClusters_Register_ConcurrentRegistrationsOfOneAPIServerLetOneIn(t *testing.T) {
+	r := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: testStore(t)})
+	apiURL := "https://race-" + time.Now().Format("150405000000") + ".example.com:6443"
+	const racers = 4
+
+	start := make(chan struct{})
+	codes := make([]int, racers)
+	var wg sync.WaitGroup
+	for i := 0; i < racers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			payload, _ := json.Marshal(map[string]any{
+				"name":            "race-" + strconv.Itoa(i) + "-" + randSuffix(),
+				"api_url":         apiURL,
+				"oidc_issuer_url": "http://localhost:5556",
+				"ca_bundle":       testCAPEM(),
+			})
+			req := httptest.NewRequest(http.MethodPost, "/v1/clusters", bytes.NewReader(payload))
+			req.Header.Set("Authorization", "Bearer x")
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			<-start
+			r.ServeHTTP(w, req)
+			codes[i] = w.Code
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	sort.Ints(codes)
+	require.Equal(t, []int{http.StatusCreated, http.StatusConflict, http.StatusConflict, http.StatusConflict}, codes)
 }
 
 func TestClusters_Register_DuplicateReturns409(t *testing.T) {

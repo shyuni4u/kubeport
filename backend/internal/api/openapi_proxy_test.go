@@ -8,8 +8,7 @@
 package api_test
 
 import (
-	"bytes"
-	"encoding/json"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,6 +18,7 @@ import (
 
 	"kubeport/internal/api"
 	"kubeport/internal/config"
+	"kubeport/internal/store"
 )
 
 // skipUnlessKind skips when the kind harness is not wired up, which is what
@@ -52,26 +52,33 @@ func kindAvail(t *testing.T) (apiURL, caBundle, token string) {
 	return apiURL, ca, tok
 }
 
+// kindCluster stores a cluster row for the kind apiserver and returns its name.
+// Straight into the store, not through POST /v1/clusters: registration refuses
+// an apiserver that is already registered (#195), and playwright.yml has
+// registered this one as "kind" before these tests run. What these tests cover
+// is the OpenAPI proxy, not registration.
+func kindCluster(t *testing.T, s *store.Store, apiURL, ca string) string {
+	t.Helper()
+	cl, err := s.InsertCluster(context.Background(), store.InsertClusterParams{
+		Name:          "kind-" + randSuffix(),
+		ApiUrl:        apiURL,
+		CaBundle:      store.PgText(ca),
+		OidcIssuerUrl: "https://host.docker.internal:5556",
+	})
+	require.NoError(t, err)
+	return cl.Name
+}
+
 func TestOpenAPI_ListGroupVersions(t *testing.T) {
 	apiURL, ca, tok := kindAvail(t)
 	s := testStore(t)
 	adminR := api.NewRouter(config.Config{OpenAPICacheMax: 32},
 		api.Deps{Verifier: adminVerifier{}, Store: s})
+	name := kindCluster(t, s, apiURL, ca)
 
-	regBody, _ := json.Marshal(map[string]any{
-		"name":            "kind-" + randSuffix(),
-		"api_url":         apiURL,
-		"ca_bundle":       ca,
-		"oidc_issuer_url": "https://host.docker.internal:5556",
-	})
-	w := do(t, adminR, http.MethodPost, "/v1/clusters", bytes.NewReader(regBody))
-	require.Equal(t, http.StatusCreated, w.Code)
-	var cl map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &cl)
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/clusters/"+cl["name"].(string)+"/openapi", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/clusters/"+name+"/openapi", nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
-	w = httptest.NewRecorder()
+	w := httptest.NewRecorder()
 	adminR.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Body.String(), `"paths":`)
@@ -83,23 +90,12 @@ func TestOpenAPI_Refresh_ClearsCache(t *testing.T) {
 	s := testStore(t)
 	r := api.NewRouter(config.Config{OpenAPICacheMax: 32},
 		api.Deps{Verifier: adminVerifier{}, Store: s})
-
-	regBody, _ := json.Marshal(map[string]any{
-		"name":            "kind-" + randSuffix(),
-		"api_url":         apiURL,
-		"ca_bundle":       ca,
-		"oidc_issuer_url": "https://host.docker.internal:5556",
-	})
-	w := do(t, r, http.MethodPost, "/v1/clusters", bytes.NewReader(regBody))
-	require.Equal(t, http.StatusCreated, w.Code)
-	var cl map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &cl)
-	name := cl["name"].(string)
+	name := kindCluster(t, s, apiURL, ca)
 
 	// Prime cache
 	req := httptest.NewRequest(http.MethodGet, "/v1/clusters/"+name+"/openapi", nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
-	w = httptest.NewRecorder()
+	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 

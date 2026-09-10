@@ -96,18 +96,18 @@ func TestDeleteByRelease_ToleratesForbiddenAndNotFound(t *testing.T) {
 	})
 
 	cli := k8s.NewForTest(dyn)
-	err := cli.DeleteByRelease(context.Background(), "default", "rel-1", "11111111-1111-1111-1111-111111111111", true)
+	err := cli.DeleteByRelease(context.Background(), k8s.ReleaseRef{Namespace: "default", Name: "rel-1", UID: "11111111-1111-1111-1111-111111111111", NameOnly: true})
 	require.NoError(t, err, "forbidden/not-found on individual resources must not fail the whole delete")
 }
 
 // #195: deleting selects on the release's id, so another release that shares
-// the name keeps its objects. Objects from before the id existed are selected
-// only when asked for, by a release delete — never by a failed create's cleanup.
-func TestDeleteByRelease_SelectsTheReleasesIDAndUnstampedObjectsOnlyWhenAsked(t *testing.T) {
+// the name keeps its objects. Unstamped objects are selected only for a
+// NameOnly release — never for one created since, nor a failed create's cleanup.
+func TestDeleteByRelease_SelectsTheReleasesIDAndUnstampedObjectsOnlyForANameOnlyRelease(t *testing.T) {
 	const uid = "11111111-1111-1111-1111-111111111111"
 	for _, tc := range []struct {
-		withUnstamped bool
-		want          []string
+		nameOnly bool
+		want     []string
 	}{
 		{true, []string{
 			"kubeport.io/release=rel-1,kubeport.io/release-uid=" + uid,
@@ -122,9 +122,31 @@ func TestDeleteByRelease_SelectsTheReleasesIDAndUnstampedObjectsOnlyWhenAsked(t 
 			return true, nil, nil
 		})
 
-		require.NoError(t, k8s.NewForTest(dyn).DeleteByRelease(context.Background(), "default", "rel-1", uid, tc.withUnstamped))
-		require.Equal(t, tc.want, selectors, "withUnstamped=%v", tc.withUnstamped)
+		ref := k8s.ReleaseRef{Namespace: "default", Name: "rel-1", UID: uid, NameOnly: tc.nameOnly}
+		require.NoError(t, k8s.NewForTest(dyn).DeleteByRelease(context.Background(), ref))
+		require.Equal(t, tc.want, selectors, "nameOnly=%v", tc.nameOnly)
 	}
+}
+
+// Security review of #195: a batch/v1 Job orphans its pods unless the delete
+// says otherwise, and a Job's pods carry no id, so they outlived the release
+// under its name alone.
+func TestDeleteByRelease_PropagatesToDependents(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())
+	var policies []string
+	dyn.PrependReactor("delete-collection", "jobs", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+		p := action.(clientgotesting.DeleteCollectionActionImpl).DeleteOptions.PropagationPolicy
+		if p == nil {
+			policies = append(policies, "")
+		} else {
+			policies = append(policies, string(*p))
+		}
+		return true, nil, nil
+	})
+
+	ref := k8s.ReleaseRef{Namespace: "default", Name: "rel-1", UID: "11111111-1111-1111-1111-111111111111"}
+	require.NoError(t, k8s.NewForTest(dyn).DeleteByRelease(context.Background(), ref))
+	require.Equal(t, []string{"Background"}, policies)
 }
 
 // Without an id the id-selector would be `release-uid=`, which matches nothing,
@@ -138,7 +160,7 @@ func TestDeleteByRelease_RefusesAnEmptyID(t *testing.T) {
 		return true, nil, nil
 	})
 
-	err := k8s.NewForTest(dyn).DeleteByRelease(context.Background(), "default", "rel-1", "", true)
+	err := k8s.NewForTest(dyn).DeleteByRelease(context.Background(), k8s.ReleaseRef{Namespace: "default", Name: "rel-1", NameOnly: true})
 
 	require.Error(t, err)
 	require.Zero(t, calls)
@@ -153,7 +175,7 @@ func TestDeleteByRelease_SurfacesOtherErrors(t *testing.T) {
 	})
 
 	cli := k8s.NewForTest(dyn)
-	err := cli.DeleteByRelease(context.Background(), "default", "rel-1", "11111111-1111-1111-1111-111111111111", true)
+	err := cli.DeleteByRelease(context.Background(), k8s.ReleaseRef{Namespace: "default", Name: "rel-1", UID: "11111111-1111-1111-1111-111111111111", NameOnly: true})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "boom")
 }

@@ -388,12 +388,17 @@ deleted release frees its name while objects it could not delete still carry
 it, and one apiserver registered under two cluster names lets two releases
 share a name and namespace.
 
-- **Existing releases keep working unchanged.** An object without the id counts
-  as its release's own by name — for status, logs, update and delete — and gains
-  the id the next time the release is updated.
+- **Existing releases keep working unchanged.** A release whose last applied
+  YAML has no id counts objects without one as its own by name — for status,
+  logs, update and delete — and gains the id the next time it is updated. After
+  that, and for every release created after the upgrade, an object without the
+  id is not the release's: it was left by an earlier release of that name.
 - **The first update of an existing release rolls its pods once.** The id is
   added to pod template labels (never to `spec.selector`, which is immutable).
-  A Job's pod template is immutable too, so a Job carries the id on itself only.
+  A Job's pod template is immutable too, so a Job carries the id on itself only
+  and its pods count through the Job that owns them. Deleting a release now
+  deletes a Job's pods with it (background propagation) instead of orphaning
+  them.
 - **A new release no longer adopts objects left by a deleted release of the same
   name.** The create is a 409 `resource-conflict` whose conflicts carry
   `same_name: true`. Clean up the leftovers (`kubectl -n <ns> get all,cm,secret
