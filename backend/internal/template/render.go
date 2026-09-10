@@ -149,10 +149,47 @@ func Render(resourcesYAML, uiSpecYAML string, values json.RawMessage, l Labels) 
 	}
 
 	for _, d := range docs {
+		stringifyStringMaps(d)
 		stampLabels(d, l)
 	}
 
 	return marshalMultiDoc(docs)
+}
+
+// stringifyStringMaps turns scalar values in the fields the API types as
+// map[string]string into strings. A ui-spec field keeps its own type — a
+// boolean for a feature flag, an integer for a port — which is right almost
+// everywhere and wrong in exactly these maps: rendered as a YAML bool or number,
+// the apiserver refuses the whole object at apply ("expected string").
+// app-with-config exposes a boolean into ConfigMap data, so every deploy of it
+// failed with a 502; it surfaced when #161 made it the demo's seed release.
+//
+// Only ConfigMap data and Secret stringData. Secret data is base64, where a
+// stringified scalar would be a wrong value instead of a refused one, and
+// binaryData is bytes. Scalars anywhere else keep their type.
+func stringifyStringMaps(doc map[string]any) {
+	var field string
+	switch doc["kind"] {
+	case "ConfigMap":
+		field = "data"
+	case "Secret":
+		field = "stringData"
+	default:
+		return
+	}
+	m, ok := doc[field].(map[string]any)
+	if !ok {
+		return
+	}
+	for k, v := range m {
+		switch v.(type) {
+		case string, nil, map[string]any, []any:
+			// Already a string, or null or a composite value: the template's own
+			// mistake, left for the apiserver to name rather than guessed at.
+		default:
+			m[k] = fmt.Sprint(v)
+		}
+	}
 }
 
 func parseMultiDoc(src string) ([]map[string]any, error) {

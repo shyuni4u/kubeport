@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,6 +27,12 @@ import (
 // A mistyped or renamed path would quietly deploy the default, and for
 // nightly-job-demo that means a working image and no failure showcase. So
 // every value key must name a field, and the broken image must really render.
+//
+// And rendering is not applying. app-with-config's boolean FEATURE_FLAG
+// rendered as a YAML bool into ConfigMap data, which the apiserver refuses, so
+// the seed release was rejected in CI — and every deploy of that template had
+// always been rejected. Every value in a map the API types as map[string]string
+// must render as a string.
 func TestReleaseSpecs_RenderAgainstTheirTemplates(t *testing.T) {
 	for _, r := range releaseSpecs() {
 		t.Run(r.Name, func(t *testing.T) {
@@ -64,6 +73,25 @@ func TestReleaseSpecs_RenderAgainstTheirTemplates(t *testing.T) {
 
 				if r.Name == "nightly-job-demo" && !strings.Contains(string(rendered), "ghcr.io/does-not-exist/nightly:0.0.0") {
 					t.Errorf("nightly-job-demo must render the image that cannot be pulled, or the failure showcase is gone")
+				}
+
+				stringMap := map[any]string{"ConfigMap": "data", "Secret": "stringData"}
+				dec := yaml.NewDecoder(bytes.NewReader(rendered))
+				for {
+					var doc map[string]any
+					err := dec.Decode(&doc)
+					if errors.Is(err, io.EOF) {
+						break
+					}
+					if err != nil {
+						t.Fatalf("rendered %s is not YAML: %v", r.Name, err)
+					}
+					m, _ := doc[stringMap[doc["kind"]]].(map[string]any)
+					for k, v := range m {
+						if _, ok := v.(string); !ok {
+							t.Errorf("%s: %s %s.%s renders as %T, but the API requires a string", r.Name, doc["kind"], stringMap[doc["kind"]], k, v)
+						}
+					}
 				}
 			}
 			if !found {
