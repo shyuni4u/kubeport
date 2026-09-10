@@ -62,8 +62,11 @@ func (c *Client) ListInstances(ctx context.Context, ref ReleaseRef) ([]Instance,
 // Job's pod template is immutable (the Job carries it instead), so such a pod
 // counts when the Job that owns it is ref's. Otherwise a Job pod left by an
 // earlier release of the same name — or one under another registration of the
-// cluster — would show up in this release's status and logs. jobs caches the
-// verdict per Job name.
+// cluster — would show up in this release's status and logs.
+//
+// The Job is matched by uid, not only by name: a pod orphaned from an earlier
+// Job still names it, and a new release may since have created a Job of that
+// name (codex review). jobs caches the verdict per owner uid.
 func (c *Client) podBelongs(ctx context.Context, p *unstructured.Unstructured, ref ReleaseRef, jobs map[string]bool) bool {
 	labels := p.GetLabels()
 	if belongsTo(labels, ref) {
@@ -76,12 +79,13 @@ func (c *Client) podBelongs(ctx context.Context, p *unstructured.Unstructured, r
 		if owner.Kind != "Job" {
 			continue
 		}
-		own, seen := jobs[owner.Name]
+		key := string(owner.UID)
+		own, seen := jobs[key]
 		if !seen {
 			job, err := c.dyn.Resource(schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "jobs"}).
 				Namespace(ref.Namespace).Get(ctx, owner.Name, metav1.GetOptions{})
-			own = err == nil && belongsTo(job.GetLabels(), ref)
-			jobs[owner.Name] = own
+			own = err == nil && owner.UID != "" && job.GetUID() == owner.UID && belongsTo(job.GetLabels(), ref)
+			jobs[key] = own
 		}
 		return own
 	}

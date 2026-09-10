@@ -44,13 +44,37 @@ data:
   note: "kubeport.io/release-uid: ` + uid + `"
 `
 
+	// codex review: a block scalar puts the text at the start of an indented
+	// line, where a pattern over the raw YAML took it for a label.
+	blockScalar := `apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    kubeport.io/release: web
+  name: web
+data:
+  labels.txt: |
+    kubeport.io/release-uid: ` + uid + `
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    kubeport.io/release: web
+  name: web
+`
+	secondDocStamped := legacy + "---\n" + stamped
+
 	for name, tc := range map[string]struct {
 		yaml     string
 		nameOnly bool
 	}{
-		"applied before the id existed": {legacy, true},
-		"applied with the id":           {stamped, false},
-		"label text inside a value":     {lookalike, true},
+		"applied before the id existed":         {legacy, true},
+		"applied with the id":                   {stamped, false},
+		"label text inside a value":             {lookalike, true},
+		"label text on its own line in a value": {blockScalar, true},
+		"id on a later document":                {secondDocStamped, false},
+		"nothing stored":                        {"", true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ref := releaseRef(store.GetReleaseByIDRow{ID: id, Name: "web", Namespace: "demo", RenderedYaml: tc.yaml})

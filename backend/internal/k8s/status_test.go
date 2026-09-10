@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	clientgotesting "k8s.io/client-go/testing"
 
 	"kubeport/internal/k8s"
@@ -161,10 +162,16 @@ func withUID(p *unstructured.Unstructured, uid string) *unstructured.Unstructure
 	return p
 }
 
-// ownedByJob returns p as a pod the named Job created.
-func ownedByJob(p *unstructured.Unstructured, job string) *unstructured.Unstructured {
-	p.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job, UID: "job-uid"}})
+// ownedByJob returns p as a pod created by the Job with this name and uid.
+func ownedByJob(p *unstructured.Unstructured, job, jobUID string) *unstructured.Unstructured {
+	p.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job, UID: types.UID(jobUID)}})
 	return p
+}
+
+// withObjectUID sets the object's own metadata.uid, as the apiserver would.
+func withObjectUID(u *unstructured.Unstructured, uid string) *unstructured.Unstructured {
+	u.SetUID(types.UID(uid))
+	return u
 }
 
 func instanceNames(t *testing.T, got []k8s.Instance, err error) []string {
@@ -202,14 +209,17 @@ func TestListInstances_CountsPodsByIDAndUnstampedOnesOnlyForANameOnlyRelease(t *
 // Job is gone — orphaned by a delete — or is another release's does not.
 func TestListInstances_CountsAJobsPodsThroughTheJob(t *testing.T) {
 	running := map[string]any{"phase": "Running"}
-	myJob := stamped("batch/v1", "Job", "demo", "once", "rel", uidMine)
-	theirJob := stamped("batch/v1", "Job", "demo", "theirs", "rel", uidOther)
+	myJob := withObjectUID(stamped("batch/v1", "Job", "demo", "once", "rel", uidMine), "job-once-now")
+	theirJob := withObjectUID(stamped("batch/v1", "Job", "demo", "theirs", "rel", uidOther), "job-theirs")
 
 	got, err := k8s.NewForTest(cluster(
 		myJob, theirJob,
-		ownedByJob(pod("once-abcde", "rel", running), "once"),
-		ownedByJob(pod("theirs-fghij", "rel", running), "theirs"),
-		ownedByJob(pod("gone-klmno", "rel", running), "gone"),
+		ownedByJob(pod("once-abcde", "rel", running), "once", "job-once-now"),
+		ownedByJob(pod("theirs-fghij", "rel", running), "theirs", "job-theirs"),
+		ownedByJob(pod("gone-klmno", "rel", running), "gone", "job-gone"),
+		// codex review: orphaned from an earlier Job that was also called
+		// "once". The name matches this release's Job; the uid does not.
+		ownedByJob(pod("once-older", "rel", running), "once", "job-once-before"),
 	)).ListInstances(context.Background(), relRef("rel"))
 
 	require.ElementsMatch(t, []string{"once-abcde"}, instanceNames(t, got, err))

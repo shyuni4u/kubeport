@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"gopkg.in/yaml.v3"
 
 	"kubeport/internal/auth"
 	"kubeport/internal/k8s"
@@ -592,10 +593,6 @@ func releaseUID(id pgtype.UUID) string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-// stampedWithID matches the id label in stored rendered YAML, which is what
-// was last applied for a release.
-var stampedWithID = regexp.MustCompile(`(?m)^\s+kubeport\.io/release-uid: `)
-
 // releaseRef identifies a stored release's objects. It is NameOnly while the
 // YAML last applied for it carries no id: a release from before #195 that has
 // not been updated since, whose objects carry only its name. Once an update
@@ -606,7 +603,31 @@ func releaseRef(rel store.GetReleaseByIDRow) k8s.ReleaseRef {
 		Namespace: rel.Namespace,
 		Name:      rel.Name,
 		UID:       releaseUID(rel.ID),
-		NameOnly:  !stampedWithID.MatchString(rel.RenderedYaml),
+		NameOnly:  !appliedWithID(rel.RenderedYaml),
+	}
+}
+
+// appliedWithID reports whether any object in stored rendered YAML carries the
+// release id label. The documents are parsed and metadata.labels read: text
+// matching found the label inside a ConfigMap value just as readily, and took
+// a release from before #195 for a migrated one — hiding its pods and leaving
+// its objects behind on delete (codex review). YAML that does not parse, which
+// kubeport never stores, counts as not stamped: the release it belongs to
+// keeps the behaviour it had.
+func appliedWithID(rendered string) bool {
+	dec := yaml.NewDecoder(strings.NewReader(rendered))
+	for {
+		var doc struct {
+			Metadata struct {
+				Labels map[string]any `yaml:"labels"`
+			} `yaml:"metadata"`
+		}
+		if err := dec.Decode(&doc); err != nil {
+			return false
+		}
+		if v, ok := doc.Metadata.Labels[k8s.ReleaseUIDLabel].(string); ok && v != "" {
+			return true
+		}
 	}
 }
 
