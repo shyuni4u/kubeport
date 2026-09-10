@@ -1562,8 +1562,9 @@ components:
       description: |
         No such resource. On template routes this is also the answer for a
         template the caller cannot see — one the template list leaves out for
-        them — whether they read, render, deploy or change it (#238, #244); a
-        403 on those routes means the caller can see the template.
+        them — whether they read, render or change it, or deploy one across
+        the demo line (#226, #238, #244); a 403 on those routes means the
+        caller can see the template.
       headers:
         X-Request-Id: { $ref: "#/components/headers/RequestId" }
       content:
