@@ -13,14 +13,25 @@ nameOverride: ""
 fullnameOverride: ""
 
 # ----- Images -------------------------------------------------------------
+# `latest` tracks main and is what makes a no-flags `helm install` work. It is the
+# right default for evaluating the chart and the wrong one for running it: nothing
+# pins it, so the next main commit silently changes what a restarted Pod runs.
+#
+# For anything you intend to keep, pin the immutable per-commit tag instead —
+# every main commit publishes one:
+#   --set images.backend.tag=sha-<7> --set images.frontend.tag=sha-<7>
+# That is what docs/oci-prod-runbook.md §3 does, and it is why rollback works.
+#
+# Do not put Chart.appVersion here: no semver image tag has ever been published
+# (see the note on the image helpers in templates/_helpers.tpl).
 images:
   backend:
     repository: ghcr.io/shyuni4u/kubeport-backend
-    tag: ""           # empty = use Chart.appVersion
+    tag: "latest"
     pullPolicy: IfNotPresent
   frontend:
     repository: ghcr.io/shyuni4u/kubeport-frontend
-    tag: ""           # empty = use Chart.appVersion
+    tag: "latest"
     pullPolicy: IfNotPresent
 
 imagePullSecrets: []  # e.g. [{ name: ghcr-pull-secret }] when using private packages
@@ -50,6 +61,14 @@ oidc:
 # Either let the chart create the Secret (auth.create=true) or reference an
 # externally managed one (auth.existingSecret). The Secret must contain:
 #   APP_ENCRYPTION_KEY_B64, OIDC_CLIENT_SECRET, DATABASE_URL
+# and, when dex.enabled=true, a fourth key:
+#   DEMO_OIDC_CLIENT_SECRET   (same value as dex.clientSecret)
+#
+# The fourth one is easy to miss because **nothing fails at install time.** Both
+# Deployments take this Secret with `envFrom`, so a missing key is simply an
+# unset variable, and the demo-reset CronJob names it with `secretKeyRef` — which
+# only surfaces as CreateContainerConfigError when the job first fires. Live, that
+# was a demo that emptied itself overnight with every probe still green (#118).
 auth:
   create: true
   existingSecret: ""

@@ -11,6 +11,47 @@ controller. Cloud-neutrality is by design: only `ingress.className`,
 `postgres.storage.storageClassName`, the public host, and the OIDC issuer URL
 should differ between environments.
 
+## Try it first (any cluster, no Ingress, no cert-manager)
+
+To see the pods come up before committing a domain and an IdP, install with the
+values CI uses for its kind smoke test:
+
+```bash
+kind create cluster --name kubeport-try     # or use any cluster you already have
+
+helm install kubeport deploy/helm/kubeport \
+  --namespace kubeport --create-namespace \
+  -f deploy/helm/kubeport/ci/smoke-values.yaml \
+  --wait --timeout 5m
+
+kubectl -n kubeport port-forward svc/kubeport-frontend 3000:3000
+# http://localhost:3000 — the landing page renders; login will not complete
+```
+
+`ci/smoke-values.yaml` sets `ingress.enabled=false`, `tls.enabled=false` **and
+`tls.certManager.enabled=false`**. That third one is the reason this needs a
+values file rather than a flag: `templates/certificate.yaml` keys off
+`tls.enabled` and `tls.certManager.enabled` only, so with the chart defaults a
+`Certificate` is rendered even when the Ingress is off, and a cluster without
+cert-manager's CRDs rejects the install on an object it was never going to use.
+
+Login is the part this path gives up: `oidc.*` points at a real issuer so the
+backend's discovery succeeds at startup, but no OAuth client is registered for
+`localhost`, so the redirect will not come back. This checks that the chart
+installs and the pods reach Ready — for a working login, do the full install
+below.
+
+Two more keys are worth knowing before you reach for `--set`, because helm
+**silently ignores** an unknown one and leaves you looking for a failure that
+never gets logged:
+
+| It is not | It is |
+|---|---|
+| `postgres.enabled` | `postgres.embedded` |
+| `postgres.storageClassName` | `postgres.storage.storageClassName` |
+
+Tear down with `kind delete cluster --name kubeport-try`.
+
 ## Quick install (any cluster)
 
 ```bash
@@ -219,8 +260,25 @@ kubectl --namespace kubeport delete pvc -l app.kubernetes.io/instance=kubeport
 
 | Mode | Set | Where |
 |---|---|---|
-| Chart-managed (dev / Phase 1) | `auth.create=true`, plus `auth.appEncryptionKeyB64` / `auth.oidcClientSecret` / `postgres.password` via `--set` | Chart writes a `<release>-auth` Secret with `DATABASE_URL`, `APP_ENCRYPTION_KEY_B64`, `OIDC_CLIENT_SECRET` |
-| External (recommended for prod) | `auth.create=false`, `auth.existingSecret=<name>` | You provide a Secret named `<name>` containing the same three keys; e.g. via `sealed-secrets` or `external-secrets` |
+| Chart-managed (dev / Phase 1) | `auth.create=true`, plus `auth.appEncryptionKeyB64` / `auth.oidcClientSecret` / `postgres.password` via `--set` | Chart writes a `<release>-auth` Secret with `DATABASE_URL`, `APP_ENCRYPTION_KEY_B64`, `OIDC_CLIENT_SECRET` — plus `DEMO_OIDC_CLIENT_SECRET` when `dex.enabled=true` |
+| External (recommended for prod) | `auth.create=false`, `auth.existingSecret=<name>` | You provide a Secret named `<name>` with the same keys; e.g. via `sealed-secrets` or `external-secrets` |
+
+**With `dex.enabled=true`, the external Secret needs a fourth key:
+`DEMO_OIDC_CLIENT_SECRET`, holding the same value as `dex.clientSecret`.**
+Both Deployments read this Secret with `envFrom`, so a missing key is not an
+error — it is an unset variable — and the demo-reset CronJob names it with
+`secretKeyRef`, which fails only when the job first fires. The install, the
+rollout and every probe stay green in between; what you see is a demo that
+empties itself on schedule and never refills (#118, same symptom as #104).
+
+`helm` cannot check this for you: the Secret is not part of the release, so
+nothing can be validated at render time. Confirm it yourself before installing:
+
+```bash
+kubectl -n kubeport get secret <name> -o jsonpath='{.data}' | tr ',' '\n' | cut -d'"' -f2
+# expect: APP_ENCRYPTION_KEY_B64, DATABASE_URL, OIDC_CLIENT_SECRET
+#         (+ DEMO_OIDC_CLIENT_SECRET when dex.enabled=true)
+```
 
 ### Postgres modes
 
