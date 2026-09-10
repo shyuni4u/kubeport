@@ -71,6 +71,10 @@ shadcn `Breadcrumb` 그대로. 모든 내부 페이지 상단.
 
 ### 1.5 색상 토큰 참고 (Tailwind 기본 팔레트 매핑)
 
+> **의미 매핑 참고용이다.** Plan 7 이후 실제 값은 `frontend/app/globals.css` 의 oklch 토큰이고,
+> 아래 hex 는 어디에도 쓰이지 않는다. 특히 "Primary action" 은 채움(`--primary`)과 텍스트(`--link`)로
+> 갈라졌다 — §1.8.
+
 | 용도 | Tailwind | hex |
 |---|---|---|
 | Primary action | `blue-700` | `#185FA5` |
@@ -105,6 +109,41 @@ shadcn `Breadcrumb` 그대로. 모든 내부 페이지 상단.
 는 8비트 채널로 반올림된 뒤 디스플레이 색관리를 거치므로, 서류상 2% 여유는 여유가 아니다.
 
 `frontend/app/globals.test.ts` 가 이 규칙들을 라이트·다크 **모든 표면**에서 고정한다.
+
+### 1.8 상호작용 상태 토큰 ([#110](https://github.com/shyuni4u/kubeport/issues/110) [#111](https://github.com/shyuni4u/kubeport/issues/111) [#112](https://github.com/shyuni4u/kubeport/issues/112) [#130](https://github.com/shyuni4u/kubeport/issues/130))
+
+**표면(surface)과 상태(state)는 다른 토큰이다.** `--muted` 는 표 헤더·리소스 패널·에디터 메타행이
+그려지는 *면*이라, hover 가 필요한 무게까지 어둡게 하면 그 면들이 무거워진다. §1.7 이 `--muted` 를
+지면에서 떼어낸 뒤에도 행 hover 는 **1.124:1** 에 머물렀다 — 한계는 불투명도가 아니라 토큰이었고,
+어떤 `/50`·`/80` 도 자기 토큰 위로 올라가지 못한다.
+
+| 토큰 | 용도 | 라이트 | 다크 |
+|---|---|---|---|
+| `--hover` | 포인터·키보드 하이라이트. **무채색 고정** | `oklch(0.84 0 0)` | `oklch(0.36 0 0)` |
+| `--selected` / `--selected-foreground` | 선택·활성. `--primary` 색조를 띤다 | `oklch(0.86 0.07 275)` / `oklch(0.35 0.2 275)` | `oklch(0.35 0.08 275)` / `oklch(0.9 0.05 275)` |
+| `--link` | 텍스트 무게의 `--primary`. 링크·인라인 액션 | `oklch(0.45 0.2 275)` | `oklch(0.8 0.15 275)` |
+| `--destructive-surface` / `-hover` | 파괴적 칩·버튼의 **불투명** 채움 | `oklch(0.93 0.035 25)` / `oklch(0.89 0.05 25)` | `oklch(0.28 0.06 25)` / `oklch(0.31 0.07 25)` |
+
+규칙:
+
+- `hover:` · `focus:` · `aria-pressed:` 에 **표면 토큰**(`bg-muted` `bg-accent` `bg-secondary`
+  `bg-card` `bg-popover` `bg-background`)을 쓰지 않는다.
+- **상태 채움은 단독 신호가 아니다.** 선택은 채움 + 테두리(또는 레이블 색)를 함께 쓴다 — 색조는
+  색각 이상 사용자가 가장 먼저 잃는 단서다. 그리고 **선택은 테두리, 포커스는 링**으로 속성을
+  나눈다. 둘 다 `ring` 을 쓰면 같은 구체성이라 emit 순서가 승자를 정하고, 지는 쪽이 포커스면
+  키보드 사용자는 포커스 표시를 통째로 잃는다.
+- **`text-primary` 는 텍스트에 쓰지 않는다.** `--primary` 는 흰 글자를 얹기 위한 *채움*이라
+  텍스트로는 여유가 없다(지면 4.82:1, 어떤 tinted 면에서도 미달). 텍스트는 `--link`.
+- **투명도로 상태를 만들지 않는다.** `/10` 은 대비를 밑면에서 빌려오므로 같은 칩이 카드 위
+  5.35:1 → hover 된 행 위 3.32:1 로 무너진다.
+- 상태 채움의 하한은 지면 대비 **1.35:1**(`--muted` 위에서는 1.25:1), 포커스 링은 WCAG 1.4.11 의
+  **3:1** 이며 **알파를 씌우지 않는다**.
+- **면을 하나 추가하면 그 위에 놓일 수 있는 모든 전경을 다시 재야 한다.** `--hover` 를 채움만 보고
+  고른 탓에 그 위의 `text-muted-foreground` 가 4.90 → 3.67:1, 링크가 3.20:1 로 떨어졌다.
+
+`frontend/app/globals.test.ts` 가 토큰 값을, `frontend/components/interaction-states.test.ts` 가
+호출부를 리포 전역으로 고정한다. 대비 계산은 `frontend/lib/color-contrast.ts` — `getComputedStyle`
+이 `lab()` 을 돌려주므로 문자열 파싱은 틀리고, 이 모듈은 라이브에서 실측한 픽셀값에 핀 고정돼 있다.
 
 ---
 
@@ -220,9 +259,18 @@ TanStack Query 로 감싸는 걸 추천:
 ┌── Top bar ·························································· [User]
 ├── 페이지 헤더 ("카탈로그" + 설명 + 검색 Input 오른쪽 정렬)
 ├── 태그 필터 (ToggleGroup, 첫 번째 "전체" 선택)
-└── CardGrid (auto-fit, minmax(190px, 1fr), gap 10px)
+└── CardGrid (auto-fill, minmax(190px, 1fr), gap 10px)
     └── CatalogCard × N
 ```
+
+`auto-fit` 이 아니라 **`auto-fill`** 이다 ([#110](https://github.com/shyuni4u/kubeport/issues/110)).
+필터 결과가 한 장만 남으면 `auto-fit` 은 빈 트랙을 접어 그 카드를 지면 폭까지 늘리고(403px → 1232px),
+더 이상 카드로 보이지 않는다. `CatalogBrowser.test.tsx` 가 고정한다.
+
+"첫 번째 '전체' 선택" 도 이 스펙이 처음부터 적어 둔 것인데 구현되지 않은 채였다 — 태그를 고르면
+카탈로그가 실제로 걸러지는데 해제할 방법이 화면에 없었다. §1.8 이후 '전체' 칩이 실재하고,
+그 값은 태그 이름 공간 밖(`all` vs `t:<tag>`)에 있다. `tags` 는 검증 없는 `[]string` 으로 API 에
+도달하므로 실재 태그가 가질 수 없는 형태란 없고, 센티널을 태그처럼 생기게 두면 언젠가 충돌한다.
 
 ### 4.3 컴포넌트
 

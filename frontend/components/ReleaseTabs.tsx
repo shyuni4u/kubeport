@@ -24,7 +24,7 @@ export function ReleaseTabs({ releaseId }: { releaseId: string }) {
             href={href}
             className={`px-3 py-2 text-sm ${
               active
-                ? "border-b-2 border-primary text-primary"
+                ? "border-b-2 border-primary text-link"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >

@@ -44,7 +44,7 @@ export default async function TemplatesPage() {
             <tr className="border-t">
               <td colSpan={3} className="p-6 text-center text-sm text-muted-foreground">
                 <p>{t("empty")}</p>
-                <Link href="/templates/new" className="mt-2 inline-block text-primary">
+                <Link href="/templates/new" className="mt-2 inline-block text-link">
                   {t("emptyCta")}
                 </Link>
               </td>
@@ -55,7 +55,7 @@ export default async function TemplatesPage() {
               <td className="p-2">
                 <Link
                   href={`/templates/${tpl.name}`}
-                  className="text-primary"
+                  className="text-link"
                 >
                   {tpl.display_name}
                 </Link>

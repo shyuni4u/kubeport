@@ -80,7 +80,7 @@ export function InstancesTable({
             <TableCell>
               <Link
                 href={`/releases/${releaseId}/logs?instance=${i.name}`}
-                className="text-primary hover:underline text-xs"
+                className="text-link hover:underline text-xs"
               >
                 {tInstances("logsLink")}
               </Link>

@@ -89,6 +89,8 @@
     "searchPlaceholder": "Search templates…",
     "emptyNoTemplates": "No templates have been published yet.",
     "emptyNoMatch": "No templates match your search or tag filter.",
+    "allTags": "All",
+    "tagFilterLabel": "Filter by tag",
     "card": {
       "deploy": "Deploy →"
     }

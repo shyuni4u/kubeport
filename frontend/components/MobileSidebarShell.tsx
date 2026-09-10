@@ -30,7 +30,7 @@ export function MobileSidebarShell({
     <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
       <DialogPrimitive.Trigger
         aria-label={triggerLabel}
-        className="md:hidden inline-flex h-9 w-9 items-center justify-center rounded-md text-foreground hover:bg-accent"
+        className="md:hidden inline-flex h-9 w-9 items-center justify-center rounded-md text-foreground hover:bg-hover"
       >
         <MenuIcon className="h-5 w-5" />
       </DialogPrimitive.Trigger>

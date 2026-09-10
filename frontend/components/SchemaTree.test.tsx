@@ -29,6 +29,24 @@ function renderTree(props: Partial<React.ComponentProps<typeof SchemaTree>> = {}
 }
 
 describe("SchemaTree", () => {
+  /**
+   * The selected node's border has to survive class merging.
+   *
+   * `border-transparent` sits in the base class so selecting a node does not
+   * shift it by a pixel, and the selected node adds `border-primary`. Both are
+   * plain (unprefixed) utilities in the same Tailwind group, so if the two are
+   * concatenated into one class attribute rather than merged, the browser picks
+   * by emit order and the selection outline never paints — a selected node
+   * would look exactly like an unselected one, which is the bug this border
+   * exists to fix (#110). Caught in cross-review; `cn()` is what resolves it.
+   */
+  it("paints the selected node's border rather than merging it away", () => {
+    renderTree({ selectedPath: "spec.replicas" });
+    const node = screen.getByText(/replicas/).closest("button");
+    expect(node?.className).toContain("border-primary");
+    expect(node?.className).not.toContain("border-transparent");
+  });
+
   it("renders no badges when fields prop is omitted", () => {
     const { container } = renderTree();
     expect(container.textContent).toContain("replicas");

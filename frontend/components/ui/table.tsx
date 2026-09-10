@@ -57,7 +57,12 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
     <tr
       data-slot="table-row"
       className={cn(
-        "border-b transition-colors hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-muted",
+        // #130's exact line. `hover:bg-muted/50` measured 1.064:1 on the
+        // release-detail instance table — and dropping the `/50`, which is what
+        // #106 did to the *list* table, only reaches 1.146:1 on this one
+        // because it is drawn on --background rather than on a white card.
+        // Neither the opacity nor the surface was the ceiling; the token was.
+        "border-b transition-colors hover:bg-hover has-aria-expanded:bg-hover data-[state=selected]:bg-selected data-[state=selected]:text-selected-foreground",
         className
       )}
       {...props}

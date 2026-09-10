@@ -176,7 +176,7 @@ export function FieldInspector({
                 ))}
                 <button
                   type="button"
-                  className="text-xs text-primary mt-1"
+                  className="text-xs text-link mt-1"
                   onClick={() => {
                     const next = [...(value.uiSpec.values ?? []), ""];
                     onChange({ ...value, uiSpec: { ...value.uiSpec, values: next } });

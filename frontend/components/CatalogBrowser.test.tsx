@@ -73,4 +73,98 @@ describe("CatalogBrowser", () => {
     await userEvent.type(screen.getByPlaceholderText(/검색/), "DB");
     expect(screen.getByText("Database")).toBeInTheDocument();
   });
+
+  /**
+   * #110. The tag chips filtered for real — clicking `batch` cut the catalog
+   * from three cards to one — while every chip's computed style stayed
+   * identical: no fill, no border, `cursor: default`, `data-state` unset. The
+   * catalog was filtered and nothing on screen said so or said how to undo it.
+   *
+   * The design spec (§4.2) had specified "tag filter (ToggleGroup, '전체'
+   * selected first)" all along; the '전체' item was simply never built, which
+   * is why there was no way back.
+   */
+  describe("tag filter", () => {
+    const pressed = () =>
+      screen
+        .getAllByRole("button")
+        .filter((b) => b.getAttribute("aria-pressed") === "true")
+        .map((b) => b.textContent);
+
+    it("offers '전체' as the first chip and starts on it", () => {
+      render(<CatalogBrowser templates={sample} />);
+      const chips = screen.getAllByRole("button").filter((b) => b.hasAttribute("aria-pressed"));
+      expect(chips[0]).toHaveTextContent("전체");
+      expect(pressed()).toEqual(["전체"]);
+    });
+
+    it("marks the chosen tag as pressed, and only that one", async () => {
+      render(<CatalogBrowser templates={sample} />);
+      await userEvent.click(screen.getByRole("button", { name: "web" }));
+      expect(pressed()).toEqual(["web"]);
+    });
+
+    it("'전체' clears the filter — the way back the reviewer could not find", async () => {
+      render(<CatalogBrowser templates={sample} />);
+      await userEvent.click(screen.getByRole("button", { name: "web" }));
+      expect(screen.queryByText("Database")).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("button", { name: "전체" }));
+      expect(screen.getByText("Database")).toBeInTheDocument();
+      expect(screen.getByText("API Gateway")).toBeInTheDocument();
+      expect(pressed()).toEqual(["전체"]);
+    });
+
+    /**
+     * The '전체' chip needs a value of its own, and the first version spelled
+     * it `__all__` on the reasoning that a real tag could not look like that.
+     * Cross-review checked instead of reasoning: `CreateTemplate` and
+     * `UpdateTemplate` store `tags` as arbitrary strings with no validation at
+     * all, so a template really can be tagged `__all__` — and it would have
+     * shared a pressed state with '전체' and been unfilterable.
+     *
+     * The chips now carry `all` and `t:<tag>`, which cannot collide because
+     * the prefix is added by this component and not by the data.
+     */
+    it("filters a tag that collides with the reset chip's own name", async () => {
+      const withCollision = [
+        ...sample,
+        {
+          name: "odd",
+          display_name: "Odd One",
+          description: "",
+          tags: ["__all__"],
+          current_version: 1,
+          owning_team_name: "platform",
+        },
+      ];
+      render(<CatalogBrowser templates={withCollision} />);
+      await userEvent.click(screen.getByRole("button", { name: "__all__" }));
+      expect(screen.getByText("Odd One")).toBeInTheDocument();
+      expect(screen.queryByText("Web Service")).not.toBeInTheDocument();
+      expect(pressed()).toEqual(["__all__"]);
+    });
+
+    it("clicking the pressed tag again also clears it", async () => {
+      // ToggleGroup's own deselect path. Without '전체' this was the *only* way
+      // back and it is undiscoverable; with '전체' it still has to keep working,
+      // or the two controls disagree about what is filtered.
+      render(<CatalogBrowser templates={sample} />);
+      const web = screen.getByRole("button", { name: "web" });
+      await userEvent.click(web);
+      await userEvent.click(web);
+      expect(screen.getByText("Database")).toBeInTheDocument();
+      expect(pressed()).toEqual(["전체"]);
+    });
+  });
+
+  // Also #110, the note at the end: with `auto-fit`, a single surviving card
+  // stretched from 403px to 1232px and stopped looking like a card at all.
+  // `auto-fill` keeps the empty tracks, so the card keeps its size.
+  it("keeps card width stable when one result is left", () => {
+    const { container } = render(<CatalogBrowser templates={sample} />);
+    const grid = container.querySelector(".grid");
+    expect(grid?.className).toContain("auto-fill");
+    expect(grid?.className).not.toContain("auto-fit");
+  });
 });

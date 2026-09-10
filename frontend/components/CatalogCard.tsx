@@ -60,7 +60,7 @@ export function CatalogCard({ template }: Props) {
         </span>
         <Link
           href={`/catalog/${template.name}/deploy`}
-          className="font-medium text-primary hover:underline"
+          className="font-medium text-link hover:underline"
         >
           {t("deploy")}
         </Link>
