@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api-server";
+import { ReleaseAutoRefresh } from "@/components/ReleaseAutoRefresh";
 import { ReleaseHeader, type ReleaseHeaderData } from "@/components/ReleaseHeader";
 import { ReleaseTabs } from "@/components/ReleaseTabs";
 import { ReleaseStaleBanner, isStaleStatus } from "@/components/ReleaseStaleBanner";
@@ -29,6 +30,9 @@ export default async function ReleaseDetailLayout({
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Keeps the header, banner and overview current while the rollout is
+          still settling, instead of until the reader reloads (#183). */}
+      <ReleaseAutoRefresh status={data.status} />
       <ReleaseHeader data={data} />
       {isStaleStatus(data.status) && (
         <ReleaseStaleBanner
