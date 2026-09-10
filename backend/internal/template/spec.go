@@ -105,8 +105,11 @@ func (f Field) Validate(v any) error {
 		// compared that way. An array or object printed by fmt.Sprint could
 		// still match a listed value spelled like "[a]" and go into the manifest
 		// whole — the #136 class with a known type (security review).
+		// int and int64 as well as float64: a submitted value is JSON
+		// (float64), but a `default: 1` in the ui-spec is decoded from YAML as
+		// int, and it used to pass the string-form check (codex review).
 		switch v.(type) {
-		case string, float64, bool:
+		case string, float64, int, int64, bool:
 		default:
 			return fmt.Errorf("%s: not one of %v", f.name(), f.Values)
 		}

@@ -189,3 +189,19 @@ func TestField_ValidateEnumRefusesCompositeValues(t *testing.T) {
 	require.Error(t, f.Validate(map[string]any{}))
 	require.NoError(t, f.Validate("[a]"), "the listed string itself is fine")
 }
+
+// A numeric enum default is written unquoted in YAML and decoded as int. It
+// passed before the scalar check, and a version relying on it must still
+// render when the user sends no value for that field (codex review).
+func TestRender_AcceptsANumericEnumDefault(t *testing.T) {
+	spec := `fields:
+  - path: Deployment[web].spec.replicas
+    label: replicas
+    type: enum
+    values: ["1", "2"]
+    default: 1
+`
+	_, err := template.Render(fieldTypeResources, spec, json.RawMessage(`{}`), template.Labels{ReleaseName: "r"})
+
+	require.NoError(t, err)
+}
