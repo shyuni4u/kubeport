@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
+import { useLogout } from "@/lib/use-logout";
 
 // The button behind GET /api/auth/logout (#28). The actual logout is a POST,
 // because a GET is something another site can cause and the route checks
@@ -22,8 +22,10 @@ import { Button } from "@/components/ui/button";
 // defence against the very thing the confirmation exists for.
 export function LogoutConfirm() {
   const t = useTranslations("logout");
-  const [pending, setPending] = useState(false);
-  const [failed, setFailed] = useState(false);
+  // The request and how its answer is read live in lib/logout.ts, shared with
+  // the top-bar menu (#166): redirect "manual", an opaque redirect or 3xx is
+  // success, and anything else keeps the reader here.
+  const { pending, failed, logout } = useLogout();
 
   return (
     <div className="mx-auto max-w-md py-16 text-center">
@@ -39,36 +41,10 @@ export function LogoutConfirm() {
           type="button"
           disabled={pending}
           onClick={() => {
-            setPending(true);
-            setFailed(false);
-            // redirect: "manual" so the answer we read is the logout route's
-            // own. The route replies 303 to "/", and the default "follow"
-            // would fetch the landing page and hand us ITS status — making
-            // "did the logout work?" depend on whether landing rendered, and
-            // costing a page load we throw away because we navigate anyway.
-            // Manual turns the 303 into an opaque redirect (type
-            // "opaqueredirect", status 0); a refusal is not a redirect and
-            // arrives intact as 403.
-            void fetch("/api/auth/logout", { method: "POST", redirect: "manual" })
-              .then((res) => {
-                // Only leave on success. Navigating regardless — which is what
-                // .finally did — showed a still-signed-in user the signed-out
-                // landing page, and this screen exists precisely so someone
-                // can be sure. A 403 here is a real configuration outcome:
-                // allowedOrigins() comes from PUBLIC_ORIGIN/OIDC_REDIRECT_URI,
-                // so a changed domain refuses every logout.
-                const redirected = res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400);
-                if (!res.ok && !redirected) throw new Error(String(res.status));
-                // router.push would keep the cached tree — including the shell
-                // the server rendered with this user's email still in it. The
-                // session is gone; the document has to be fetched again.
-                // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-                window.location.assign("/");
-              })
-              .catch(() => {
-                setPending(false);
-                setFailed(true);
-              });
+            // Only leaves on success. Navigating regardless showed a
+            // still-signed-in user the signed-out landing page, and this
+            // screen exists precisely so someone can be sure.
+            void logout();
           }}
         >
           {pending ? t("pending") : t("confirm")}
