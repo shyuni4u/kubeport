@@ -14,7 +14,7 @@ const enumSchema: SchemaNode = { type: "string", enum: ["A", "B"] };
 function harness(
   initial: UIField | undefined,
   schema: SchemaNode = stringSchema,
-  extra: { kind?: string; resourceName?: string } = {},
+  extra: { kind?: string; resourceName?: string; readOnly?: boolean } = {},
 ) {
   const onChange = vi.fn();
   const onClear = vi.fn();
@@ -211,6 +211,34 @@ describe("FieldInspector", () => {
       fireEvent.click(screen.getByText("+ 값 추가"));
       const next = onChange.mock.calls[0][0] as Extract<UIField, { mode: "exposed" }>;
       expect(next.uiSpec.values).toEqual(["a", "b", ""]);
+    });
+  });
+
+  // #184 — a YAML-authored draft opened in UI mode cannot be saved, yet every
+  // input accepted typing next to a save button that never enabled.
+  //
+  // Asserted as disabled rather than by clicking: jsdom still dispatches a
+  // click to a control inside a disabled fieldset, which a browser does not.
+  describe("readOnly", () => {
+    const exposed: UIField = {
+      mode: "exposed",
+      uiSpec: { label: "Image", type: "string", required: false },
+    };
+
+    it("shows the field's settings but lets nothing change them", () => {
+      harness(exposed, stringSchema, { readOnly: true });
+
+      expect(screen.getByDisplayValue("Image")).toBeDisabled();
+      expect(screen.getByText(ko.templates.editor.field.fix)).toBeDisabled();
+      expect(screen.getByText(ko.templates.editor.field.expose)).toBeDisabled();
+      expect(screen.getByRole("checkbox")).toBeDisabled();
+    });
+
+    it("stays editable by default", () => {
+      harness(exposed);
+
+      expect(screen.getByDisplayValue("Image")).toBeEnabled();
+      expect(screen.getByText(ko.templates.editor.field.fix)).toBeEnabled();
     });
   });
 

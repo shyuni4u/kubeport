@@ -373,6 +373,8 @@
       },
       "convert": {
         "yamlDraftPreview": "This draft was authored in YAML mode, so the UI editor is preview-only. To edit it in the UI, delete this draft from the detail page and start a new version.",
+        "yamlDraftInspector": "This draft was authored in YAML, so field settings here are view-only and cannot be saved.",
+        "editInYaml": "Edit in YAML mode",
         "willSaveAsNew": "Saving will create a new UI-mode version. Some structures may be lost in conversion — verify them in the tree.",
         "convertedTitle": "Auto-converted from YAML.",
         "warnings": "{count} conversion warning(s)",

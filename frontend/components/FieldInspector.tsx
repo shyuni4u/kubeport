@@ -37,7 +37,7 @@ export function uiSpecPath(kind: string | undefined, resourceName: string | unde
 }
 
 export function FieldInspector({
-  path, node, value, onChange, onClear, kind, resourceName,
+  path, node, value, onChange, onClear, kind, resourceName, readOnly = false,
 }: {
   path: string;
   node: SchemaNode;
@@ -48,6 +48,13 @@ export function FieldInspector({
   kind?: string;
   /** Resource metadata.name — used to display the ui-spec path. */
   resourceName?: string;
+  /**
+   * Show the field's settings without letting them change. Set when the page
+   * cannot save what the inspector would edit (a YAML-authored draft opened in
+   * UI mode): inputs that accept typing next to a save button that never
+   * enables read as broken (#184).
+   */
+  readOnly?: boolean;
 }) {
   const t = useTranslations("templates.editor.field");
   const mode = value?.mode ?? null;
@@ -62,6 +69,12 @@ export function FieldInspector({
       >
         {uiSpecPath(kind, resourceName, path)}
       </div>
+      {/*
+        A disabled fieldset disables every control inside it natively, so a
+        control added later cannot be missed. min-w-0: a fieldset's default
+        min-width is its content, which would stop the inspector shrinking.
+      */}
+      <fieldset disabled={readOnly} className="min-w-0 border-0 p-0 m-0">
       <div className="flex items-center gap-2 mb-3">
         <button
           type="button"
@@ -200,6 +213,7 @@ export function FieldInspector({
           </label>
         </div>
       )}
+      </fieldset>
     </div>
   );
 }
