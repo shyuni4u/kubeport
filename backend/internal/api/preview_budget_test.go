@@ -79,12 +79,15 @@ func TestPreview_StaysOpenToPlainUsers(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
 
-// The same bomb reaches POST /v1/templates, which serializes the ui_state
-// BEFORE it checks whether the caller may create a template — so a caller
-// destined for a 403 could still spend the memory first. Gating the preview
-// route alone would have left this one open, which is why the limit lives in
-// SerializeUIMode rather than in middleware.
-func TestCreateTemplate_RefusesBombBeforeAuthorizing(t *testing.T) {
+// The same bomb reaches POST /v1/templates, which is why the limit lives in
+// SerializeUIMode rather than in middleware on the preview route.
+//
+// That handler used to serialize ui_state BEFORE checking whether the caller
+// may create a template, so a caller destined for a 403 spent the work first.
+// Authorization now runs before serialization — it never depended on ui_state
+// — which is what the other two SerializeUIMode call sites already did. So a
+// plain user gets 403 here and never reaches the bomb at all.
+func TestCreateTemplate_AuthorizesBeforeSerializing(t *testing.T) {
 	r := plainUserRouter(t)
 	body, err := json.Marshal(map[string]any{
 		"name": "t-" + randSuffix(), "display_name": "T", "authoring_mode": "ui",
@@ -99,6 +102,31 @@ func TestCreateTemplate_RefusesBombBeforeAuthorizing(t *testing.T) {
 	})
 	require.NoError(t, err)
 	w := do(t, r, http.MethodPost, "/v1/templates", bytes.NewReader(body))
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "rbac-denied")
+}
+
+// The budget charged the path but not the value it attached, so a two-segment
+// path with a deeply nested fixedValue walked straight past every limit. The
+// path here is `data.k` — the shortest thing that reaches a leaf.
+func TestPreview_RefusesNestedValueBomb(t *testing.T) {
+	r := plainUserRouter(t)
+	var v any = "x"
+	for i := 0; i < 500; i++ {
+		v = map[string]any{"a": v}
+	}
+	b, err := json.Marshal(map[string]any{
+		"ui_state": map[string]any{
+			"resources": []map[string]any{{
+				"apiVersion": "v1", "kind": "ConfigMap", "name": "m",
+				"fields": map[string]any{
+					"data.k": map[string]any{"mode": "fixed", "fixedValue": v},
+				},
+			}},
+		},
+	})
+	require.NoError(t, err)
+	w := do(t, r, http.MethodPost, "/v1/templates/preview", bytes.NewReader(b))
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "validation-error")
 }

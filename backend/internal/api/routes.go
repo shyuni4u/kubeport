@@ -72,16 +72,29 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	// miss pulls up to 10MiB, and a caller can manufacture misses at will by
 	// varying the group/version.
 	upstream := newRateLimiter(60, 4096)
-	// Preview is CPU, not control plane, so it gets its own bucket rather than
-	// drawing on `upstream` — sharing would let an admin's typing starve the
-	// SSAR fan-out that the deploy form depends on.
+	// One budget for every route that runs SerializeUIMode — preview, create,
+	// and the two version writers. They do the same work, so they share the
+	// allowance rather than each getting a private one.
 	//
-	// 600/min because the editor is the caller: both preview panes are mounted
-	// at once and each debounces at 300ms, so sustained typing is ~400/min and
-	// a 60/min bucket would refuse the admin mid-keystroke. What this bounds is
-	// the flood — 10/s of a bounded transform is a rounding error on 4 OCPUs,
-	// where an unmetered loop is not.
-	preview := newRateLimiter(600, 4096)
+	// Separate from `upstream` because this is CPU, not control plane: none of
+	// these routes touches the apiserver, and sharing that bucket would let an
+	// admin's typing starve the SSAR fan-out the deploy form depends on.
+	//
+	// 120/min is sized off what the editor can actually emit. The two preview
+	// panes are sibling <TabsContent> panels with no keepMounted, so only one
+	// is ever mounted, and use-debounce is configured without maxWait — it
+	// does not fire DURING continuous typing, only after a 300ms pause. The
+	// ceiling is therefore ~200/min and real use is far below it, while the
+	// 60/min `upstream` bucket that issue #135 asked for could refuse an admin
+	// mid-edit. (An earlier revision of this comment claimed both panes mount
+	// at once; security review checked the tabs and it does not hold.)
+	//
+	// What it bounds is the flood. The pod's cpu limit is 500m and a maximal
+	// template costs ~200ms once maxSerializedBytes caps it, so 2/s is the
+	// most of that allowance a determined caller can take — bounded and
+	// throttled, where an unmetered loop pegs the limit and throttles every
+	// other route.
+	authoring := newRateLimiter(120, 4096)
 	v := r.Group("/v1", requireAuth(deps.Verifier))
 	v.GET("/me", h.GetMe)
 	v.GET("/clusters", h.ListClusters)
@@ -100,7 +113,7 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	if deps.DemoAllowTemplateCreate {
 		noDemoAuthoring = func(c *gin.Context) { c.Next() }
 	}
-	v.POST("/templates", noDemoAuthoring, h.CreateTemplate)
+	v.POST("/templates", rateLimit(authoring), noDemoAuthoring, h.CreateTemplate)
 	// Deliberately NOT requireAdmin()/noDemoAuthoring, though issue #135 asked
 	// for both. Preview returns a pure function of the body the caller just
 	// sent — it reads no template, no cluster and no DB, so there is nothing
@@ -110,14 +123,14 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	// who is not kubeport-admin, and gating preview would let them author
 	// without seeing what they are authoring. noDemoAuthoring would take the
 	// editor walkthrough away from the demo admin, which is the tour.
-	v.POST("/templates/preview", rateLimit(preview), h.PreviewTemplate)
+	v.POST("/templates/preview", rateLimit(authoring), h.PreviewTemplate)
 	v.POST("/templates/:name/render", h.PreviewRender)
 	v.GET("/templates/:name", h.GetTemplate)
 	v.PATCH("/templates/:name", h.UpdateTemplate)
 	v.GET("/templates/:name/versions", h.ListTemplateVersions)
-	v.POST("/templates/:name/versions", h.CreateTemplateVersion)
+	v.POST("/templates/:name/versions", rateLimit(authoring), h.CreateTemplateVersion)
 	v.GET("/templates/:name/versions/:v", h.GetTemplateVersion)
-	v.PATCH("/templates/:name/versions/:v", h.UpdateTemplateVersion)
+	v.PATCH("/templates/:name/versions/:v", rateLimit(authoring), h.UpdateTemplateVersion)
 	v.DELETE("/templates/:name/versions/:v", h.DeleteTemplateVersion)
 	v.POST("/templates/:name/versions/:v/publish", h.PublishVersion)
 	v.POST("/templates/:name/versions/:v/deprecate", h.DeprecateVersion)

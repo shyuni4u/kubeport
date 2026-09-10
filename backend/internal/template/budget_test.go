@@ -146,6 +146,94 @@ func TestSerializeUIMode_RefusalStaysSmall(t *testing.T) {
 		"a refused path should not allocate its way to the refusal")
 }
 
+// Charging only the walk left the VALUE as a way around the whole budget.
+// setJSONPathAbsolute's last step is `mp[key] = v`, and v is whatever the
+// request's JSON decoded to — UIField.FixedValue is `any`. So a two-segment
+// path could hang an arbitrarily deep object off the document, and the encoder
+// indented it the same as any other nesting: value depth 2000 under `data.k`
+// produced 4MB of YAML, and a 4MiB body of them produced gigabytes. The path
+// limits could not see any of it. Found by security review of this change.
+func TestSerializeUIMode_ChargesNestedFixedValue(t *testing.T) {
+	var v any = "x"
+	for i := 0; i < 500; i++ {
+		v = map[string]any{"a": v}
+	}
+	ui := template.UIModeTemplate{
+		Resources: []template.UIResource{
+			{APIVersion: "v1", Kind: "ConfigMap", Name: "m", Fields: map[string]template.UIField{
+				"data.k": {Mode: "fixed", FixedValue: v},
+			}},
+		},
+	}
+	_, _, err := template.SerializeUIMode(ui)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nests deeper")
+}
+
+// A wide value is the same hole in the other direction — no depth at all.
+func TestSerializeUIMode_ChargesWideFixedValue(t *testing.T) {
+	wide := make([]any, 20000)
+	for i := range wide {
+		wide[i] = map[string]any{"a": "b"}
+	}
+	ui := template.UIModeTemplate{
+		Resources: []template.UIResource{
+			{APIVersion: "v1", Kind: "ConfigMap", Name: "m", Fields: map[string]template.UIField{
+				"data.k": {Mode: "fixed", FixedValue: wide},
+			}},
+		},
+	}
+	_, _, err := template.SerializeUIMode(ui)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "too many")
+}
+
+// An exposed field's default takes the same route into the document, so it
+// has to be charged the same way.
+func TestSerializeUIMode_ChargesNestedUISpecDefault(t *testing.T) {
+	var v any = "x"
+	for i := 0; i < 500; i++ {
+		v = map[string]any{"a": v}
+	}
+	ui := template.UIModeTemplate{
+		Resources: []template.UIResource{
+			{APIVersion: "v1", Kind: "ConfigMap", Name: "m", Fields: map[string]template.UIField{
+				"data.k": {Mode: "exposed", UISpec: &template.UISpecEntry{
+					Path: "data.k", Label: "K", Type: "string", Default: v,
+				}},
+			}},
+		},
+	}
+	_, _, err := template.SerializeUIMode(ui)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nests deeper")
+}
+
+// Counting containers does not bound output. Many leaves hanging off ONE deep
+// shared prefix creates almost no containers — 16000 leaves under a 120-deep
+// prefix costs ~121, 1.5% of the budget — while every leaf carries the whole
+// prefix's indentation: 4MB of YAML and 763ms of CPU. Peak heap stayed at
+// 36MB and nothing was retained, so this is the pod's 500m cpu at risk rather
+// than its 256Mi, and output bytes are the parameter that tracks it.
+func TestSerializeUIMode_BoundsOutputSize(t *testing.T) {
+	prefix := ""
+	for i := 0; i < 120; i++ {
+		prefix += "a."
+	}
+	fields := map[string]template.UIField{}
+	for i := 0; i < 16000; i++ {
+		fields[prefix+"k"+itoa(i)] = template.UIField{Mode: "fixed", FixedValue: "v"}
+	}
+	ui := template.UIModeTemplate{
+		Resources: []template.UIResource{
+			{APIVersion: "v1", Kind: "ConfigMap", Name: "m", Fields: fields},
+		},
+	}
+	_, _, err := template.SerializeUIMode(ui)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "bytes of YAML")
+}
+
 // The guard must not refuse manifests anyone actually writes. This is a
 // deliberately oversized one — 5 Deployments, each with 10 containers carrying
 // 50 env vars and 10 volume mounts — well past anything in this product, and
@@ -157,6 +245,13 @@ func TestSerializeUIMode_AllowsAnOversizedRealTemplate(t *testing.T) {
 		for c := 0; c < 10; c++ {
 			base := "spec.template.spec.containers[" + itoa(c) + "]"
 			fields[base+".image"] = template.UIField{Mode: "fixed", FixedValue: "nginx"}
+			// Structured values too — a real manifest's fields are not all
+			// scalars, and chargeValue must not refuse ordinary ones.
+			fields[base+".resources"] = template.UIField{Mode: "fixed", FixedValue: map[string]any{
+				"limits":   map[string]any{"cpu": "500m", "memory": "256Mi"},
+				"requests": map[string]any{"cpu": "50m", "memory": "64Mi"},
+			}}
+			fields[base+".args"] = template.UIField{Mode: "fixed", FixedValue: []any{"-c", "run", "--flag"}}
 			for e := 0; e < 50; e++ {
 				fields[base+".env["+itoa(e)+"].name"] = template.UIField{Mode: "fixed", FixedValue: "K"}
 				fields[base+".env["+itoa(e)+"].value"] = template.UIField{Mode: "fixed", FixedValue: "V"}

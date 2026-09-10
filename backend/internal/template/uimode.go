@@ -47,8 +47,89 @@ const maxNewContainers = 8192
 // (maxPathDepth, the other half of this guard, lives with the tokenizer in
 // jsonpath.go — it has to bite while parsing, before anything walks a path.)
 
+// maxSerializedBytes caps the YAML one call may emit.
+//
+// The budget above counts the containers the WALK creates, which is not the
+// same as counting output. A path can be cheap in containers and expensive in
+// bytes: 16000 leaves hanging off one shared 120-deep prefix creates ~121
+// containers — 1.5% of the budget — and still cost 4MB of resources.yaml and
+// 677MB of allocation, because every leaf carries the whole prefix's
+// indentation. Counting containers cannot see that; counting bytes can.
+//
+// Enforced through a writer that fails the encode mid-document, not by
+// measuring afterwards: by the time a finished document can be measured, it
+// has already been built.
+//
+// What this actually bounds is CPU. Measured: the leaf-heavy shape above keeps
+// peak heap to ~36MB and retains nothing — the GC reclaims all of it — but
+// spends 763ms doing so. So the danger is not the pod's 256Mi, it is the pod's
+// 500m cpu, and output bytes are the parameter that tracks it: 1MiB of YAML is
+// ~200ms, 4MiB is ~760ms.
+//
+// 1MiB is ~20× the largest manifest set anyone writes and ~4× the deliberately
+// oversized one in budget_test.go, while holding one call to ~200ms.
+const maxSerializedBytes = 1 << 20
+
 // containerBudget is the per-call allowance, spent by setJSONPathAbsolute.
 type containerBudget struct{ left int }
+
+// chargeValue charges the containers inside a FIXED VALUE, which the walk
+// never creates and so never saw.
+//
+// setJSONPathAbsolute's last segment does `mp[key] = v`, where v is whatever
+// came out of the request's JSON — `UIField.FixedValue` is `any`. Charging
+// only the path left the value as a way to hang an arbitrarily large object
+// off a two-segment path, and the encoder indents it just the same: value
+// nesting of 2000 under `data.k` produced 4MB of YAML, and a 4MiB body of them
+// produced gigabytes. Found by security review of this change.
+//
+// depth starts at the path's own length so the two nest counts share one
+// limit — the encoder's quadratic does not care which half of the document a
+// level came from.
+func chargeValue(v any, depth int, path string, b *containerBudget) error {
+	if depth > maxPathDepth {
+		return fmt.Errorf(
+			"value at path %q nests deeper than %d levels once its path is counted",
+			path, maxPathDepth)
+	}
+	switch t := v.(type) {
+	case map[string]any:
+		if err := b.spend(1, path); err != nil {
+			return err
+		}
+		for _, e := range t {
+			if err := chargeValue(e, depth+1, path, b); err != nil {
+				return err
+			}
+		}
+	case []any:
+		if err := b.spend(len(t), path); err != nil {
+			return err
+		}
+		for _, e := range t {
+			if err := chargeValue(e, depth+1, path, b); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// cappedWriter fails once total bytes exceed its limit. yaml.Encoder surfaces
+// the write error, which stops the encode where it stands.
+type cappedWriter struct {
+	buf     *bytes.Buffer
+	written int
+	limit   int
+}
+
+func (w *cappedWriter) Write(p []byte) (int, error) {
+	w.written += len(p)
+	if w.written > w.limit {
+		return 0, fmt.Errorf("template serializes to more than %d bytes of YAML", w.limit)
+	}
+	return w.buf.Write(p)
+}
 
 // spend charges n containers, reporting the path that ran the budget out
 // rather than a bare limit — with a whole template in the body, which path is
@@ -98,7 +179,10 @@ type UISpecEntry struct {
 // YAML pair that the Plan 1 render pipeline understands.
 func SerializeUIMode(ui UIModeTemplate) (resourcesYAML, uiSpecYAML string, err error) {
 	var resBuf bytes.Buffer
-	enc := yaml.NewEncoder(&resBuf)
+	// The encoder writes through a cap so an oversized document fails partway
+	// through emitting rather than after — see maxSerializedBytes.
+	capped := &cappedWriter{buf: &resBuf, limit: maxSerializedBytes}
+	enc := yaml.NewEncoder(capped)
 	enc.SetIndent(2)
 
 	var allFields []UISpecEntry
@@ -193,6 +277,11 @@ func setJSONPathAbsolute(obj map[string]any, path string, v any, budget *contain
 	}
 	if len(segs) == 0 {
 		return fmt.Errorf("empty path")
+	}
+	// The value lands in the document whole, so charge it before walking —
+	// otherwise the last segment is a way around the budget entirely.
+	if err := chargeValue(v, len(segs), path, budget); err != nil {
+		return err
 	}
 	// Walk with parent/setter closures so we can grow slices (which are
 	// value types — growing in place is impossible, we have to reassign

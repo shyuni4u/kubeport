@@ -492,6 +492,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/templates/preview:
@@ -504,13 +505,16 @@ paths:
         database — so it is open to any authenticated caller.
 
         400 when the ui_state would build a document far larger than the body
-        that described it: a path may not create more than 8192 objects across
-        one request, nor be more than 128 levels deep. Real manifest paths run
-        about nine deep and no template approaches the object budget; a request
-        that trips either is malformed rather than large (issue #135).
+        that described it. Three limits, all per request: at most 8192 objects
+        created, nothing more than 128 levels deep counting a field's path and
+        its value together, and at most 1MiB of resources.yaml emitted. Real
+        manifest paths run about nine deep and no template approaches any of
+        them; a request that trips one is malformed rather than large
+        (issue #135).
 
-        Rate limited separately from the control-plane routes, at a budget
-        sized for the editor's own typing rather than for apiserver fan-out.
+        Rate limited on a budget shared with the other routes that serialize a
+        ui_state, separate from the control-plane routes, and sized for the
+        editor's own typing rather than for apiserver fan-out.
       requestBody:
         required: true
         content:
@@ -674,6 +678,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
 
   /v1/templates/{name}/versions/{v}:
@@ -731,6 +736,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
     delete:
       tags: [templates]
