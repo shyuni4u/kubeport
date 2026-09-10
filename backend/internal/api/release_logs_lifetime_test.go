@@ -102,3 +102,34 @@ func TestStreamReleaseLogs_AStreamEndedByItsLifetimeReturnsItsSlot(t *testing.T)
 	stop := holdStream(t, r, path, started)
 	stop()
 }
+
+// The slot is taken before the pods are listed, so the lifetime has to cover
+// the listing too. An apiserver that accepts the connection and never answers
+// used to hold the slot for as long as it stalled — the lifetime only started
+// once discovery had finished, and the cluster client has no timeout of its
+// own — so a few stalled opens filled the cap and turned away streams to
+// healthy clusters as well (found by codex).
+func TestStreamReleaseLogs_TheLifetimeBoundsPodDiscoveryToo(t *testing.T) {
+	applier := &fakeK8sApplier{instancesStall: true}
+	r, path := lifetimeRouter(t, config.Config{
+		LogStreamsPerCaller:  1,
+		LogStreamMaxLifetime: 200 * time.Millisecond,
+	}, applier)
+
+	done := make(chan int, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer x")
+		rec := newStreamRecorder()
+		r.ServeHTTP(rec, req)
+		done <- rec.Code
+	}()
+
+	select {
+	case code := <-done:
+		// The deferred release has run by the time the handler returns.
+		require.NotEqual(t, http.StatusOK, code, "a stalled discovery was reported as a stream")
+	case <-time.After(5 * time.Second):
+		t.Fatal("a request stuck listing pods outlived the stream lifetime and kept its slot")
+	}
+}

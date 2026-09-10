@@ -67,6 +67,10 @@ type fakeK8sApplier struct {
 	// moment of its choosing instead of waiting out the 15s ping.
 	logFeed chan string
 
+	// instancesStall makes ListInstances hang until its context ends, like an
+	// apiserver that accepted the connection and never answered.
+	instancesStall bool
+
 	// accessChecks records every CheckAccess call for assertions.
 	// accessResult is the stub response; accessErr overrides it when non-nil.
 	accessChecks []k8s.AccessCheck
@@ -87,7 +91,11 @@ func (f *fakeK8sApplier) DeleteByRelease(_ context.Context, _, release string) e
 	return nil
 }
 
-func (f *fakeK8sApplier) ListInstances(_ context.Context, _, _ string) ([]k8s.Instance, error) {
+func (f *fakeK8sApplier) ListInstances(ctx context.Context, _, _ string) ([]k8s.Instance, error) {
+	if f.instancesStall {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if f.instancesErr != nil {
 		return nil, f.instancesErr
 	}

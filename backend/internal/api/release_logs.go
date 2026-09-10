@@ -114,12 +114,36 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	}
 	defer h.streams.release(u.Subject)
 
+	// Bounded by a lifetime as well as by the caller leaving (#169).
+	//
+	// Nothing else ends a stream the reader keeps open. The proxy in front does
+	// not: Traefik's writeTimeout defaults to 0 and its idleTimeout counts only
+	// idle keep-alive connections, which the 15s ping keeps this from ever
+	// being. And the stream itself never looks at its caller again —
+	// authorizeReleaseAccess ran once at the handshake and the cluster checked
+	// the token once when the log request opened — so a tab left open went on
+	// receiving pod logs after the caller's RBAC was revoked or their session
+	// had expired, for as long as the tab lived.
+	//
+	// When the lifetime is up the handler just returns, with no `end` frame.
+	// To the browser that is a dropped connection, so it reconnects — through
+	// the BFF, which refreshes the token, into a handshake that authorizes
+	// again. A named instance resumes from Last-Event-ID; `instance=all`
+	// replays into a cleared pane, the same as after any other drop.
+	//
+	// It starts here, the moment the slot is taken, and covers pod discovery as
+	// well as the stream: the cluster client has no timeout of its own, and an
+	// apiserver that accepts the connection and never answers the listing would
+	// otherwise hold the slot for as long as it stalled.
+	streamCtx, cancel := context.WithTimeout(ctx, h.streamLifetime)
+	defer cancel()
+
 	cli, err := h.deps.K8sFactory.NewWithToken(rel.ClusterApiUrl, rel.ClusterCaBundle.String, u.IDToken)
 	if err != nil {
 		internalError(c, "StreamReleaseLogs: k8s client", err)
 		return
 	}
-	instances, err := cli.ListInstances(ctx, rel.Namespace, rel.Name)
+	instances, err := cli.ListInstances(streamCtx, rel.Namespace, rel.Name)
 	if err != nil {
 		clusterError(c, "StreamReleaseLogs: list instances", err)
 		return
@@ -146,24 +170,6 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	c.Writer.Header().Set("Connection", "close")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 
-	// Bounded by a lifetime as well as by the caller leaving (#169).
-	//
-	// Nothing else ends a stream the reader keeps open. The proxy in front does
-	// not: Traefik's writeTimeout defaults to 0 and its idleTimeout counts only
-	// idle keep-alive connections, which the 15s ping keeps this from ever
-	// being. And the stream itself never looks at its caller again —
-	// authorizeReleaseAccess ran once at the handshake and the cluster checked
-	// the token once when the log request opened — so a tab left open went on
-	// receiving pod logs after the caller's RBAC was revoked or their session
-	// had expired, for as long as the tab lived.
-	//
-	// When the lifetime is up the handler just returns, with no `end` frame.
-	// To the browser that is a dropped connection, so it reconnects — through
-	// the BFF, which refreshes the token, into a handshake that authorizes
-	// again. A named instance resumes from Last-Event-ID; `instance=all`
-	// replays into a cleared pane, the same as after any other drop.
-	streamCtx, cancel := context.WithTimeout(ctx, h.streamLifetime)
-	defer cancel()
 	// The context only ends a handler that gets back to its select. One stuck
 	// in a write does not: a reader that keeps the connection but stops reading
 	// fills the socket buffers, the next write blocks in the kernel, and
