@@ -217,7 +217,7 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
 ### 공용 머신에서 테스트
 - 고치는 동안은 파일·패키지 단위(`pnpm vitest run <file>`, `go test ./internal/x -run TestY`), **전체 스위트는 푸시 직전 1회** —
   CI 가 어차피 전체를 돈다. 실측: vitest 전체 평균 65초 vs 파일 단위 11초, 한 세션이 전체를 42회 돌렸다.
-- 백엔드 통합 테스트는 **세션별 DB** 로: `eval "$(scripts/test-db.sh)"` ([docs/testing.md](docs/testing.md)). 공용 DB 에서 두 세션이
+- 백엔드 통합 테스트는 **세션별 DB** 로: `out=$(scripts/test-db.sh) && eval "$out"` ([docs/testing.md](docs/testing.md) §3.4 — `eval "$(…)"` 형태는 스크립트가 실패해도 성공으로 끝나 테스트가 공용 DB 로 되돌아간다). 공용 DB 에서 두 세션이
   동시에 돌리면 `TestMain` 의 이름 패턴 정리가 서로의 행을 지운다.
 
 ## 코드 리뷰
