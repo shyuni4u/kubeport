@@ -41,15 +41,30 @@ const KNOWN_OPEN_ERRORS = new Set([
   "unauthenticated",
   "demo-restricted",
   "rbac-denied",
+  "cluster-auth-denied",
   "validation-error",
   "internal",
   "k8s-error",
+  "rate-limited",
 ]);
 
-// Kinds a retry can actually clear: the cluster was unreachable, or kubeport
-// itself stumbled. Everything else is a verdict — no pods, not yours, gone,
-// signed out — and offering [Reconnect] for those is what #134 was about.
-const RETRYABLE_OPEN_ERRORS = new Set(["k8s-error", "internal"]);
+// Kinds a retry can actually clear. `no-pods` belongs here even though it is
+// what #134 was reported against: it is an observation, not a verdict — the
+// backend writes it whenever ListInstances comes back empty, which is every
+// pod that is still Pending or pulling, and every Job between runs. Nothing
+// re-checks on its own (the stream is closed, the browser will not retry, the
+// page is a server component), so taking the button away left "deploy, open
+// logs" — the demo's most-walked path — with F5 as the only way forward.
+//
+// The rest are verdicts: not yours, gone, signed out, the cluster refused the
+// token. Those keep the button hidden, which is the half of #134 point 3 that
+// still holds.
+const RETRYABLE_OPEN_ERRORS = new Set([
+  "k8s-error",
+  "internal",
+  "no-pods",
+  "rate-limited",
+]);
 
 // EventSource.readyState. Read off the instance rather than the constructor so
 // the component does not depend on statics a stub may not define.

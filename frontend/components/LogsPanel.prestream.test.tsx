@@ -99,16 +99,33 @@ describe("LogsPanel pre-stream refusals", () => {
     expect(screen.queryByText(/연결이 끊겼습니다/)).toBeNull();
   });
 
-  // Point 3 of the issue: the button worked — it really did re-request the
-  // stream — but there are no pods, so it was an invitation to retry forever.
+  // Point 3 of the issue, as far as it goes: the button worked — it really did
+  // re-request the stream — but under "the connection dropped" it was an
+  // invitation to retry forever. Under a verdict it is worse than useless.
   it("offers no reconnect action for a refusal that retrying cannot fix", async () => {
+    fetchMock.mockResolvedValue(problem("not-found", 404));
+    render(<LogsPanel releaseId="abc" instances={[]} />);
+
+    refuse();
+
+    await screen.findByText(/릴리스를 찾을 수 없습니다/);
+    expect(screen.queryByRole("button", { name: "다시 연결" })).toBeNull();
+  });
+
+  // ...but no-pods is not a verdict, it is an observation: the backend writes
+  // it whenever ListInstances comes back empty, which covers every pod still
+  // Pending or pulling and every Job between runs. Nothing re-checks on its
+  // own — the stream is closed, the browser will not retry, the page is a
+  // server component — so taking the button away here left "deploy, then open
+  // logs", the most-walked path in the demo, with F5 as the only way forward.
+  it("keeps the reconnect action for no-pods, which is a wait rather than a verdict", async () => {
     fetchMock.mockResolvedValue(problem("no-pods", 404));
     render(<LogsPanel releaseId="abc" instances={[]} />);
 
     refuse();
 
-    await screen.findByText(/실행 중인 인스턴스가 없습니다/);
-    expect(screen.queryByRole("button", { name: "다시 연결" })).toBeNull();
+    expect(await screen.findByText(/실행 중인 인스턴스가 없습니다/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "다시 연결" })).toBeInTheDocument();
   });
 
   it("reads the refusal from the same URL the stream used", async () => {

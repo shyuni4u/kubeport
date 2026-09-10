@@ -106,7 +106,14 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	v.GET("/releases", h.ListReleases)
 	v.POST("/releases", h.CreateRelease)
 	v.GET("/releases/:id", h.GetRelease)
-	v.GET("/releases/:id/logs", h.StreamReleaseLogs)
+	// Opening a stream lists the release's pods and then follows one log per
+	// pod, so it is a control-plane fan-out like the two above and belongs on
+	// the same budget — it was simply missed when #73 drew the line. #134 made
+	// the omission cost more: a refusal now costs a second request, because the
+	// client re-asks for the same URL to read the Problem EventSource hid from
+	// it. One token per open, not one per line; a follow that stays up for an
+	// hour spends nothing after the handshake.
+	v.GET("/releases/:id/logs", rateLimit(upstream), h.StreamReleaseLogs)
 	v.PUT("/releases/:id", h.UpdateRelease)
 	v.DELETE("/releases/:id", h.DeleteRelease)
 	v.GET("/teams", h.ListTeams)

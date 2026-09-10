@@ -46,7 +46,7 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	}
 	instances, err := cli.ListInstances(ctx, rel.Namespace, rel.Name)
 	if err != nil {
-		upstreamError(c, "StreamReleaseLogs: list instances", err)
+		clusterError(c, "StreamReleaseLogs: list instances", err)
 		return
 	}
 
@@ -130,6 +130,31 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 			return true
 		}
 	})
+}
+
+// clusterError answers a cluster call that failed *before* the stream opened,
+// using the same vocabulary the in-stream frame uses.
+//
+// upstreamError folds all of these into `k8s-error`. For a one-shot request
+// that is fine — the caller retries or gives up. For this endpoint it is not:
+// the same apiserver 401 is called `cluster-auth-denied` once the stream is up
+// (streamErrorKind, since #82) and `k8s-error` one instruction earlier, and the
+// client gates its Reconnect button on the kind (#134). A permanent refusal
+// arriving as the retryable kind is an invitation to retry something that can
+// never clear. The handshake should not change what a failure is called.
+//
+// The detail is ours, not client-go's, for the reason spelled out at sseError:
+// its text names the apiserver's address, the namespace and the pod (#108).
+func clusterError(c *gin.Context, op string, err error) {
+	logWithheld(c, op, err)
+	switch {
+	case apierrors.IsUnauthorized(err):
+		writeError(c, http.StatusBadGateway, "cluster-auth-denied", op+" failed")
+	case apierrors.IsForbidden(err):
+		writeError(c, http.StatusForbidden, "rbac-denied", op+" failed")
+	default:
+		writeError(c, http.StatusBadGateway, "k8s-error", op+" failed")
+	}
 }
 
 // streamErrorKind picks the kind for an in-stream failure.
