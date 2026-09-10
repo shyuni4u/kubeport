@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
+import { DemoAccounts } from "@/components/DemoAccounts";
 import { LandingCompare } from "@/components/LandingCompare";
 import { LoginErrorBanner } from "@/components/LoginErrorBanner";
 import { apiFetch } from "@/lib/api-server";
@@ -65,16 +66,21 @@ export default async function Home({
       ) : (
         <div className="flex flex-col items-center gap-3">
           {demo && (
-            <div className="flex gap-3">
-              <a href={withNext(`/api/auth/login?provider=demo&hint=${encodeURIComponent(adminEmail)}`)} className="rounded-md border px-4 py-2 hover:bg-hover">{t("tryAdmin")}</a>
-              <a href={withNext(`/api/auth/login?provider=demo&hint=${encodeURIComponent(userEmail)}`)} className="rounded-md border px-4 py-2 hover:bg-hover">{t("tryUser")}</a>
-            </div>
-          )}
-          {demo && (
-            <p className="text-xs text-muted-foreground">
-              {t("demoNote")}
-              {passwordHint && <><br />{t("demoCreds", { password: passwordHint })}</>}
-            </p>
+            <DemoAccounts
+              accounts={[
+                {
+                  label: t("tryAdmin"),
+                  href: withNext(`/api/auth/login?provider=demo&hint=${encodeURIComponent(adminEmail)}`),
+                  email: adminEmail,
+                },
+                {
+                  label: t("tryUser"),
+                  href: withNext(`/api/auth/login?provider=demo&hint=${encodeURIComponent(userEmail)}`),
+                  email: userEmail,
+                },
+              ]}
+              passwordHint={passwordHint}
+            />
           )}
           {/* Primary CTA when demo is off (it's the only way in); secondary under the demo buttons. */}
           <a
