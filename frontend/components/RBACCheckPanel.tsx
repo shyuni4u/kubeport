@@ -122,8 +122,9 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
       // commits the denied rows and the parent's disabled button at once
       // (#99). Reporting the verdict from the effect below instead left one
       // commit where the panel said "denied" and the button still worked.
-      // `loading` is cleared here rather than in a `.finally`, which would run
-      // a microtask later and split the same update across two commits.
+      // `loading` is cleared in the same callback rather than a `.finally`, so
+      // all three are scheduled together instead of relying on a later
+      // microtask landing in the same render.
       //
       // onResult is the one captured when this check started. The parent
       // stamps the verdict with the cluster and namespace it closes over, and
@@ -149,15 +150,20 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
   const skipped = effectiveResults.filter((r) => r.skipped);
   const allAllowed = checked.length > 0 && checked.every((r) => r.allowed);
   const denied = checked.filter((r) => !r.allowed);
-  const showPlaceholder = !loading && effectiveResults.length === 0;
+  // `loading` can outlive its inputs: clear them while a check is out and the
+  // cleanup drops that check's result, so nothing ever sets it back to false.
+  // What is on screen follows the inputs instead of the flag.
+  const checking = loading && hasInputs;
+  const showPlaceholder = !checking && effectiveResults.length === 0;
 
   const status: RbacStatus =
     loading || !hasInputs ? "unknown" : statusFrom(effectiveResults);
 
   // Still reported from an effect as well, for what the fetch callback never
   // sees: cleared inputs and a re-check starting both go back to "unknown".
-  // For a finished check it repeats what the callback already sent, which the
-  // parent's state setter treats as no change.
+  // For a finished check it repeats what the callback already sent. The
+  // verdict is the same, so the parent's gate does not change — though a
+  // parent that stores an object (DeployClient) re-renders once more.
   useEffect(() => {
     onResult?.(status);
   }, [status, onResult]);
@@ -173,7 +179,7 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
         )}
       </CardHeader>
       <CardContent className="flex flex-col gap-1 text-xs">
-        {loading && <span className="text-muted-foreground">{t("checking")}</span>}
+        {checking && <span className="text-muted-foreground">{t("checking")}</span>}
         {showPlaceholder && (
           <span className="text-muted-foreground">{t("hint")}</span>
         )}
@@ -187,13 +193,13 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
           same thing, and an emoji's own name ("cross mark") was being read
           out ahead of it.
         */}
-        {!loading && allAllowed && (
+        {!checking && allAllowed && (
           <span className="flex items-center gap-1.5 text-green-700">
             <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             {t("allAllowed")}
           </span>
         )}
-        {!loading && denied.length > 0 && (
+        {!checking && denied.length > 0 && (
           <>
             <ul className="flex flex-col gap-0.5">
               {denied.map((r) => {
@@ -226,7 +232,7 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
             <p className="text-red-700">{t("deniedNext")}</p>
           </>
         )}
-        {!loading && skipped.length > 0 && (
+        {!checking && skipped.length > 0 && (
           <p className="flex items-start gap-1.5 text-amber-700">
             <AlertTriangle
               className="mt-0.5 h-3.5 w-3.5 shrink-0"
