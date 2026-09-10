@@ -135,13 +135,24 @@ func demoVisibleTemplates(ctx context.Context, st *store.Store, demoDomain strin
 // It stays 200 even when the count is unavailable: the same path backs the
 // readiness probe, and failing it over a reporting problem would take the pod
 // out of service. Callers branch on the body, not the status.
+//
+// `version` is on every response, bare path included. It is what lets anyone
+// outside the cluster answer "which commit is live" without shell access to
+// the node — the deploy workflow polls it to confirm a rollout landed, and
+// before it existed sessions had to ask each other. It is a constant, so the
+// probes still touch nothing, and the repository is public, so the sha
+// discloses nothing a visitor could not already read.
 func healthz(deps Deps, gauge *catalogGauge) gin.HandlerFunc {
+	version := deps.Version
+	if version == "" {
+		version = "dev"
+	}
 	return func(c *gin.Context) {
 		if c.Query("verbose") != "1" {
-			c.JSON(http.StatusOK, gin.H{"status": "ok"})
+			c.JSON(http.StatusOK, gin.H{"status": "ok", "version": version})
 			return
 		}
-		body := gin.H{"status": "ok"}
+		body := gin.H{"status": "ok", "version": version}
 		if deps.HealthPublicCatalog && deps.Store != nil {
 			n, err := gauge.count(deps.Store, deps.DemoEmailDomain)
 			switch {

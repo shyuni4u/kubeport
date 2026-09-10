@@ -32,6 +32,25 @@ describe("GET /api/healthz", () => {
     await expect(res.json()).resolves.toEqual(upstream);
   });
 
+  // deploy.yml polls this route until `version` equals the sha it just
+  // shipped. The BFF is the only public way to read the backend's health, so
+  // dropping the field here would make every deploy time out as a failure.
+  it("passes the backend's build version through", async () => {
+    process.env.GO_API_BASE_URL = "http://api.test";
+    stubFetch(
+      (async () =>
+        new Response(JSON.stringify({ status: "ok", version: "c9b1404" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })) as unknown as typeof fetch,
+    );
+
+    const res = await GET();
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).version).toBe("c9b1404");
+  });
+
   it("asks the backend for the verbose form", async () => {
     process.env.GO_API_BASE_URL = "http://api.test";
     const spy = vi.fn(
