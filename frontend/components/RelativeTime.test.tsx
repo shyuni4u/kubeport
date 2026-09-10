@@ -48,13 +48,32 @@ describe("RelativeTime", () => {
 
   // The exact timestamp is still reachable — relative time alone is useless
   // for "which deploy was this?".
-  it("keeps the absolute time in the title and a machine-readable dateTime", () => {
+  it("keeps a machine-readable dateTime", () => {
     const iso = "2026-09-09T10:00:00.000Z";
     renderAt(iso);
-    const el = screen.getByRole("time");
-    expect(el).toHaveAttribute("dateTime", iso);
-    // 10:00Z is 19:00 in Asia/Seoul.
-    expect(el.getAttribute("title")).toMatch(/7:00|19:00/);
+    expect(screen.getByRole("time")).toHaveAttribute("dateTime", iso);
+  });
+
+  // #115 — the absolute time was in `title` only: invisible to touch, to the
+  // keyboard, and to anyone who never happened to hover. Asserted on the
+  // rendered text rather than by opening the tooltip, because that is the
+  // copy that needs no interaction at all to reach.
+  //
+  // 10:00Z is 19:00 in Asia/Seoul.
+  it("renders the absolute time without requiring interaction", () => {
+    renderAt("2026-09-09T10:00:00.000Z");
+    expect(screen.getByRole("button").textContent).toMatch(/7:00|19:00/);
+  });
+
+  // Hover alone cannot reach a tooltip on a touch screen, and `title` cannot
+  // be focused. The trigger is a button for both reasons (the HelpHint rule).
+  it("exposes the timestamp through a focusable trigger", () => {
+    renderAt("2026-09-09T10:00:00.000Z");
+    const trigger = screen.getByRole("button");
+    trigger.focus();
+    expect(trigger).toHaveFocus();
+    // No native title popup competing with the tooltip.
+    expect(trigger).not.toHaveAttribute("title");
   });
 
   it("renders nothing for an unparseable timestamp", () => {
