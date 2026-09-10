@@ -98,6 +98,25 @@ That command also installs the `latest` tag. For an install you intend to keep,
 add `--set images.backend.tag=sha-<7> --set images.frontend.tag=sha-<7>` — every
 main commit publishes one, and pinning is what makes a rollback possible.
 
+TLS comes from cert-manager. The chart creates a `Certificate` that points at a
+**ClusterIssuer named `letsencrypt-prod`**, but it does not create that issuer.
+If the cluster has no issuer by that name, `helm install` still succeeds and
+every Pod goes Ready — the certificate simply never issues, and the site has no
+valid TLS. The only sign is `READY False` in `kubectl -n kubeport get certificate`.
+So before installing, create that ClusterIssuer (step 2 of the chart README's
+[Quick install](deploy/helm/kubeport/README.md#quick-install-any-cluster) has
+one — change its solver's `class: traefik` to your `ingress.className`, or the
+HTTP-01 challenge goes unanswered and fails the same silent way), or point the
+chart at what you have:
+
+- another ClusterIssuer: `--set tls.certManager.issuerName=<name>`
+- a TLS Secret you already have: `--set tls.certManager.enabled=false --set tls.existingSecret=<secret>`
+- no TLS inside the cluster: `--set tls.enabled=false --set tls.certManager.enabled=false`.
+  The login and logout URLs the chart derives then become `http://`. If TLS is
+  terminated in front of the cluster (a load balancer, Cloudflare), also put the
+  `https://` origin browsers see in `frontend.publicOrigins`, or logout is
+  refused with 403.
+
 Read [deploy/helm/kubeport/README.md](deploy/helm/kubeport/README.md) first —
 especially **"After install — required on every cluster"**. Without those steps
 the app runs and people can log in, but it cannot deploy anything.
