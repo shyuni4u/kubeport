@@ -28,7 +28,8 @@
   건너뛴 사이클이면 이틀 남는다. 삭제까지가 검증의 일부다.
 - **배포 폼의 네임스페이스는 `demo` 로 바꿔 넣는다.** 폼은 `default` 가 채워진 채로 열리지만(`DeployClient.tsx` 의 `meta` 초기값) 데모 계정 권한은 `demo` 에만 있다(`demo-rbac.yaml`). 그대로 두면 RBAC 사전 점검이 거부하고 제출이 막힌다(#69). **알려진 결함이고 [#179](https://github.com/shyuni4u/kubeport/issues/179) 로 추적한다 — 같은 내용으로 새 이슈를 올리지 말고 거기에 코멘트할 것.** 단 그 거부 문장이 방문자에게 다음에 뭘 해야 하는지 알려주는지는 여전히 볼 거리다. 네임스페이스 도움말(`namespaceHelp`)이 "관리자가 따로 알려주지 않았다면 그대로 두세요" 라고 안내해서, 도움말을 믿은 방문자가 정확히 막히는 쪽으로 간다.
 - 금지: 실제 Google 계정 로그인. 데모 계정으로 UI 밖의 API 를 직접 호출해 대량 생성. 같은 동작 반복 5회 이상(부하).
-- 시드 데이터: 템플릿 3개(`web-app`, `nightly-job`, `app-with-config`), 릴리스 2개(`web-app-demo` 정상, `nightly-job-demo` 는 존재하지 않는 이미지로 의도적 실패 — 실패 설명 배너가 정상). 근거: 템플릿은 `backend/cmd/seed-demo/templates.go` + `cmd/seed-demo/fixtures/`, 릴리스는 `backend/cmd/seed-demo/seed.go`.
+- 시드 데이터: 템플릿 3개(`web-app`, `nightly-job`, `app-with-config`), 릴리스 2개(`app-with-config-demo` 정상, `nightly-job-demo` 는 존재하지 않는 이미지로 의도적 실패 — 실패 설명 배너가 정상). 근거: 템플릿은 `backend/cmd/seed-demo/templates.go` + `cmd/seed-demo/fixtures/`, 릴리스는 `backend/cmd/seed-demo/seed.go`.
+- **`app-with-config`·`nightly-job` 을 `demo` 에 배포하면 409 가 정상이다.** 두 템플릿은 오브젝트 이름이 고정돼 있고 같은 이름을 시드 릴리스가 이미 쥐고 있어서, "`app-with-config-demo` 릴리스가 이미 쓰고 있다" 는 안내와 함께 거절된다(#161 — 예전엔 조용히 빼앗았고 지우면 시드가 깨졌다). 한 네임스페이스에 같은 템플릿 릴리스는 하나뿐인 게 현재 제약이다(#190). **배포 흐름은 비어 있는 `web-app` 으로 검증하고, 이 409 를 결함으로 올리지 말 것.** 단 거절 문장이 어느 릴리스 때문인지·이름을 바꿔도 안 된다는 것을 말하는지는 볼 거리다.
 
 ## 브라우저 툴
 

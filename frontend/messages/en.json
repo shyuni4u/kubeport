@@ -209,7 +209,7 @@
     "errors": {
       "forbidden": "You do not have permission to perform this action. Please contact an admin.",
       "conflict": "A release with the same name already exists. Use a different name or check the existing release.",
-      "resourceConflict": "In this area, the release '{owner}' already uses the resources this template creates. A different name will not help — deploy into another area, or delete '{owner}' first.",
+      "resourceConflict": "In this area, the release ''{owner}'' already uses the resources this template creates. A different name will not help — deploy into another area, or delete ''{owner}'' first.",
       "resourceConflictForeign": "Resources this template creates already exist in this area, made outside kubeport. A different name will not help — deploy into another area, or ask an admin.",
       "server": "Something went wrong on the server and the deployment failed. Try again shortly or contact an admin.",
       "generic": "The deployment failed. Please review your inputs and try again."
