@@ -45,6 +45,40 @@ describe("DynamicForm widget mapping", () => {
     expect(screen.getByTestId("slider-value")).toHaveTextContent("3");
   });
 
+  // #164 — DynamicForm is the trust boundary, and the deploy form is the
+  // entry point that proves it has to be: DeployClient hands it the server's
+  // ui-spec directly, with no preview component in between to normalise it.
+  //
+  // Once schemaFromUISpec stopped throwing on an undescribable field, an
+  // un-normalised spec would leave the field out of the schema while still
+  // rendering its row — renderWidget returns undefined, and FormControl's
+  // React.cloneElement throws on that. The crash would just move from the
+  // validator to the renderer, into the one form with no error boundary.
+  it("drops an undescribable field instead of rendering a row it cannot fill", () => {
+    const spec = {
+      fields: [
+        { path: "metadata.name", label: "Name", type: "string" },
+        { path: "broken", label: "Broken", type: "sxtring" },
+      ],
+    } as unknown as UISpec;
+
+    expect(() =>
+      renderWithIntl(<DynamicForm spec={spec} onSubmit={() => {}} />),
+    ).not.toThrow();
+    expect(screen.getByLabelText(/Name/)).toBeInTheDocument();
+    expect(screen.queryByText("Broken")).toBeNull();
+  });
+
+  it("survives an enum with no values, from any entry point", () => {
+    const spec = {
+      fields: [{ path: "a", label: "Choice", type: "enum" }],
+    } as unknown as UISpec;
+    expect(() =>
+      renderWithIntl(<DynamicForm spec={spec} onSubmit={() => {}} />),
+    ).not.toThrow();
+    expect(screen.queryByText("Choice")).toBeNull();
+  });
+
   it("renders numeric Input for integer without both min+max", () => {
     const spec: UISpec = {
       fields: [

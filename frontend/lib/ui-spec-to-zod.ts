@@ -86,6 +86,12 @@ const KNOWN_TYPES = [
  *
  * `new RegExp("[")` throws, and a lone `[` is one keystroke on the way to
  * every character class anyone has ever written (#164).
+ *
+ * "safe" here means *it compiles*, and nothing more. A pattern that compiles
+ * but backtracks catastrophically (`^(a+)+$`) passes, and the deploy form
+ * validates on every keystroke — so an admin can still freeze a user's tab
+ * with one. Out of reach for demo visitors, who cannot author templates at
+ * all, but not a guarantee this function makes.
  */
 function safeRegExp(pattern: string): RegExp | null {
   try {

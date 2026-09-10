@@ -37,6 +37,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   schemaFromUISpec,
   defaultsFromUISpec,
+  normalizeUISpec,
   type UISpec,
   type UISpecField,
 } from "@/lib/ui-spec-to-zod";
@@ -152,7 +153,7 @@ function rangedIntValue(field: IntegerField, value: unknown): number {
  * - string → Input type="text" (with optional pattern hint)
  */
 export function DynamicForm({
-  spec,
+  spec: rawSpec,
   initialValues,
   submitLabel = "배포하기",
   submitVariant = "default",
@@ -160,6 +161,24 @@ export function DynamicForm({
   onSubmit,
   onChange,
 }: Props) {
+  // The trust boundary sits here, not in the callers (#164).
+  //
+  // It started one level up, in UserFormPreview, which covered the admin's
+  // preview and missed the deploy form — DeployClient hands the server's
+  // ui-spec straight to this component. That gap mattered once
+  // `schemaFromUISpec` stopped throwing on an undescribable field: the field
+  // left the schema but `spec.fields.map` below still rendered its row,
+  // `renderWidget` returned undefined for it, and FormControl's
+  // `React.cloneElement(children, …)` threw on that undefined — moving the
+  // crash from the validator to the renderer, in the one place that has no
+  // error boundary.
+  //
+  // Normalising here instead means every entry point is covered exactly once,
+  // and the schema and the rendered rows are built from the same field list
+  // by construction. It is idempotent, so a caller that already normalised
+  // (UserFormPreview does, to report what dropped) costs nothing.
+  const spec = useMemo(() => normalizeUISpec(rawSpec).spec, [rawSpec]);
+
   // The zod schema validates flat dotted-keys (`input["spec.replicas"]`), but
   // RHF treats `.` in names as a nested-path separator. We keep RHF field
   // names dot-free (encoded) and write a thin resolver that decodes values
