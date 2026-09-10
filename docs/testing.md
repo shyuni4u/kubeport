@@ -34,17 +34,19 @@ cd backend && go test -short ./...
 ### 3.2 Integration 실행 (현재 기본)
 
 ```bash
-docker compose -f deploy/docker/docker-compose.yml up -d   # postgres + dex
+scripts/compose.sh up -d   # postgres + dex — 어느 워크트리에서 쳐도 메인 체크아웃 기준으로 뜬다
 (cd backend/migrations && atlas schema apply --env local --auto-approve)   # 최초 1회 또는 schema 변경 후
 (cd backend && go test -p 1 ./...)   # -p 1: 패키지 병렬 금지 (§6)
 ```
 
 > 위 명령은 공유 DB `kubeport` 를 쓴다. **다른 세션·워크트리가 같은 머신에서 테스트를 돌릴 수 있다면 §3.4 의 세션별 DB 를 먼저 만든다.**
 
+> **워크트리에서 `docker compose -f deploy/docker/docker-compose.yml up -d` 를 직접 치지 않는다** (#230). 모든 체크아웃의 `deploy/docker` 는 같은 compose 프로젝트 `docker` 라, 워크트리에서 치면 공용 컨테이너가 **그 워크트리 경로로 재생성**되고 dex 가 그 워크트리의 `dex.yaml`·`certs` 를 bind-mount 한다. 머지 뒤 워크트리를 지우면 모든 세션의 dex 테스트가 깨진다. `scripts/compose.sh` 는 메인 체크아웃의 파일로 compose 를 돌리고, 메인에 인증서가 없으면 새로 만들지 말고 돌고 있는 dex 의 것을 복사하라고 멈춘다. 프로젝트 이름은 그대로다 — 바꾸면 `docker_pgdata` 대신 빈 볼륨이 생기고 옛 컨테이너와 포트가 충돌한다.
+
 컴포즈 중단:
 ```bash
-docker compose -f deploy/docker/docker-compose.yml down        # 데이터 유지
-docker compose -f deploy/docker/docker-compose.yml down -v     # pgdata 볼륨까지 삭제
+scripts/compose.sh down        # 데이터 유지
+scripts/compose.sh down -v     # pgdata 볼륨까지 삭제
 ```
 
 ### 3.3 e2e (Task 22 에서 도입)
@@ -78,7 +80,7 @@ out=$(scripts/test-db.sh) && eval "$out" && echo "$TEST_DATABASE_URL" && (cd bac
 
 - **스키마 적용은 CI 와 같은 경로다.** `backend/migrations/atlas.hcl` 의 `env "local"` + `schema.hcl` 을 그대로 쓰고 `--var url=…` 로 대상만 바꾼다. `url`·`dev` 가 변수가 됐지만 기본값이 예전 값이라 CI·`up.sh` 의 `atlas schema apply --env local` 은 그대로다.
 - **한 가지 차이 — atlas dev DB.** CI 의 `docker://postgres/16/dev` 는 적용마다 컨테이너를 띄우는데, 일부 Docker Desktop(Windows) 호스트에서는 atlas 가 호스트 LAN IP 로 붙으려다 ~70초 뒤 타임아웃한다(2026-09-10 이 머신에서 재현). 그래서 스크립트는 같은 compose postgres(같은 16 메이저) 안에 세션별 빈 DB `kubeport_atlasdev_<name>` 을 dev DB 로 쓴다. 적용 결과는 같고 3초 안에 끝난다.
-- **컴포즈가 안 떠 있으면** 즉시 실패하고 `docker compose ... up -d` 를 안내한다. psql 은 컨테이너 안에서 돌기 때문에 호스트에 psql 이 없어도 된다(Git Bash·WSL·macOS 동일).
+- **컴포즈가 안 떠 있으면** 즉시 실패하고 `scripts/compose.sh up -d` 를 안내한다. 공용 postgres 가 메인 체크아웃이 아닌 곳에서 만들어졌으면 한 줄 알린다(데이터는 named volume 이라 동작은 한다). psql 은 컨테이너 안에서 돌기 때문에 호스트에 psql 이 없어도 된다(Git Bash·WSL·macOS 동일).
 - **워크트리를 지우기 전에 `--drop`.** 잊었으면 `--list` 로 찾아 `scripts/test-db.sh --drop <name>`.
 - 세션별 DB 에서도 **`-p 1` 은 여전히 필요하다** — 같은 세션 안의 `internal/api` 와 `internal/store` 충돌(§6)은 DB 를 나눠도 그대로다.
 - CI 는 러너마다 postgres 가 따로라 이 스크립트를 쓰지 않는다.

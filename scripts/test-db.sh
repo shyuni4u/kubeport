@@ -23,6 +23,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/main-checkout.sh
+. "$ROOT/scripts/lib/main-checkout.sh"
 COMPOSE="$ROOT/deploy/docker/docker-compose.yml"
 PREFIX="kubeport_test_"
 # atlas needs an empty scratch DB to normalise the desired schema. One per
@@ -83,7 +85,15 @@ need docker
 # The compose project's postgres. Resolved through compose (not a hardcoded
 # container name) so a clone in a differently named directory still works.
 CID="$(docker compose -f "$COMPOSE" ps -q postgres 2>/dev/null || true)"
-[[ -n "$CID" ]] || die "compose postgres is not running — docker compose -f deploy/docker/docker-compose.yml up -d"
+[[ -n "$CID" ]] || die "compose postgres is not running — scripts/compose.sh up -d"
+# Not fatal: the data is in a named volume, so a postgres created from a
+# worktree works until someone recreates it. Said anyway, because the same
+# mistake on dex is what bind-mounts a worktree that will be deleted (#230).
+PG_WD="$(compose_container_workdir postgres)"
+MAIN_DIR="$(main_checkout "$ROOT")/deploy/docker"
+if [[ -n "$PG_WD" && "$(norm_path "$PG_WD")" != "$(norm_path "$MAIN_DIR")" ]]; then
+  log "note: the shared postgres was created from $PG_WD, not the main checkout — recreate the stack with scripts/compose.sh up -d when nobody is mid-test"
+fi
 docker exec "$CID" pg_isready -U "$PG_USER" -d postgres >/dev/null 2>&1 \
   || die "compose postgres container $CID is up but not accepting connections yet — retry in a few seconds"
 

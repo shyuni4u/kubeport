@@ -4,7 +4,13 @@
 # flags; JSON goes through node, which the frontend already requires.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-CERT_DIR="$ROOT/deploy/docker/certs"
+. "$ROOT/scripts/lib/main-checkout.sh"
+# The dex certificate belongs to the shared compose stack, which runs from the
+# main checkout (scripts/compose.sh, #230). Kept there, a worktree's backend,
+# seed and kind cluster trust the same file the running dex serves, and it
+# does not disappear with the worktree.
+MAIN="$(main_checkout "$ROOT")"
+CERT_DIR="$MAIN/deploy/docker/certs"
 DEX_CRT="$CERT_DIR/dex.crt"
 ENV_LOCAL="$ROOT/frontend/.env.local"
 
