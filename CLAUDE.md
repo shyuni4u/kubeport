@@ -247,9 +247,10 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
   응답에 `version` 이 없으면 아직 #199 배포 이전이니 runbook §3-3 의 `helm history`·이미지 태그로 본다.
 
 ### 브라우저
-- Playwright MCP 를 `.mcp.json` 에서 `--isolated`(세션마다 메모리 프로필)로 띄우면 쿠키가 세션끼리 섞이지 않으므로
-  **개발 세션도 자기 PR 을 배포 후 Playwright 로 직접 확인해도 된다.** 먼저 `grep -- --isolated .mcp.json` 으로 켜져 있는지
-  확인하고(없으면 UI reviewer 에 맡긴다), 설정은 세션을 새로 시작해야 적용된다. `.mcp.json` 수정은 사용자가 한다.
+- Playwright MCP 는 `.mcp.json` 에서 `--isolated`(세션마다 메모리 프로필)로 뜬다 — 쿠키가 세션끼리 섞이지 않으므로
+  **개발 세션도 자기 PR 을 배포 후 Playwright 로 직접 확인해도 된다.** 설정은 **메인 체크아웃**(`C:/Users/shyuniz/kubeport`)의
+  `.mcp.json` 을 세션 시작 때 읽으므로, 그 체크아웃이 이 커밋 이후이고 세션을 새로 시작했을 때만 적용된다
+  (`grep -- --isolated .mcp.json` 으로 확인, 없으면 UI reviewer 에 맡긴다). 메모리 프로필이라 데모 로그인은 세션마다 새로 한다.
 - Chrome 확장(공용 Chrome 프로필)은 여전히 UI reviewer 만 쓴다. `/pr-review` 브라우저 페르소나 순차 실행 규칙도 그대로다.
 
 ### 공용 머신에서 테스트
