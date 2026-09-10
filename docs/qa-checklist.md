@@ -127,7 +127,9 @@ Plan 0–5 로 구현된 기능을 **직접 클릭하면서 확인**하기 위�
 - [ ] 권한 있는 namespace: 초록 체크 + "배포" 버튼 활성화
 - [ ] 권한 없는 namespace: 빨간 경고 + 버튼 비활성화
 - [ ] namespace 전환 시 재판정
-- [ ] RBAC 판정 전에는 버튼 로딩 상태
+- [ ] RBAC 판정 중("확인 중…")이거나 판정 자체가 실패(HTTP 오류)했을 때는 배포 버튼이 막히지 않음 — 거부로 판정된 경우에만 비활성화 (fail-open, #30)
+- [ ] 빨간 거부 문구가 보이는 순간 배포 버튼이 이미 비활성화되어 있음 (#99 — 1커밋 간격이라 눈으로는 못 보고 `frontend/components/RBACCheckPanel.same-commit.test.tsx` 가 자동 검증)
+- [ ] 판정 중에 구역을 지우면 "확인 중…" 이 남지 않고 안내 문구로 돌아감
 
 ### 6.4 제출
 - [ ] submit → `/releases/<id>` 로 이동, StatusChip `deploying`
