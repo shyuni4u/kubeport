@@ -35,9 +35,11 @@ cd backend && go test -short ./...
 
 ```bash
 docker compose -f deploy/docker/docker-compose.yml up -d   # postgres + dex
-cd backend/migrations && atlas schema apply --env local --auto-approve   # 최초 1회 또는 schema 변경 후
-cd backend && go test ./...
+(cd backend/migrations && atlas schema apply --env local --auto-approve)   # 최초 1회 또는 schema 변경 후
+(cd backend && go test -p 1 ./...)   # -p 1: 패키지 병렬 금지 (§6)
 ```
+
+> 위 명령은 공유 DB `kubeport` 를 쓴다. **다른 세션·워크트리가 같은 머신에서 테스트를 돌릴 수 있다면 §3.4 의 세션별 DB 를 먼저 만든다.**
 
 컴포즈 중단:
 ```bash
@@ -49,11 +51,56 @@ docker compose -f deploy/docker/docker-compose.yml down -v     # pgdata 볼륨�
 
 미정. `test/e2e/` 안에 compose 기반 플로우 러너 + kind 클러스터 부트스트랩 예정.
 
+### 3.4 세션·워크트리별 테스트 DB (`scripts/test-db.sh`)
+
+**왜 필요한가.** 통합 테스트는 모두 `TEST_DATABASE_URL`(없으면 공유 DB `kubeport`)에 실제 행을 남기고, 정리는 **이름 패턴**으로 한다:
+
+- `internal/api/main_test.go` 의 `TestMain` 이 스위트가 끝나면 이름이 `-[0-9]{6}\.[0-9]{6}$`(`HHMMSS.micros` 접미사)로 끝나는 `releases`·`template_versions`·`templates`·`clusters`·`teams`·`users` 를 **그 DB 전체에서** 지운다.
+- `internal/store` 의 픽스처(`test-sub-<stamp>`, `rollback-<stamp>` …)도 같은 접미사라 이 패턴에 걸린다.
+- `cmd/seed-demo/templates_test.go` 는 **고정된** 데모 템플릿 이름을 지우고 다시 만든다.
+
+`go test -p 1` 은 **한 번의 실행 안에서** 패키지를 직렬로 돌릴 뿐이다. 이 머신에서 Claude 세션 여러 개가 같은 compose postgres 로 동시에 테스트를 돌리면, A 세션의 `internal/api` 가 끝나는 순간 B 세션이 방금 만든 클러스터·템플릿을 지운다 → B 는 404·FK 오류로 **간헐적으로** 깨진다. 재현이 어렵고 코드와 무관한 빨간불이라 가장 비싼 종류의 실패다.
+
+**사용법** — 세션을 시작할 때 한 번:
+
+```bash
+# 리포(워크트리) 루트에서
+out=$(scripts/test-db.sh) && eval "$out" && echo "$TEST_DATABASE_URL"   # kubeport_test_<워크트리 디렉터리명> 생성 + 스키마 적용 + export
+(cd backend && go test -p 1 ./internal/store/...)
+```
+
+> **`eval "$(scripts/test-db.sh)"` 로 쓰지 않는다.** 스크립트가 실패하면(컴포즈 꺼짐·atlas 실패·다른 cwd) stdout 이 비고, 빈 문자열 eval 은 성공으로 끝나 `TEST_DATABASE_URL` 없이 **조용히 공유 DB `kubeport` 로 테스트가 돈다.** `echo` 가 `kubeport_test_` 가 들어간 URL 을 찍지 않았으면 테스트를 돌리지 않는다.
+
+| 명령 | 동작 |
+|------|------|
+| `scripts/test-db.sh [name]` | DB `kubeport_test_<name>` 이 없으면 만들고 스키마 적용(멱등 — 최신이면 no-op). stdout 에는 `export TEST_DATABASE_URL=...` **한 줄만**, 안내는 stderr. `name` 생략 시 워크트리 디렉터리명을 소문자·영숫자·밑줄로 정규화해 쓴다. 63바이트 식별자 한도를 넘으면 잘라 체크섬을 붙인다 |
+| `out=$(scripts/test-db.sh --drop [name]) && eval "$out"` | 그 DB(와 atlas dev DB)를 삭제하고 `TEST_DATABASE_URL` 을 unset. **공유 DB `kubeport` 는 이름 규칙상 대상이 될 수 없고, 추가로 명시적 가드가 있다** |
+| `scripts/test-db.sh --list` | 이 postgres 에 남아 있는 세션별 DB 목록 — 지운 워크트리의 DB 청소용 |
+
+- **스키마 적용은 CI 와 같은 경로다.** `backend/migrations/atlas.hcl` 의 `env "local"` + `schema.hcl` 을 그대로 쓰고 `--var url=…` 로 대상만 바꾼다. `url`·`dev` 가 변수가 됐지만 기본값이 예전 값이라 CI·`up.sh` 의 `atlas schema apply --env local` 은 그대로다.
+- **한 가지 차이 — atlas dev DB.** CI 의 `docker://postgres/16/dev` 는 적용마다 컨테이너를 띄우는데, 일부 Docker Desktop(Windows) 호스트에서는 atlas 가 호스트 LAN IP 로 붙으려다 ~70초 뒤 타임아웃한다(2026-09-10 이 머신에서 재현). 그래서 스크립트는 같은 compose postgres(같은 16 메이저) 안에 세션별 빈 DB `kubeport_atlasdev_<name>` 을 dev DB 로 쓴다. 적용 결과는 같고 3초 안에 끝난다.
+- **컴포즈가 안 떠 있으면** 즉시 실패하고 `docker compose ... up -d` 를 안내한다. psql 은 컨테이너 안에서 돌기 때문에 호스트에 psql 이 없어도 된다(Git Bash·WSL·macOS 동일).
+- **워크트리를 지우기 전에 `--drop`.** 잊었으면 `--list` 로 찾아 `scripts/test-db.sh --drop <name>`.
+- 세션별 DB 에서도 **`-p 1` 은 여전히 필요하다** — 같은 세션 안의 `internal/api` 와 `internal/store` 충돌(§6)은 DB 를 나눠도 그대로다.
+- CI 는 러너마다 postgres 가 따로라 이 스크립트를 쓰지 않는다.
+
+### 3.5 반복 규칙 — 전체 스위트는 푸시 직전 1회
+
+개발 세션 기록을 보면 수정 반복 중에 전체 스위트를 너무 자주 돌렸다: **vitest 전체 42회, 평균 65초** — 파일 단위 실행은 평균 **11초**. **go test 전체도 43회**. 전체 한 번이 파일 단위 여섯 번 값이고, 공유 DB 를 쓰던 시절에는 그 43회가 전부 다른 세션과 충돌할 기회였다.
+
+- **고치는 동안은 파일·패키지·테스트 단위로 돈다.**
+  ```bash
+  cd frontend && pnpm vitest run components/DemoBanner.test.tsx
+  cd backend  && go test ./internal/api -run TestClusters_Register
+  ```
+- **전체 스위트(`pnpm test`, `go test -p 1 ./...`)는 푸시 직전 1회.** 그 사이 바뀐 게 테스트 대상 밖으로 번졌는지 확인하는 용도다.
+- **CI 가 어차피 전체를 돈다** (`.github/workflows/ci.yml` — backend·frontend·audit·hooks). 로컬 전체 실행은 CI 를 대신하는 게 아니라 "빨간 CI 로 왕복하는 비용" 을 줄이는 한 번이면 충분하다.
+
 ## 4. 환경 변수
 
 | 이름 | 기본값 | 목적 |
 |------|--------|------|
-| `TEST_DATABASE_URL` | `postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable` | 통합 테스트 DB DSN. CI 에서 주입 가능 |
+| `TEST_DATABASE_URL` | `postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable` | 통합 테스트 DB DSN. CI 에서 주입 가능. 로컬에서 세션이 여럿이면 `out=$(scripts/test-db.sh) && eval "$out"` 로 세션별 DB 를 가리킨다 (§3.4) |
 | `TEST_DEX_ISSUER` (예정, Task 7) | `http://localhost:5556` | OIDC 테스트용 dex 이슈어 |
 | `TEST_KUBECONFIG` (예정, Task 12) | `$HOME/.kube/config` | k8s 테스트용 kubeconfig |
 | `OIDC_ISSUER` | `http://localhost:5556` | `internal/auth` 가 붙을 dex. HTTPS dex 는 `https://host.docker.internal:5556` |
@@ -93,7 +140,7 @@ clusterName  := "test-" + stamp
 - [x] **빌드 태그는 skip 이 아니라 실명(失明)이다** (#121, 2026-09-10). `//go:build` 가 붙은 파일은 컴파일러에게 **안 보이므로**, 조용히 썩고 "Skipped Go tests" 요약에도 안 잡힌다 — skip 과 결정적으로 다른 점이다. `openapi_proxy_test.go` 는 `integration` 태그를 뗐다(`kindAvail()` 이 `testStore(t)` 보다 **먼저** 호출되므로 이 파일의 두 테스트는 postgres 없이도 skip 된다 — 태그 제거가 새 클론을 더 빨갛게 만들지 않는다. 다만 `go test ./...` 전체는 위 `[~]` 항목대로 여전히 컴포즈가 필요하다). `backend/e2e` 는 `TestMain` 이 compose 와 서버를 띄우므로 `e2e` 태그를 유지하되 `go vet -tags=<발견된 태그> ./...` 로 **컴파일만** 검증한다. 태그 목록은 `ci.yml` 이 소스에서 **스캔**한다 — 손으로 적은 목록은 코드에서 멀어지고, 그 드리프트가 #121 의 정체였다.
 - [x] **kind 필요 테스트는 playwright.yml 이 실제로 돌린다** (#121). 그전에는 ci.yml 주석이 "playwright.yml 이 게이트" 라고 적어 뒀지만 그 워크플로에 `go test` 가 한 줄도 없었다 — `openapi_proxy`·`internal/k8s` 는 **어디서도 실행된 적이 없다.** 이제 클러스터 등록 직후(시더 앞) `KIND_API`/`KIND_CA`/`DEX_TOKEN` 을 주입해 돌린다.
 - [x] **`KBP_REQUIRE_KIND=1` 은 kind 계열 skip 을 실패로 바꾼다** — `KBP_REQUIRE_DEX` 와 같은 논리다. 스스로 skip 하는 테스트는 배선이 끊겨도 초록이라 **게이트가 아니게 된다.** 스위치를 워크플로의 테스트 이름 목록이 아니라 **테스트 코드**(`kindAvail()`, `client_test.go`)에 둔 것이 핵심이다 — 새 kind 테스트는 `kindAvail()` 을 부르는 순간 자동으로 게이트에 들어오고, 이름이 바뀌거나 지워지면 스스로 빠진다. 워크플로에 목록을 두면 그 목록이 또 코드에서 멀어진다.
-- [ ] **패키지 병렬 실행 불가.** `internal/api` 의 `TestMain` 이 이름 패턴으로 공유 DB 를 정리하는데 `internal/store` 가 같은 타임스탬프 접미사를 쓴다 → 동시 실행 시 서로의 픽스처를 지운다. CI 는 `-p 1` 로 우회 중이며, 근본 해결은 패키지별 스키마 분리 또는 접미사 네임스페이싱.
+- [ ] **패키지 병렬 실행 불가.** `internal/api` 의 `TestMain` 이 이름 패턴으로 공유 DB 를 정리하는데 `internal/store` 가 같은 타임스탬프 접미사를 쓴다 → 동시 실행 시 서로의 픽스처를 지운다. CI 는 `-p 1` 로 우회 중이며, 근본 해결은 패키지별 스키마 분리 또는 접미사 네임스페이싱. **세션 간** 충돌(같은 머신의 여러 세션이 공유 DB `kubeport` 를 쓰는 경우)은 `scripts/test-db.sh` 의 세션별 DB 로 해소됐다(§3.4) — 세션 **안의** 패키지 병렬은 여전히 불가.
 - [ ] **schema.hcl ↔ schema.sql 드리프트 가드 없음.** atlas 로 regen 후 `git diff --exit-code schema.sql` 을 CI 가 돌려야 한다.
 
 ## 7. 태스크별 테스트 프리리퀴짓 매트릭스
