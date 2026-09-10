@@ -22,8 +22,8 @@
 #        BOOTSTRAP_OIDC_CLIENT_ID=<google-client-id> bash bootstrap.sh
 #   # k3s 는 고정 버전(K3S_PINNED)으로 깔린다 (#194). 복구 등으로 다른 버전이 필요할 때만:
 #   sudo BOOTSTRAP_EMAIL=you@example.com BOOTSTRAP_K3S_VERSION=v1.xx.y+k3s1 bash bootstrap.sh
-#   # v1.30 이상만 받는다. 1.34 미만에 BOOTSTRAP_OIDC_CLIENT_ID 를 주면
-#   # BOOTSTRAP_AUTH_API=apiserver.config.k8s.io/v1beta1 도 함께 준다 (아니면 시작 전에 거부).
+#   # v1.30 미만은 거부, 지원 종료 마이너(K3S_MIN_SUPPORTED_MINOR 미만)는 BOOTSTRAP_K3S_ALLOW_EOL=1 일 때만.
+#   # AuthenticationConfiguration apiVersion 은 apiserver 버전에서 고른다 (BOOTSTRAP_AUTH_API 로 덮을 수 있음).
 #
 # After this completes, run helm install separately (deploy/oci/README.md).
 
@@ -47,32 +47,64 @@ fi
 # §2. BOOTSTRAP_K3S_VERSION overrides it — say, to rebuild at a known older
 # version — and an override is announced, never silent.
 K3S_PINNED="v1.36.3+k3s1"
+# The oldest Kubernetes minor upstream still patches (kubernetes.io/releases;
+# 1.34 until 2026-10-27). Raise it when that minor reaches end of life, in the
+# same kind of commit as the pin.
+K3S_MIN_SUPPORTED_MINOR=34
 K3S_VERSION="${BOOTSTRAP_K3S_VERSION:-${K3S_PINNED}}"
 
-# An override is checked before anything on the host changes. It was passed to
-# the installer as given, so a typo or an old version installed quietly
-# (security review of #206):
-#   - below 1.30 there is no structured authentication, which Step 2 writes and
-#     deploy/oci/k3s-auth-config.sh needs for the Dex demo IdP — and such a k3s
-#     is long out of security support;
-#   - below 1.34 the default AuthenticationConfiguration apiVersion (v1) does not
-#     exist, and the apiserver never comes up. The node-Ready wait then fails
-#     without saying why.
-if [[ ! "${K3S_VERSION}" =~ ^v1\.([0-9]+)\.[0-9]+\+k3s[0-9]+$ ]]; then
+# The minor of a k3s version string, or nothing when it is not one.
+k3s_minor_of() {
+  [[ "$1" =~ ^v1\.([0-9]+)\.[0-9]+\+k3s[0-9]+$ ]] && echo "$((10#${BASH_REMATCH[1]}))"
+}
+
+# Everything below is checked before anything on the host changes. The override
+# used to go to the installer as given, so a typo or an old version installed
+# quietly (security review of #206).
+k3s_minor="$(k3s_minor_of "${K3S_VERSION}" || true)"
+if [[ -z "${k3s_minor}" ]]; then
   echo "error: BOOTSTRAP_K3S_VERSION must look like v1.NN.P+k3sN (got ${K3S_VERSION})" >&2
   exit 1
 fi
-k3s_minor="${BASH_REMATCH[1]}"
-if (( 10#${k3s_minor} < 30 )); then
+# Below 1.30 there is no structured authentication, which Step 2 writes and
+# deploy/oci/k3s-auth-config.sh needs for the Dex demo IdP. No flag lifts this.
+if (( k3s_minor < 30 )); then
   echo "error: k3s ${K3S_VERSION} predates structured authentication; use v1.30 or later" >&2
   exit 1
 fi
-if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" && -z "${BOOTSTRAP_AUTH_API:-}" ]] && (( 10#${k3s_minor} < 34 )); then
-  echo "error: k3s ${K3S_VERSION} is older than 1.34 and needs BOOTSTRAP_AUTH_API=apiserver.config.k8s.io/v1beta1" >&2
+# A minor upstream no longer patches is refused unless asked for by name, for a
+# recovery that has to reproduce an old node. 1.30 above is where a feature
+# starts, not where support ends.
+if (( k3s_minor < K3S_MIN_SUPPORTED_MINOR )) && [[ "${BOOTSTRAP_K3S_ALLOW_EOL:-}" != 1 ]]; then
+  echo "error: k3s ${K3S_VERSION} is past upstream end of life (oldest supported minor: 1.${K3S_MIN_SUPPORTED_MINOR}); set BOOTSTRAP_K3S_ALLOW_EOL=1 to install it anyway (recovery only)" >&2
   exit 1
 fi
 if [[ "${K3S_VERSION}" != "${K3S_PINNED}" ]]; then
   echo "NOTE: BOOTSTRAP_K3S_VERSION=${K3S_VERSION} overrides the pinned ${K3S_PINNED}" >&2
+fi
+
+# A re-run leaves an installed k3s as it is (Step 2), so the apiserver that will
+# read auth.yaml is the installed one, not K3S_VERSION.
+installed=""
+if command -v k3s >/dev/null 2>&1; then
+  installed="$(k3s --version 2>/dev/null | awk 'NR==1 {print $3}' || true)"
+fi
+auth_minor="$(k3s_minor_of "${installed}" || true)"
+auth_minor="${auth_minor:-${k3s_minor}}"
+# AuthenticationConfiguration is apiserver.config.k8s.io/v1 from k8s 1.34 and
+# v1beta1 from 1.30. v1 on an older apiserver does not exist: it never starts,
+# and the node-Ready wait fails without saying why. So the default follows the
+# apiserver, and v1 is refused below 1.34 (the rule deploy/oci/k3s-auth-config.sh
+# applies too). BOOTSTRAP_AUTH_API still overrides.
+if (( auth_minor >= 34 )); then
+  auth_api_default="apiserver.config.k8s.io/v1"
+else
+  auth_api_default="apiserver.config.k8s.io/v1beta1"
+fi
+AUTH_API="${BOOTSTRAP_AUTH_API:-${auth_api_default}}"
+if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" && "${AUTH_API}" == "apiserver.config.k8s.io/v1" ]] && (( auth_minor < 34 )); then
+  echo "error: k8s 1.${auth_minor} has no ${AUTH_API}; use BOOTSTRAP_AUTH_API=apiserver.config.k8s.io/v1beta1 or leave it unset" >&2
+  exit 1
 fi
 
 echo "== Step 1/4: OS firewall (iptables) — open 80/443 =="
@@ -131,13 +163,18 @@ echo "== Step 2/4: k3s single-node install =="
 # bootstrap writes it directly to avoid a config-format migration afterwards.
 # NB: values MUST be quoted — a trailing ':' in a value makes YAML parse the list
 # item as a map and k3s dies with "unknown flag". See deploy/oci/README.md §7.1.
-# BOOTSTRAP_AUTH_API overrides the AuthenticationConfiguration apiVersion —
-# default apiserver.config.k8s.io/v1 (GA, k8s >= 1.34); k8s 1.30–1.33 needs
-# apiserver.config.k8s.io/v1beta1.
-if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
+# The apiVersion is AUTH_API, chosen from the apiserver version at the top.
+#
+# Existing files are left alone. deploy/oci/k3s-auth-config.sh later rewrites
+# auth.yaml to trust Dex as well; overwriting it with the Google-only form on a
+# re-run removed that trust silently, and the next k3s restart turned every
+# demo cluster call into a 401 (security review of #206).
+if [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]] && [[ -e /etc/rancher/k3s/auth.yaml || -e /etc/rancher/k3s/config.yaml ]]; then
+  echo "  WARNING: /etc/rancher/k3s/auth.yaml or config.yaml already exists (Dex trust from k3s-auth-config.sh, or settings of your own); leaving both unchanged" >&2
+elif [[ -n "${BOOTSTRAP_OIDC_CLIENT_ID:-}" ]]; then
   mkdir -p /etc/rancher/k3s
   cat > /etc/rancher/k3s/auth.yaml <<YAML
-apiVersion: ${BOOTSTRAP_AUTH_API:-apiserver.config.k8s.io/v1}
+apiVersion: ${AUTH_API}
 kind: AuthenticationConfiguration
 jwt:
   - issuer:
@@ -169,8 +206,7 @@ else
   # the control plane, which is a decision for a person (CLAUDE.md "사용자에게
   # 먼저 묻는 것"), not a side effect of re-running bootstrap. Say when it
   # differs from the pin, so a re-run on an old VM does not read as "on the
-  # pinned version".
-  installed="$(k3s --version 2>/dev/null | awk 'NR==1 {print $3}' || true)"
+  # pinned version". `installed` was read at the top.
   if [[ "${installed}" == "${K3S_VERSION}" ]]; then
     echo "  k3s ${installed} already installed (matches the pin), skipping"
   else

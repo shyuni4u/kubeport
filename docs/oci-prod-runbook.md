@@ -70,7 +70,12 @@ echo "KEY=$KEY"
   그리고 이 셸 문자열은 dependabot 이 추적하지 않는다. 그래서 같은 마이너(`v1.36.x`)의 k3s 보안 패치가 나오면 핀을 올리고,
   **VM 을 재구성하기 전에는 핀이 그 마이너의 최신 패치인지 먼저 확인한다** —
   [k3s releases](https://github.com/k3s-io/k3s/releases), [k8s CVE feed](https://kubernetes.io/docs/reference/issues-security/official-cve-feed/).
-  `BOOTSTRAP_K3S_VERSION` 오버라이드는 v1.30 이상만 받는다(1.34 미만 + OIDC 면 `BOOTSTRAP_AUTH_API=apiserver.config.k8s.io/v1beta1` 필요).
+  **운영 노드**는 핀을 올려도 바뀌지 않는다 — 현재 마이너의 보안 수정이 k8s CVE feed 나 k3s 릴리스 노트에 뜨면 핀을 올리는
+  PR 과 함께 사용자에게 k3s 업그레이드(재시작 동반) 승인을 요청한다. **마이너 지원 종료 3개월 전**(v1.36 은 2027-06-28 종료)에는
+  다음 마이너로 올리는 이슈를 연다. 지원 종료일은 [kubernetes.io/releases](https://kubernetes.io/releases/) — 이때
+  `bootstrap.sh` 의 `K3S_MIN_SUPPORTED_MINOR` 도 올린다.
+  `BOOTSTRAP_K3S_VERSION` 오버라이드는 v1.30 이상만 받고, 지원 종료 마이너는 `BOOTSTRAP_K3S_ALLOW_EOL=1` 일 때만 깐다.
+  재실행은 이미 있는 `auth.yaml`·`config.yaml` 을 덮어쓰지 않는다(Dex 신뢰 보존).
 - **traefik** ingress (`traefik` class), **cert-manager** + `letsencrypt-prod` ClusterIssuer (HTTP-01).
 - **Postgres** in-cluster (`kubeport-postgres-0`, local-path PVC).
 - backend(Go) / frontend(Next.js standalone) — TLS 는 traefik 종료, 파드엔 HTTP.
