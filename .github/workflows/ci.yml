@@ -15,10 +15,19 @@ on:
 permissions:
   contents: read
 
-# A new push supersedes the previous run on the same ref.
+# On a pull request a new push supersedes the previous run on the same ref.
+#
+# On main every commit runs to completion, in a group of its own (run_id is
+# unique) — the same shape as build-images.yml and playwright.yml. deploy.yml
+# deploys a main commit only when this workflow's latest push run for that sha
+# is green (#202), so a cancelled run is not "superseded, never mind": it leaves
+# that commit undeployable, including by the documented `workflow_dispatch`
+# recovery. Re-running it would not help either — in a shared main group the
+# re-run would cancel the HEAD commit's in-progress CI. A main CI run is ~1.5
+# minutes, so letting each one finish is cheap.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   backend:

@@ -104,9 +104,12 @@ main push → build-images (sha-<7> 이미지 push)  ┐
 - **지금 라이브가 어느 커밋인가**: `curl -s https://kubeport.enzo.kr/api/healthz | jq -r .version` —
   ssh 없이 누구나 본다. backend 빌드의 sha 다(frontend 는 같은 커밋·같은 배포로 함께 올라간다).
 - **건너뛰기**: 워크플로가 실제로 돌 때 그 sha 가 이미 main HEAD 가 아니면 배포하지 않고 notice 만
-  남긴다. 더 새 커밋의 빌드가 끝나면 그쪽 배포가 두 커밋을 함께 올린다. 빌드는 끝나는 순서가
+  남긴다. 더 새 커밋의 build-images·CI 가 끝나면 그쪽 배포가 두 커밋을 함께 올린다. 런은 끝나는 순서가
   섞이므로, 이게 없으면 늦게 끝난 **옛 커밋의 배포가 라이브를 뒤로 되돌린다.** 대가: 새 커밋의
-  빌드가 실패하면 아무것도 안 올라간다 — 그 빌드의 빨간 불이 신호이고, 필요하면 아래 dispatch.
+  빌드나 CI 가 실패하면 아무것도 안 올라간다 — deploy 워크플로의 `report-failure` job 이 빨간 런으로 알리고,
+  필요하면 아래 dispatch 로 옛 sha 를 올린다(dispatch 도 그 sha 의 build-images·CI 최신 push 런이 success 여야 한다).
+  main 의 CI 는 커밋마다 끝까지 돈다(`ci.yml` concurrency 가 push 에서는 run_id 별) — 연속 머지로 앞 커밋의 CI 가
+  취소돼 그 커밋을 영영 배포할 수 없게 되는 일을 막기 위해서다.
 - **동시성**: job 수준 `concurrency: deploy-prod`, 진행 중인 배포는 취소하지 않는다(ssh 가 끊겨 helm 이
   `pending-upgrade` 로 남으면 이후 모든 upgrade 가 막힌다). 수동 배포와는 VM 의 같은 락으로 직렬화된다.
   워크플로 수준이 아니라 **job 수준**인 이유: build-images·CI 가 끝날 때마다(PR·fork·취소된 CI 포함) 이 워크플로의
@@ -546,8 +549,8 @@ port-forward 로 밖에서 잡는다.
 | `helm upgrade`/`rollback` 이 `another operation (install/upgrade/rollback) is in progress`, 또는 deploy 가 `aborted-before-upgrade` + `release kubeport is pending-upgrade` | 이전 helm 작업이 끝나지 못했다 — deploy 런 Cancel, ssh 끊김, VM 재부팅 중 upgrade. 락을 잡고 마지막 `deployed` 리비전으로 되돌린다: `ssh -i "$KEY" ubuntu@168.107.55.95 "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; helm history kubeport -n kubeport \| tail -5"` 로 `deployed` 인 rev 를 찾고 → `ssh ... "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; flock -w 600 /run/lock/kubeport-deploy.lock helm rollback kubeport <마지막 deployed rev> -n kubeport"`. 그 뒤 원래 하려던 배포를 다시 한다 |
 | deploy 워크플로가 `SSH failed` (exit 255) | 인스턴스 stop/start 로 공인 IP 가 바뀌었다. `OCI_DEPLOY_HOST`·`OCI_DEPLOY_KNOWN_HOSTS` 시크릿 갱신 ([README "자동 배포 설치"](../deploy/oci/README.md#자동-배포-설치-github-actions--vm)) |
 | deploy 워크플로가 `Version not live` | helm 은 끝났는데 `/api/healthz` 의 version 이 안 바뀐다. `kubeport-deploy status` 로 이미지 태그, 파드·ingress 확인 (§3-3). `version` 필드가 생기기 전 빌드를 배포한 거라면(관리자 키로 그 빌드까지 롤백한 뒤에만 가능) dispatch 에 `verify_version=false` |
-| deploy 런이 `Skipped` notice 로 초록 | 셋 중 하나다(notice 문구로 구분, §3-0). `newer than` — 그 사이 main 이 더 나아갔고 새 커밋의 런들이 함께 올린다. `has not finished` — 같은 sha 의 build-images/CI 중 다른 쪽이 아직 돈다, 끝나면 다시 트리거된다. `already live` — 두 트리거 중 먼저 온 쪽이 이미 배포했다 |
-| deploy 런이 `CI not green` / `build-images not green` 으로 빨강 | 그 main 커밋의 CI(또는 빌드)가 실패해 **배포하지 않았다** — 라이브는 이전 커밋 그대로. 합쳐진 두 PR 이 main 에서만 깨지는 경우가 전형이다(#202). main 을 고치는 PR 을 머지하면 그 커밋이 배포된다. 플레이크면 그 워크플로 런을 re-run — 초록 완료가 deploy 를 다시 트리거한다 |
+| deploy 런이 `Skipped` notice 로 초록 | 셋 중 하나다(notice 문구로 구분, §3-0). `newer than` — 그 사이 main 이 더 나아갔고 새 커밋의 런들이 함께 올린다. `has not finished` — 같은 sha 의 build-images/CI 중 다른 쪽이 아직 돈다. 성공하면 그 완료가 다시 트리거하고, 실패하면 `report-failure` job 의 빨간 런이 따로 뜬다 — 뒤따르는 런이 아무것도 없으면 Actions 에서 그 sha 의 build-images/CI 런을 직접 본다. `already live` — 두 트리거 중 먼저 온 쪽이 이미 배포했다 |
+| deploy 런이 빨강 — `CI not green` / `build-images not green`(deploy job), 또는 `report-failure` job | 그 main 커밋의 CI(또는 빌드)가 success 가 아니라 **배포하지 않았다** — 라이브는 이전 커밋 그대로. 먼저 끝난 쪽이 실패하면 deploy job 이, 나중에 끝난 쪽이 실패하면 report-failure job 이 빨갛게 된다. 합쳐진 두 PR 이 main 에서만 깨지는 경우가 전형이다(#202). main 을 고치는 PR 을 머지하면 그 커밋이 배포된다. 플레이크면 그 워크플로 런을 re-run — 초록 완료가 deploy 를 다시 트리거한다. main CI 는 커밋마다 끝까지 돌므로 re-run 이 HEAD 의 CI 를 취소하지 않는다 |
 | 새 파드가 `ImagePullBackOff` | 존재하지 않는 태그로 upgrade 했다. §3-1 로 태그부터 확인하고 `helm rollback kubeport <이전rev> -n kubeport` |
 | backend 파드에 `kubectl exec` 이 `failed to exec in container` | 이미지에 셸이 없다. 정상이다 — port-forward 로 밖에서 잡는다 (§6 "Go API 를 직접 찔러 보기") |
 | `/api/v1/<경로>` 가 404·405 대신 401 | 설계된 동작이다. BFF 세션 게이트가 라우팅보다 먼저다 ([machine-clients.md §5](machine-clients.md#5-호출할-때-알아두면-좋은-것)). `/api/v1` 루트만 예외로 세션 검사 없이 404 |

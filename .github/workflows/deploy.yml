@@ -48,15 +48,52 @@ env:
   HEALTH_URL: https://kubeport.enzo.kr/api/healthz
 
 jobs:
+  # A red build-images or CI run on the main HEAD commit means that commit is not
+  # deployed. `deploy` below ignores unsuccessful runs so they cannot take its
+  # single pending concurrency slot, which would leave no trace in this
+  # workflow when the LATER of the two runs is the one that failed (the earlier
+  # green one only left a "has not finished" skip). This job makes that a red
+  # run here. It holds no secrets, uses no environment and joins no concurrency
+  # group, so it cannot delay or cancel a deploy.
+  report-failure:
+    if: >-
+      github.repository == 'shyuni4u/kubeport' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion != 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report an unsuccessful run on main HEAD
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          NAME: ${{ github.event.workflow_run.name }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+          head=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          if [ "$SHA" != "$head" ]; then
+            echo "::notice title=Superseded::$NAME ended '$CONCLUSION' for ${SHA:0:7}, but main is at ${head:0:7}; that commit decides the next deploy."
+            exit 0
+          fi
+          echo "::error title=$NAME not green, not deployed::$NAME ended '$CONCLUSION' for main HEAD ${SHA:0:7} ($RUN_URL). Live stays on the previous commit. Fix main, or re-run $NAME if it was a flake; its green completion deploys it."
+          exit 1
+
   deploy:
     # workflow_run fires for every completed build-images or CI run. Only a
     # successful run of a push to main in this repository counts: a PR run is
     # the PR branch (and builds without pushing images), a tag build is a
     # release rather than main, and a dispatched run may be of any branch.
     # `branches: [main]` above already filters head_branch; it is repeated
-    # here so the condition reads completely in one place. A failed run does
-    # not start a job at all — its red run is the signal — and whether the
-    # OTHER workflow is green for the same sha is checked in Resolve.
+    # here so the condition reads completely in one place. An unsuccessful run
+    # does not start this job — so it cannot take the deploy-prod pending slot
+    # from a real deploy — and `report-failure` above makes it a red run here
+    # instead. Whether the OTHER workflow is green for the same sha is checked
+    # in Resolve.
     #
     # The repository check comes first: in a fork every clause after it would
     # pass, and the job would fail on the missing secrets (see the header).
@@ -165,7 +202,7 @@ jobs:
               "completed success") return 0 ;;
               "none"|queued*|in_progress*|waiting*|requested*|pending*)
                 if [ "$EVENT" = workflow_run ]; then
-                  skip "$label for ${sha:0:7} has not finished ($state); its completion starts this deploy again."
+                  skip "$label for ${sha:0:7} has not finished ($state). If it succeeds, its completion starts this deploy again; if it fails, report-failure turns this workflow red."
                 fi
                 echo "::error title=$label not finished::$label for $sha is '$state'. Dispatch again once it is green."
                 exit 1 ;;

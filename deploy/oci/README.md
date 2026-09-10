@@ -351,7 +351,7 @@ kubectl auth can-i delete resourcequota --as=dex:demo-admin@demo.kubeport -n dem
 
 ## 자동 배포 설치 (GitHub Actions → VM)
 
-main 머지 → build-images → `.github/workflows/deploy.yml` → VM 의 `kubeport-deploy` 로 라이브까지
+main 머지 → build-images·CI(같은 sha 둘 다 성공) → `.github/workflows/deploy.yml` → VM 의 `kubeport-deploy` 로 라이브까지
 자동으로 가게 하는 1회 설치. 동작·운영·실패 읽기는
 [runbook §3](../../docs/oci-prod-runbook.md#3-재배포-이미지-갱신). 설계 원칙은 둘이다:
 
@@ -457,7 +457,7 @@ main 머지 → build-images → `.github/workflows/deploy.yml` → VM 의 `kube
    같은 이름을 예전에 리포 레벨로 올렸다면 지운다(`gh secret delete OCI_DEPLOY_SSH_KEY` 등) — 남겨 두면
    environment 제한 밖에서도 읽힌다.
 
-6. **첫 자동 배포 확인.** 1~5 뒤의 첫 main push 에서 build-images 가 끝나면 deploy 가 자동으로 돈다 —
+6. **첫 자동 배포 확인.** 1~5 뒤의 첫 main push 에서 build-images 와 CI 가 둘 다 초록으로 끝나면 deploy 가 자동으로 돈다 —
    그 런이 첫 검증이다. Actions → deploy 에서 세 단계가 초록인지, 특히 마지막 `Wait for /api/healthz` 가
    `reports <sha7>` 로 끝나는지 본다. 기다릴 main push 가 없으면 7 의 dispatch 로 바로 확인한다.
    (`workflow_dispatch`·`workflow_run` 은 기본 브랜치의 워크플로 파일만 쓰므로, `deploy.yml` 이 main 에
