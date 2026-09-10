@@ -290,7 +290,10 @@
         "invalid": "검증에 실패했습니다: {detail}",
         "generic": "저장에 실패했습니다 (HTTP {status}). {detail}",
         "metaSave": "템플릿 메타데이터 저장에 실패했습니다 (HTTP {status}). {detail}",
-        "missingLabel": "노출 필드 {path} 에 라벨이 없습니다. 사용자 폼에는 이 라벨이 표시됩니다."
+        "missingLabel": "노출 필드 {path} 에 라벨이 없습니다. 사용자 폼에는 이 라벨이 표시됩니다.",
+        "preview": "미리보기를 만들지 못했습니다: {detail}",
+        "previewNoDetail": "미리보기를 만들지 못했습니다 (HTTP {status}). 잠시 후 다시 시도하고, 계속되면 관리자에게 문의하세요.",
+        "previewRequestId": "요청 ID: {requestId}"
       },
       "field": {
         "fixedBadge": "고정",
