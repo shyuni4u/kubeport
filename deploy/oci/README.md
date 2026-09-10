@@ -39,8 +39,11 @@ sudo BOOTSTRAP_EMAIL=you@example.com bash bootstrap.sh
   claim(`BOOTSTRAP_OIDC_USERNAME_CLAIM`)·빈 prefix·그 밖의 매핑 없음. 다른 issuer(Dex) 항목은 비교하지 않고 보존한다.
   두 파일 모두 주석 줄과 줄끝 주석을 벗긴 뒤 **값**으로 비교한다(audiences 는 원소, 나머지는 따옴표를 뗀 값) — 주석 안의 값은
   판정에 쓰이지 않고, 그렇게 읽을 수 없는 형식(블록 리스트 audiences, 블록 맵 username 등)은 거부한다.
-  고정되는 건 k3s **바이너리 버전**이다. 설치 스크립트(get.k3s.io)는 매번 원격에서 받는다(#221)
-- helm CLI
+- **설치물은 내용(sha256)으로 고정한다**(#221) — k3s `install.sh`(핀한 버전 태그의 파일), helm 릴리스 tarball(`HELM_VERSION`,
+  arm64/amd64), cert-manager 매니페스트(`CERT_MANAGER_VERSION`). 호스트를 건드리기 전(Step 0)에 받아 스크립트에 적힌 해시와
+  대조하고, **다르면 아무것도 설치하지 않고 멈춘다** — 예전 주소(get.k3s.io, get-helm-3@main)로 되돌아가지 않는다. 오버라이드한
+  k3s 버전은 이 파일에 해시가 없으므로 `BOOTSTRAP_K3S_INSTALL_SHA256` 을 같이 줘야 한다(이미 k3s 가 깔린 노드는 설치하지 않아 불필요).
+- helm CLI (위 tarball)
 - cert-manager + Let's Encrypt ClusterIssuer (`letsencrypt-prod`)
 
 스크립트는 idempotent — 다시 돌려도 안전.
