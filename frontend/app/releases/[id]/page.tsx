@@ -9,7 +9,7 @@ import { ReleaseProblems } from "@/components/ReleaseProblems";
 type ReleaseOverview = {
   id: string;
   status: string;
-  template: { name: string };
+  template: { name: string; version: number };
   instances_total: number;
   instances_ready: number;
   instances: Instance[];
@@ -35,6 +35,7 @@ export default async function ReleaseOverviewPage({
       <ReleaseProblems
         releaseId={d.id}
         template={d.template.name}
+        version={d.template.version}
         instances={d.instances}
       />
       {/* The backend does not report memory usage or a public address yet.

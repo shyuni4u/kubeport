@@ -72,7 +72,7 @@ describe("InstancesTable", () => {
     it("says the table is empty instead of rendering nothing", () => {
       render(<InstancesTable releaseId="abc" instances={[]} />);
       expect(
-        screen.getByText("실행 중인 인스턴스가 없습니다."),
+        screen.getByText(/^지금 실행 중인 인스턴스가 없습니다\./),
       ).toBeInTheDocument();
     });
 
@@ -94,7 +94,7 @@ describe("InstancesTable", () => {
     it("keeps the empty row spanning the full width of the header", () => {
       render(<InstancesTable releaseId="abc" instances={[]} />);
       const cell = screen
-        .getByText("실행 중인 인스턴스가 없습니다.")
+        .getByText(/^지금 실행 중인 인스턴스가 없습니다\./)
         .closest("td");
       const headers = document.querySelectorAll("thead th");
       expect(cell).toHaveAttribute("colSpan", String(headers.length));

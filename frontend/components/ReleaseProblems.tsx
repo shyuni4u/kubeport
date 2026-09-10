@@ -9,6 +9,7 @@ import { useKubeTermsStore } from "@/stores/kube-terms-store";
 type Cause =
   | "image"
   | "crash"
+  | "exited"
   | "memory"
   | "config"
   | "capacity"
@@ -23,7 +24,9 @@ const CAUSE_OF: Record<string, Cause> = {
   ErrImagePull: "image",
   InvalidImageName: "image",
   CrashLoopBackOff: "crash",
-  Error: "crash",
+  // A container that ended with an error is not necessarily restarting: a Job
+  // with restartPolicy Never stops there, so "keeps restarting" would be false.
+  Error: "exited",
   OOMKilled: "memory",
   CreateContainerConfigError: "config",
   CreateContainerError: "config",
@@ -31,11 +34,11 @@ const CAUSE_OF: Record<string, Cause> = {
   Evicted: "evicted",
 };
 
-// Causes a new value fixes: another image, a higher memory limit, a setting the
-// app chokes on. Waiting for capacity and eviction clear on their own or need
-// an admin, and a missing referenced value is not something the form holds,
-// so offering a redeploy for those sends the reader the wrong way.
-const FIXED_BY_SETTINGS = new Set<Cause>(["image", "crash", "memory"]);
+// Causes a new value can fix: another image, a higher memory limit, a setting
+// the app chokes on. Waiting for capacity and eviction clear on their own or
+// need an admin, and a missing referenced value is not something the form
+// holds, so offering a redeploy for those sends the reader the wrong way.
+const FIXED_BY_SETTINGS = new Set<Cause>(["image", "crash", "exited", "memory"]);
 
 export type ProblemGroup = {
   cause: Cause;
@@ -67,10 +70,13 @@ export function groupProblems(instances: Instance[]): ProblemGroup[] {
 export function ReleaseProblems({
   releaseId,
   template,
+  version,
   instances,
 }: {
   releaseId: string;
   template: string;
+  /** The template version the release is pinned to. */
+  version: number;
   instances: Instance[];
 }) {
   const t = useTranslations("releases.problems");
@@ -94,12 +100,7 @@ export function ReleaseProblems({
         <ul className="space-y-3">
           {groups.map((g) => (
             <li key={g.cause} className="space-y-1 text-sm">
-              <p>
-                {t(`cause.${g.cause}.what`, {
-                  count: g.count,
-                  reason: g.reasons.join(", "),
-                })}
-              </p>
+              <p>{t(`cause.${g.cause}.what`, { count: g.count })}</p>
               <p className="text-muted-foreground">{t(`cause.${g.cause}.fix`)}</p>
               {/* k8s's own words, verbatim, for whoever asked to see them. */}
               {kube && (
@@ -112,8 +113,12 @@ export function ReleaseProblems({
           ))}
         </ul>
         {offerUpdate && (
+          // The version-pinned route, not /catalog/<t>/deploy: only it loads
+          // the release's current values into the form, so the reader fixes
+          // the one wrong value instead of resetting every field to the
+          // template's defaults — and stays on the version the release runs.
           <Link
-            href={`/catalog/${encodeURIComponent(template)}/deploy?updateReleaseId=${encodeURIComponent(releaseId)}`}
+            href={`/catalog/${encodeURIComponent(template)}/versions/${version}/deploy?updateReleaseId=${encodeURIComponent(releaseId)}`}
             className="inline-block text-sm text-link hover:underline"
           >
             {t("changeSettings")}
