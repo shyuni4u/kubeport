@@ -236,6 +236,14 @@ helm upgrade kubeport deploy/helm/kubeport --reuse-values \
 `backend/internal/api/error_shape_test.go` 와 `openapi_spec_test.go` 가 빌드를 깬다. `detail` 은 사람이
 읽는 문장이라 바뀔 수 있다.
 
+**409 는 `title` 로 셋이 갈린다.** `conflict` 는 같은 이름의 릴리스가 이미 있다는 뜻이라 다른 이름으로
+풀린다. 같은 `conflict` 라도 `detail: version not published` 는 이름으로 안 풀린다. `resource-conflict` 는
+**템플릿이 만드는 오브젝트를 같은 네임스페이스의 다른 릴리스가 이미 쥐고 있다**는 뜻이라, 역시 이름을
+바꿔도 안 풀린다([#161](https://github.com/shyuni4u/kubeport/issues/161)). 다른 네임스페이스에 배포하거나
+그 릴리스를 먼저 지워야 한다. 이 kind 만 확장 필드 `conflicts[]`(`kind`·`name`·`namespace`·`owner`)를
+달고 온다. 붙잡고 있는 릴리스 이름은 `detail` 을 파싱하지 말고 `owner` 에서 읽는다(kubeport 가 만든 게
+아니면 빈 문자열). 이 응답을 받았다면 **아무것도 적용되지 않았고 릴리스도 기록되지 않았다.**
+
 여기엔 **kubeport 의 두 진입점 어디에도 핸들러가 없는 응답까지 포함된다**
 ([#81](https://github.com/shyuni4u/kubeport/issues/81)):
 

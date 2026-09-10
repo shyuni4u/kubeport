@@ -81,7 +81,37 @@ func validatePath(path string) error {
 		return fmt.Errorf("path is not canonical: write it as `%s` (quote a key only when the bare form cannot express it)",
 			strings.TrimSuffix(path, rest)+canon)
 	}
+	if reservedPath(canon) {
+		return fmt.Errorf("path sets %s, which kubeport decides: a release's objects live in the release's namespace and keep the kind and apiVersion the template gives them (#137)", canon)
+	}
 	return nil
+}
+
+// reservedPath reports whether a canonical resource-relative path writes a
+// field kubeport's release model depends on. An exposed field's value comes
+// from whoever deploys, not from the template author.
+//
+// metadata.namespace matters most: an object sent to another namespace is
+// orphaned as soon as it is applied, because deletion and status look only in
+// the release's. kind and apiVersion change what is being applied at all, and
+// setting `metadata` whole reaches the namespace by the back door. Templates
+// saved before this check are still caught at deploy time, where CheckApply
+// refuses a pinned namespace.
+//
+// metadata.name is deliberately not reserved. Exposing it is how a template
+// lets two releases share a namespace, and the ownership check at deploy time
+// (#161) is what makes a user-chosen name safe.
+func reservedPath(canon string) bool {
+	switch canon {
+	case "kind", "apiVersion", "metadata", "metadata.namespace":
+		return true
+	}
+	for _, prefix := range []string{"kind.", "apiVersion.", "metadata.namespace."} {
+		if strings.HasPrefix(canon, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func Render(resourcesYAML, uiSpecYAML string, values json.RawMessage, l Labels) ([]byte, error) {

@@ -137,6 +137,10 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
 		return
 	}
+	if problem := releaseTargetProblem(r.Namespace, r.Name); problem != "" {
+		writeError(c, http.StatusBadRequest, "validation-error", problem)
+		return
+	}
 	ctx := c.Request.Context()
 	u, _ := auth.UserFrom(ctx)
 
@@ -173,6 +177,22 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		return
 	}
 
+	// The client, and the ownership check it makes, come before the row. A
+	// refused create then leaves nothing to roll back. More to the point,
+	// nothing has been applied yet, which is the only state in which the
+	// failed-apply cleanup below cannot delete another release's objects: that
+	// cleanup deletes by label, and an apply that got partway had already
+	// relabelled whatever it overwrote (#161).
+	caBundle := cluster.CaBundle.String
+	cli, err := h.deps.K8sFactory.NewWithToken(cluster.ApiUrl, caBundle, u.IDToken)
+	if err != nil {
+		internalError(c, "CreateRelease: k8s client", err)
+		return
+	}
+	if !h.checkOwnership(c, cli, "CreateRelease", r.Namespace, r.Name, rendered) {
+		return
+	}
+
 	user, ok := h.resolveUser(c)
 	if !ok {
 		return
@@ -195,18 +215,6 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		}
 		log.Printf("InsertRelease error: %v", err)
 		writeError(c, http.StatusInternalServerError, "internal", "failed to create release")
-		return
-	}
-
-	caBundle := cluster.CaBundle.String
-	cli, err := h.deps.K8sFactory.NewWithToken(cluster.ApiUrl, caBundle, u.IDToken)
-	if err != nil {
-		rollbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if delErr := h.deps.Store.DeleteRelease(rollbackCtx, rel.ID); delErr != nil {
-			log.Printf("rollback: failed to delete release %s from DB: %v", rel.Name, delErr)
-		}
-		internalError(c, "CreateRelease: k8s client", err)
 		return
 	}
 	if err := cli.ApplyAll(ctx, r.Namespace, rendered); err != nil {

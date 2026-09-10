@@ -15,10 +15,18 @@ type Problem struct {
 	Status    int    `json:"status"`
 	Detail    string `json:"detail,omitempty"`
 	RequestID string `json:"request_id,omitempty"`
+	// Conflicts is the resource-conflict extension member (#161): the objects
+	// a release would have taken over, and what holds each. RFC 7807 allows
+	// extension members, and this one exists so a client can name the holder
+	// without parsing detail, which is prose.
+	Conflicts []ProblemConflict `json:"conflicts,omitempty"`
 }
 
-func writeError(c *gin.Context, status int, kind, detail string) {
-	c.AbortWithStatusJSON(status, Problem{
+// problemOption sets an extension member on a Problem.
+type problemOption func(*Problem)
+
+func writeError(c *gin.Context, status int, kind, detail string, opts ...problemOption) {
+	p := Problem{
 		Type:   "https://kubeport.io/errors/" + kind,
 		Title:  kind,
 		Status: status,
@@ -27,7 +35,11 @@ func writeError(c *gin.Context, status int, kind, detail string) {
 		// any server-side detail we withheld from them (#72). The field was
 		// declared but never populated.
 		RequestID: requestIDFrom(c),
-	})
+	}
+	for _, opt := range opts {
+		opt(&p)
+	}
+	c.AbortWithStatusJSON(status, p)
 }
 
 // sseError writes a Problem as a named `error` event on an already-upgraded

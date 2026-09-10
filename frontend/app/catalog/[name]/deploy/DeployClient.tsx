@@ -44,6 +44,28 @@ type Props = {
 
 type Meta = { name: string; cluster: string; namespace: string };
 
+/**
+ * Who holds the objects behind a `resource-conflict` 409, read from the
+ * Problem's structured `conflicts` list rather than from `detail`, which is
+ * never shown. `owner` is "" when kubeport did not create what holds them.
+ * Null for any other body, a malformed one included.
+ */
+function resourceConflictOf(body: string): { owner: string } | null {
+  try {
+    const p = JSON.parse(body) as {
+      title?: unknown;
+      conflicts?: Array<{ owner?: unknown }>;
+    };
+    if (p.title !== "resource-conflict") return null;
+    const held = Array.isArray(p.conflicts)
+      ? p.conflicts.find((c) => typeof c?.owner === "string" && c.owner !== "")
+      : undefined;
+    return { owner: typeof held?.owner === "string" ? held.owner : "" };
+  } catch {
+    return null;
+  }
+}
+
 export function DeployClient({
   templateName,
   version,
@@ -58,13 +80,24 @@ export function DeployClient({
   const t = useTranslations("deploy");
   const isUpdate = Boolean(updateReleaseId);
 
-  // Map an HTTP status to a non-technical, localized message. The raw backend
-  // text is preserved only as the Error `cause` (for logs / debugging) and is
-  // never shown to the user.
+  // Map a failed response to a non-technical, localized message. The raw
+  // backend text is preserved only as the Error `cause` (for logs / debugging)
+  // and is never shown to the user. The one thing taken from the body is the
+  // name of a release holding a resource-conflict, which arrives as structured
+  // data so it can be shown: "a release with this name exists" is the wrong
+  // advice there, because a different name does not help (#161).
   const errorMessageForStatus = useCallback(
-    (status: number): string => {
+    (status: number, body = ""): string => {
       if (status === 403) return t("errors.forbidden");
-      if (status === 409) return t("errors.conflict");
+      if (status === 409) {
+        const held = resourceConflictOf(body);
+        if (held) {
+          return held.owner
+            ? t("errors.resourceConflict", { owner: held.owner })
+            : t("errors.resourceConflictForeign");
+        }
+        return t("errors.conflict");
+      }
       if (status >= 500) return t("errors.server");
       return t("errors.generic");
     },
@@ -283,9 +316,8 @@ export function DeployClient({
             body: JSON.stringify({ version, values }),
           });
           if (!r.ok) {
-            throw new Error(errorMessageForStatus(r.status), {
-              cause: await r.text(),
-            });
+            const text = await r.text();
+            throw new Error(errorMessageForStatus(r.status, text), { cause: text });
           }
           router.push(`/releases/${updateReleaseId}`);
         } else {
@@ -302,9 +334,8 @@ export function DeployClient({
             }),
           });
           if (!r.ok) {
-            throw new Error(errorMessageForStatus(r.status), {
-              cause: await r.text(),
-            });
+            const text = await r.text();
+            throw new Error(errorMessageForStatus(r.status, text), { cause: text });
           }
           const body = (await r.json()) as { id: string };
           router.push(`/releases/${body.id}`);

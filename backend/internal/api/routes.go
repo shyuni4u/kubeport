@@ -21,6 +21,10 @@ type K8sApplier interface {
 	// CheckAccess proxies a SelfSubjectAccessReview so the caller can ask
 	// "can I do verb on resource?" before attempting an action.
 	CheckAccess(ctx context.Context, spec k8s.AccessCheck) (k8s.AccessResult, error)
+	// CheckApply reports which objects in a rendered release already belong to
+	// another release, or to nothing kubeport created, before anything is
+	// applied (#161).
+	CheckApply(ctx context.Context, namespace, release string, yaml []byte) (k8s.ApplyCheck, error)
 }
 
 // K8sClientFactory creates per-request k8s clients using the caller's token.

@@ -161,7 +161,13 @@ func TestPathExists(t *testing.T) {
 func TestReleaseSpecs(t *testing.T) {
 	rs := releaseSpecs()
 	require.Len(t, rs, 2)
-	require.Equal(t, "web-app-demo", rs[0].Name)
+	require.Equal(t, "app-with-config-demo", rs[0].Name)
 	require.Equal(t, "nightly-job-demo", rs[1].Name)
 	require.Contains(t, string(rs[1].Values), "does-not-exist", "second release must fail to pull so the failure UX is visible")
+	// Visitors and the persona scripts deploy web-app into the seed namespace.
+	// A seed release of it would hold web-app's fixed object names and turn
+	// every one of those deploys into a resource-conflict (#161).
+	for _, r := range rs {
+		require.NotEqual(t, "web-app", r.Template, "seed release %s would occupy the objects visitors deploy", r.Name)
+	}
 }

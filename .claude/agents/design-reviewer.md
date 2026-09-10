@@ -16,7 +16,7 @@ model: inherit
 1. 랜딩 `/` (비로그인) — YAML vs 폼 비교 쇼케이스 포함.
 2. `/catalog`
 3. `/catalog/web-app/deploy`
-4. `/releases` 목록에서 `web-app-demo` 를 열어 개요·로그 탭, 그리고 `nightly-job-demo` 의 실패 배너.
+4. `/releases` 목록에서 `app-with-config-demo` 를 열어 개요·로그 탭, 그리고 `nightly-job-demo` 의 실패 배너.
 5. `/templates` 목록.
 6. 템플릿 버전 에디터 (`?mode=ui` 와 `?mode=yaml` 둘 다).
 

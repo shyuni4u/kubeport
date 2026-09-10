@@ -236,6 +236,63 @@ describe("DeployClient", () => {
     );
     expect(releaseCalls).toHaveLength(1);
   });
+
+  async function submitAndReadAlert(releases: () => Response) {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", routedFetch({ releases }));
+    render(<DeployClient templateName="nightly-job" version={1} team={null} spec={spec} />);
+    await fillMeta(user);
+    const button = screen.getByRole("button", { name: /배포하기/ });
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+    return screen.findByRole("alert");
+  }
+
+  // #161: another release holds the objects this template creates. The old
+  // message said "a release with this name exists, pick another name", which is
+  // the one thing that cannot help, and did not say which release to look for.
+  it("names the release holding the resources on a resource-conflict", async () => {
+    const alert = await submitAndReadAlert(() =>
+      jsonResponse(
+        {
+          title: "resource-conflict",
+          status: 409,
+          detail: "objects this template creates already exist",
+          conflicts: [
+            { kind: "CronJob", name: "nightly", namespace: "demo", owner: "nightly-job-demo" },
+          ],
+        },
+        409,
+      ),
+    );
+
+    expect(alert).toHaveTextContent("nightly-job-demo");
+    expect(alert).toHaveTextContent(/배포 이름을 바꿔도 해결되지 않습니다/);
+    expect(alert).not.toHaveTextContent(/같은 이름의 릴리스/);
+  });
+
+  it("does not invent an owner when kubeport did not create the holder", async () => {
+    const alert = await submitAndReadAlert(() =>
+      jsonResponse(
+        {
+          title: "resource-conflict",
+          status: 409,
+          conflicts: [{ kind: "ConfigMap", name: "stray", namespace: "demo", owner: "" }],
+        },
+        409,
+      ),
+    );
+
+    expect(alert).toHaveTextContent(/kubeport 밖에서 만든 것/);
+  });
+
+  it("still says the name is taken for an ordinary conflict", async () => {
+    const alert = await submitAndReadAlert(() =>
+      jsonResponse({ title: "conflict", status: 409, detail: "release name already exists" }, 409),
+    );
+
+    expect(alert).toHaveTextContent(/같은 이름의 릴리스/);
+  });
 });
 
 // #179 — the namespace field started on a hard-coded "default". The chart
