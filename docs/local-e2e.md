@@ -262,10 +262,11 @@ Leave unset to disable demo restrictions entirely.
 `KBP_DEMO_ALLOW_TEMPLATE_CREATE=true` re-opens template authoring for demo
 accounts. Nothing in this stack needs it: `seed-demo` writes the catalog straight
 to the database (`cmd/seed-demo/templates.go`), and the gate covers
-`POST /v1/templates` and version publishing (`api/routes.go`, #294) — the
-demo-admin specs (04, 06) only edit draft versions of an already-seeded template,
-which is not gated. Set it only if a spec needs a demo account to create a *new*
-template or publish a version, or to demo authoring itself
+`POST /v1/templates` and a version's publish, deprecate and undeprecate
+(`api/routes.go`, #294) — the demo-admin specs (04, 06) only edit draft versions
+of an already-seeded template, which is not gated. Set it only if a spec needs a
+demo account to create a *new* template or switch a version's status, or to demo
+authoring itself
 (see [oci-prod-runbook §5](oci-prod-runbook.md)).
 
 ### 8. Frontend

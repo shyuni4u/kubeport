@@ -48,7 +48,7 @@ type Deps struct {
 	K8sFactory      K8sClientFactory
 	DemoEmailDomain string // "" = no demo restrictions
 	// DemoAllowTemplateCreate lets demo accounts author new templates and
-	// publish versions. Off by default: demo accounts carry kubeport-admin so
+	// publish, deprecate or undeprecate versions. Off by default: demo accounts carry kubeport-admin so
 	// they can show the admin UX, and these are the admin powers whose output
 	// outlives the visit and reaches other people — a published version runs
 	// whatever the visitor wrote against Secrets other visitors deployed

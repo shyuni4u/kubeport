@@ -787,7 +787,8 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
   `WARN: reset: … skipped — referenced by non-demo releases`; delete that
   release (from its detail page or `DELETE /v1/releases/:id`) and the next
   reset clears the demo catalog again — re-running the reset before that
-  changes nothing. Creating *new* templates and publishing versions are also
+  changes nothing. Creating *new* templates and publishing, deprecating or
+  undeprecating versions are also
   refused unless you set `demo.allowTemplateCreate=true`
   (`KBP_DEMO_ALLOW_TEMPLATE_CREATE`); leave it off for a public demo, since
   templates demo visitors author outlive a reset once someone deploys from

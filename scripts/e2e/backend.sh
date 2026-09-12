@@ -21,8 +21,8 @@ export APP_ENCRYPTION_KEY_B64="$KEY"
 export KBP_DEV_ADMIN_EMAILS=admin@example.com,demo-admin@demo.kubeport
 export KBP_DEMO_EMAIL_DOMAIN=demo.kubeport
 # No KBP_DEMO_ALLOW_TEMPLATE_CREATE here: the seeder writes templates to the DB,
-# and the gate covers POST /v1/templates and version publishing (#294) — the
-# demo-admin specs only edit drafts. Set it only if a spec needs a demo account to
-# create a template or publish a version.
+# and the gate covers POST /v1/templates and a version's publish, deprecate and
+# undeprecate (#294) — the demo-admin specs only edit drafts. Set it only if a spec
+# needs a demo account to create a template or switch a version's status.
 log "backend on $API_URL"
 exec go run ./cmd/server

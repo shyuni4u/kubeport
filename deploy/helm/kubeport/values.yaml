@@ -272,7 +272,8 @@ demo:
   adminEmail: demo-admin@demo.kubeport
   userEmail: demo-user@demo.kubeport
   passwordHint: ""                # shown on landing (public by design)
-  # Let demo accounts author new templates and publish versions. Off by default:
+  # Let demo accounts author new templates and publish, deprecate or undeprecate
+  # versions. Off by default:
   # demo accounts carry kubeport-admin so they can show the admin UX, and
   # authoring is the admin power whose output outlives the visit and reaches
   # other people — a published version can read Secrets other visitors deployed
