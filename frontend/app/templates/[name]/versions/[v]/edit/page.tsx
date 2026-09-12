@@ -11,7 +11,7 @@ import { EditorLayout } from "@/components/editor/EditorLayout";
 import { MetaRow, TemplateMeta } from "@/components/editor/MetaRow";
 import { BottomBar, UnsavedChangesStatus } from "@/components/editor/BottomBar";
 import { saveErrorMessage } from "@/components/editor/saveError";
-import { findUnlabelledExposedField, useBeforeUnloadWhenDirty } from "@/components/editor/useDirtyGuard";
+import { findUnlabelledExposedField, stableStringify, useBeforeUnloadWhenDirty, useDirtyAgainstBaseline } from "@/components/editor/useDirtyGuard";
 import { YamlEditor } from "@/components/YamlEditor";
 import { useTemplateYamlValidation } from "@/components/editor/useTemplateYamlValidation";
 import { YamlIssueList, useSaveBlockedReason } from "@/components/editor/YamlIssues";
@@ -118,6 +118,11 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
   const [meta, setMeta] = useState<TemplateMeta>({ name: name ?? "", tags: [] });
   // Snapshot of meta loaded from the server, used to detect what to PATCH on save.
   const [initialMeta, setInitialMeta] = useState<TemplateMeta | null>(null);
+  // The version as loaded: what the server holds until a version write lands.
+  // A save stores the metadata first and the version second; when only the
+  // first half lands, the dirty baseline becomes this plus the stored metadata —
+  // exactly what the server holds, whichever way the fields move afterwards (#274).
+  const [initialState, setInitialState] = useState<UIModeTemplate | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -137,10 +142,18 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
           ui_spec_yaml: string;
           status: string;
         };
+        // Every body is read before any state is set. The editor turns editable
+        // once `state` is set, and the dirty baseline comes from the first render
+        // that has everything: setting state between these awaits let the admin
+        // edit the metadata while the rest was still in flight, and that edit
+        // became the baseline (#274).
+        const tmpl = tRes.ok ? ((await tRes.json()) as TemplateMetaFromAPI) : null;
+        const clusterList = cRes.ok ? ((await cRes.json()) as { clusters: Array<{ name: string }> }) : null;
         setSourceStatus(ver.status);
         setSourceAuthoringMode(ver.authoring_mode);
         if (ver.authoring_mode === "ui") {
           setState(ver.ui_state_json);
+          setInitialState(ver.ui_state_json);
         } else {
           // YAML-authored source: best-effort parse resources + ui-spec back
           // into the UI editor's state. Warnings surface anything the
@@ -153,22 +166,24 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
           // means the user will need to delete the yaml draft separately).
           const { uiState, warnings } = yamlToUIState(ver.resources_yaml ?? "", ver.ui_spec_yaml ?? "");
           setState(uiState as UIModeTemplate);
+          // The converted state stands in for the stored version: it is what
+          // the editor compares against until a version write lands (#274).
+          setInitialState(uiState as UIModeTemplate);
           setConvertWarnings(warnings);
         }
 
-        if (tRes.ok) {
-          const t = await tRes.json() as TemplateMetaFromAPI;
+        if (tmpl) {
           const loaded: TemplateMeta = {
-            name: t.name,
-            display_name: t.display_name,
-            tags: t.tags ?? [],
+            name: tmpl.name,
+            display_name: tmpl.display_name,
+            tags: tmpl.tags ?? [],
           };
           setMeta(loaded);
           setInitialMeta(loaded);
         }
 
-        if (cRes.ok) {
-          const d = await cRes.json() as { clusters: Array<{ name: string }> };
+        if (clusterList) {
+          const d = clusterList;
           setClusters(d.clusters);
           // Prefer a previously-chosen cluster (sessionStorage). Otherwise the
           // first entry. The frontend has no way to know which cluster is the
@@ -185,6 +200,9 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
         }
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
+      } finally {
+        // The dirty baseline waits for this, not for `state` alone (#274).
+        setLoadDone(true);
       }
     })();
   }, [name, v]);
@@ -211,6 +229,22 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
 
   const uiStateSynthetic = useMemo<UIModeTemplate | null>(() => state, [state]);
   const touch = () => onDirty(true);
+  // Everything a save sends, so undoing an edit clears the mark (#274). Null
+  // until the whole load has settled: the version renders before the
+  // template's metadata arrives, and a baseline taken in between would count
+  // the loaded metadata as an edit.
+  const [loadDone, setLoadDone] = useState(false);
+  const snapshot = useMemo(
+    () =>
+      state && loadDone
+        ? stableStringify({
+            state,
+            meta: { name: meta.name, display_name: meta.display_name ?? "", tags: meta.tags },
+          })
+        : null,
+    [state, loadDone, meta],
+  );
+  const markSaved = useDirtyAgainstBaseline(snapshot, dirty, onDirty);
 
   function pickCluster(next: string) {
     setCluster(next);
@@ -269,6 +303,20 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
           setErr(t("errors.metaSave", { status: patchRes.status, detail: (await patchRes.text()).trim() }));
           return;
         }
+        // Stored, whatever the version write below does. A retry now compares
+        // against what the server holds, so putting a field back sends it back
+        // instead of skipping the PATCH; and the dirty baseline becomes the
+        // stored metadata on the loaded version, which is the server's state if
+        // the version write fails (#274).
+        setInitialMeta(meta);
+        if (initialState) {
+          markSaved(
+            stableStringify({
+              state: initialState,
+              meta: { name: meta.name, display_name: meta.display_name ?? "", tags: meta.tags },
+            }),
+          );
+        }
       }
 
       // 2) Either PATCH the draft in place or POST a new version.
@@ -289,7 +337,7 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
         body: JSON.stringify(req.body),
       });
       if (!res.ok) { setErr(await saveErrorMessage(t, res)); return; }
-      onDirty(false);
+      markSaved();
       router.push(`/templates/${name}`);
     } finally {
       setSaving(false);
@@ -486,6 +534,13 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
   }, [name, v]);
 
   const touch = () => onDirty(true);
+  // The two files a save sends, null until the version has loaded, so undoing
+  // an edit clears the mark (#274).
+  const snapshot = useMemo(
+    () => (loaded ? stableStringify([resourcesYaml, uispecYaml]) : null),
+    [loaded, resourcesYaml, uispecYaml],
+  );
+  const markSaved = useDirtyAgainstBaseline(snapshot, dirty, onDirty);
 
   const isDraft = status === "draft";
   // UI-authored drafts can't be PATCHed with yaml payloads — the backend
@@ -523,7 +578,7 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
         body: JSON.stringify(req.body),
       });
       if (!res.ok) { setErr(await saveErrorMessage(t, res)); return; }
-      onDirty(false);
+      markSaved();
       router.push(`/templates/${name}`);
     } finally {
       setSaving(false);
