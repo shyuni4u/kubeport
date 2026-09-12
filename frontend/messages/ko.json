@@ -125,7 +125,8 @@
   "releases": {
     "myTitle": "내 릴리스",
     "meta": {
-      "deployedAt": "<time></time> 배포"
+      "deployedAt": "<time></time> 배포",
+      "cluster": "클러스터"
     },
     "table": {
       "name": "이름",
@@ -152,7 +153,8 @@
       "instances": "인스턴스",
       "instanceId": "인스턴스 ID",
       "status": "상태",
-      "namespace": "구역"
+      "namespace": "구역",
+      "allInstances": "전체 인스턴스"
     },
     "delete": {
       "button": "삭제",
@@ -290,18 +292,17 @@
     "teamSuffix": "{team} 팀"
   },
   "logs": {
-    "allInstances": "전체 인스턴스",
     "autoscroll": "자동 스크롤",
     "clear": "지우기",
     "emptyWaiting": "아직 출력이 없습니다. 실행되면 여기에 바로 나타납니다.",
     "emptyDisconnected": "연결이 끊겼습니다. [다시 연결]을 눌러 보세요. 계속 끊기면 관리자에게 문의하세요.",
     "reconnect": "다시 연결",
-    "ended": "이 인스턴스가 로그를 모두 보냈습니다. 다시 실행되면 [다시 연결]로 이어서 볼 수 있습니다.",
+    "ended": "이 {kube, select, true {Pod} other {인스턴스}}가 로그를 모두 보냈습니다. 다시 실행되면 [다시 연결]로 이어서 볼 수 있습니다.",
     "error": {
       "k8s-error": "클러스터에서 로그를 가져오지 못했습니다. 잠시 후 다시 시도해 보세요.",
       "cluster-auth-denied": "클러스터가 접속을 거부했습니다. 다시 로그인해도 해결되지 않으니 관리자에게 문의하세요.",
       "rbac-denied": "이 릴리스의 로그를 볼 권한이 없습니다.",
-      "no-pods": "이 릴리스에는 아직 실행 중인 인스턴스가 없습니다. 파드가 뜬 뒤 [다시 연결]을 눌러 주세요.",
+      "no-pods": "이 릴리스에는 아직 실행 중인 {kube, select, true {Pod} other {인스턴스}}가 없습니다. {kube, select, true {Pod} other {인스턴스}}가 뜬 뒤 [다시 연결]을 눌러 주세요.",
       "not-found": "릴리스를 찾을 수 없습니다. 삭제됐을 수 있습니다.",
       "unauthenticated": "로그인이 만료됐습니다. 다시 로그인한 뒤 시도해 주세요.",
       "demo-restricted": "데모 계정은 데모에서 만든 릴리스의 로그만 볼 수 있습니다.",

@@ -125,7 +125,8 @@
   "releases": {
     "myTitle": "My releases",
     "meta": {
-      "deployedAt": "deployed <time></time>"
+      "deployedAt": "deployed <time></time>",
+      "cluster": "Cluster"
     },
     "table": {
       "name": "Name",
@@ -152,7 +153,8 @@
       "instances": "Instances",
       "instanceId": "Instance ID",
       "status": "Status",
-      "namespace": "Area"
+      "namespace": "Area",
+      "allInstances": "All instances"
     },
     "delete": {
       "button": "Delete",
@@ -290,18 +292,17 @@
     "teamSuffix": "{team} team"
   },
   "logs": {
-    "allInstances": "All instances",
     "autoscroll": "Auto-scroll",
     "clear": "Clear",
     "emptyWaiting": "No output yet. Lines appear here as soon as it runs.",
     "emptyDisconnected": "Connection lost. Try Reconnect; if it keeps dropping, contact an admin.",
     "reconnect": "Reconnect",
-    "ended": "This instance has sent all its logs. If it runs again, Reconnect picks up from there.",
+    "ended": "{kube, select, true {This pod} other {This instance}} has sent all its logs. If it runs again, Reconnect picks up from there.",
     "error": {
       "k8s-error": "Could not read logs from the cluster. Try again in a moment.",
       "cluster-auth-denied": "The cluster refused the connection. Signing in again will not help — ask an admin.",
       "rbac-denied": "You do not have permission to view this release's logs.",
-      "no-pods": "This release has no running instances yet. Reconnect once a pod starts.",
+      "no-pods": "This release has no running {kube, select, true {pods} other {instances}} yet. Reconnect once {kube, select, true {a pod} other {an instance}} starts.",
       "not-found": "That release no longer exists — it may have been deleted.",
       "unauthenticated": "Your session has expired. Sign in again and retry.",
       "demo-restricted": "Demo accounts can only read logs from releases created in the demo.",

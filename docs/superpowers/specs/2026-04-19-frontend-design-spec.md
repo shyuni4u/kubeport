@@ -415,7 +415,7 @@ const form = useForm({
 - StatusChip (정상 / 배포 중 / 실패)
 - UpdateAvailableBadge (선택적) — "업데이트 가능 · v2 → v3"
 - 우측: "Kubernetes 용어로 보기" Switch + (?) 도움말 ("배포 폼과 릴리스 화면에 모두 적용", #249). 좁은 화면에서는 헤더 행이 줄바꿈된다.
-- 메타 줄: "Web Service v2 · dev / team-beta · 2시간 전 배포"
+- 메타 줄: "Web Service v2 · 클러스터 dev · 구역 team-beta · 2시간 전 배포" — 값마다 이름표를 붙인다(#259). "구역" 은 용어 토글 ON 이면 "Namespace", "클러스터" 는 kubeport 가 등록한 클러스터 이름이라 토글과 무관하게 그대로.
 - Tabs: 개요 · 로그 · 활동 · 설정
 
 ### 6.3 개요 탭 (page.tsx)
@@ -455,10 +455,10 @@ useEffect(() => {
   ```ts
   { showKubeTerms: boolean, touched: boolean, toggle: () => void, applyDefault: (show: boolean) => void }
   ```
-- ON: 라벨 `인스턴스` → `Pods`, `외부 주소` → `External Address`, `재시작` → `Restart Count`, `구역` → `Namespace` (#250)
+- ON: 라벨 `인스턴스` → `Pods`, `외부 주소` → `External Address`, `재시작` → `Restart Count`, `구역` → `Namespace` (#250), `전체 인스턴스` → `All Pods` (#260)
 - 번역 맵은 `lib/kube-term-map.ts` 로 분리
 - 시작값은 역할로 정한다 (#39): 서버 컴포넌트가 `roleFromGroups(me.groups)` 로 판정해 `KubeTermsDefault` 에 넘기고, admin 은 ON·user 는 OFF. 사용자가 토글을 한 번 누르면(`touched`) 그 뒤로는 기본값을 적용하지 않는다.
-- 적용 화면: 릴리스 상세 헤더·인스턴스 소제목, 릴리스 목록의 구역 컬럼, 배포 폼의 리소스 미리보기·권한 확인 패널. kind 이름은 `messages/*.json` 의 `kinds.*` 로 번역하고(`lib/kube-kinds.ts`), 목록 밖 kind 는 원문 그대로 둔다.
+- 적용 화면: 릴리스 상세 헤더(메타 줄의 구역 이름표 포함, #259)·인스턴스 소제목, 로그 탭의 인스턴스 선택(#260), 배포 폼의 구역 라벨·리소스 미리보기·권한 확인 패널. 릴리스 목록의 구역 컬럼은 토글이 없는 화면이라 쉬운 말로 고정한다(#250). kind 이름은 `messages/*.json` 의 `kinds.*` 로 번역하고(`lib/kube-kinds.ts`), 목록 밖 kind 는 원문 그대로 둔다.
 
 ### 6.6 업데이트 플로우
 

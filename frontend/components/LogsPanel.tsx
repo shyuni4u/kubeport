@@ -11,6 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { termLabel } from "@/lib/kube-term-map";
+import { useKubeTermsStore } from "@/stores/kube-terms-store";
 
 type LogEntry = {
   id: number;
@@ -209,6 +211,11 @@ function Toolbar({
   children,
 }: ToolbarProps) {
   const t = useTranslations("logs");
+  // "전체 인스턴스" stayed while the overview next door said "Pods" with the
+  // terms switch on (#260).
+  const kube = useKubeTermsStore((s) => s.showKubeTerms);
+  const tTerms = useTranslations("releases.terms");
+  const allLabel = termLabel("allInstances", kube, (k) => tTerms(k));
   return (
     <>
       <div className="flex items-center gap-3 text-xs">
@@ -222,11 +229,11 @@ function Toolbar({
               label.
             */}
             <SelectValue>
-              {instance === "all" ? t("allInstances") : instance}
+              {instance === "all" ? allLabel : instance}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">{t("allInstances")}</SelectItem>
+            <SelectItem value="all">{allLabel}</SelectItem>
             {instances.map((i) => (
               <SelectItem key={i.name} value={i.name}>
                 {i.name}
@@ -253,6 +260,9 @@ type StreamProps = {
 
 function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
   const t = useTranslations("logs");
+  // The stream's own sentences say "Pod" with Kubernetes terms on, like the
+  // picker above them and the overview's table (#260 review).
+  const kube = useKubeTermsStore((s) => s.showKubeTerms);
   const [lines, setLines] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<Status>("connecting");
   const [failure, setFailure] = useState<Failure | null>(null);
@@ -491,7 +501,7 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
               [{new Date(l.time).toLocaleTimeString()}]
             </span>{" "}
             <span className="text-cyan-300">[{l.pod}]</span>{" "}
-            {l.kind === "error" ? streamErrorText(t, l) : l.text}
+            {l.kind === "error" ? streamErrorText(t, l, kube) : l.text}
           </div>
         ))}
         {/*
@@ -503,10 +513,10 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
           "Not connected".
         */}
         {footer && (
-          <p className="whitespace-pre-wrap text-red-300">{openErrorText(t, footer)}</p>
+          <p className="whitespace-pre-wrap text-red-300">{openErrorText(t, footer, kube)}</p>
         )}
         {status === "ended" && (
-          <p className="whitespace-pre-wrap text-slate-400">{t("ended")}</p>
+          <p className="whitespace-pre-wrap text-slate-400">{t("ended", { kube: String(kube) })}</p>
         )}
       </div>
     </>
@@ -518,9 +528,13 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
 // The backend deliberately sends no reason (#108), so all we have is the kind
 // and the request id — which is the point: the id is what an admin looks the
 // real reason up by, so it belongs on screen rather than buried in devtools.
-function streamErrorText(t: ReturnType<typeof useTranslations>, l: LogEntry): string {
+function streamErrorText(
+  t: ReturnType<typeof useTranslations>,
+  l: LogEntry,
+  kube: boolean,
+): string {
   const key = l.errorTitle && KNOWN_STREAM_ERRORS.has(l.errorTitle) ? l.errorTitle : "unknown";
-  const message = t(`error.${key}`);
+  const message = t(`error.${key}`, { kube: String(kube) });
   return l.requestId ? t("error.withId", { message, requestId: l.requestId }) : message;
 }
 
@@ -552,10 +566,11 @@ async function readRefusal(url: string, signal: AbortSignal): Promise<Failure | 
 function openErrorText(
   t: ReturnType<typeof useTranslations>,
   failure: Failure | null,
+  kube: boolean,
 ): string {
   const key =
     failure?.title && KNOWN_OPEN_ERRORS.has(failure.title) ? failure.title : "unknown";
-  const message = t(`error.${key}`);
+  const message = t(`error.${key}`, { kube: String(kube) });
   return failure?.requestId
     ? t("error.withId", { message, requestId: failure.requestId })
     : message;
