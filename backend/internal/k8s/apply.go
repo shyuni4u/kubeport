@@ -130,6 +130,10 @@ var mvpResources = []schema.GroupVersionResource{
 // manages. `mvpResources` is the single source of truth for that set, so the
 // SSAR proxy can refuse to ask a cluster about anything kubeport would never
 // apply (issue #73) without a second list drifting from this one.
+//
+// TODO(v1.1 CRDs, #103): widen this with the admin-registered CRD set when it
+// exists — e.g. IsAllowedResource(group, resource, registered) — or the SSAR
+// proxy refuses every CRD the deploy itself would apply.
 func IsMVPResource(group, resource string) bool {
 	for _, gvr := range mvpResources {
 		if gvr.Group == group && gvr.Resource == resource {
