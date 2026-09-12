@@ -29,7 +29,12 @@ jobs:
         env:
           URL: https://kubeport.enzo.kr/
         run: |
-          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 --retry 2 "$URL" || echo 000)
+          # On a connection failure curl already prints 000 for %{http_code} and
+          # exits non-zero, so `|| echo 000` made it "000000" and the check below
+          # never fired. Take what it printed and normalise anything that is not
+          # a three-digit status.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 --retry 2 "$URL") || true
+          [[ $code =~ ^[0-9]{3}$ ]] || code=000
           echo "GET $URL -> $code"
           # Any HTTP response (even a redirect/401) proves the ingress + app are
           # serving and generates the network/CPU we need. Only a connection
@@ -53,9 +58,19 @@ jobs:
           URL: https://kubeport.enzo.kr/api/healthz
         run: |
           body=$(curl -sS --max-time 30 --retry 2 "$URL" || echo '')
-          echo "GET $URL -> ${body:-<no body>}"
+          # Size only, never the body (#228). This runs before anything below has
+          # looked at the response, and a line of it starting with `::` is a
+          # workflow command -- an ingress error page is not JSON and is not
+          # escaped. Every value that does reach the log is checked first.
+          echo "GET $URL -> ${#body} bytes"
           if [ -z "$body" ]; then
             echo "::error::No body from $URL — the health endpoint itself is down"
+            exit 1
+          fi
+          # -s and length == 1: plain -e judges only the LAST document, so
+          # `"junk" {}` or a valid object followed by `{"status":""}` passed.
+          if ! printf '%s' "$body" | jq -e -s 'length == 1 and (.[0] | type == "object")' >/dev/null 2>&1; then
+            echo "::error::$URL did not return a JSON object — an ingress or proxy page, not the API."
             exit 1
           fi
 
@@ -65,10 +80,16 @@ jobs:
           # database we cannot ask about are both things someone must look at.
           status=$(printf '%s' "$body" | jq -r '.status // "unknown"')
           if [ "$status" != "ok" ]; then
+            # jq -r prints a string raw, newlines included -- only a plain word
+            # is quoted back.
+            [[ $status =~ ^[a-z]{1,32}$ ]] || status="<unexpected value>"
             echo "::error::Health reports status=$status — the API or its database is unhealthy."
             exit 1
           fi
-          if [ "$(printf '%s' "$body" | jq -r '.catalog.available // "absent"')" = "false" ]; then
+          # `.catalog.available`, not `.catalog.available // "absent"`: jq's `//`
+          # treats false like null, so that form turned false into "absent" and
+          # this alarm could never fire.
+          if [ "$(printf '%s' "$body" | jq -r '.catalog.available')" = "false" ]; then
             echo "::error::Catalog count unavailable — the API could not query its database."
             exit 1
           fi
@@ -82,6 +103,10 @@ jobs:
             # ConfigMap that did not roll, both land here, and skipping would
             # leave the empty-demo alarm silently blind.
             echo "::error::Health returned no catalog field — demo.publicHealthCatalog is off or the backend ConfigMap did not roll. The empty-demo check is currently blind."
+            exit 1
+          fi
+          if ! [[ $count =~ ^[0-9]{1,9}$ ]]; then
+            echo "::error::catalog.templates is not a count — refusing to judge the catalog."
             exit 1
           fi
           echo "catalog.templates = $count"
