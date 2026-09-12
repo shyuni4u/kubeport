@@ -526,7 +526,10 @@ function FieldRow({
                 }}
               />
             ) : (
-              <FormControl>{renderWidget(field, rhf)}</FormControl>
+              <FormControl>
+                {/* Required as the schema reads it: a kept or re-entered Secret too. */}
+                {renderWidget(field, rhf, Boolean(field.required || reenter || kept))}
+              </FormControl>
             )}
           </div>
           {/*
@@ -590,6 +593,7 @@ function FieldRow({
 function renderWidget(
   field: UISpecField,
   rhf: ControllerRenderProps<FieldValues, string>,
+  required: boolean,
 ) {
   switch (field.type) {
     case "boolean":
@@ -674,11 +678,23 @@ function renderWidget(
         return (
           <ToggleGroup
             value={current}
-            onValueChange={(next: string[]) => {
-              // Single-select: keep the last-pressed value; unpressing all
-              // clears to undefined so validation reflects the state.
+            onValueChange={(next: string[], details) => {
+              // Pressing the picked item again is the only way to an empty
+              // group (#323). It used to store undefined, and react-hook-form
+              // reads an undefined field back from its default values: the
+              // ui-spec default still looked pressed while the form held
+              // nothing, the same root as the number box in #321.
               if (next.length === 0) {
-                rhf.onChange(undefined);
+                // Required works like radio buttons. Base UI's toggle group
+                // has no "no deselect" option in single mode, so the press is
+                // cancelled; the controlled value keeps the item pressed.
+                if (required) {
+                  details.cancel();
+                  return;
+                }
+                // Optional clears to null, which react-hook-form keeps and the
+                // schema reads as no value: nothing pressed, key left out.
+                rhf.onChange(null);
                 return;
               }
               rhf.onChange(next[next.length - 1]);
@@ -694,8 +710,20 @@ function renderWidget(
       }
       return (
         <Select
-          value={typeof rhf.value === "string" ? rhf.value : undefined}
-          onValueChange={(v) => rhf.onChange(v)}
+          // null, not undefined, for no value: Base UI reads an undefined
+          // value as uncontrolled and would then show its own last pick
+          // instead of what the form holds.
+          value={typeof rhf.value === "string" && rhf.value !== "" ? rhf.value : null}
+          onValueChange={(v) => {
+            // Picking the picked option again picks it again; a single Select
+            // has no un-pick from the list. Should it ever report no value,
+            // the same rule as the toggle group applies (#323).
+            if (v === null) {
+              if (!required) rhf.onChange(null);
+              return;
+            }
+            rhf.onChange(v);
+          }}
         >
           <SelectTrigger className="w-full">
             <SelectValue />

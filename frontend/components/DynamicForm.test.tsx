@@ -492,6 +492,34 @@ describe("DynamicForm secrets to enter again", () => {
     );
   });
 
+  // An optional enum with a default becomes required once it has to be entered
+  // again, so it follows the required rule (#323): nothing picked to start,
+  // and a pick pressed again stays picked.
+  it("starts a re-entered enum unpicked, and keeps a pick that is pressed again", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const mode = "Secret[app].stringData.MODE";
+    const enumSpec: UISpec = {
+      fields: [{ path: mode, label: "Mode", type: "enum", values: ["fast", "safe"], default: "fast" }],
+    };
+    renderWithIntl(<DynamicForm spec={enumSpec} reenterSecrets={[mode]} onSubmit={onSubmit} />);
+    const fast = screen.getByRole("button", { name: "fast" });
+    const safe = screen.getByRole("button", { name: "safe" });
+    expect(fast).toHaveAttribute("aria-pressed", "false");
+    expect(safe).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(screen.getByText(ko.form.validation.required)).toBeInTheDocument());
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await user.click(safe);
+    await user.click(safe);
+    expect(safe).toHaveAttribute("aria-pressed", "true");
+    expect(fast).toHaveAttribute("aria-pressed", "false");
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ [mode]: "safe" }));
+  });
+
   it("keeps the default for a form that is not moving version", () => {
     renderWithIntl(<DynamicForm spec={spec} onSubmit={() => {}} />);
     expect((screen.getByLabelText(/Password/) as HTMLInputElement).value).toBe("changeme");
@@ -644,7 +672,10 @@ describe("DynamicForm kept Secrets", () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ ...kept, [S.debug]: true }));
   });
 
-  it("refuses an enum replacement that was picked and then unpicked", async () => {
+  // A replacement is required, so its enum follows the required rule (#323):
+  // pressing the pick again keeps it, rather than emptying the field under a
+  // group that had just shown a choice.
+  it("keeps an enum replacement's pick when it is pressed again", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
     renderWithIntl(<DynamicForm spec={spec} initialValues={kept} onSubmit={onSubmit} />);
@@ -652,10 +683,10 @@ describe("DynamicForm kept Secrets", () => {
     const safe = screen.getByRole("button", { name: "safe" });
     await user.click(safe);
     await user.click(safe);
-    expect(safe).toHaveAttribute("aria-pressed", "false");
+    expect(safe).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "fast" })).toHaveAttribute("aria-pressed", "false");
     await user.click(screen.getByRole("button", { name: /배포하기/ }));
-    await waitFor(() => expect(screen.getByText(ko.form.validation.required)).toBeInTheDocument());
-    expect(onSubmit).not.toHaveBeenCalled();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ ...kept, [S.mode]: "safe" }));
   });
 
   it("refuses a string replacement that was typed and then cleared", async () => {
@@ -1077,6 +1108,215 @@ describe("DynamicForm clearing a number box that has a default", () => {
     expect(input).toHaveValue("api");
     await user.click(screen.getByRole("button", { name: /배포하기/ }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ "metadata.name": "api" }));
+  });
+});
+
+// #323 — pressing the picked item of an enum toggle again stored `undefined`,
+// and react-hook-form reads an undefined field back from its default values
+// (the same root as #321). The ui-spec default still looked pressed while the
+// form held nothing: a required enum said "required" under a visibly picked
+// item, and an optional one left the key out.
+describe("DynamicForm pressing a picked enum item again", () => {
+  const mode = "ConfigMap[app].data.MODE";
+  const values = ["A", "B", "C"];
+  const specWith = (required: boolean, def?: string): UISpec => ({
+    fields: [
+      { path: "metadata.name", label: "Name", type: "string", default: "web" },
+      { path: mode, label: "Mode", type: "enum", values, required, default: def },
+    ],
+  });
+  const item = (v: string) => screen.getByRole("button", { name: v });
+  // aria-pressed is what a screen reader hears, data-pressed is what the
+  // pressed style keys on. Both have to agree with what the form holds.
+  const expectPressed = (picked: string | null) => {
+    for (const v of values) {
+      expect(item(v), v).toHaveAttribute("aria-pressed", String(v === picked));
+      if (v === picked) expect(item(v), v).toHaveAttribute("data-pressed");
+      else expect(item(v), v).not.toHaveAttribute("data-pressed");
+    }
+  };
+  const wire = (v: unknown) => JSON.parse(JSON.stringify(v));
+
+  it("keeps a required enum's default picked, like a radio button", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const onParsedChange = vi.fn();
+    renderWithIntl(
+      <DynamicForm spec={specWith(true, "A")} onSubmit={onSubmit} onParsedChange={onParsedChange} />,
+    );
+    expectPressed("A");
+
+    await user.click(item("A"));
+    expectPressed("A");
+    expect(onParsedChange).toHaveBeenLastCalledWith({
+      success: true,
+      values: { "metadata.name": "web", [mode]: "A" },
+    });
+
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ "metadata.name": "web", [mode]: "A" }));
+    expect(screen.queryByText(ko.form.validation.required)).toBeNull();
+  });
+
+  it("asks for a pick on a required enum with no default, and keeps the pick when pressed again", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(<DynamicForm spec={specWith(true)} onSubmit={onSubmit} />);
+    expectPressed(null);
+
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(screen.getByText(ko.form.validation.required)).toBeInTheDocument());
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await user.click(item("B"));
+    expectPressed("B");
+    await user.click(item("B"));
+    expectPressed("B");
+
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ "metadata.name": "web", [mode]: "B" }));
+  });
+
+  it("moves a required enum's pick to another item", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(<DynamicForm spec={specWith(true, "A")} onSubmit={onSubmit} />);
+    await user.click(item("C"));
+    expectPressed("C");
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ "metadata.name": "web", [mode]: "C" }));
+  });
+
+  it("clears an optional enum to no value: nothing pressed, and left out of the preview and the submit", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const onParsedChange = vi.fn();
+    renderWithIntl(
+      <DynamicForm spec={specWith(false, "A")} onSubmit={onSubmit} onParsedChange={onParsedChange} />,
+    );
+    expectPressed("A");
+
+    await user.click(item("A"));
+    expectPressed(null);
+    const parsed = onParsedChange.mock.calls.at(-1)?.[0];
+    expect(parsed.success).toBe(true);
+    expect(wire(parsed.values)).toEqual({ "metadata.name": "web" });
+
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(ko.form.validation.required)).toBeNull();
+    const sent = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    expect(sent[mode]).toBeUndefined();
+    expect(wire({ values: sent })).toEqual({ values: { "metadata.name": "web" } });
+    // Neither leaving the group nor a re-render brings the default back.
+    await user.tab();
+    expectPressed(null);
+
+    await user.click(item("B"));
+    expectPressed("B");
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit).toHaveBeenLastCalledWith({ "metadata.name": "web", [mode]: "B" });
+  });
+
+  it("shows a required enum stored as null as nothing picked, not its default, and refuses it", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(
+      <DynamicForm
+        spec={specWith(true, "A")}
+        initialValues={{ "metadata.name": "web", [mode]: null }}
+        submitLabel="업데이트"
+        onSubmit={onSubmit}
+      />,
+    );
+    expectPressed(null);
+
+    await user.click(screen.getByRole("button", { name: "업데이트" }));
+    await waitFor(() => expect(screen.getByText(ko.form.validation.required)).toBeInTheDocument());
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // The pick, once made, holds — pressing it again does not fall back to A.
+    await user.click(item("B"));
+    await user.click(item("B"));
+    expectPressed("B");
+    await user.click(screen.getByRole("button", { name: "업데이트" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ "metadata.name": "web", [mode]: "B" }));
+  });
+
+  it("shows an optional enum stored as null as nothing picked, and clears a later pick back to that", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(
+      <DynamicForm
+        spec={specWith(false, "A")}
+        initialValues={{ "metadata.name": "web", [mode]: null }}
+        submitLabel="업데이트"
+        onSubmit={onSubmit}
+      />,
+    );
+    expectPressed(null);
+
+    await user.click(item("A"));
+    expectPressed("A");
+    await user.click(item("A"));
+    expectPressed(null);
+
+    await user.click(screen.getByRole("button", { name: "업데이트" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(wire({ values: onSubmit.mock.calls[0][0] })).toEqual({ values: { "metadata.name": "web" } });
+  });
+
+  it("starts an update on the release's pick, not the default", () => {
+    renderWithIntl(
+      <DynamicForm
+        spec={specWith(true, "A")}
+        initialValues={{ "metadata.name": "web", [mode]: "C" }}
+        onSubmit={() => {}}
+      />,
+    );
+    expectPressed("C");
+  });
+
+  // Long or many values get a Select, which has no un-pick: pressing the
+  // picked option again picks it again. A stored null still has to read as
+  // nothing picked rather than the default.
+  describe("as a Select", () => {
+    const tier = "ConfigMap[app].data.TIER";
+    const many = ["a", "b", "c", "d", "e"];
+    const selectSpec = (required: boolean): UISpec => ({
+      fields: [{ path: tier, label: "Tier", type: "enum", values: many, required, default: "a" }],
+    });
+    const trigger = () => screen.getByRole("combobox", { name: /Tier/ });
+    const shown = () => trigger().textContent?.replace(/[^A-Za-z0-9]/g, "");
+
+    it("starts on the default", () => {
+      renderWithIntl(<DynamicForm spec={selectSpec(true)} onSubmit={() => {}} />);
+      expect(shown()).toBe("a");
+    });
+
+    it("shows a required Select stored as null as nothing picked and refuses it", async () => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn();
+      renderWithIntl(
+        <DynamicForm spec={selectSpec(true)} initialValues={{ [tier]: null }} onSubmit={onSubmit} />,
+      );
+      expect(shown()).toBe("");
+      await user.click(screen.getByRole("button", { name: /배포하기/ }));
+      await waitFor(() => expect(screen.getByText(ko.form.validation.required)).toBeInTheDocument());
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("keeps the picked option when it is picked again", async () => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn();
+      renderWithIntl(<DynamicForm spec={selectSpec(true)} onSubmit={onSubmit} />);
+      await user.click(trigger());
+      await user.click(await screen.findByRole("option", { name: "a" }));
+      await waitFor(() => expect(shown()).toBe("a"));
+      await user.click(screen.getByRole("button", { name: /배포하기/ }));
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ [tier]: "a" }));
+    });
   });
 });
 
