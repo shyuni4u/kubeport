@@ -11,6 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { termLabel } from "@/lib/kube-term-map";
+import { useKubeTermsStore } from "@/stores/kube-terms-store";
 
 type LogEntry = {
   id: number;
@@ -209,6 +211,11 @@ function Toolbar({
   children,
 }: ToolbarProps) {
   const t = useTranslations("logs");
+  // "전체 인스턴스" stayed while the overview next door said "Pods" with the
+  // terms switch on (#260).
+  const kube = useKubeTermsStore((s) => s.showKubeTerms);
+  const tTerms = useTranslations("releases.terms");
+  const allLabel = termLabel("allInstances", kube, (k) => tTerms(k));
   return (
     <>
       <div className="flex items-center gap-3 text-xs">
@@ -222,11 +229,11 @@ function Toolbar({
               label.
             */}
             <SelectValue>
-              {instance === "all" ? t("allInstances") : instance}
+              {instance === "all" ? allLabel : instance}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">{t("allInstances")}</SelectItem>
+            <SelectItem value="all">{allLabel}</SelectItem>
             {instances.map((i) => (
               <SelectItem key={i.name} value={i.name}>
                 {i.name}

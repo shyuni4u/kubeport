@@ -18,6 +18,8 @@ const KUBE = {
   // `.status.phase` — a "Phase" header pointed at the wrong field.
   status: "Status",
   namespace: "Namespace",
+  // The logs tab's instance picker (#260).
+  allInstances: "All Pods",
 } as const;
 
 export type TermKey = keyof typeof KUBE;

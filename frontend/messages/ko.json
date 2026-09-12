@@ -125,7 +125,8 @@
   "releases": {
     "myTitle": "내 릴리스",
     "meta": {
-      "deployedAt": "<time></time> 배포"
+      "deployedAt": "<time></time> 배포",
+      "cluster": "클러스터"
     },
     "table": {
       "name": "이름",
@@ -152,7 +153,8 @@
       "instances": "인스턴스",
       "instanceId": "인스턴스 ID",
       "status": "상태",
-      "namespace": "구역"
+      "namespace": "구역",
+      "allInstances": "전체 인스턴스"
     },
     "delete": {
       "button": "삭제",
@@ -290,7 +292,6 @@
     "teamSuffix": "{team} 팀"
   },
   "logs": {
-    "allInstances": "전체 인스턴스",
     "autoscroll": "자동 스크롤",
     "clear": "지우기",
     "emptyWaiting": "아직 출력이 없습니다. 실행되면 여기에 바로 나타납니다.",

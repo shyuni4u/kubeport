@@ -125,7 +125,8 @@
   "releases": {
     "myTitle": "My releases",
     "meta": {
-      "deployedAt": "deployed <time></time>"
+      "deployedAt": "deployed <time></time>",
+      "cluster": "Cluster"
     },
     "table": {
       "name": "Name",
@@ -152,7 +153,8 @@
       "instances": "Instances",
       "instanceId": "Instance ID",
       "status": "Status",
-      "namespace": "Area"
+      "namespace": "Area",
+      "allInstances": "All instances"
     },
     "delete": {
       "button": "Delete",
@@ -290,7 +292,6 @@
     "teamSuffix": "{team} team"
   },
   "logs": {
-    "allInstances": "All instances",
     "autoscroll": "Auto-scroll",
     "clear": "Clear",
     "emptyWaiting": "No output yet. Lines appear here as soon as it runs.",

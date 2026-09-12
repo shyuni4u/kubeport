@@ -2,7 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { StatusChip, statusChipVariantFromRelease } from "@/components/StatusChip";
 import { KubeTermsToggle } from "@/components/KubeTermsToggle";
 import { DeleteReleaseButton } from "@/components/DeleteReleaseButton";
-import { RelativeTime } from "@/components/RelativeTime";
+import { ReleaseMeta } from "@/components/ReleaseMeta";
 
 export type ReleaseHeaderData = {
   id: string;
@@ -16,7 +16,6 @@ export type ReleaseHeaderData = {
 
 export async function ReleaseHeader({ data }: { data: ReleaseHeaderData }) {
   const t = await getTranslations("releases.status");
-  const tm = await getTranslations("releases.meta");
   // The status string comes from the backend (`healthy` / `warning` / `error` /
   // `unknown` / `cluster-unreachable` / `resources-missing`). next-intl throws
   // for missing keys, so a backend that ships a new status before the frontend
@@ -45,22 +44,13 @@ export async function ReleaseHeader({ data }: { data: ReleaseHeaderData }) {
           )}
         </div>
       </div>
-      <div className="text-sm text-muted-foreground">
-        {data.template.name} v{data.template.version} · {data.cluster} / {data.namespace}
-        {data.created_at ? (
-          <>
-            {" · "}
-            {/*
-              t.rich, not string concatenation: Korean puts "배포" after the
-              time and English puts "deployed" before it, so the word order
-              has to live in the message, not in the JSX (#40).
-            */}
-            {tm.rich("deployedAt", {
-              time: () => <RelativeTime iso={data.created_at!} />,
-            })}
-          </>
-        ) : null}
-      </div>
+      <ReleaseMeta
+        template={data.template.name}
+        version={data.template.version}
+        cluster={data.cluster}
+        namespace={data.namespace}
+        createdAt={data.created_at}
+      />
     </header>
   );
 }
