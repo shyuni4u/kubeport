@@ -97,7 +97,10 @@ async function proxy(
       signal: req.signal,
     });
   } catch (e) {
-    if (e instanceof Error && e.name === "AbortError") {
+    // A client that hangs up while its body is still being read surfaces as
+    // ECONNRESET from the body stream, not AbortError — but req.signal is
+    // aborted either way, and it is not the API being down.
+    if (req.signal.aborted || (e instanceof Error && e.name === "AbortError")) {
       // 499 is nginx's non-standard "client closed request" and has no body,
       // so the id can only travel as a header.
       return new NextResponse(null, { status: 499, headers: { "X-Request-Id": requestId } });

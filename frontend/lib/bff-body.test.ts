@@ -59,6 +59,13 @@ describe("readBoundedBody", () => {
     expect(cancelled()).toBe(true);
   });
 
+  it("fills a declared-length body into one buffer of that size", async () => {
+    const { req } = streamed([4, 3], { "content-length": "7" });
+    const out = (await readBoundedBody(req, 10)) as Uint8Array;
+    expect(out.byteLength).toBe(7);
+    expect(out.buffer.byteLength).toBe(7);
+  });
+
   it("does not trust an understated Content-Length", async () => {
     const { req } = streamed([6, 6], { "content-length": "5" });
     expect(await readBoundedBody(req, 10)).toBe("too-large");

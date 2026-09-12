@@ -136,6 +136,34 @@ describe("BFF proxy — body cap", () => {
     expect(new TextDecoder().decode(sent)).toBe('{"name":"web"}');
   });
 
+  // A client hanging up mid-upload errors the body stream (ECONNRESET), not
+  // fetch. That is the caller leaving, and must not be logged as the API down.
+  it("answers 499 when the client goes away while its body is being read", async () => {
+    const aborter = new AbortController();
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        aborter.abort();
+        controller.error(Object.assign(new Error("aborted"), { code: "ECONNRESET" }));
+      },
+    });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(
+      new NextRequest(new URL("https://kubeport.enzo.kr/api/v1/templates/preview"), {
+        method: "POST",
+        body,
+        signal: aborter.signal,
+        duplex: "half",
+      } as ConstructorParameters<typeof NextRequest>[1]),
+      { params: Promise.resolve({ path: ["templates", "preview"] }) },
+    );
+
+    expect(res.status).toBe(499);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(errorLog).not.toHaveBeenCalled();
+    errorLog.mockRestore();
+  });
+
   // Order matters for the machine-client contract: through the BFF, no session
   // is 401 whatever the size, and nothing of the body is read to find that out.
   it("still answers 401 first to a caller without a session", async () => {

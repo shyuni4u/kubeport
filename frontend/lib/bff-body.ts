@@ -16,28 +16,52 @@ export const PAYLOAD_TOO_LARGE_DETAIL = "request body exceeds 4 MiB";
 /**
  * Reads a request body, refusing it once it is known to exceed `max` bytes:
  * up front when `Content-Length` says so, otherwise the moment the running
- * count passes it — so at most `max` bytes plus one chunk are ever held.
- * A body of exactly `max` bytes is accepted, matching http.MaxBytesReader.
+ * count passes it. A body of exactly `max` bytes is accepted, matching
+ * http.MaxBytesReader.
+ *
+ * Memory held per request: with a `Content-Length` (what browsers and fetch
+ * send) the buffer is allocated once at that size and chunks are copied
+ * straight in, so at most `max` bytes. A body of unknown length is collected
+ * in chunks and joined at the end, so up to 2×`max` transiently.
  */
 export async function readBoundedBody(
   req: Pick<Request, "headers" | "body">,
   max: number = MAX_REQUEST_BODY,
 ): Promise<Uint8Array<ArrayBuffer> | "too-large"> {
-  const declared = Number(req.headers.get("content-length") ?? "");
+  const header = req.headers.get("content-length");
+  const declared = header === null ? NaN : Number(header);
   if (Number.isFinite(declared) && declared > max) return "too-large";
   if (!req.body) return new Uint8Array(0);
 
   const reader = req.body.getReader();
+  const refuse = async () => {
+    await reader.cancel().catch(() => {});
+    return "too-large" as const;
+  };
+
+  if (Number.isInteger(declared) && declared >= 0) {
+    // Node's parser hands over exactly Content-Length bytes, so a body longer
+    // than it declared does not reach here; if one ever did, it is refused
+    // rather than trusted past the buffer.
+    const out = new Uint8Array(declared);
+    let offset = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (offset + value.byteLength > declared) return refuse();
+      out.set(value, offset);
+      offset += value.byteLength;
+    }
+    return offset === declared ? out : out.slice(0, offset);
+  }
+
   const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > max) {
-      await reader.cancel().catch(() => {});
-      return "too-large";
-    }
+    if (total > max) return refuse();
     chunks.push(value);
   }
   const out = new Uint8Array(total);
