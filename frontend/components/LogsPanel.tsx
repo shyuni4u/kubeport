@@ -299,7 +299,15 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
         return [...trimmed, next];
       });
     };
+    // Whether this stream's log frames carried SSE ids. The server gives one to
+    // every stamped line it can resume from — a named instance's time, or on
+    // `all` a cursor holding each pod's own position (#172) — and the browser
+    // hands the last one back as Last-Event-ID when it reconnects. So this is
+    // what says whether a reconnect resumes or replays, and only a replay needs
+    // the pane emptied first (onopen, below).
+    let carriedIds = false;
     es.addEventListener("log", (e: MessageEvent) => {
+      if (e.lastEventId) carriedIds = true;
       try {
         const data = JSON.parse(e.data) as { time: number; pod: string; text: string };
         append({ ...data, kind: "log" });
@@ -342,8 +350,8 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
     // The server saying it is done. This is the only way to know: WHATWG gives
     // EventSource no way to tell a finished stream from a dropped one, so
     // without this frame the browser reopens on its own 3s timer, forever —
-    // and on `instance=all`, which has no resume point, is served the whole
-    // container log every round (#157, #162).
+    // and a stream with no resume point is served the whole container log
+    // every round (#157, #162).
     es.addEventListener("end", () => {
       es.close();
       setTerminated(lastError ?? {});
@@ -361,15 +369,16 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
       // rbac-denied that has since been granted still hiding the Reconnect
       // button.
       lastError = null;
-      // On `all` the reconnect cannot resume — the backend emits no ids there
-      // (one cursor cannot stand for several pods, #172) — so it replays the
-      // container log from the top into a pane the browser does not clear.
-      // That was #107's duplicate pile-up, and `all` is the default view, so
-      // resuming only named instances left the symptom where most readers are.
-      // Clearing here is the same trade the Reconnect button makes (#46): the
-      // replay brings every line straight back, minus scrollback past LINE_CAP.
-      // A named instance resumes instead, so its pane is kept.
-      if (opened && instance === "all") setLines([]);
+      // A reconnect hands the server the last id this stream carried, and the
+      // server resumes from it: a named instance from its time, `all` from each
+      // pod's own position (#172). It sends only what came after, so the pane
+      // is kept. A stream whose frames carried no ids — nothing stamped yet, or
+      // more pods than the cursor covers — replays the container log from the
+      // top instead, into a pane the browser does not clear. That was #107's
+      // duplicate pile-up, so that case alone is emptied first: the same trade
+      // the Reconnect button makes (#46), the replay bringing every line
+      // straight back, minus scrollback past LINE_CAP.
+      if (opened && !carriedIds) setLines([]);
       opened = true;
       setStatus("connected");
     };

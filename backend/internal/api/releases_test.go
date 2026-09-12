@@ -48,11 +48,18 @@ type fakeK8sApplier struct {
 	// around a resume point; it wins over logLineAt when set.
 	logLineAt  time.Time
 	logLineAts []time.Time
+	// logLinePods names the pod each line comes from, for `instance=all`
+	// streams that follow several pods (#172). A line with no entry comes from
+	// the first pod the handler asked for.
+	logLinePods []string
 
-	// sinceSeen records the resume point the handler passed down, so a test can
-	// tell "asked the cluster for a window" from "asked for everything". nil
-	// means StreamLogs was called with a zero time.
-	sinceSeen *time.Time
+	// sinceByPod records where the handler asked each pod to pick up (#172);
+	// nil means it asked for everything. sinceSeen is the one-pod shorthand
+	// most tests want: the single resume point passed down, or nil when there
+	// was none. It tells "asked the cluster for a window" from "asked for
+	// everything".
+	sinceByPod map[string]time.Time
+	sinceSeen  *time.Time
 
 	// streamStarted, when set, receives a value as soon as StreamLogs is called
 	// — that is, once the handler has passed every check and is committed to
@@ -164,10 +171,27 @@ func (f *fakeK8sApplier) ListInstances(ctx context.Context, _ k8s.ReleaseRef) ([
 	return f.instances, nil
 }
 
-func (f *fakeK8sApplier) StreamLogs(ctx context.Context, _ string, _ []string, since time.Time) (<-chan k8s.LogLine, <-chan error) {
-	if !since.IsZero() {
-		s := since
+func (f *fakeK8sApplier) StreamLogs(ctx context.Context, _ string, pods []string, since map[string]time.Time) (<-chan k8s.LogLine, <-chan error) {
+	for pod, at := range since {
+		if at.IsZero() {
+			continue
+		}
+		if f.sinceByPod == nil {
+			f.sinceByPod = map[string]time.Time{}
+		}
+		f.sinceByPod[pod] = at
+		s := at
 		f.sinceSeen = &s
+	}
+	firstPod := "web-7d9f8-x2k4l"
+	if len(pods) > 0 {
+		firstPod = pods[0]
+	}
+	podOf := func(i int) string {
+		if i < len(f.logLinePods) {
+			return f.logLinePods[i]
+		}
+		return firstPod
 	}
 	if f.streamStarted != nil {
 		select {
@@ -195,7 +219,7 @@ func (f *fakeK8sApplier) StreamLogs(ctx context.Context, _ string, _ []string, s
 					select {
 					case <-ctx.Done():
 						return
-					case ch <- k8s.LogLine{Pod: "web-7d9f8-x2k4l", Text: text}:
+					case ch <- k8s.LogLine{Pod: firstPod, Text: text}:
 					}
 				}
 			}
@@ -208,7 +232,7 @@ func (f *fakeK8sApplier) StreamLogs(ctx context.Context, _ string, _ []string, s
 			select {
 			case <-ctx.Done():
 				return
-			case ch <- k8s.LogLine{Pod: "web-7d9f8-x2k4l", Text: text, At: at}:
+			case ch <- k8s.LogLine{Pod: podOf(i), Text: text, At: at}:
 			}
 		}
 		if len(f.logLines) > 0 {

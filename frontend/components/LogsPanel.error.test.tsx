@@ -81,11 +81,16 @@ function reopen() {
   });
 }
 
-/** One log line from the given pod. */
-function emitLog(pod: string, text: string) {
+/**
+ * One log line from the given pod. `id` is the frame's SSE id, which a browser
+ * exposes as `lastEventId`: the server sets one on every line it can resume
+ * from, so a frame without it is one a reconnect would replay.
+ */
+function emitLog(pod: string, text: string, id = "") {
   act(() => {
     listeners.get("log")?.({
       data: JSON.stringify({ time: Date.now(), pod, text }),
+      lastEventId: id,
     } as MessageEvent);
   });
 }
@@ -356,14 +361,16 @@ describe("LogsPanel in-stream termination", () => {
   });
 });
 
-// #107 in the view most readers actually use. The backend resumes a named
-// instance from Last-Event-ID, but `instance=all` — the default — emits no ids,
-// because one cursor cannot stand for several pods. So a browser reconnect on
-// `all` replays the container log from the top, and without this the replay
-// piled onto the lines already on screen: every one of them twice, then three
-// times, with each network hiccup.
+// #107 in the view most readers actually use. A browser reconnect hands the
+// server the last SSE id the stream carried. When there was one the server
+// resumes — a named instance from its time, `all` from a cursor holding each
+// pod's own position (#172) — and sends only what came after. When the frames
+// carried none (nothing stamped yet, or more pods than the cursor covers) it
+// replays the container log from the top, and without clearing first that
+// replay piled onto the lines already on screen: every one of them twice, then
+// three times, with each network hiccup.
 describe("LogsPanel browser reconnect", () => {
-  it("clears the pane before an `all` stream replays", () => {
+  it("clears the pane before a stream that carried no ids replays", () => {
     render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
 
     reopen();
@@ -394,10 +401,25 @@ describe("LogsPanel browser reconnect", () => {
     render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} initialInstance="p1" />);
 
     reopen();
-    emitLog("p1", "before the drop");
+    emitLog("p1", "before the drop", "2026-09-09T07:36:36.000000000Z");
     dropConnection();
     reopen();
 
     expect(screen.getByText(/before the drop/)).toBeInTheDocument();
+  });
+
+  // `all` resumes too once its frames carry a per-pod cursor (#172). Clearing
+  // there was the workaround for a replay that no longer happens.
+  it("keeps the pane on `all` when its frames carried a cursor", () => {
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }, { name: "p2" }]} />);
+
+    reopen();
+    emitLog("p1", "p1 before the drop", "p1@2026-09-09T07:36:36.000000000Z");
+    emitLog("p2", "p2 before the drop", "p1@2026-09-09T07:36:36.000000000Z,p2@2026-09-09T07:36:37.000000000Z");
+    dropConnection();
+    reopen();
+
+    expect(screen.getByText(/p1 before the drop/)).toBeInTheDocument();
+    expect(screen.getByText(/p2 before the drop/)).toBeInTheDocument();
   });
 });

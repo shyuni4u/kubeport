@@ -1298,7 +1298,7 @@ paths:
 
         | event | data |
         |---|---|
-        | `log`   | `{"time": <unix ms>, "pod": "<name>", "text": "<line>"}`. `time` is when the container wrote the line, from the kubelet's own stamp — not when the server forwarded it (#131); replayed history carries past times, and under `instance=all` frame order and `time` order can differ, so do not read `time` as progress. **On a named-instance stream**, a stamped line also carries an SSE `id:` — the same instant, always UTC with exactly nine fractional digits (`2026-09-09T07:36:36.120000000Z`), so ids sort as strings in time order. That is the resume point below |
+        | `log`   | `{"time": <unix ms>, "pod": "<name>", "text": "<line>"}`. `time` is when the container wrote the line, from the kubelet's own stamp — not when the server forwarded it (#131); replayed history carries past times, and under `instance=all` frame order and `time` order can differ, so do not read `time` as progress. A stamped line also carries an SSE `id:`, the resume point below. **On a named-instance stream** it is the line's instant, always UTC with exactly nine fractional digits (`2026-09-09T07:36:36.120000000Z`), so ids sort as strings in time order. **On an `instance=all` stream** it is a per-pod cursor: `pod@instant` for every pod the stream has a position for, sorted by pod and comma-joined, each instant in that same form (`web-1@2026-09-09T07:36:36.120000000Z,web-2@2026-09-09T07:35:00.900000000Z`). Hand a cursor back whole, the last one received; do not compare cursors as strings |
         | `ping`  | unix seconds, every 15s to keep the connection open |
         | `error` | a `Problem`, same schema and same `ErrorKind` vocabulary as any other error. `title` is `rbac-denied` (403, the caller may read the release but not its pods' logs — permanent), `cluster-auth-denied` (502, the cluster refused the forwarded token — permanent), or `k8s-error` (502, transport or anything else — retryable) |
         | `end`   | `{"reason": "all pods stopped emitting"}` — a fixed string. The stream is over; the server closes immediately after. Always the last frame a client receives |
@@ -1336,29 +1336,35 @@ paths:
         are the ones where the client has already gone, so its absence never
         means "finished, quietly".
 
-        **Reopening resumes rather than replays — when following one instance.**
-        On a single-instance stream each `log` frame carries an SSE `id:`, so a
-        standard `EventSource` sends the last one back as `Last-Event-ID` on its
-        automatic reconnect and picks up where it left off: no client code, and
-        no duplicates in a pane the browser does not clear (#107). A caller with
-        no `EventSource` keeping track for it can pass the same instant as
-        `?since=`, which wins if both are present.
+        **Reopening resumes rather than replays.** Each stamped `log` frame
+        carries an SSE `id:`, so a standard `EventSource` sends the last one back
+        as `Last-Event-ID` on its automatic reconnect and picks up where it left
+        off: no client code, and no duplicates in a pane the browser does not
+        clear (#107). A caller with no `EventSource` keeping track for it passes
+        the same value as `?since=`, which wins if both are present.
 
-        **`instance=all` emits no ids and ignores a resume point**, so it
-        replays from the beginning as it always did — including when it happens
-        to match a single pod, because which pods it covers is not fixed. One
+        **A named instance resumes from one instant.** The name is in the
+        request, so it means the same pod on every reconnect, and if that pod is
+        gone the answer is `404 no-pods` rather than a different pod inheriting
+        its position.
+
+        **`instance=all` resumes each pod from its own position** (#172). One
         instant cannot stand for progress through a set: pods are followed
-        concurrently and merged without ordering, so the newest id belongs to
+        concurrently and merged without ordering, so the newest line belongs to
         whichever wrote last, and resuming every pod from it would skip —
-        silently and for good — whatever a slower one had not reached. Nor can
-        it survive the set changing: a single-replica release that rolls over
-        would hand the cursor of the pod that left to the pod that replaced it.
-        Resending lines is the lesser cost. A per-pod cursor is tracked as #172.
+        silently and for good — whatever a slower one had not reached. So the id
+        is a cursor holding every pod's position, and on reconnect each pod picks
+        up from its own. The set can change between connections: a pod the
+        cursor does not name — one that started since — is sent from the
+        beginning, and a position for a pod that is gone is dropped rather than
+        handed to the pod that replaced it. For the same reason a plain instant
+        in `?since=` on an `all` stream is `400 validation-error`, and a plain
+        instant in `Last-Event-ID` there (left over from a single-instance stream
+        on the same `EventSource`) is ignored.
 
-        Naming an instance is what makes a stream resumable, because the name is
-        in the request: it means the same pod on every reconnect, and if that pod
-        is gone the answer is `404 no-pods` rather than a different pod
-        inheriting its position.
+        The cursor rides on every frame, so it is bounded: past 8 pods an `all`
+        stream carries no ids and ignores a cursor, replaying from the beginning
+        as before. Resending lines is the lesser cost.
 
         A line the kubelet could not stamp carries no id either. Its `time` is
         the server's clock so the row has something to render, and letting that
@@ -1399,7 +1405,8 @@ paths:
         permission or an expired session went on receiving logs for as long as
         the tab stayed open. Treat it like any drop: reconnect. A browser does
         so on its own, through a refreshed token and a new authorization; a
-        named instance resumes from its cursor and `instance=all` replays.
+        named instance resumes from its instant and `instance=all` from its
+        per-pod cursor (replaying only past the cursor's pod bound).
 
         A caller may also hold only so many streams open at once (16 by
         default, which an install can change); past that, opening another is
@@ -1414,21 +1421,25 @@ paths:
           in: query
           required: false
           description: |
-            Resume point: an RFC3339 instant, normally the `id:` of the last
-            `log` frame received. Lines at or before it are not sent. Omit to
-            get the container log from the beginning.
+            Resume point, normally the `id:` of the last `log` frame received.
+            Lines at or before it are not sent. Omit to get the container log
+            from the beginning.
+
+            Its shape follows `instance`. On a named instance it is an RFC3339
+            instant. On `instance=all` — the default — it is the per-pod cursor
+            that stream's frames carry: `pod@instant` pairs joined by commas
+            (at most 8), each pod resuming from its own instant (#172). A pod
+            the cursor does not name is sent from the beginning.
 
             A browser does not need this — its `EventSource` sends
             `Last-Event-ID` by itself. This parameter is for callers that do
             not, and it takes precedence over that header when both are given.
 
-            **Requires a named `instance`.** With `instance=all` — the default —
-            an explicit `since` is `400 validation-error` rather than silently
-            ignored: a 200 carrying the whole log would look like a working
-            resume while every reconnect duplicated. (`Last-Event-ID` on an
-            `all` stream is still ignored, not refused — the browser keeps it
-            across an instance switch.) See the description above for why `all`
-            cannot resume.
+            A plain instant with `instance=all` is `400 validation-error`
+            rather than silently applied to every pod: that is the resume that
+            skips whatever a slower pod had not reached. (A plain instant in
+            `Last-Event-ID` on an `all` stream is ignored, not refused — the
+            browser keeps it across an instance switch.)
 
             An unparseable `since` is `400 validation-error`: the caller wrote
             it, and a 200 with the whole log would let them keep sending it.
@@ -1437,7 +1448,8 @@ paths:
             browser re-attaches it on every automatic reconnect and nothing on
             the page can clear it, so refusing it would leave the tab with a log
             pane that fails on every reconnect until reloaded.
-          schema: { type: string, format: date-time }
+          # Not `format: date-time`: on `instance=all` it is a per-pod cursor.
+          schema: { type: string }
       responses:
         "200":
           description: Stream opened.
