@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 // Warns before leaving while the editor holds unsaved edits:
 //  - tab close / reload / hard navigation → native beforeunload prompt
@@ -39,25 +39,44 @@ export function useBeforeUnloadWhenDirty(dirty: boolean, leaveMessage?: string) 
 }
 
 /**
+ * JSON with object keys sorted, so two states with the same content serialize
+ * the same. Clearing a field and setting it again moves its key to the end of
+ * the fields object; plain JSON.stringify then called the undone edit a change.
+ */
+export function stableStringify(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(
+          Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+        )
+      : v,
+  );
+}
+
+/**
  * Settles `dirty` against what the editor started from, so undoing an edit
  * clears it (#274). Before, every edit handler set dirty and nothing ever
  * compared the text with the loaded one: type a line, delete it, and the
  * "저장하지 않은 변경 사항이 있습니다" mark and the leave prompt both stayed.
  *
- * `snapshot` is a string of everything a save would send, or null while the
- * editor is still loading; the first non-null value is the baseline. Edit
- * handlers may still mark dirty at once — this runs after the commit and puts
- * it back to "differs from the baseline", including when a handler fired
- * without changing anything (re-picking the same team).
+ * `snapshot` is a string of everything a save would send (build it with
+ * stableStringify), or null until the editor has finished loading — every
+ * part of it, so the baseline is never the placeholder of a part still in
+ * flight. The first non-null value is the baseline. Edit handlers may still
+ * mark dirty at once; this runs after the commit and puts it back to "differs
+ * from the baseline", including when a handler fired without changing anything
+ * (re-picking the same team).
  *
- * A successful save navigates away, and a mode switch remounts the editor,
- * which starts a new baseline; neither needs to move this one.
+ * Returns `markSaved`: call it where a save succeeds, instead of onDirty(false).
+ * It moves the baseline to the state that was sent, so the effect does not
+ * set dirty again while the page navigates away. A mode switch remounts the
+ * editor, which starts a new baseline on its own.
  */
 export function useDirtyAgainstBaseline(
   snapshot: string | null,
   dirty: boolean,
   onDirty: (dirty: boolean) => void,
-) {
+): () => void {
   const baseline = useRef<string | null>(null);
   useEffect(() => {
     if (snapshot === null) return;
@@ -65,6 +84,12 @@ export function useDirtyAgainstBaseline(
     const differs = snapshot !== baseline.current;
     if (differs !== dirty) onDirty(differs);
   }, [snapshot, dirty, onDirty]);
+  // Captures the snapshot of the render the save started from: that is what
+  // was sent, and an edit typed while the request was out stays dirty.
+  return useCallback(() => {
+    if (snapshot !== null) baseline.current = snapshot;
+    onDirty(false);
+  }, [snapshot, onDirty]);
 }
 
 // Returns the ui-spec path of the first exposed field whose label is blank,

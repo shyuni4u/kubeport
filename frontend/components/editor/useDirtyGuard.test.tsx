@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { useDirtyAgainstBaseline } from "./useDirtyGuard";
+import { stableStringify, useDirtyAgainstBaseline } from "./useDirtyGuard";
 
 // A stand-in editor: `text` is what a save would send, `dirty` is the page's
 // flag, and each button is an edit handler — setting the text and marking
@@ -9,7 +9,7 @@ import { useDirtyAgainstBaseline } from "./useDirtyGuard";
 function Editor({ initial }: { initial: string | null }) {
   const [text, setText] = useState<string | null>(initial);
   const [dirty, setDirty] = useState(false);
-  useDirtyAgainstBaseline(text, dirty, setDirty);
+  const markSaved = useDirtyAgainstBaseline(text, dirty, setDirty);
   const edit = (next: string) => () => {
     setText(next);
     setDirty(true);
@@ -23,6 +23,7 @@ function Editor({ initial }: { initial: string | null }) {
       <button onClick={edit("loaded")}>set loaded</button>
       <button onClick={edit("loaded + edit")}>set loaded + edit</button>
       <button onClick={() => setDirty(true)}>touch only</button>
+      <button onClick={markSaved}>saved</button>
     </>
   );
 }
@@ -58,5 +59,31 @@ describe("useDirtyAgainstBaseline", () => {
     expect(dirty()).toBe("true");
     press("set loaded");
     expect(dirty()).toBe("false");
+  });
+
+  // A save clears the mark and navigates away. Without moving the baseline the
+  // effect saw "differs from the original" and set dirty again meanwhile.
+  it("stays clean after a save, and measures later edits from what was saved", () => {
+    render(<Editor initial="a" />);
+    press("set ab");
+    press("saved");
+    expect(dirty()).toBe("false");
+    press("set a");
+    expect(dirty()).toBe("true");
+    press("set ab");
+    expect(dirty()).toBe("false");
+  });
+});
+
+describe("stableStringify", () => {
+  // Clearing a field and setting it again moves its key to the end.
+  it("serializes the same content the same whatever order its keys were set in", () => {
+    const before = { fields: { a: 1, b: { mode: "fixed", value: 2 } }, name: "web" };
+    const after = { name: "web", fields: { b: { value: 2, mode: "fixed" }, a: 1 } };
+    expect(stableStringify(after)).toBe(stableStringify(before));
+  });
+
+  it("keeps array order, which is content", () => {
+    expect(stableStringify({ tags: ["a", "b"] })).not.toBe(stableStringify({ tags: ["b", "a"] }));
   });
 });

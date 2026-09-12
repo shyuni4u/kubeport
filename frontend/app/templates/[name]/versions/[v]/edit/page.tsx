@@ -11,7 +11,7 @@ import { EditorLayout } from "@/components/editor/EditorLayout";
 import { MetaRow, TemplateMeta } from "@/components/editor/MetaRow";
 import { BottomBar, UnsavedChangesStatus } from "@/components/editor/BottomBar";
 import { saveErrorMessage } from "@/components/editor/saveError";
-import { findUnlabelledExposedField, useBeforeUnloadWhenDirty, useDirtyAgainstBaseline } from "@/components/editor/useDirtyGuard";
+import { findUnlabelledExposedField, stableStringify, useBeforeUnloadWhenDirty, useDirtyAgainstBaseline } from "@/components/editor/useDirtyGuard";
 import { YamlEditor } from "@/components/YamlEditor";
 import { useTemplateYamlValidation } from "@/components/editor/useTemplateYamlValidation";
 import { YamlIssueList, useSaveBlockedReason } from "@/components/editor/YamlIssues";
@@ -185,6 +185,9 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
         }
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
+      } finally {
+        // The dirty baseline waits for this, not for `state` alone (#274).
+        setLoadDone(true);
       }
     })();
   }, [name, v]);
@@ -211,10 +214,22 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
 
   const uiStateSynthetic = useMemo<UIModeTemplate | null>(() => state, [state]);
   const touch = () => onDirty(true);
-  // Everything a save sends, null until the version has loaded, so undoing an
-  // edit clears the mark (#274).
-  const snapshot = useMemo(() => (state ? JSON.stringify({ state, meta }) : null), [state, meta]);
-  useDirtyAgainstBaseline(snapshot, dirty, onDirty);
+  // Everything a save sends, so undoing an edit clears the mark (#274). Null
+  // until the whole load has settled: the version renders before the
+  // template's metadata arrives, and a baseline taken in between would count
+  // the loaded metadata as an edit.
+  const [loadDone, setLoadDone] = useState(false);
+  const snapshot = useMemo(
+    () =>
+      state && loadDone
+        ? stableStringify({
+            state,
+            meta: { name: meta.name, display_name: meta.display_name ?? "", tags: meta.tags },
+          })
+        : null,
+    [state, loadDone, meta],
+  );
+  const markSaved = useDirtyAgainstBaseline(snapshot, dirty, onDirty);
 
   function pickCluster(next: string) {
     setCluster(next);
@@ -293,7 +308,7 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
         body: JSON.stringify(req.body),
       });
       if (!res.ok) { setErr(await saveErrorMessage(t, res)); return; }
-      onDirty(false);
+      markSaved();
       router.push(`/templates/${name}`);
     } finally {
       setSaving(false);
@@ -493,10 +508,10 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
   // The two files a save sends, null until the version has loaded, so undoing
   // an edit clears the mark (#274).
   const snapshot = useMemo(
-    () => (loaded ? JSON.stringify([resourcesYaml, uispecYaml]) : null),
+    () => (loaded ? stableStringify([resourcesYaml, uispecYaml]) : null),
     [loaded, resourcesYaml, uispecYaml],
   );
-  useDirtyAgainstBaseline(snapshot, dirty, onDirty);
+  const markSaved = useDirtyAgainstBaseline(snapshot, dirty, onDirty);
 
   const isDraft = status === "draft";
   // UI-authored drafts can't be PATCHed with yaml payloads — the backend
@@ -534,7 +549,7 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
         body: JSON.stringify(req.body),
       });
       if (!res.ok) { setErr(await saveErrorMessage(t, res)); return; }
-      onDirty(false);
+      markSaved();
       router.push(`/templates/${name}`);
     } finally {
       setSaving(false);
