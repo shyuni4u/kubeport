@@ -14,12 +14,21 @@ check() { # check <label> <command...>
 log "repo: $ROOT"
 for t in docker kind kubectl atlas go node pnpm curl openssl; do check "tool $t" command -v "$t"; done
 
-# The entry must say 127.0.0.1, not merely exist: dex is published on loopback
-# only (#63), and Docker Desktop's own entry is the LAN IP (#298).
+# The entry must say 127.0.0.1, not merely exist: dex is published on 127.0.0.1
+# by default (#63), and Docker Desktop's own entry is the LAN IP (#298). A dex
+# published on every interface (KBP_DEX_BIND=0.0.0.0, a kind apiserver on native
+# Linux — docs/local-e2e.md §4) answers another address too, so there it is a
+# note rather than a failure. The address itself is not printed: it can be a
+# public IP, and this output gets pasted into issues.
 hdi_ip="$(hosts_file_ip host.docker.internal "${HOSTS_FILES[@]}")"
-check "hosts entry host.docker.internal → 127.0.0.1" reaches_dex_ip "$hdi_ip"
-if [[ -n "$hdi_ip" ]] && ! reaches_dex_ip "$hdi_ip"; then
-  warn "        host.docker.internal is $hdi_ip in the hosts file — set it to 127.0.0.1 (docs/local-e2e.md §1)"
+dex_ports="$(docker ps --filter name=dex --format '{{.Ports}}' 2>/dev/null || true)"
+if reaches_dex_ip "$hdi_ip"; then
+  log "ok   hosts entry host.docker.internal → 127.0.0.1"
+elif [[ -n "$hdi_ip" && -n "$dex_ports" && "$dex_ports" != *127.0.0.1:5556* ]]; then
+  warn "note hosts entry host.docker.internal is not 127.0.0.1 — it works only because dex is published beyond loopback; set it to 127.0.0.1 (docs/local-e2e.md §1)"
+else
+  warn "MISSING hosts entry host.docker.internal → 127.0.0.1 ($([[ -n "$hdi_ip" ]] && printf 'it has another address' || printf 'there is none')) — docs/local-e2e.md §1"
+  ok=0
 fi
 check "dex cert $DEX_CRT" test -f "$DEX_CRT"
 check "frontend/.env.local" test -f "$ENV_LOCAL"

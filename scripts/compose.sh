@@ -63,12 +63,13 @@ case "${1:-}" in
     # Host processes reach dex as host.docker.internal (dex.yaml's issuer)
     # through the hosts file. A loopback publish does not answer the LAN IP
     # Docker Desktop writes for that name, so the backend and go test would
-    # time out on it (#298). Warn only; the hosts file is the user's to edit.
-    if [[ -z "$bind" || "$bind" == "127.0.0.1" ]]; then
-      hdi="$(hosts_file_ip host.docker.internal "${HOSTS_FILES[@]}")"
-      if [[ -n "$hdi" ]] && ! reaches_dex_ip "$hdi"; then
-        say "WARNING: the hosts file maps host.docker.internal to $hdi, where dex on 127.0.0.1:5556 does not answer — set that entry to 127.0.0.1 (docs/local-e2e.md §1, #298)"
-      fi
+    # time out on it (#298). Checked whatever the binding: KBP_DEX_BIND=0.0.0.0
+    # also makes a wrong entry work — by opening dex to the network — and must
+    # not become the way this warning goes away. Warn only; the hosts file is
+    # the user's to edit, and its address is not echoed (it can be a public IP).
+    hdi="$(hosts_file_ip host.docker.internal "${HOSTS_FILES[@]}")"
+    if [[ -n "$hdi" ]] && ! reaches_dex_ip "$hdi"; then
+      say "WARNING: the hosts file does not map host.docker.internal to 127.0.0.1 — set that entry to 127.0.0.1 (docs/local-e2e.md §1, #298). Do not work around it with KBP_DEX_BIND=0.0.0.0: that republishes dex's public passwords to your network (#63)"
     fi
     ;;
 esac

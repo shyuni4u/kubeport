@@ -7,13 +7,20 @@
 # Docker Desktop's own entry is the machine's LAN IP, which a loopback publish
 # does not answer, and it goes stale when the LAN IP changes (#298).
 
-# HOSTS_FILES — where a host process looks the name up. Windows' file first:
-# native tools under Git Bash (curl, go, node) use it, not MSYS's /etc/hosts.
-# On Linux, macOS and WSL the Windows path does not exist and /etc/hosts is it.
-HOSTS_FILES=(/c/Windows/System32/drivers/etc/hosts /etc/hosts)
+# HOSTS_FILES — the file a host process really reads. Under Git Bash that is
+# Windows' own: native tools (curl, go, node) use it, and MSYS's /etc/hosts is a
+# separate copy Git for Windows ships, which they never read. On Linux, macOS
+# and WSL it is /etc/hosts.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) HOSTS_FILES=(/c/Windows/System32/drivers/etc/hosts) ;;
+  *) HOSTS_FILES=(/etc/hosts) ;;
+esac
 
-# hosts_file_ip <name> <file>... — the address the first uncommented line
-# naming <name> maps it to, searching the files in order. Empty when none does.
+# hosts_file_ip <name> <file>... — 127.0.0.1 when any uncommented line maps
+# <name> to it, otherwise the address of the first line that maps <name>, from
+# the first file that has one. Empty when none does. A UTF-8 BOM (Notepad) and
+# CRLF are ignored. Resolvers fall back to the next entry when one refuses, so
+# `::1 name` above `127.0.0.1 name` still reaches dex.
 # awk reads to the end rather than exiting early, so `tr` never meets a closed
 # pipe — callers run under `set -o pipefail`.
 hosts_file_ip() {
@@ -22,8 +29,16 @@ hosts_file_ip() {
   for f in "$@"; do
     [[ -r "$f" ]] || continue
     ip="$(tr -d '\r' < "$f" | awk -v n="$name" '
+      NR == 1 { sub(/^\357\273\277/, "") }
       { sub(/#.*/, "") }
-      !found && NF >= 2 { for (i = 2; i <= NF; i++) if (tolower($i) == tolower(n)) { print $1; found = 1; break } }')"
+      NF >= 2 {
+        for (i = 2; i <= NF; i++) if (tolower($i) == tolower(n)) {
+          if (first == "") first = $1
+          if ($1 == "127.0.0.1") ok = 1
+          break
+        }
+      }
+      END { if (ok) print "127.0.0.1"; else if (first != "") print first }')"
     if [[ -n "$ip" ]]; then
       printf '%s' "$ip"
       return 0
