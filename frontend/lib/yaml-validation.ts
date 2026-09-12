@@ -12,8 +12,12 @@
 // block save. Each kind of error below was run through the real backend.
 //
 //   error    An unclosed `[` or `{` ("did not find expected ',' or ']'").
-//            A key repeated in one mapping, compared as yaml.v3 compares keys —
-//            by text, so `a` and "a" collide while `0x1` and `1` do not.
+//            A key repeated in a mapping yaml.v3 decodes, compared as it compares
+//            keys — by text, so `a` and "a" collide while `0x1` and `1` do not.
+//            That is every mapping in resources.yaml, but in ui-spec.yaml only
+//            the root, the field entries (merge sources included) and the values
+//            of their known keys. An unknown key's value is never decoded, so a
+//            repeat inside one is a warning.
 //            A resource document that is not a mapping; a ui-spec that is not
 //            `fields: [mapping…]`; an unknown field type; a blank label; a path
 //            that does not parse, is not canonical, selects a whole resource or
@@ -291,7 +295,11 @@ function keyText(key: unknown, text: string): string | null {
   return null;
 }
 
-function duplicateKeyIssues(doc: Document.Parsed, text: string, out: Collector): boolean {
+/**
+ * Repeated keys. `decoded` is the set of mappings yaml.v3 decodes, where a
+ * repeat is refused; null means all of them. A repeat anywhere else warns.
+ */
+function duplicateKeyIssues(doc: Document.Parsed, text: string, out: Collector, decoded: Set<unknown> | null): boolean {
   let visits = 0;
   let found = false;
   visit(doc, (_key, node) => {
@@ -302,8 +310,9 @@ function duplicateKeyIssues(doc: Document.Parsed, text: string, out: Collector):
       const k = keyText(pair.key, text);
       if (k === null) continue;
       if (seen.has(k)) {
-        found = true;
-        out.add("error", "duplicateKey", nodeRange(pair.key, [0, 0]), { key: k });
+        const blocks = decoded === null || decoded.has(node);
+        if (blocks) found = true;
+        out.add(blocks ? "error" : "warning", "duplicateKey", nodeRange(pair.key, [0, 0]), { key: k });
       } else {
         seen.add(k);
       }
@@ -313,11 +322,17 @@ function duplicateKeyIssues(doc: Document.Parsed, text: string, out: Collector):
 }
 
 /** Reports syntax problems; true when the text did not parse cleanly. */
-function syntaxIssues(docs: Document.Parsed[], text: string, out: Collector, firstDocOnly: boolean): boolean {
+function syntaxIssues(
+  docs: Document.Parsed[],
+  text: string,
+  out: Collector,
+  firstDocOnly: boolean,
+  decodedMaps: (doc: Document.Parsed) => Set<unknown> | null = () => null,
+): boolean {
   const unclosed = unclosedFlowIssues(text, out, firstDocOnly);
   let broken = unclosed;
   for (const doc of docs) {
-    if (duplicateKeyIssues(doc, text, out)) broken = true;
+    if (duplicateKeyIssues(doc, text, out, decodedMaps(doc))) broken = true;
   }
   for (const doc of docs) {
     for (const e of doc.errors) {
@@ -513,9 +528,12 @@ interface ResourceDoc {
 function resourceDocs(docs: Document.Parsed[], r: Resolver): ResourceDoc[] | null {
   const list: ResourceDoc[] = [];
   for (let i = 0; i < docs.length; i++) {
-    const contents = docs[i].contents;
-    if (!isMap(contents)) continue;
-    const value = r.use(i).value(contents);
+    // A root may be an alias to a mapping anchored in an earlier document,
+    // which yaml.v3's streaming decoder resolves (measured).
+    const root = r.use(i).deref(docs[i].contents);
+    if (root === UNKNOWN) return null;
+    if (!isMap(root)) continue;
+    const value = r.value(root);
     if (r.exhausted || value === UNKNOWN) return null;
     const obj = value as Record<string, unknown>;
     // parseMultiDoc drops a document that decodes to an empty mapping, which
@@ -533,16 +551,21 @@ function resourceDocs(docs: Document.Parsed[], r: Resolver): ResourceDoc[] | nul
   return list;
 }
 
-function docKind(r: Resolver, doc: Document.Parsed, index: number): { apiVersion: string; kind: string } | null {
-  if (doc.errors.length > 0 || !isMap(doc.contents)) return null;
-  r.use(index);
-  const av = r.get(doc.contents, "apiVersion");
-  const kd = r.get(doc.contents, "kind");
+function docKind(
+  r: Resolver,
+  doc: Document.Parsed,
+  index: number,
+): { apiVersion: string; kind: string; root: YAMLMap } | null {
+  if (doc.errors.length > 0) return null;
+  const root = r.use(index).deref(doc.contents);
+  if (!isMap(root)) return null;
+  const av = r.get(root, "apiVersion");
+  const kd = r.get(root, "kind");
   if (!av || av === UNKNOWN || !kd || kd === UNKNOWN) return null;
   const apiVersion = r.text(av.value);
   const kind = r.text(kd.value);
   if (typeof apiVersion !== "string" || typeof kind !== "string" || !apiVersion || !kind) return null;
-  return { apiVersion, kind };
+  return { apiVersion, kind, root };
 }
 
 /** apiVersion/kind of each mapping document, for the caller to fetch schemas by. */
@@ -558,7 +581,7 @@ export function resourceKinds(resourcesYaml: string): Array<{ apiVersion: string
     const key = `${k.apiVersion}/${k.kind}`;
     if (seen.has(key)) return;
     seen.add(key);
-    out.push(k);
+    out.push({ apiVersion: k.apiVersion, kind: k.kind });
   });
   return out;
 }
@@ -603,7 +626,7 @@ function actualType(node: unknown): string | null {
 
 // Walks the tree as written. Aliased values and merged keys are not followed:
 // these are warnings, and a check that cannot see a value stays quiet about it.
-function schemaIssues(doc: Document.Parsed, schema: SchemaNode, out: Collector) {
+function schemaIssues(root: unknown, schema: SchemaNode, out: Collector) {
   let visits = 0;
   const walk = (node: unknown, s: SchemaNode, path: string, depth: number) => {
     if (out.full || visits++ > MAX_SCHEMA_VISITS || depth > MAX_SCHEMA_DEPTH) return;
@@ -632,7 +655,7 @@ function schemaIssues(doc: Document.Parsed, schema: SchemaNode, out: Collector) 
       node.items.forEach((item, i) => walk(item, s.items!, `${path}[${i}]`, depth + 1));
     }
   };
-  walk(doc.contents, schema, "", 0);
+  walk(root, schema, "", 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -707,6 +730,69 @@ function resolvePath(
     }
   }
   return null;
+}
+
+// The keys of UISpecField (spec.go's Field) — the only entry keys whose
+// values yaml.v3 decodes.
+const UI_FIELD_KEYS = new Set(["path", "label", "help", "type", "min", "max", "pattern", "values", "default", "required"]);
+
+/**
+ * The mappings yaml.v3 decodes when parseSpec reads a ui-spec, which is where a
+ * repeated key is refused.
+ *
+ * It decodes into a struct. A struct's own mapping is checked key by key,
+ * unknown keys included, and so is every merge source folded into it; the
+ * value of a known key is decoded whole (`default` is `any`); the value of an
+ * unknown key is skipped without being looked at. Every case was measured:
+ * `x` twice at the root refuses, `unused: {a: 1, a: 2}` saves.
+ */
+function uiSpecDecodedMaps(doc: Document.Parsed, r: Resolver): Set<unknown> {
+  const decoded = new Set<unknown>();
+  const walked = new Set<unknown>();
+  const structs = new Set<unknown>();
+
+  const whole = (node: unknown, depth: number) => {
+    if (depth > MAX_NESTING) return;
+    const n = r.deref(node);
+    if (!(isMap(n) || isSeq(n)) || walked.has(n)) return;
+    walked.add(n);
+    if (isMap(n)) {
+      decoded.add(n);
+      for (const pair of n.items) whole(pair.value, depth + 1);
+    } else {
+      for (const item of n.items) whole(item, depth + 1);
+    }
+  };
+
+  const struct = (node: unknown, onKey: (key: string, value: unknown, depth: number) => void, depth: number) => {
+    if (depth > MAX_NESTING) return;
+    const n = r.deref(node);
+    if (!isMap(n) || structs.has(n)) return;
+    structs.add(n);
+    decoded.add(n);
+    for (const pair of n.items) {
+      if (isMergeKey(pair.key)) {
+        const src = r.deref(pair.value);
+        for (const source of isSeq(src) ? src.items : [src]) struct(source, onKey, depth + 1);
+        continue;
+      }
+      const key = r.text(pair.key);
+      if (typeof key === "string") onKey(key, pair.value, depth + 1);
+    }
+  };
+
+  const entryKey = (key: string, value: unknown, depth: number) => {
+    if (UI_FIELD_KEYS.has(key)) whole(value, depth);
+  };
+  const rootKey = (key: string, value: unknown, depth: number) => {
+    if (key !== "fields") return;
+    const list = r.deref(value);
+    if (isSeq(list)) for (const item of list.items) struct(item, entryKey, depth + 1);
+  };
+
+  r.use(0);
+  struct(doc.contents, rootKey, 0);
+  return decoded;
 }
 
 function uiSpecIssuesAt(doc: Document.Parsed, r: Resolver, resources: ResourceDoc[] | null, out: Collector) {
@@ -811,24 +897,31 @@ function checkResources(text: string, schemaFor?: SchemaLookup): { issues: YamlI
   // whatever the parser recovered is a guess.
   const broken = syntaxIssues(res.docs, text, out, false);
   if (!broken) {
-    for (const doc of res.docs) {
-      const c = doc.contents;
-      // An empty document — a bare `---` or only comments — decodes to an
-      // empty map in the backend and is dropped.
-      if (isNullScalar(c)) continue;
+    const shapes = new Resolver(res.docs);
+    res.docs.forEach((doc, i) => {
+      // Resolved first: a root alias to a mapping in an earlier document is a
+      // mapping to yaml.v3 (measured).
+      const c = shapes.use(i).deref(doc.contents);
+      // An anchor that cannot be found is refused by yaml.v3, but there is no
+      // shape to judge. An empty document — a bare `---`, only comments, or an
+      // alias to null — decodes to an empty map in the backend and is dropped.
+      if (c === UNKNOWN || isNullScalar(c)) return;
       if (!isMap(c)) {
-        out.add("error", "documentNotMapping", nodeRange(c, [0, 0]), { found: isSeq(c) ? "list" : "scalar" });
+        out.add("error", "documentNotMapping", nodeRange(doc.contents, [0, 0]), { found: isSeq(c) ? "list" : "scalar" });
       }
-    }
+    });
   }
   const docs = broken ? null : resourceDocs(res.docs, new Resolver(res.docs));
   if (schemaFor && !broken) {
     const kinds = new Resolver(res.docs);
+    // Two documents can share one root through an alias; check it once.
+    const walked = new Set<unknown>();
     res.docs.forEach((doc, i) => {
       const k = docKind(kinds, doc, i);
-      if (!k) return;
+      if (!k || walked.has(k.root)) return;
+      walked.add(k.root);
       const schema = schemaFor(k.apiVersion, k.kind);
-      if (schema) schemaIssues(doc, schema, out);
+      if (schema) schemaIssues(k.root, schema, out);
     });
   }
   return { issues: out.issues, docs };
@@ -841,7 +934,8 @@ function checkUiSpec(text: string, resources: ResourceDoc[] | null): YamlIssue[]
   const spec = parse(text);
   const out = new Collector("uiSpec", spec.lc, text);
   const first = spec.docs.slice(0, 1);
-  if (!syntaxIssues(first, text, out, true) && first[0]) {
+  const decodedMaps = (doc: Document.Parsed) => uiSpecDecodedMaps(doc, new Resolver([doc]));
+  if (!syntaxIssues(first, text, out, true, decodedMaps) && first[0]) {
     // Resolution needs resources that parse; until then only the path's own
     // grammar is checked.
     uiSpecIssuesAt(first[0], new Resolver(first), resources, out);

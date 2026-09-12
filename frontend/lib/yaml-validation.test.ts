@@ -393,6 +393,95 @@ spec:
     });
   });
 
+  // What yaml.v3 actually decodes. Each input was run through the real
+  // parseMultiDoc / ValidateSpec first.
+  describe("(g) only what the backend decodes", () => {
+    const blockingCodes = (r: { resources: YamlIssue[]; uiSpec: YamlIssue[] }) =>
+      errorsOf([...r.resources, ...r.uiSpec]).map((i) => i.code);
+    const NESTED_ANCHOR =
+      "x: &m {apiVersion: v1, kind: ConfigMap, metadata: {name: b}}\napiVersion: v1\nkind: Secret\nmetadata: {name: a}\n---\n*m\n";
+
+    it("resolves a document whose root is an alias to an earlier anchor", () => {
+      const spec = "fields:\n  - path: ConfigMap[b].data.k\n    label: K\n    type: string\n";
+      const r = validateTemplateYaml(NESTED_ANCHOR, spec, lookup);
+      expect(r.resources).toEqual([]);
+      expect(r.uiSpec).toEqual([]);
+      expect(resourceKinds(NESTED_ANCHOR)).toEqual([
+        { apiVersion: "v1", kind: "Secret" },
+        { apiVersion: "v1", kind: "ConfigMap" },
+      ]);
+    });
+
+    it("counts an aliased whole document as a document of its kind", () => {
+      const res = "--- &m\napiVersion: v1\nkind: ConfigMap\nmetadata: {name: a}\n---\n*m\n";
+      const spec = "fields:\n  - path: ConfigMap.data.k\n    label: K\n    type: string\n";
+      const r = validateTemplateYaml(res, spec, lookup);
+      expect(r.resources).toEqual([]);
+      expect(codes(r.uiSpec)).toEqual(["resourceAmbiguous"]);
+    });
+
+    it("still refuses a root alias to a scalar, and drops one to null as parseMultiDoc does", () => {
+      expect(blockingCodes(validateTemplateYaml("x: &s hello\nkind: A\n---\n*s\n", "", lookup))).toEqual([
+        "documentNotMapping",
+      ]);
+      const res =
+        "x: &n ~\nkind: ConfigMap\nmetadata: {name: a}\n---\n*n\n---\nkind: ConfigMap\nmetadata: {name: b}\n";
+      const spec = "fields:\n  - path: ConfigMap[1].data.k\n    label: K\n    type: string\n";
+      const r = validateTemplateYaml(res, spec, lookup);
+      expect(r.resources).toEqual([]);
+      expect(r.uiSpec).toEqual([]);
+    });
+
+    it("does not block a root alias to an anchor it cannot find", () => {
+      expect(blockingCodes(validateTemplateYaml("kind: A\n---\n*nope\n", "", lookup))).toEqual([]);
+    });
+
+    it("type-checks an aliased document root once", () => {
+      const res =
+        "x: &m {apiVersion: apps/v1, kind: Deployment, metadata: {name: b}, spec: {replicas: many}}\napiVersion: v1\nkind: ConfigMap\nmetadata: {name: a}\n---\n*m\n";
+      expect(codes(validateTemplateYaml(res, "", lookup).resources)).toEqual(["schemaType"]);
+    });
+
+    it("blocks a repeated key anywhere in resources.yaml, which decodes whole", () => {
+      const res = "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: a}\nunused: {a: 1, a: 2}\n";
+      expect(blockingCodes(validateTemplateYaml(res, "", lookup))).toEqual(["duplicateKey"]);
+      expect(blockingCodes(validateTemplateYaml("base: &b {a: 1, a: 2}\ndata:\n  <<: *b\n", "", lookup))).toEqual([
+        "duplicateKey",
+      ]);
+    });
+
+    const P = "Deployment[web].spec.replicas";
+    const ENTRY = `fields:\n  - path: ${P}\n    label: R\n    type: integer\n`;
+
+    it.each([
+      ["the root's own keys", "x: 1\nx: 2\nfields: []\n"],
+      ["a default value", `${ENTRY}    default: {a: 1, a: 2}\n`],
+      ["a nested default value", `${ENTRY}    default: {x: {a: 1, a: 2}}\n`],
+      ["an aliased default value", `d: &d {a: 1, a: 2}\n${ENTRY}    default: *d\n`],
+      ["help", `${ENTRY}    help: {a: 1, a: 2}\n`],
+      ["values", `fields:\n  - path: ${P}\n    label: R\n    type: enum\n    values: {a: 1, a: 2}\n`],
+      ["a field entry's unknown keys", `${ENTRY}    x: 1\n    x: 2\n`],
+      ["a merge source of an entry", `base: &b {type: integer, label: R, zz: 1, zz: 2}\nfields:\n  - <<: *b\n    path: ${P}\n`],
+      ["a merge source's default", `base: &b {type: integer, label: R, default: {a: 1, a: 2}}\nfields:\n  - <<: *b\n    path: ${P}\n`],
+      ["an aliased entry", `e: &e {path: "${P}", label: R, type: integer, zz: 1, zz: 2}\nfields:\n  - *e\n`],
+      ["an entry of an aliased fields list", `l: &l\n  - {path: "${P}", label: R, type: integer, label: S}\nfields: *l\n`],
+      ["a merge source of the root", "base: &b {q: 1, q: 2}\n<<: *b\nfields: []\n"],
+    ])("blocks a repeated key in %s of ui-spec.yaml", (_name, spec) => {
+      expect(blockingCodes(validateTemplateYaml(RESOURCES, spec, lookup))).toEqual(["duplicateKey"]);
+    });
+
+    it.each([
+      ["an unknown root key's value", "unused: {a: 1, a: 2}\nfields: []\n"],
+      ["an unknown entry key's value", `${ENTRY}    extra: {a: 1, a: 2}\n`],
+      ["an unknown key of a merge source", `base: &b {type: integer, label: R, extra: {a: 1, a: 2}}\nfields:\n  - <<: *b\n    path: ${P}\n`],
+      ["a list under an unknown root key", "fields: []\nother: [{a: 1, a: 2}]\n"],
+    ])("only warns about a repeated key in %s, which yaml.v3 never decodes", (_name, spec) => {
+      const r = validateTemplateYaml(RESOURCES, spec, lookup);
+      expect(errorsOf(r.uiSpec)).toEqual([]);
+      expect(r.uiSpec.map((i) => [i.severity, i.code])).toContainEqual(["warning", "duplicateKey"]);
+    });
+  });
+
   // Stored input: the next visitor to open a version pays for whatever is in it.
   describe("(f) size", () => {
     const CONFIGMAP = "apiVersion: v1\nkind: ConfigMap\nmetadata: { name: big }\ndata:\n";
