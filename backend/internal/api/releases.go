@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"gopkg.in/yaml.v3"
@@ -154,17 +155,21 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "not-found", "template version")
 		return
 	}
+	tpl, err := h.deps.Store.GetTemplateByName(ctx, r.Template)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(c, http.StatusNotFound, "not-found", "template version")
+			return
+		}
+		internalError(c, "CreateRelease: template", err)
+		return
+	}
 	// The catalog shows a caller only the templates on their side of the demo
 	// line (scopeTemplatesToDemo), and deploying by name must not cross it
 	// either (#226). Answered exactly like a missing version, as the list
 	// answers by omission — and before the publish check, whose 409 would
 	// otherwise confirm the template exists.
 	if h.deps.DemoEmailDomain != "" {
-		tpl, err := h.deps.Store.GetTemplateByName(ctx, r.Template)
-		if err != nil {
-			writeError(c, http.StatusNotFound, "not-found", "template version")
-			return
-		}
 		inScope, err := h.inDemoScope(c, nil, tpl.OwnerUserID)
 		if err != nil {
 			internalError(c, "CreateRelease: demo scope", err)
@@ -174,6 +179,19 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 			writeError(c, http.StatusNotFound, "not-found", "template version")
 			return
 		}
+	}
+	// Never published and not the caller's to read: not in their catalog, and
+	// every read and write already answers it like a name that matches
+	// nothing (#238, #244). The publish check's 409 would confirm the name
+	// (#252); a caller who can read the drafts keeps it.
+	hidden, err := h.neverPublishedAndUnreadable(c, tpl)
+	if err != nil {
+		internalError(c, "CreateRelease: draft access", err)
+		return
+	}
+	if hidden {
+		writeError(c, http.StatusNotFound, "not-found", "template version")
+		return
 	}
 	if !requireDeployableVersion(c, tv, r.Template) {
 		return

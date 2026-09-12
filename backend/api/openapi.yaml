@@ -1045,7 +1045,9 @@ paths:
               was recorded.
             - `conflict` with `detail: version not published`: the target
               version cannot back a release. A different name will not fix it
-              either.
+              either. Only a caller who can see the template gets this: one
+              never published whose drafts the caller may not read answers 404
+              like a missing version (#252).
             - `conflict` otherwise: a release of that name already exists in
               the cluster and namespace. Pick another name.
           content:
