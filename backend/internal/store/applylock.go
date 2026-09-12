@@ -10,6 +10,11 @@ import (
 // by hashing text.
 const applyLockSeed int64 = 0x6b62705f61706c79
 
+// applyLockConns caps the connections apply locks hold, and so how many
+// namespaces can be between an ownership check and the end of their apply at
+// once. Requests past it wait for a lock connection, not for the database.
+const applyLockConns = 8
+
 // LockApply takes the advisory lock for key — a cluster's apiserver and a
 // namespace — and returns the function that releases it (#191).
 //
@@ -26,11 +31,16 @@ const applyLockSeed int64 = 0x6b62705f61706c79
 // replica sharing the database, not another installation applying to the same
 // cluster.
 //
-// A waiter does not hold a connection while it waits: it tries the lock, gives
-// the connection back when it is taken, and tries again. Blocking in
-// pg_advisory_lock would park one pooled connection per waiting request, and a
-// burst of deploys could leave the holder unable to get the connection its own
-// rollback needs. Waiting ends with ctx.
+// Locks live on connections from a pool of their own, never the one queries
+// use. A holder goes on to query — an update writes the release row after its
+// apply, a failed create deletes its row — and with locks on the query pool, as
+// many holders as that pool's size would each wait for a connection none of
+// them could free (codex review).
+//
+// A waiter does not hold a lock connection while it waits: it tries the lock,
+// gives the connection back when it is taken, and tries again, so requests for
+// one busy namespace do not keep other namespaces from their turn. Waiting ends
+// with ctx.
 //
 // The release runs with a fresh deadline, since it usually runs as ctx ends. A
 // connection that cannot be unlocked is closed rather than returned to the
@@ -38,7 +48,7 @@ const applyLockSeed int64 = 0x6b62705f61706c79
 func (s *Store) LockApply(ctx context.Context, key string) (func(), error) {
 	backoff := 20 * time.Millisecond
 	for {
-		conn, err := s.pool.Acquire(ctx)
+		conn, err := s.lockPool.Acquire(ctx)
 		if err != nil {
 			return nil, err
 		}

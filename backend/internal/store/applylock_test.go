@@ -75,3 +75,31 @@ func TestLockApply_WaitersDoNotHoldConnections(t *testing.T) {
 		require.NoError(t, <-done)
 	}
 }
+
+// codex and security review of #191: holders of different keys, more of them
+// than the query pool has connections, must still leave that pool free — a
+// holder goes on to write or delete its release row while it holds the lock.
+func TestLockApply_HoldersDoNotTakeQueryConnections(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.NewStore(ctx, testDSN(t)+"&pool_max_conns=2")
+	require.NoError(t, err)
+	defer s.Close()
+
+	stamp := time.Now().Format("150405.000000")
+	var releases []func()
+	for _, ns := range []string{"a", "b", "c"} {
+		release, err := s.LockApply(ctx, "https://apply-lock-holders-"+stamp+" "+ns)
+		require.NoError(t, err)
+		releases = append(releases, release)
+	}
+	defer func() {
+		for _, release := range releases {
+			release()
+		}
+	}()
+
+	queryCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	_, err = s.ListClusters(queryCtx)
+	require.NoError(t, err, "three holders on a two-connection query pool left no connection for a query")
+}
