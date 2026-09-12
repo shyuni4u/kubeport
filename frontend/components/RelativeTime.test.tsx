@@ -66,11 +66,14 @@ describe("RelativeTime", () => {
   });
 
   // #142 — the absolute time is pinned to Asia/Seoul, and an English reader
-  // elsewhere read it as their own clock. Matched loosely: runtimes name the
-  // zone "GMT+9", "UTC+9" or "KST" depending on their ICU data.
+  // elsewhere read it as their own clock. The label is an offset worked out
+  // from numbers, so it is the same text in every runtime and locale.
   it("names the time zone the absolute time is in", () => {
     renderAt("2026-09-09T10:00:00.000Z", "en");
-    expect(screen.getByRole("button").textContent).toMatch(/GMT\+9|UTC\+9|KST/);
+    expect(screen.getByRole("button").textContent).toMatch(/UTC\+9\)$/);
+    cleanup();
+    renderAt("2026-09-09T10:00:00.000Z", "ko");
+    expect(screen.getByRole("button").textContent).toMatch(/UTC\+9\)$/);
   });
 
   // Passing `timeZoneName` alongside `dateStyle` makes Intl throw, and

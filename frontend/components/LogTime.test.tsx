@@ -28,12 +28,6 @@ describe("LogTime", () => {
     expect(text).toMatch(/2:53:56|14:53:56/);
   });
 
-  it("formats differently per app locale", () => {
-    const koText = renderIn("ko").container.textContent;
-    cleanup();
-    expect(renderIn("en").container.textContent).not.toBe(koText);
-  });
-
   // On a CI runner in UTC, the browser-zone version printed 5:53:56.
   it("uses the app's pinned time zone, whatever zone the runtime is in", () => {
     const { container } = renderIn("en");

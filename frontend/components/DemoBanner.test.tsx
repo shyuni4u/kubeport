@@ -67,9 +67,9 @@ describe("DemoBanner", () => {
   });
 
   // #142 — the hour is Asia/Seoul's; say so, or a visitor abroad reads it as
-  // their own clock. Loose on the name: ICU data varies between runtimes.
+  // their own clock. Same computed label as RelativeTime.
   it("names the time zone of the reset time", () => {
     renderBanner("en");
-    expect(message()).toMatch(/GMT\+9|UTC\+9|KST/);
+    expect(message()).toMatch(/UTC\+9/);
   });
 });

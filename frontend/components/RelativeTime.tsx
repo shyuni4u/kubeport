@@ -1,8 +1,10 @@
 "use client";
 
-import { useFormatter, useLocale, useNow, useTimeZone } from "next-intl";
+import { useMemo } from "react";
+import { useFormatter, useNow, useTimeZone } from "next-intl";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { utcOffsetLabel } from "@/lib/utc-offset";
 import { cn } from "@/lib/utils";
 
 type Props = { iso: string; className?: string };
@@ -11,27 +13,6 @@ type Props = { iso: string; className?: string };
 // the finest, and half that keeps a tab opened after a client-side navigation
 // from showing a stale phrase for long.
 export const RELATIVE_TIME_UPDATE_MS = 30_000;
-
-/**
- * The short name of `timeZone` at `date` in `locale` ("GMT+9", "KST"), or
- * null when the runtime cannot name it.
- *
- * Read separately rather than passed as `timeZoneName` to the formatter
- * below: Intl rejects `timeZoneName` combined with `dateStyle`/`timeStyle`,
- * and next-intl answers that by printing `Date.toString()` instead
- * ("Wed Sep 09 2026 19:00:00 GMT+0900 …").
- */
-function zoneName(date: Date, locale: string, timeZone: string | undefined): string | null {
-  try {
-    return (
-      new Intl.DateTimeFormat(locale, { timeZone, timeZoneName: "short" })
-        .formatToParts(date)
-        .find((p) => p.type === "timeZoneName")?.value ?? null
-    );
-  } catch {
-    return null;
-  }
-}
 
 /**
  * "2시간 전" with the exact timestamp one hover, focus or tap away (spec §6.2).
@@ -57,7 +38,6 @@ function zoneName(date: Date, locale: string, timeZone: string | undefined): str
  */
 export function RelativeTime({ iso, className }: Props) {
   const format = useFormatter();
-  const locale = useLocale();
   const timeZone = useTimeZone();
   // The provider's `now` is pinned per request so the server render and the
   // hydrated render agree — but the root layout does not re-render on a
@@ -67,6 +47,12 @@ export function RelativeTime({ iso, className }: Props) {
   // (#100). useNow starts from the same pinned value, so hydration still
   // matches, and then keeps the clock running.
   const now = useNow({ updateInterval: RELATIVE_TIME_UPDATE_MS });
+  // The zone is labelled: every time is pinned to TIME_ZONE (Asia/Seoul), and
+  // an English reader in London took "Sep 9, 2026, 4:36 PM" for their own
+  // clock — eight hours off, with nothing on screen to say so (#142). The zone
+  // stays pinned; only the label is new. Memoized: the phrase re-renders every
+  // RELATIVE_TIME_UPDATE_MS, the label only changes with the timestamp.
+  const zone = useMemo(() => utcOffsetLabel(new Date(iso), timeZone), [iso, timeZone]);
   const date = new Date(iso);
   // A malformed timestamp from the backend should not take the page down.
   if (Number.isNaN(date.getTime())) return null;
@@ -75,15 +61,9 @@ export function RelativeTime({ iso, className }: Props) {
   // just happened as "in a few seconds". Nothing here is scheduled for the
   // future, so a future timestamp reads as now.
   const shown = date.getTime() > now.getTime() ? now : date;
-  // The zone is named: every time is pinned to TIME_ZONE (Asia/Seoul), and an
-  // English reader in London took "Sep 9, 2026, 4:36 PM" for their own clock —
-  // eight hours off, with nothing on screen to say so (#142). The zone stays
-  // pinned; only the label is new.
-  const zone = zoneName(date, locale, timeZone);
-  const absolute = [
-    format.dateTime(date, { dateStyle: "medium", timeStyle: "short" }),
-    zone,
-  ]
+  // Appended rather than passed as `timeZoneName`: Intl rejects that together
+  // with dateStyle/timeStyle, and next-intl then prints `Date.toString()`.
+  const absolute = [format.dateTime(date, { dateStyle: "medium", timeStyle: "short" }), zone]
     .filter(Boolean)
     .join(" ");
   return (

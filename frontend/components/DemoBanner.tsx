@@ -1,7 +1,8 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useTimeZone, useTranslations } from "next-intl";
+import { utcOffsetLabel } from "@/lib/utc-offset";
 
 const KEY = "kbp_demo_banner_dismissed";
 
@@ -40,6 +41,7 @@ function dismiss() {
 export function DemoBanner({ resetAtIso }: { resetAtIso: string | null }) {
   const t = useTranslations("demo");
   const format = useFormatter();
+  const timeZone = useTimeZone();
   // Server snapshot is "dismissed" so the markup matches the pre-hydration DOM.
   const hidden = useSyncExternalStore(subscribe, isDismissed, () => true);
   if (hidden) return null;
@@ -50,15 +52,14 @@ export function DemoBanner({ resetAtIso }: { resetAtIso: string | null }) {
   // The banner still warns that a reset is coming; it just does not claim to
   // know when, because a wrong hour is worse than no hour (#153).
   //
-  // The zone is named for the same reason RelativeTime names it (#142): the
-  // hour is Asia/Seoul's, and a visitor elsewhere would otherwise plan around
-  // "06:00" on their own clock.
-  const time = resetAtIso
-    ? format.dateTime(new Date(resetAtIso), {
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZoneName: "short",
-      })
+  // The zone is labelled the way RelativeTime labels it (#142): the hour is
+  // Asia/Seoul's, and a visitor elsewhere would otherwise plan around "06:00"
+  // on their own clock.
+  const resetAt = resetAtIso ? new Date(resetAtIso) : null;
+  const time = resetAt
+    ? [format.dateTime(resetAt, { hour: "2-digit", minute: "2-digit" }), utcOffsetLabel(resetAt, timeZone)]
+        .filter(Boolean)
+        .join(" ")
     : null;
   return (
     <div role="status" className="flex items-center gap-3 border-b border-amber-300 bg-amber-50 px-6 py-2 text-sm text-amber-900">
