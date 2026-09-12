@@ -312,10 +312,16 @@ in that annotation are kept, after the redirect.
   browser ignores HSTS it receives over http, so a first visit stayed on http —
   where the `Secure` auth cookies cannot be stored and login fails with
   `login_error=expired`.
-- **Opt out** with `--set ingress.httpsRedirect=false` if something in front of
-  the cluster already redirects, or if your Traefik predates the `traefik.io`
-  CRDs (v2.10). The upgrade fails with `no matches for kind "Middleware"` in
-  that second case.
+- **Opt out** with `--set ingress.httpsRedirect=false` if:
+  - something in front of the cluster **terminates TLS and forwards plain http**
+    to Traefik — Cloudflare "Flexible" SSL, an L7 load balancer with an http
+    backend. Traefik does not trust that proxy's `X-Forwarded-Proto` by default,
+    so every request is redirected again and the site loops
+    (`ERR_TOO_MANY_REDIRECTS`). Either opt out, or have the proxy talk https to
+    the cluster;
+  - something in front already redirects;
+  - your Traefik predates the `traefik.io` CRDs (v2.10). The upgrade fails with
+    `no matches for kind "Middleware"`.
 - **Certificate renewal is unaffected.** cert-manager's HTTP-01 solver gets its
   own route, and Let's Encrypt follows a redirect to https without checking
   the certificate.
@@ -324,7 +330,9 @@ Verify after the upgrade:
 
 ```bash
 curl -sI http://<host>/ | head -3        # 301 with Location: https://<host>/
-curl -sI https://<host>/ | head -1       # the usual answer, not a redirect loop
+curl -sI https://<host>/ | head -1       # the usual answer, not a redirect
+# Through whatever the browser really goes through: more than one 301 is a loop
+curl -sIL --max-redirs 3 http://<host>/ | grep -c '^HTTP/.* 301'   # 1
 ```
 
 ### Behaviour changes when upgrading past #253
