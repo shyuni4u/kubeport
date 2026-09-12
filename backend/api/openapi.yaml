@@ -515,6 +515,32 @@ paths:
         deploy form — no follow-up per template.
 
         **Not paginated** (issue #58): the whole table is returned.
+
+        Filters narrow what the caller may already see (#74). A query parameter
+        not listed here is refused with 400 rather than ignored.
+      parameters:
+        - name: search
+          in: query
+          required: false
+          description: Case-insensitive substring of `name` or `display_name`.
+          schema: { type: string }
+        - name: tag
+          in: query
+          required: false
+          description: |
+            Keeps templates carrying this tag. Repeat it to require every one
+            (`?tag=web&tag=demo`).
+          style: form
+          explode: true
+          schema: { type: array, items: { type: string } }
+        - name: status
+          in: query
+          required: false
+          description: |
+            The current version's status — `published` or `deprecated` — or
+            `draft` for a template never published. Anything else matches
+            nothing.
+          schema: { type: string, enum: [published, deprecated, draft] }
       responses:
         "200":
           description: OK
@@ -527,6 +553,11 @@ paths:
                   templates:
                     type: array
                     items: { $ref: "#/components/schemas/TemplateListItem" }
+        "400":
+          description: A query parameter this endpoint does not take (#74).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "500": { $ref: "#/components/responses/InternalError" }
     post:
@@ -977,6 +1008,24 @@ paths:
         - name: offset
           in: query
           schema: { type: integer, minimum: 0, default: 0 }
+        - name: cluster
+          in: query
+          required: false
+          description: Only releases on the cluster registered under this name (#74).
+          schema: { type: string }
+        - name: namespace
+          in: query
+          required: false
+          description: Only releases in this namespace (#74).
+          schema: { type: string }
+        - name: template
+          in: query
+          required: false
+          description: |
+            Only releases of the template with this name, any version (#74).
+            Filters apply before `limit`/`offset`, so pages count filtered
+            rows. A query parameter not listed here is refused with 400.
+          schema: { type: string }
       responses:
         "200":
           description: OK
@@ -989,6 +1038,11 @@ paths:
                   releases:
                     type: array
                     items: { $ref: "#/components/schemas/ReleaseListItem" }
+        "400":
+          description: A query parameter this endpoint does not take (#74).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "500": { $ref: "#/components/responses/InternalError" }
     post:

@@ -6,9 +6,12 @@ SELECT r.id, r.name, r.template_version_id, r.cluster_id, r.namespace,
   JOIN clusters c          ON c.id = r.cluster_id
   JOIN template_versions tv ON tv.id = r.template_version_id
   JOIN templates t         ON t.id = tv.template_id
- WHERE r.created_by_user_id = $1
+ WHERE r.created_by_user_id = sqlc.arg(created_by_user_id)
+   AND (sqlc.narg(cluster)::text IS NULL OR c.name = sqlc.narg(cluster))
+   AND (sqlc.narg(namespace)::text IS NULL OR r.namespace = sqlc.narg(namespace))
+   AND (sqlc.narg(template)::text IS NULL OR t.name = sqlc.narg(template))
  ORDER BY r.created_at DESC
- LIMIT $2 OFFSET $3;
+ LIMIT sqlc.arg(lim)::int OFFSET sqlc.arg(off)::int;
 
 -- name: ListAllReleases :many
 SELECT r.id, r.name, r.template_version_id, r.cluster_id, r.namespace,
@@ -18,8 +21,11 @@ SELECT r.id, r.name, r.template_version_id, r.cluster_id, r.namespace,
   JOIN clusters c          ON c.id = r.cluster_id
   JOIN template_versions tv ON tv.id = r.template_version_id
   JOIN templates t         ON t.id = tv.template_id
+ WHERE (sqlc.narg(cluster)::text IS NULL OR c.name = sqlc.narg(cluster))
+   AND (sqlc.narg(namespace)::text IS NULL OR r.namespace = sqlc.narg(namespace))
+   AND (sqlc.narg(template)::text IS NULL OR t.name = sqlc.narg(template))
  ORDER BY r.created_at DESC
- LIMIT $1 OFFSET $2;
+ LIMIT sqlc.arg(lim)::int OFFSET sqlc.arg(off)::int;
 
 -- name: ListReleasesForDemoDomain :many
 -- Releases created by any user whose email is in the demo domain ($1, e.g.
@@ -34,6 +40,9 @@ SELECT r.id, r.name, r.template_version_id, r.cluster_id, r.namespace,
   JOIN templates t         ON t.id = tv.template_id
   JOIN users u             ON u.id = r.created_by_user_id
  WHERE u.email ILIKE '%@' || sqlc.arg(domain)::text
+   AND (sqlc.narg(cluster)::text IS NULL OR c.name = sqlc.narg(cluster))
+   AND (sqlc.narg(namespace)::text IS NULL OR r.namespace = sqlc.narg(namespace))
+   AND (sqlc.narg(template)::text IS NULL OR t.name = sqlc.narg(template))
  ORDER BY r.created_at DESC
  LIMIT sqlc.arg(lim)::int OFFSET sqlc.arg(off)::int;
 

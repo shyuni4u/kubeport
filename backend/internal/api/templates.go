@@ -171,6 +171,9 @@ func (h *Handlers) CreateTemplate(c *gin.Context) {
 }
 
 func (h *Handlers) ListTemplates(c *gin.Context) {
+	if !onlyQuery(c, "search", "tag", "status") {
+		return
+	}
 	ctx := c.Request.Context()
 	rows, err := h.deps.Store.ListTemplates(ctx)
 	if err != nil {
@@ -207,6 +210,7 @@ func (h *Handlers) ListTemplates(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, "internal", "failed to authorize template list")
 		return
 	}
+	visible = filterTemplates(visible, c.Query("search"), c.QueryArray("tag"), c.Query("status"))
 	c.JSON(http.StatusOK, gin.H{"templates": visible})
 }
 

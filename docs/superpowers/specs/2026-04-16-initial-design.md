@@ -502,7 +502,7 @@ POST   /v1/templates/:name/render            { version, values } → 렌더된 Y
 
 **릴리스**
 ```
-GET    /v1/releases                          ?cluster=dev&namespace=X&owner=me
+GET    /v1/releases                          ?cluster=dev&namespace=X&template=Y   (owner 는 필터가 아니라 권한: 관리자 외에는 자기 것만, #74)
 POST   /v1/releases                          { template, version, cluster, namespace, name, values }
                                              → DB 기록 + k8s apply
 GET    /v1/releases/:id                      메타 + 라이브 상태 조인

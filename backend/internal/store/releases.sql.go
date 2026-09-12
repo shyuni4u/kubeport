@@ -123,13 +123,19 @@ SELECT r.id, r.name, r.template_version_id, r.cluster_id, r.namespace,
   JOIN clusters c          ON c.id = r.cluster_id
   JOIN template_versions tv ON tv.id = r.template_version_id
   JOIN templates t         ON t.id = tv.template_id
+ WHERE ($1::text IS NULL OR c.name = $1)
+   AND ($2::text IS NULL OR r.namespace = $2)
+   AND ($3::text IS NULL OR t.name = $3)
  ORDER BY r.created_at DESC
- LIMIT $1 OFFSET $2
+ LIMIT $5::int OFFSET $4::int
 `
 
 type ListAllReleasesParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Cluster   pgtype.Text `json:"cluster"`
+	Namespace pgtype.Text `json:"namespace"`
+	Template  pgtype.Text `json:"template"`
+	Off       int32       `json:"off"`
+	Lim       int32       `json:"lim"`
 }
 
 type ListAllReleasesRow struct {
@@ -147,7 +153,13 @@ type ListAllReleasesRow struct {
 }
 
 func (q *Queries) ListAllReleases(ctx context.Context, arg ListAllReleasesParams) ([]ListAllReleasesRow, error) {
-	rows, err := q.db.Query(ctx, listAllReleases, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listAllReleases,
+		arg.Cluster,
+		arg.Namespace,
+		arg.Template,
+		arg.Off,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -188,14 +200,20 @@ SELECT r.id, r.name, r.template_version_id, r.cluster_id, r.namespace,
   JOIN templates t         ON t.id = tv.template_id
   JOIN users u             ON u.id = r.created_by_user_id
  WHERE u.email ILIKE '%@' || $1::text
+   AND ($2::text IS NULL OR c.name = $2)
+   AND ($3::text IS NULL OR r.namespace = $3)
+   AND ($4::text IS NULL OR t.name = $4)
  ORDER BY r.created_at DESC
- LIMIT $3::int OFFSET $2::int
+ LIMIT $6::int OFFSET $5::int
 `
 
 type ListReleasesForDemoDomainParams struct {
-	Domain string `json:"domain"`
-	Off    int32  `json:"off"`
-	Lim    int32  `json:"lim"`
+	Domain    string      `json:"domain"`
+	Cluster   pgtype.Text `json:"cluster"`
+	Namespace pgtype.Text `json:"namespace"`
+	Template  pgtype.Text `json:"template"`
+	Off       int32       `json:"off"`
+	Lim       int32       `json:"lim"`
 }
 
 type ListReleasesForDemoDomainRow struct {
@@ -216,7 +234,14 @@ type ListReleasesForDemoDomainRow struct {
 // "demo.kubeport"). Backs the scoped admin view for demo accounts: a demo
 // admin sees the demo user's releases but nothing from real users.
 func (q *Queries) ListReleasesForDemoDomain(ctx context.Context, arg ListReleasesForDemoDomainParams) ([]ListReleasesForDemoDomainRow, error) {
-	rows, err := q.db.Query(ctx, listReleasesForDemoDomain, arg.Domain, arg.Off, arg.Lim)
+	rows, err := q.db.Query(ctx, listReleasesForDemoDomain,
+		arg.Domain,
+		arg.Cluster,
+		arg.Namespace,
+		arg.Template,
+		arg.Off,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -256,14 +281,20 @@ SELECT r.id, r.name, r.template_version_id, r.cluster_id, r.namespace,
   JOIN template_versions tv ON tv.id = r.template_version_id
   JOIN templates t         ON t.id = tv.template_id
  WHERE r.created_by_user_id = $1
+   AND ($2::text IS NULL OR c.name = $2)
+   AND ($3::text IS NULL OR r.namespace = $3)
+   AND ($4::text IS NULL OR t.name = $4)
  ORDER BY r.created_at DESC
- LIMIT $2 OFFSET $3
+ LIMIT $6::int OFFSET $5::int
 `
 
 type ListReleasesForUserParams struct {
 	CreatedByUserID pgtype.UUID `json:"created_by_user_id"`
-	Limit           int32       `json:"limit"`
-	Offset          int32       `json:"offset"`
+	Cluster         pgtype.Text `json:"cluster"`
+	Namespace       pgtype.Text `json:"namespace"`
+	Template        pgtype.Text `json:"template"`
+	Off             int32       `json:"off"`
+	Lim             int32       `json:"lim"`
 }
 
 type ListReleasesForUserRow struct {
@@ -281,7 +312,14 @@ type ListReleasesForUserRow struct {
 }
 
 func (q *Queries) ListReleasesForUser(ctx context.Context, arg ListReleasesForUserParams) ([]ListReleasesForUserRow, error) {
-	rows, err := q.db.Query(ctx, listReleasesForUser, arg.CreatedByUserID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listReleasesForUser,
+		arg.CreatedByUserID,
+		arg.Cluster,
+		arg.Namespace,
+		arg.Template,
+		arg.Off,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}

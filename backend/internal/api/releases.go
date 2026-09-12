@@ -365,14 +365,21 @@ func (h *Handlers) isDemoOwnedRelease(ctx context.Context, createdBy pgtype.UUID
 }
 
 func (h *Handlers) ListReleases(c *gin.Context) {
+	if !onlyQuery(c, "limit", "offset", "cluster", "namespace", "template") {
+		return
+	}
 	ctx := c.Request.Context()
 	limit, offset := parsePagination(c)
+	// Filters apply in the query, before limit and offset, so a page counts
+	// only matching releases (#74).
+	cluster, namespace, tpl := optionalText(c.Query("cluster")), optionalText(c.Query("namespace")), optionalText(c.Query("template"))
 
 	// A demo admin gets an admin-shaped list, but scoped to releases created
 	// by demo accounts - never a real user's workloads.
 	if isAdmin(c) && h.isDemoCaller(c) {
 		rows, err := h.deps.Store.ListReleasesForDemoDomain(ctx, store.ListReleasesForDemoDomainParams{
 			Domain: h.deps.DemoEmailDomain, Lim: limit, Off: offset,
+			Cluster: cluster, Namespace: namespace, Template: tpl,
 		})
 		if err != nil {
 			internalError(c, "ListReleases (demo scope)", err)
@@ -387,7 +394,8 @@ func (h *Handlers) ListReleases(c *gin.Context) {
 
 	if isAdmin(c) {
 		rows, err := h.deps.Store.ListAllReleases(ctx, store.ListAllReleasesParams{
-			Limit: limit, Offset: offset,
+			Lim: limit, Off: offset,
+			Cluster: cluster, Namespace: namespace, Template: tpl,
 		})
 		if err != nil {
 			internalError(c, "ListReleases (admin)", err)
@@ -405,7 +413,8 @@ func (h *Handlers) ListReleases(c *gin.Context) {
 		return
 	}
 	rows, err := h.deps.Store.ListReleasesForUser(ctx, store.ListReleasesForUserParams{
-		CreatedByUserID: user.ID, Limit: limit, Offset: offset,
+		CreatedByUserID: user.ID, Lim: limit, Off: offset,
+		Cluster: cluster, Namespace: namespace, Template: tpl,
 	})
 	if err != nil {
 		internalError(c, "ListReleases", err)
