@@ -134,6 +134,14 @@ inside a worktree recreates the shared dex from that worktree's `dex.yaml` and
 session (#230). The certificate from step 2 therefore lives in the main
 checkout too; `scripts/e2e/*` look for it there.
 
+dex is published on `127.0.0.1:5556` only (#63) — its static passwords are in
+this repo. That is all the backend, the BFF and a kind cluster on Docker
+Desktop need. On **native Linux docker** a kind apiserver reaches the host
+through the docker network gateway, which a loopback publish does not answer;
+start the stack with `KBP_DEX_BIND=0.0.0.0 scripts/compose.sh up -d` there
+(CI's playwright job does the same). Check what you got with
+`docker ps --format '{{.Names}}\t{{.Ports}}' | grep dex`.
+
 ### 5. Create kind cluster with OIDC trust for dex
 
 Save as `/tmp/kind-cluster.yaml` (adjust the `hostPath` to your repo):

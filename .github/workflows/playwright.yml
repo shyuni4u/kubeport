@@ -72,6 +72,13 @@ jobs:
           chmod 644 deploy/docker/certs/dex.key
 
       - name: Start compose (postgres + dex)
+        # The kind apiserver reaches dex through the kind network gateway
+        # (see "Expose host.docker.internal to kube-apiserver"), which the
+        # compose default loopback publish does not answer (#63). A throwaway
+        # runner has nothing else on its network, so publish on all interfaces
+        # here only.
+        env:
+          KBP_DEX_BIND: 0.0.0.0
         run: docker compose -f deploy/docker/docker-compose.yml up -d
 
       - name: Wait for dex
