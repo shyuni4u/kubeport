@@ -125,6 +125,29 @@ frontend:
   # forged X-Forwarded-Host can't steer them. Leave empty for a single domain —
   # the origin of oidc.redirectUri is used then.
   publicOrigins: []
+  # Security headers on every response (#80, #143). The frontend sets them at
+  # request time from these values, so they can differ per install.
+  securityHeaders:
+    # false drops all of them — for a proxy in front that sets its own.
+    enabled: true
+    # Two years, no `preload` (submitting to the preload list is your call).
+    # includeSubDomains suits the intended layout — the app plus Dex on its own
+    # subdomain, both https — but on an apex domain with sibling http services
+    # it forces them onto https in visitors' browsers for two years, with no way
+    # back: drop it there. Empty sends no HSTS (a proxy in front already does).
+    hsts: "max-age=63072000; includeSubDomains"
+    # CSP frame-ancestors sources. 'none' keeps the login screen and the demo
+    # buttons out of every iframe; list a portal's origin to embed kubeport.
+    frameAncestors: "'none'"
+    # enforce | report-only | off. The default policy stops scripts, styles,
+    # fonts, frames and connections from foreign origins, allowing only
+    # cdn.jsdelivr.net, where the YAML editor (Monaco) loads from. report-only
+    # sends it as Content-Security-Policy-Report-Only (frame-ancestors still
+    # enforced) to see what it would block; off sends only frame-ancestors.
+    cspMode: enforce
+    # A whole policy replacing the default; frame-ancestors is appended. Empty
+    # uses the default in frontend/lib/security-headers.ts.
+    contentSecurityPolicy: ""
   resources:
     requests:
       cpu: 50m

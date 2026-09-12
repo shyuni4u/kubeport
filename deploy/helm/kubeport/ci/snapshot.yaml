@@ -260,6 +260,13 @@ data:
   OIDC_CLIENT_ID: "golden-snapshot-client"
   OIDC_REDIRECT_URI: "https://kp.test.local/api/auth/callback"
   GO_API_BASE_URL: "http://kp-kubeport-backend:8080"
+  # Security headers, read by frontend/proxy.ts on every request (#80, #143).
+  # They are not in next.config.ts because that is baked at image build time.
+  SECURITY_HEADERS: "on"
+  # Empty = no HSTS header (a proxy in front already sends one).
+  SECURITY_HSTS: "max-age=63072000; includeSubDomains"
+  SECURITY_FRAME_ANCESTORS: "'none'"
+  SECURITY_CSP_MODE: "enforce"
   DEMO_OIDC_ISSUER: "https://dex.example.test"
   DEMO_OIDC_CLIENT_ID: "kubeport-demo"
   DEMO_EMAIL_DOMAIN: "demo.kubeport"
@@ -1237,7 +1244,7 @@ spec:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/component: frontend
       annotations:
-        checksum/config: e92441590a94b04b36200941c32f84c53608bf8ce54eefc9647e3a8943990f78
+        checksum/config: fb005fcdecd4a9eca0098a9e907b62953c8bf5fc0d52c3ca95edd48522746040
         checksum/secret: e7dde2c9f0d9e6ff324c1fe9ec29e374b1dfb55ceb2fe06c296a8b108aa27451
     spec:
       securityContext:

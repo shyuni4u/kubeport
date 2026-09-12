@@ -19,6 +19,18 @@ data:
   OIDC_SCOPES: {{ . | quote }}
   {{- end }}
   GO_API_BASE_URL: {{ printf "http://%s:%v" (include "kubeport.backend.fullname" .) .Values.backend.service.port | quote }}
+  # Security headers, read by frontend/proxy.ts on every request (#80, #143).
+  # They are not in next.config.ts because that is baked at image build time.
+  {{- with .Values.frontend.securityHeaders }}
+  SECURITY_HEADERS: {{ ternary "on" "off" (ne (toString .enabled) "false") | quote }}
+  # Empty = no HSTS header (a proxy in front already sends one).
+  SECURITY_HSTS: {{ .hsts | default "" | quote }}
+  SECURITY_FRAME_ANCESTORS: {{ .frameAncestors | default "'none'" | quote }}
+  SECURITY_CSP_MODE: {{ .cspMode | default "enforce" | quote }}
+  {{- with .contentSecurityPolicy }}
+  SECURITY_CSP: {{ . | quote }}
+  {{- end }}
+  {{- end }}
   {{- if .Values.dex.enabled }}
   DEMO_OIDC_ISSUER: {{ include "kubeport.dex.issuer" . | quote }}
   DEMO_OIDC_CLIENT_ID: {{ .Values.dex.clientId | quote }}
