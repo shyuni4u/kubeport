@@ -30,7 +30,27 @@ function placeholders(s: string): string[] {
   const text = (): void => {
     while (i < s.length && s[i] !== "}") {
       if (s[i] === "{") argument();
+      else if (s[i] === "'") quoted();
       else i++;
+    }
+  };
+  // ICU quoting: `''` is one apostrophe, and an apostrophe before a syntax
+  // character starts literal text up to the next lone apostrophe, so
+  // `'{name}'` is text and not an argument. Any other apostrophe is literal.
+  const quoted = (): void => {
+    const next = s[i + 1];
+    if (next === "'") {
+      i += 2;
+      return;
+    }
+    i++;
+    if (next === undefined || !"{}#|".includes(next)) return;
+    while (i < s.length) {
+      if (s[i] === "'" && s[i + 1] === "'") i += 2;
+      else if (s[i] === "'") {
+        i++;
+        return;
+      } else i++;
     }
   };
   const argument = (): void => {
@@ -43,7 +63,7 @@ function placeholders(s: string): string[] {
     if (head && ["select", "plural", "selectordinal"].includes(head[2] ?? "")) {
       i++; // the comma before the branches
       for (;;) {
-        const branch = /^\s*(?:offset:\d+\s*)?=?\w+\s*\{/.exec(s.slice(i));
+        const branch = /^\s*(?:offset:\d+\s*)?(?:=-?\d+|\w+)\s*\{/.exec(s.slice(i));
         if (!branch) break;
         i += branch[0].length;
         text();
@@ -68,6 +88,12 @@ describe("messages", () => {
     expect(placeholders("{kube, select, true {This pod} other {This instance}} ended")).toEqual(["kube"]);
     expect(placeholders("{n, plural, one {# item} other {{n} items in {where}}}")).toEqual(["n", "n", "where"]);
     expect(placeholders("{count}개 중 {total}, {n, number, integer}")).toEqual(["count", "n", "total"]);
+  });
+
+  it("does not read quoted braces as arguments, and reads every plural selector", () => {
+    expect(placeholders("type '{name}' here, don't {miss}")).toEqual(["miss"]);
+    expect(placeholders("it''s {n}")).toEqual(["n"]);
+    expect(placeholders("{n, plural, =-1 {{missing}} =0 {none} other {#}}")).toEqual(["missing", "n"]);
   });
 
   it("ko 와 en 의 키 집합이 같다", () => {
