@@ -9,7 +9,7 @@ import { YamlPreview, UIModeTemplate } from "@/components/YamlPreview";
 import { UserFormPreview } from "@/components/UserFormPreview";
 import { EditorLayout } from "@/components/editor/EditorLayout";
 import { MetaRow, TemplateMeta } from "@/components/editor/MetaRow";
-import { BottomBar } from "@/components/editor/BottomBar";
+import { BottomBar, UnsavedChangesStatus } from "@/components/editor/BottomBar";
 import { saveErrorMessage } from "@/components/editor/saveError";
 import { findUnlabelledExposedField, useBeforeUnloadWhenDirty } from "@/components/editor/useDirtyGuard";
 import { YamlEditor } from "@/components/YamlEditor";
@@ -68,7 +68,11 @@ function EditUITemplateVersionInner() {
           </TabsList>
         </Tabs>
       </div>
-      {mode === "yaml" ? <YamlModeEdit onDirty={setDirty} /> : <UIModeEdit onDirty={setDirty} />}
+      {mode === "yaml" ? (
+        <YamlModeEdit dirty={dirty} onDirty={setDirty} />
+      ) : (
+        <UIModeEdit dirty={dirty} onDirty={setDirty} />
+      )}
     </div>
   );
 }
@@ -85,9 +89,10 @@ function tagsEqual(a: string[], b: string[]): boolean {
   return true;
 }
 
-type ModeProps = { onDirty: (dirty: boolean) => void };
+// `dirty` comes back down so each mode's BottomBar can show it (#146).
+type ModeProps = { dirty: boolean; onDirty: (dirty: boolean) => void };
 
-function UIModeEdit({ onDirty }: ModeProps) {
+function UIModeEdit({ dirty, onDirty }: ModeProps) {
   const { name, v } = useParams<{ name: string; v: string }>();
   const router = useRouter();
   const t = useTranslations("templates.editor");
@@ -430,6 +435,7 @@ function UIModeEdit({ onDirty }: ModeProps) {
       <BottomBar
         canSave={canSave}
         canPublish={canPublish}
+        dirty={dirty}
         saving={saving}
         onSave={save}
         onPublish={() => {}}
@@ -446,7 +452,7 @@ function UIModeEdit({ onDirty }: ModeProps) {
 // This is why "+ 새 버전" on the detail page is just a Link (not a
 // server-action that pre-creates a draft): the draft only gets persisted
 // when the user clicks Save. Going back before saving leaves the DB alone.
-function YamlModeEdit({ onDirty }: ModeProps) {
+function YamlModeEdit({ dirty, onDirty }: ModeProps) {
   const { name, v } = useParams<{ name: string; v: string }>();
   const router = useRouter();
   const t = useTranslations("templates.editor");
@@ -546,7 +552,9 @@ function YamlModeEdit({ onDirty }: ModeProps) {
         is now outline. Labels stay — "save as new version" is the whole point
         of editing a published version and BottomBar cannot say it.
       */}
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        {/* The screen #146 was observed on: say edits are pending before the leave prompt does. */}
+        <UnsavedChangesStatus dirty={dirty} />
         <Button onClick={save} disabled={!canSave}>
           {saving ? t("saving") : isDraft ? t("save") : t("saveAsNew")}
         </Button>

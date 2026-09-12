@@ -89,14 +89,19 @@ function NewTemplatePageInner() {
           </TabsList>
         </Tabs>
       </div>
-      {mode === "yaml" ? <YamlModeNew onDirty={setDirty} /> : <UIModeNew onDirty={setDirty} />}
+      {mode === "yaml" ? (
+        <YamlModeNew dirty={dirty} onDirty={setDirty} />
+      ) : (
+        <UIModeNew dirty={dirty} onDirty={setDirty} />
+      )}
     </div>
   );
 }
 
-type ModeProps = { onDirty: (dirty: boolean) => void };
+// `dirty` comes back down so each mode's BottomBar can show it (#146).
+type ModeProps = { dirty: boolean; onDirty: (dirty: boolean) => void };
 
-function UIModeNew({ onDirty }: ModeProps) {
+function UIModeNew({ dirty, onDirty }: ModeProps) {
   const router = useRouter();
   const t = useTranslations("templates.editor");
   const [loaded, setLoaded] = useState(false);
@@ -342,6 +347,7 @@ function UIModeNew({ onDirty }: ModeProps) {
       {err && <div className="text-red-600 text-sm whitespace-pre">{err}</div>}
       <BottomBar
         canSave={canSave}
+        dirty={dirty}
         canPublish={canPublish}
         saving={saving}
         publishing={publishing}
@@ -379,7 +385,7 @@ const STARTER_UISPEC = `fields:
     default: 3
 `;
 
-function YamlModeNew({ onDirty }: ModeProps) {
+function YamlModeNew({ dirty, onDirty }: ModeProps) {
   const router = useRouter();
   const t = useTranslations("templates.editor");
   const [meta, setMeta] = useState<TemplateMeta>({ name: "", tags: [] });
@@ -469,6 +475,7 @@ function YamlModeNew({ onDirty }: ModeProps) {
       {err && <div className="text-red-600 text-sm whitespace-pre">{err}</div>}
       <BottomBar
         canSave={canSave}
+        dirty={dirty}
         canPublish={false}
         saving={saving}
         onSave={saveDraft}

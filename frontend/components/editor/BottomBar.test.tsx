@@ -36,4 +36,28 @@ describe("BottomBar", () => {
     expect(screen.getByRole("button", { name: "저장 중…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "게시 중…" })).toBeDisabled();
   });
+
+  // #146 — with edits pending, nothing on screen said so until the browser's
+  // leave prompt did.
+  it("says there are unsaved changes, in a live region, only while dirty", () => {
+    renderBar({ dirty: true });
+    expect(screen.getByRole("status")).toHaveTextContent("저장하지 않은 변경 사항이 있습니다");
+  });
+
+  it("keeps the status region mounted but empty when there is nothing to save", () => {
+    renderBar({ dirty: false });
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
+  });
+
+  it("gives Save the primary look only while dirty, and keeps it enabled either way", () => {
+    renderBar({ dirty: false });
+    const idle = screen.getByRole("button", { name: "Draft 저장" });
+    expect(idle).toBeEnabled();
+    expect(idle).toHaveAttribute("data-variant", "outline");
+  });
+
+  it("switches Save to the primary look when edits are pending", () => {
+    renderBar({ dirty: true });
+    expect(screen.getByRole("button", { name: "Draft 저장" })).toHaveAttribute("data-variant", "default");
+  });
 });
