@@ -67,7 +67,7 @@ export function YamlPreview({ uiState }: { uiState: UIModeTemplate }) {
   return (
     <div className="space-y-3">
       {err && (
-        <div className="text-red-600 text-sm space-y-1">
+        <div className="text-red-600 dark:text-red-400 text-sm space-y-1">
           <p className="whitespace-pre-wrap break-all">
             {err.detail ? t("preview", { detail: err.detail }) : t("previewNoDetail", { status: err.status })}
           </p>

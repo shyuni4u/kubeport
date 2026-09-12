@@ -159,9 +159,9 @@ export default async function TemplateDetail({
             <span
               title={tr(`statusHelp.${v.status as TemplateStatus}`)}
               className={`text-xs px-2 py-0.5 rounded ${
-                v.status === "published" ? "bg-green-100 text-green-800"
+                v.status === "published" ? "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200"
                 : v.status === "deprecated" ? "bg-muted text-foreground"
-                : "bg-yellow-100 text-yellow-800"
+                : "bg-yellow-100 text-yellow-800 dark:bg-yellow-950 dark:text-yellow-200"
               }`}
             >
               {tr(`status.${v.status as TemplateStatus}`)}
@@ -192,7 +192,7 @@ export default async function TemplateDetail({
                       <input type="hidden" name="version" value={v.version} />
                       <ConfirmSubmit
                         message={tr("detail.confirmDeleteDraft", { version: v.version })}
-                        className="text-red-600 text-sm"
+                        className="text-red-600 dark:text-red-400 text-sm"
                       >
                         {tr("deleteDraft")}
                       </ConfirmSubmit>
@@ -204,7 +204,7 @@ export default async function TemplateDetail({
                     <input type="hidden" name="version" value={v.version} />
                     <ConfirmSubmit
                       message={tr("detail.confirmDeprecate", { version: v.version })}
-                      className="text-red-600 text-sm"
+                      className="text-red-600 dark:text-red-400 text-sm"
                     >
                       {tr("deprecate")}
                     </ConfirmSubmit>

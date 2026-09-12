@@ -53,7 +53,7 @@ export function BottomBar({
   const t = useTranslations("templates.editor");
   const reasonId = useId();
   return (
-    <div className="sticky bottom-0 flex flex-wrap items-center justify-end gap-3 border-t bg-white/90 px-4 py-3 backdrop-blur">
+    <div className="sticky bottom-0 flex flex-wrap items-center justify-end gap-3 border-t bg-card/90 px-4 py-3 backdrop-blur">
       <UnsavedChangesStatus dirty={dirty} />
       {/*
         A save button that is off for a reason says so beside it — otherwise

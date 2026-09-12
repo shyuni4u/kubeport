@@ -92,7 +92,7 @@ export function KindPicker({
       <details>
         <summary className="cursor-pointer text-sm text-foreground">{t("allGroupVersions", { count: gvs.length })}</summary>
         <div className="mt-2 max-h-64 overflow-auto text-xs font-mono">
-          {err && <div className="text-red-600">{err}</div>}
+          {err && <div className="text-red-600 dark:text-red-400">{err}</div>}
           {gvs.map(gv => (
             <button
               key={gv}

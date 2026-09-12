@@ -145,6 +145,49 @@ shadcn `Breadcrumb` 그대로. 모든 내부 페이지 상단.
 호출부를 리포 전역으로 고정한다. 대비 계산은 `frontend/lib/color-contrast.ts` — `getComputedStyle`
 이 `lab()` 을 돌려주므로 문자열 파싱은 틀리고, 이 모듈은 라이브에서 실측한 픽셀값에 핀 고정돼 있다.
 
+**다크 `--primary` 위 레이블 ([#150](https://github.com/shyuni4u/kubeport/issues/150)).** 흰 레이블
+(`oklch(0.985)`)은 다크 `--primary`(`oklch(0.65 0.22 275)`) 위에서 **3.42:1** 로 AA 미달이었다. 세 안을
+실측해 **레이블을 옮겼다** — 다크 `--primary-foreground` · `--sidebar-primary-foreground` 를
+`oklch(0.145 0 0)`(= `--background`)로, **5.54:1**.
+
+| 안 | 레이블 | 부작용 |
+|---|---|---|
+| 1. 레이블만 어둡게 (**채택**) | 5.54:1 | 없음. `--primary`·`--ring`·`--chart-1`·`--sidebar-primary` 그대로 |
+| 2. `--primary` 를 0.55 로 | 흰색 5.03:1 | 체크된 체크박스·스위치(= `--primary` 채움)가 `--muted` 카드 위 **2.88:1** — 1.4.11 의 3:1 미달. `--ring` 등도 끌려간다 |
+| 3. `--primary-label` 분리 | 1안과 같다 | 불필요. `--link` 는 `--primary` 가 채움·텍스트 두 역할이라 갈랐지만, `--primary-foreground` 는 이미 레이블 전용이다 |
+
+다크에서는 `[a]:hover:bg-primary/80` 이 어두운 레이블 아래 채움을 어두운 지면 쪽으로 흐려 3.90:1 이 되므로
+Button·Badge 기본 variant 에 `dark:[a]:hover:bg-primary/90`(4.67:1 이상)을 둔다. `globals.test.ts` 가 모든
+`*-foreground`/채움 쌍을 두 테마에서 4.5:1 로, `--primary` 채움을 `--muted` 포함 3:1 로 고정한다.
+
+### 1.9 다크 모드 ([#155](https://github.com/shyuni4u/kubeport/issues/155))
+
+**선택은 사용자가, 기본값은 시스템.** 상단 바 언어 선택 옆 `ThemeSwitch`(네이티브 `<select>`, 시스템
+설정/라이트/다크).
+
+- **쿠키 `kbp_theme=system|light|dark`** — `Path=/`, `SameSite=Lax`, `Max-Age` 1년, https 페이지에서만
+  `Secure`, **`Domain` 없음**(host-only — `dex.<app-host>` 로 새지 않는다), HttpOnly 아님(비밀이 아닌 UI 설정).
+- **서버가 클래스를 정한다.** 루트 레이아웃이 쿠키를 읽어 `<html class="dark">` / `class="light"` / 클래스
+  없음(system)을 렌더한다. 첫 페인트가 이미 선택된 테마이고 하이드레이션이 받은 마크업과 같다 — #247 처럼
+  브라우저만 아는 값으로 그렸다가 뒤집히는 경로가 없다. 레이아웃은 이미 next-intl 이 로케일 쿠키를 읽어
+  요청 시점 렌더링이었으므로 렌더링 모드는 바뀌지 않는다.
+- **system 은 스크립트 없이 CSS 가 따른다.** `@custom-variant dark` 가 `.dark` 와
+  `@media (prefers-color-scheme: dark)` 의 `:root:not(.light)` 둘 다에 매치하고, 다크 토큰은
+  `:root { @variant dark { … } }` **한 번만** 쓴다 — Tailwind 가 두 벌로 펼치며, `globals.test.ts` 가
+  컴파일해서 두 벌이 같음을 확인한다. 인라인 스크립트가 없으므로 CSP(`script-src 'self' 'unsafe-inline'`)와 무관.
+  구체성은 `:is(.dark *)` 와 같은 클래스 1개로 유지(`:where(:root)` 는 0).
+- `color-scheme` 도 따라가므로 네이티브 컨트롤·스크롤바가 테마와 맞는다.
+
+**다크 대비 규칙.** 라이트 토큰은 건드리지 않는다. 다크에서:
+
+- `--input` 은 컨트롤의 윤곽이라 1.4.11 대상 — 불투명 `oklch(0.58)`(지면 4.61 · 카드 4.18 · muted 3.53:1).
+  `--border`(10% 헤어라인)는 카드·행 구분선이라 대상이 아니어서 그대로 둔다. 라이트 `--input`(0.922)은
+  여전히 약 1.2:1 이다 — 이 변경 범위 밖으로 남긴 알려진 격차.
+- `--switch-track` 을 다크 스위치에도 쓴다(shadcn 의 `bg-input/80` 은 muted 카드 위 1.46:1). `oklch(0.58)`.
+- **토큰을 우회하는 Tailwind 팔레트 클래스는 `dark:` 짝을 가진다.** 텍스트는 항상, 채움·테두리는 양끝 틴트
+  (50–300, 700–950)일 때. `bg-white` 면은 `bg-card`(라이트에서 동일). `frontend/components/dark-palette.test.ts`
+  가 리포 전역으로 짝의 존재와 그 짝의 4.5:1 을 고정한다. LogsPanel 은 두 테마 공통의 터미널 지면이라 제외.
+
 ---
 
 ## 2. 공통 레이아웃

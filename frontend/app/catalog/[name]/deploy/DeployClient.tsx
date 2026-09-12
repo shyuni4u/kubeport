@@ -579,7 +579,7 @@ export function DeployClient({
         {!isUpdate && clusters.length === 0 && (
           <div
             role="status"
-            className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+            className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100"
           >
             {t("noClusterWarning")}
           </div>
@@ -597,7 +597,7 @@ export function DeployClient({
           fallback={() => (
             <p
               role="alert"
-              className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+              className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200"
             >
               {t("formCrashed")}
             </p>
@@ -632,7 +632,7 @@ export function DeployClient({
           // "disabled for no stated reason" and the sentence as an unrelated
           // notice. Nothing about the wording changes — only where it sits.
           <div className="mt-2 flex justify-end">
-            <p role="status" className="max-w-sm text-right text-sm text-red-700">
+            <p role="status" className="max-w-sm text-right text-sm text-red-700 dark:text-red-400">
               {t("blockedByRbac")}
             </p>
           </div>
@@ -642,7 +642,7 @@ export function DeployClient({
             ref={errRef}
             role="alert"
             tabIndex={-1}
-            className="mt-2 whitespace-pre-wrap text-sm text-red-700 outline-none"
+            className="mt-2 whitespace-pre-wrap text-sm text-red-700 dark:text-red-400 outline-none"
           >
             {err}
           </p>

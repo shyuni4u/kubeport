@@ -37,6 +37,12 @@
     "noClusters": "등록된 클러스터 없음",
     "openMenu": "메뉴 열기",
     "localeSwitchLabel": "언어 선택",
+    "themeSwitchLabel": "색 테마",
+    "theme": {
+      "system": "시스템 설정",
+      "light": "라이트",
+      "dark": "다크"
+    },
     "role": {
       "adminDesc": "템플릿 작성",
       "userDesc": "카탈로그 소비"

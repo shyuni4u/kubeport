@@ -88,7 +88,7 @@ export function FieldInspector({
           onClick={() => onChange({ mode: "exposed", uiSpec: { label: "", type: schemaType, required: false } })}
         >{t("expose")}</button>
         <HelpHint text={t("exposeHelp")} />
-        {value && <button type="button" className="ml-auto text-xs text-red-600" onClick={onClear}>{t("clear")}</button>}
+        {value && <button type="button" className="ml-auto text-xs text-red-600 dark:text-red-400" onClick={onClear}>{t("clear")}</button>}
       </div>
 
       {value?.mode === "fixed" && (
@@ -179,7 +179,7 @@ export function FieldInspector({
                     />
                     <button
                       type="button"
-                      className="text-xs text-red-600 px-2"
+                      className="text-xs text-red-600 dark:text-red-400 px-2"
                       onClick={() => {
                         const next = (value.uiSpec.values ?? []).filter((_, j) => j !== i);
                         onChange({ ...value, uiSpec: { ...value.uiSpec, values: next } });

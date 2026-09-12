@@ -62,11 +62,11 @@ export function DemoBanner({ resetAtIso }: { resetAtIso: string | null }) {
         .join(" ")
     : null;
   return (
-    <div role="status" className="flex items-center gap-3 border-b border-amber-300 bg-amber-50 px-6 py-2 text-sm text-amber-900">
+    <div role="status" className="flex items-center gap-3 border-b border-amber-300 bg-amber-50 px-6 py-2 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
       <span className="flex-1">{time ? t("banner", { time }) : t("bannerNoTime")}</span>
       <button
         type="button"
-        className="rounded px-2 py-0.5 hover:bg-amber-100"
+        className="rounded px-2 py-0.5 hover:bg-amber-100 dark:hover:bg-amber-500/20"
         onClick={dismiss}
       >
         {t("dismiss")}
