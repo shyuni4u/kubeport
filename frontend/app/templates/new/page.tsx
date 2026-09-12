@@ -12,7 +12,7 @@ import { EditorLayout } from "@/components/editor/EditorLayout";
 import { MetaRow, TemplateMeta } from "@/components/editor/MetaRow";
 import { BottomBar } from "@/components/editor/BottomBar";
 import { saveErrorMessage } from "@/components/editor/saveError";
-import { findUnlabelledExposedField, useBeforeUnloadWhenDirty } from "@/components/editor/useDirtyGuard";
+import { findUnlabelledExposedField, useBeforeUnloadWhenDirty, useDirtyAgainstBaseline } from "@/components/editor/useDirtyGuard";
 import { YamlEditor } from "@/components/YamlEditor";
 import { useTemplateYamlValidation } from "@/components/editor/useTemplateYamlValidation";
 import { YamlIssueList, useSaveBlockedReason } from "@/components/editor/YamlIssues";
@@ -158,6 +158,13 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
   }, []);
 
   const touch = () => onDirty(true);
+  // Everything a save sends, so undoing an edit clears the mark (#274). The
+  // schemas are left out: they are fetched, not edited.
+  const snapshot = useMemo(
+    () => JSON.stringify({ meta, owningTeamId, resources: resources.map(({ gv, kind, name, fields }) => ({ gv, kind, name, fields })) }),
+    [meta, owningTeamId, resources],
+  );
+  useDirtyAgainstBaseline(snapshot, dirty, onDirty);
 
   async function addKind(k: KindRef) {
     const res = await fetch(`/api/v1/clusters/${encodeURIComponent(cluster)}/openapi/${k.gv}`);
@@ -420,6 +427,13 @@ function YamlModeNew({ dirty, onDirty }: ModeProps) {
   const blockedReason = saveBlockedReason(validation);
   const canSave = meta.name.trim().length > 0 && !saving && !blockedReason;
   const touch = () => onDirty(true);
+  // Everything a save sends, so undoing an edit back to the starter clears the
+  // mark (#274).
+  const snapshot = useMemo(
+    () => JSON.stringify({ meta, owningTeamId, resourcesYaml, uispecYaml }),
+    [meta, owningTeamId, resourcesYaml, uispecYaml],
+  );
+  useDirtyAgainstBaseline(snapshot, dirty, onDirty);
 
   async function saveDraft() {
     setErr(null);

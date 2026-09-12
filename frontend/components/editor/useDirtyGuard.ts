@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 // Warns before leaving while the editor holds unsaved edits:
 //  - tab close / reload / hard navigation → native beforeunload prompt
@@ -36,6 +36,35 @@ export function useBeforeUnloadWhenDirty(dirty: boolean, leaveMessage?: string) 
       document.removeEventListener("click", onClick, true);
     };
   }, [dirty, leaveMessage]);
+}
+
+/**
+ * Settles `dirty` against what the editor started from, so undoing an edit
+ * clears it (#274). Before, every edit handler set dirty and nothing ever
+ * compared the text with the loaded one: type a line, delete it, and the
+ * "저장하지 않은 변경 사항이 있습니다" mark and the leave prompt both stayed.
+ *
+ * `snapshot` is a string of everything a save would send, or null while the
+ * editor is still loading; the first non-null value is the baseline. Edit
+ * handlers may still mark dirty at once — this runs after the commit and puts
+ * it back to "differs from the baseline", including when a handler fired
+ * without changing anything (re-picking the same team).
+ *
+ * A successful save navigates away, and a mode switch remounts the editor,
+ * which starts a new baseline; neither needs to move this one.
+ */
+export function useDirtyAgainstBaseline(
+  snapshot: string | null,
+  dirty: boolean,
+  onDirty: (dirty: boolean) => void,
+) {
+  const baseline = useRef<string | null>(null);
+  useEffect(() => {
+    if (snapshot === null) return;
+    if (baseline.current === null) baseline.current = snapshot;
+    const differs = snapshot !== baseline.current;
+    if (differs !== dirty) onDirty(differs);
+  }, [snapshot, dirty, onDirty]);
 }
 
 // Returns the ui-spec path of the first exposed field whose label is blank,
