@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 
 import { proxy } from "./proxy";
+import { SESSION_COOKIE } from "./lib/cookie-names";
 
 // #41: an unauthenticated page request went straight to /api/auth/login, which
 // goes straight to Google's account picker. The demo's "try it" buttons live on
@@ -10,7 +11,7 @@ import { proxy } from "./proxy";
 
 function req(path: string, opts?: { session?: boolean }) {
   const r = new NextRequest(new URL(`https://kubeport.enzo.kr${path}`));
-  if (opts?.session) r.cookies.set("kbp_sid", "abc");
+  if (opts?.session) r.cookies.set(SESSION_COOKIE, "abc");
   return r;
 }
 

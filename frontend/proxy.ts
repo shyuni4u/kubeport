@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-// Import-free module on purpose — see lib/demo-config.
+// Import-free modules on purpose — see lib/demo-config.
 import { demoConfigured } from "@/lib/demo-config";
+import { SESSION_COOKIE } from "@/lib/cookie-names";
 
 // Pages get redirected to the login screen when there is no session cookie.
 // The whole /api/ surface is excluded on purpose: /api/v1/* is the machine
@@ -18,7 +19,7 @@ export const config = {
 };
 
 export function proxy(req: NextRequest) {
-  const hasSession = req.cookies.has("kbp_sid");
+  const hasSession = req.cookies.has(SESSION_COOKIE);
   if (hasSession) return NextResponse.next();
 
   // Where they were trying to go, so the round trip can put them back there
