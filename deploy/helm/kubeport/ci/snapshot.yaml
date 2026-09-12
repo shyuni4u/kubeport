@@ -1589,6 +1589,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: dex
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: kubeport-kp-kubeport-https-redirect@kubernetescrd
 spec:
   ingressClassName: "traefik"
   tls:
@@ -1618,6 +1620,8 @@ metadata:
     app.kubernetes.io/instance: kp
     app.kubernetes.io/version: "0.1.0"
     app.kubernetes.io/managed-by: Helm
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: kubeport-kp-kubeport-https-redirect@kubernetescrd
 spec:
   ingressClassName: "traefik"
   tls:
@@ -1677,3 +1681,19 @@ spec:
   issuerRef:
     kind: "ClusterIssuer"
     name: "letsencrypt-prod"
+---
+# Source: kubeport/templates/https-redirect-middleware.yaml
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: kp-kubeport-https-redirect
+  labels:
+    helm.sh/chart: kubeport-0.1.0
+    app.kubernetes.io/name: kubeport
+    app.kubernetes.io/instance: kp
+    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true

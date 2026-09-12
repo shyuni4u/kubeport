@@ -165,6 +165,27 @@ ingress:
   #   nginx.ingress.kubernetes.io/proxy-body-size: "4m"
   annotations: {}
   # tls handled by .Values.tls below
+  # Redirect plain http to https on the app and Dex hosts (#268). Without it
+  # the whole app is served over http too, and the HSTS header it sends is
+  # ignored by a browser that receives it over http (RFC 6797 §8.1) — a first
+  # visit stays on http, where the Secure auth cookies cannot even be stored.
+  #
+  # Rendered only with className "traefik" and TLS on, as a Traefik
+  # `traefik.io/v1alpha1` Middleware (k3s ships the CRD). Other ingress classes
+  # need their own mechanism (nginx: ssl-redirect is on by default with TLS).
+  # Set false on a Traefik without the traefik.io CRDs (older than v2.10, or
+  # installed with --skip-crds) — the install fails with no matches for kind
+  # "Middleware" — or with its kubernetesCRD provider off, where the install
+  # succeeds but the Ingress routers cannot resolve the Middleware and both hosts
+  # answer 404, https included. Also set false when
+  # something in front already redirects, or when something in front terminates
+  # TLS and forwards plain http to Traefik (Cloudflare "Flexible" SSL, an L7 load
+  # balancer with an http backend): Traefik does not trust that proxy's
+  # X-Forwarded-Proto by default, so every request is redirected again and the
+  # site loops (ERR_TOO_MANY_REDIRECTS). cert-manager's HTTP-01 challenge
+  # keeps working: its solver gets its own route, and Let's Encrypt follows a
+  # redirect to https without checking the certificate.
+  httpsRedirect: true
 
 tls:
   # Setting this to false makes the derived oidc.redirectUri http://, and that
