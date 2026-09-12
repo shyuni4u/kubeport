@@ -28,13 +28,18 @@ func (adminVerifier) Verify(_ context.Context, _ string) (auth.Claims, error) {
 	return auth.Claims{Subject: "admin", Email: "admin@example.com", Groups: []string{"kubeport-admin"}}, nil
 }
 
+// testDatabaseURL is the database the api tests write to: the session's own
+// (scripts/test-db.sh) when TEST_DATABASE_URL is set, the shared one otherwise.
+func testDatabaseURL() string {
+	if dsn := os.Getenv("TEST_DATABASE_URL"); dsn != "" {
+		return dsn
+	}
+	return "postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable"
+}
+
 func testStore(t *testing.T) *store.Store {
 	t.Helper()
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		dsn = "postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable"
-	}
-	s, err := store.NewStore(context.Background(), dsn)
+	s, err := store.NewStore(context.Background(), testDatabaseURL())
 	require.NoError(t, err)
 	t.Cleanup(s.Close)
 	return s

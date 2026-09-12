@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
 	"kubeport/internal/api"
@@ -49,7 +51,33 @@ func seedClusterAt(t *testing.T, r http.Handler, apiURL, caPEM string) string {
 	})
 	w := do(t, r, http.MethodPost, "/v1/clusters", bytes.NewReader(body))
 	require.Equal(t, http.StatusCreated, w.Code, "seed cluster: %s", w.Body.String())
+	// apiURL is an httptest address, and the OS gives its port out again. Since
+	// #245 a registered api_url refuses a second registration with 409, so the
+	// row goes when this test ends — TestMain's sweep runs only after the whole
+	// package, too late for the next test that draws the same port (#304).
+	t.Cleanup(func() { deleteClusterRow(t, name) })
 	return name
+}
+
+// deleteClusterRow removes a cluster a test registered, with any release on it.
+func deleteClusterRow(t *testing.T, name string) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, testDatabaseURL())
+	if err != nil {
+		t.Errorf("delete cluster %s: %v", name, err)
+		return
+	}
+	defer conn.Close(ctx)
+	for _, q := range []string{
+		`DELETE FROM releases WHERE cluster_id IN (SELECT id FROM clusters WHERE name = $1)`,
+		`DELETE FROM clusters WHERE name = $1`,
+	} {
+		if _, err := conn.Exec(ctx, q, name); err != nil {
+			t.Errorf("delete cluster %s: %v", name, err)
+			return
+		}
+	}
 }
 
 func upstreamRouter(t *testing.T, status int, body string) (http.Handler, string) {

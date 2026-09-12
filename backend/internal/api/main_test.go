@@ -32,12 +32,8 @@ func TestMain(m *testing.M) {
 }
 
 func cleanupTestFixtures() {
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		dsn = "postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable"
-	}
 	ctx := context.Background()
-	conn, err := pgx.Connect(ctx, dsn)
+	conn, err := pgx.Connect(ctx, testDatabaseURL())
 	if err != nil {
 		log.Printf("cleanupTestFixtures: connect skipped: %v", err)
 		return
