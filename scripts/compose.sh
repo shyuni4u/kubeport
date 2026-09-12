@@ -21,6 +21,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$here/scripts/lib/main-checkout.sh"
+. "$here/scripts/lib/hosts.sh"
 
 MAIN="$(main_checkout "$here")"
 DIR="$MAIN/deploy/docker"
@@ -58,6 +59,16 @@ case "${1:-}" in
     fi
     if [[ -n "$bind" && "$bind" != "127.0.0.1" ]]; then
       say "WARNING: dex will be published on $bind:5556 — its passwords are public, so this reaches past this machine unless a firewall blocks it (#63)"
+    fi
+    # Host processes reach dex as host.docker.internal (dex.yaml's issuer)
+    # through the hosts file. A loopback publish does not answer the LAN IP
+    # Docker Desktop writes for that name, so the backend and go test would
+    # time out on it (#298). Warn only; the hosts file is the user's to edit.
+    if [[ -z "$bind" || "$bind" == "127.0.0.1" ]]; then
+      hdi="$(hosts_file_ip host.docker.internal "${HOSTS_FILES[@]}")"
+      if [[ -n "$hdi" ]] && ! is_loopback_ip "$hdi"; then
+        say "WARNING: the hosts file maps host.docker.internal to $hdi, where dex on 127.0.0.1:5556 does not answer — set that entry to 127.0.0.1 (docs/local-e2e.md §1, #298)"
+      fi
     fi
     ;;
 esac

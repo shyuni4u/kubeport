@@ -3,6 +3,7 @@
 # Prints what is present/missing so a fresh machine knows exactly what to do.
 set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+. "$ROOT/scripts/lib/hosts.sh"
 
 ok=1
 check() { # check <label> <command...>
@@ -13,7 +14,13 @@ check() { # check <label> <command...>
 log "repo: $ROOT"
 for t in docker kind kubectl atlas go node pnpm curl openssl; do check "tool $t" command -v "$t"; done
 
-check "hosts entry host.docker.internal" grep -qi 'host.docker.internal' /etc/hosts /c/Windows/System32/drivers/etc/hosts
+# The entry must say 127.0.0.1, not merely exist: dex is published on loopback
+# only (#63), and Docker Desktop's own entry is the LAN IP (#298).
+hdi_ip="$(hosts_file_ip host.docker.internal "${HOSTS_FILES[@]}")"
+check "hosts entry host.docker.internal → 127.0.0.1" is_loopback_ip "$hdi_ip"
+if [[ -n "$hdi_ip" ]] && ! is_loopback_ip "$hdi_ip"; then
+  warn "        host.docker.internal is $hdi_ip in the hosts file — set it to 127.0.0.1 (docs/local-e2e.md §1)"
+fi
 check "dex cert $DEX_CRT" test -f "$DEX_CRT"
 check "frontend/.env.local" test -f "$ENV_LOCAL"
 check "postgres container running" sh -c 'docker ps --format "{{.Names}} {{.Status}}" | grep -q "postgres.*Up"'

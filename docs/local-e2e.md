@@ -57,8 +57,15 @@ below assumes your repo lives under `~/dev/kubeport` (WSL2 home), not on
 
 ### 1. Fix Windows `hosts` for `host.docker.internal`
 
-Docker Desktop sometimes writes a bad IP into Windows's hosts file (e.g. the
-machine's public IP from ISP DNS leak). Open PowerShell as Administrator:
+Host processes — the backend, the BFF, `go test` — reach dex as
+`https://host.docker.internal:5556` (the issuer in `dex.yaml`) through the
+hosts file, and dex is published on `127.0.0.1` only (#63). So the entry must
+say `127.0.0.1`, not merely exist. Docker Desktop writes a different IP there —
+the machine's LAN IP, or a stale one after the network changed, or a public IP
+from an ISP DNS leak — and a loopback publish does not answer any of them
+(#298). `scripts/e2e/doctor.sh` and `scripts/compose.sh up` check the entry. On
+macOS and Linux add `127.0.0.1 host.docker.internal` to `/etc/hosts` (CI does
+the same). On Windows, open PowerShell as Administrator:
 
 ```powershell
 notepad C:\Windows\System32\drivers\etc\hosts
