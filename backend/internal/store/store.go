@@ -10,6 +10,9 @@ import (
 type Store struct {
 	*Queries
 	pool *pgxpool.Pool
+	// lockPool holds the connections apply locks live on (see LockApply), apart
+	// from pool so that holding locks never takes a connection a query needs.
+	lockPool *pgxpool.Pool
 }
 
 func NewStore(ctx context.Context, dsn string) (*Store, error) {
@@ -21,10 +24,25 @@ func NewStore(ctx context.Context, dsn string) (*Store, error) {
 		pool.Close()
 		return nil, err
 	}
-	return &Store{Queries: New(pool), pool: pool}, nil
+	lockCfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		pool.Close()
+		return nil, err
+	}
+	lockCfg.MaxConns = applyLockConns
+	lockCfg.MinConns = 0
+	lockPool, err := pgxpool.NewWithConfig(ctx, lockCfg)
+	if err != nil {
+		pool.Close()
+		return nil, err
+	}
+	return &Store{Queries: New(pool), pool: pool, lockPool: lockPool}, nil
 }
 
-func (s *Store) Close() { s.pool.Close() }
+func (s *Store) Close() {
+	s.lockPool.Close()
+	s.pool.Close()
+}
 
 // clusterRegistrationLock is the transaction-scoped advisory lock key that
 // serialises cluster registration ("kbp_clus"). A constant of its own so no
