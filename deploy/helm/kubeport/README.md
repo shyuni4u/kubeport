@@ -320,7 +320,9 @@ could freeze the browser:
   naming the field and what to write instead). `(?i)` and `(?P<name>…)` do not
   compile in the browser, so the form used to drop the pattern without a word;
   `\A`, `\z`, `\pL`, `[[:alpha:]]` and `\x{41}` compile there with a different
-  meaning. Common rewrites:
+  meaning. So does any character outside the Basic Multilingual Plane, such as
+  an emoji: without the `u` flag the browser reads it as two halves. Common
+  rewrites:
 
   | RE2-only | Write instead |
   |---|---|
@@ -329,6 +331,8 @@ could freeze the browser:
   | `\A` / `\z` | `^` / `$` |
   | `[[:alpha:]]`, `\pL` | `[a-zA-Z]` (list the characters) |
   | `\x{41}` | `\x41` |
+  | `[😀]`, or an emoji anywhere | leave it out, or allow such characters with a negated class such as `[^\x00-\x7F]` |
+  | `(a?){25}`, `(a*){3}` — a repeat of something that can be empty | `a{0,25}`, `a*` |
 
 - **Patterns longer than 200 characters, and patterns that can match the same
   text in more than one way inside a repeat, are refused on save** — `(a+)+`,
@@ -336,7 +340,11 @@ could freeze the browser:
   `^[a-z0-9]+[-a-z0-9]*[a-z0-9]+$`. Give each repetition a separator nothing
   else in it can match, at either end — `^[a-z]+(-[a-z]+)*$`,
   `^([a-z]+,)*[a-z]+$`, `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` — and start the pattern
-  with `^`.
+  with `^`. A repeat of something that can match nothing, such as `(a?){25}`,
+  is refused too. Ways also multiply along the whole pattern, not only inside a
+  repeat: a few two-way parts are fine (the common IPv4 pattern built from
+  `[01]?[0-9][0-9]?` is accepted), but many are refused; write each part so it
+  matches one way, as in `(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])`.
 - **Published versions with such a pattern still deploy**, and the API still
   checks values against it, but the deploy form sets the pattern and its format
   hint aside, so a user hears about a mismatch only from the deploy's 400. The
@@ -351,7 +359,7 @@ Find stored versions with RE2-only syntax before upgrading:
 ```sql
 SELECT t.name, tv.version, tv.status
   FROM template_versions tv JOIN templates t ON t.id = tv.template_id
- WHERE tv.ui_spec_yaml ~ '(?n)^[ \t]*(-[ \t]+)?pattern:.*(\(\?[^:<]|\(\?<[0-9=!]|\\+([AzQpPa1-9]|x\{)|\[\^?\]|\[[^]]*\[:\^?[a-z]+:\]|\{([0-9]+,)?0[0-9]|(^|[^[])\^[*+?]|\$[*+?]|\\+[bB][*+?{])';
+ WHERE tv.ui_spec_yaml ~ '(?n)^[ \t]*(-[ \t]+)?pattern:.*(\(\?[^:<]|\(\?<[0-9=!]|\\+([AzQpPa1-9]|x\{)|\[\^?\]|\[[^]]*\[:\^?[a-z]+:\]|\{([0-9]+,)?0[0-9]|(^|[^[])\^[*+?]|\$[*+?]|\\+[bB][*+?{]|[\U00010000-\U0010FFFF]|\\U000[1-9a-fA-F]|\\U0010|\\u[dD][89a-fA-F])';
 ```
 
 The query reads `pattern:` lines, plain or quoted either way, so a spec written

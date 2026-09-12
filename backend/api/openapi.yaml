@@ -2233,7 +2233,9 @@ components:
                   must be written in the subset both read the same way. Saving
                   a template refuses anything else with 400 `validation-error`:
                   RE2-only syntax such as `(?i)`, `(?s)`, `(?P<name>...)`,
-                  `\A`, `\z`, `\Q...\E`, `\pL` or `[[:alpha:]]` (use
+                  `\A`, `\z`, `\Q...\E`, `\pL`, `[[:alpha:]]`, or a character
+                  outside the Basic Multilingual Plane such as an emoji,
+                  which the browser reads as two halves (use
                   `(?:...)` and `(?<name>...)` for groups); a pattern longer
                   than 200 characters; and a pattern that can match the same
                   text in more than one way inside a repeat, as in `(a+)+`,
@@ -2241,6 +2243,10 @@ components:
                   (bounded counts are judged like unbounded ones). A separator
                   nothing else in the repeat can match keeps it unambiguous,
                   at either end: `^[a-z]+(-[a-z]+)*$`, `^([a-z]+,)*[a-z]+$`.
+                  A repeat of something that can match nothing, as in
+                  `(a?){25}`, is refused as well. Ways also multiply along the
+                  whole pattern, not only inside a repeat: a few two-way
+                  parts pass (IPv4 built from `[01]?[0-9][0-9]?`), many do not.
               values:
                 type: array
                 items: { type: string }

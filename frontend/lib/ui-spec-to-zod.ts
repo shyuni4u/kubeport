@@ -125,6 +125,29 @@ function safeRegExp(pattern: string): RegExp | null {
 const MAX_PATTERN_INPUT = 256;
 
 /**
+ * Values are the other half of the UTF-16 problem ui-spec-pattern.ts refuses
+ * in patterns. A flagless RegExp reads "😀" as two characters and Go as one, so
+ * `^[^a]{2}$` would pass it here and fail on deploy. For a value holding any
+ * surrogate, the form runs the pattern in Unicode mode instead, which reads
+ * code points as Go does, with each lone half turned into U+FFFD the way the
+ * API's JSON decoding turns it. A pattern that is not valid in Unicode mode
+ * (`\_`, a lone `{`) leaves such a value to the API.
+ */
+const SURROGATE = /[\uD800-\uDFFF]/;
+
+function unicodeRegExp(pattern: string): RegExp | null {
+  try {
+    return new RegExp(pattern, "u");
+  } catch {
+    return null;
+  }
+}
+
+function withLoneSurrogatesReplaced(value: string): string {
+  return value.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDFFF]/g, (m) => (m.length === 2 ? m : String.fromCharCode(0xfffd)));
+}
+
+/**
  * One thing wrong with a ui-spec field. `dropped` means the field is left out
  * of the form; `ignored` means the field stays and only that setting is set
  * aside until it is complete. Both used to reach the admin as "left out, the
@@ -304,13 +327,17 @@ export function schemaFromUISpec(spec: UISpec): z.ZodObject<Record<string, ZodTy
         // it reaches here, but this function must not throw or hang for a
         // caller that skipped it.
         const re = f.pattern ? safeRegExp(f.pattern) : null;
+        const reUnicode = re && f.pattern ? unicodeRegExp(f.pattern) : null;
         // Not `.regex(re)` behind `.max()`: zod runs every check, so a value
         // over maxLength still reached the pattern. The bound has to sit in
         // front of `re.test` itself. The issue keeps `.regex`'s code, which
         // DynamicForm turns into its "not an allowed format" message.
         zs = re
           ? s.superRefine((v, ctx) => {
-              if (v.length > MAX_PATTERN_INPUT || re.test(v)) return;
+              if (v.length > MAX_PATTERN_INPUT) return;
+              const halves = SURROGATE.test(v);
+              const target = halves ? reUnicode : re;
+              if (!target || target.test(halves ? withLoneSurrogatesReplaced(v) : v)) return;
               ctx.addIssue({ code: z.ZodIssueCode.invalid_string, validation: "regex", message: "Invalid" });
             })
           : s;

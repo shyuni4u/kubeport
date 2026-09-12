@@ -13,17 +13,37 @@
 /** Longest pattern accepted, in characters (code points, as the API counts). */
 export const MAX_PATTERN_LENGTH = 200;
 
+// Ambiguity is scored as an estimate, in bits, of the extra work a
+// backtracking engine does when a match fails: two runs over the same text
+// that parted and meet again at one position double it, or more.
+
 /**
- * The number of times two ways of matching the same text merge back together
- * along one run at which a pattern is refused. Each merge multiplies the work
- * a backtracking engine does when a match fails; a merge inside a loop
- * (`(a+)+`, `(a|a)*`) repeats without end, so every exponential pattern
- * reaches it, and so do three overlapping loops in a row. One merge is the
- * ambiguity real patterns have — an image reference whose registry part can
- * also be read as its path, or an unanchored `[a-z]+` the browser retries at
- * every position — and costs roughly the square of the value's length.
+ * A merge whose runs parted and met again across a loop: where each run left
+ * the loop is a choice among up to the value's length (256 characters in the
+ * form), so it counts nine bits.
  */
-const MAX_AMBIGUITY = 2;
+const LOOP_MERGE_COST = 9;
+
+/**
+ * The score at which a pattern is refused. Two loop merges reach it — three
+ * overlapping loops such as `^[a-z0-9]+[-a-z0-9]*[a-z0-9]+$`, an unanchored
+ * `\w+\w+` — and so does any merge on a cycle, which scores without end
+ * (`(a+)+`, `(a|a)*`). A merge with no loop between the parting and the
+ * meeting is bounded; it counts two bits per doubling (a pair of runs sees
+ * about every other independent choice), so the four octets of an IPv4
+ * pattern written with `[01]?[0-9][0-9]?` fit and 2^9 choices do not.
+ */
+const MAX_AMBIGUITY = 18;
+
+/**
+ * A counted repeat up to this many, with no loop inside, is copied out rather
+ * than treated as a loop, so the ambiguity in `(octet\.){3}` is scored as the
+ * bounded thing it is.
+ */
+const MAX_EXPANDED_COUNT = 4;
+
+/** Caps copying out; past it a repeat is treated as a loop, which only ever scores higher. */
+const MAX_POSITIONS = 400;
 
 /** Work spent looking; a pattern that needs more is refused as too complex. */
 const ANALYSIS_BUDGET = 200_000;
@@ -40,6 +60,14 @@ class Incomplete {}
 export function patternProblem(pattern: string): PatternProblemKind | null {
   const s = Array.from(pattern, (ch) => ch.codePointAt(0)!);
   if (s.length > MAX_PATTERN_LENGTH) return "too-long";
+  // A flagless RegExp runs on UTF-16 code units, so a character outside the
+  // Basic Multilingual Plane is two characters here and one to Go: `[😀]` is
+  // a class of two halves, and `([😀]|[😁])+` is ambiguous because both share
+  // the first half. Refusing them — and any lone half — keeps every accepted
+  // pattern the same sequence of characters on both sides, which is what the
+  // analysis assumes. With them gone, code points and code units also count
+  // the pattern's length the same way.
+  if (s.some((c) => c > 0xffff || (c >= 0xd800 && c <= 0xdfff))) return "dialect";
   try {
     const parser = new Parser(s);
     const root = parser.parseAlt();
@@ -107,7 +135,9 @@ function singleCodePoint(s: CharSet): number | undefined {
 }
 
 // The browser's meaning of the classes, since that is where backtracking
-// happens.
+// happens. Sets run to U+10FFFF: for a flagless RegExp, which sees only code
+// units, that over-approximates (safe); for the Unicode-mode run the form uses
+// on values holding surrogates, it is exact.
 const DIGIT = setOf(0x30, 0x39);
 const WORD = setOf(0x30, 0x39, 0x41, 0x5a, 0x5f, 0x5f, 0x61, 0x7a);
 const SPACE = setOf(
@@ -136,7 +166,7 @@ interface PatternNode {
   /** The source code points it covers. */
   start: number;
   end: number;
-  /** The positions created inside it. */
+  /** The source positions created inside it. */
   posLo: number;
   posHi: number;
 }
@@ -149,12 +179,15 @@ class Parser {
   i = 0;
   /** One per position (a character the pattern consumes). */
   readonly sets: CharSet[] = [];
+  /** The source position each position was copied from. */
+  readonly origin: number[] = [];
   private readonly names = new Set<string>();
 
   constructor(readonly s: number[]) {}
 
   private lit(set: CharSet): PatternNode {
     this.sets.push(set);
+    this.origin.push(this.sets.length - 1);
     return node({ op: "lit", pos: this.sets.length - 1 });
   }
 
@@ -259,13 +292,22 @@ class Parser {
     }
     return null;
   }
+
+  clone(nd: PatternNode): PatternNode {
+    if (nd.op === "lit") {
+      this.sets.push(this.sets[nd.pos]);
+      this.origin.push(this.origin[nd.pos]);
+      return { ...nd, pos: this.sets.length - 1 };
+    }
+    return { ...nd, subs: nd.subs.map((sub) => this.clone(sub)) };
+  }
 }
 
 /**
  * The escape at s[i] === "\\". Letters and digits are an allowlist: what is
  * not on it either does not compile in Go or means something else here (`\A`,
- * `\z`, `\pL`, `\Q`, `\a`, `\1`), and `new RegExp` reads them all without
- * complaint.
+ * `\z`, `\pL`, `\Q`, `\a`, `\1`, `\u`), and `new RegExp` reads them all
+ * without complaint.
  */
 function scanEscape(s: number[], i: number, inClass: boolean): { set: CharSet; assert: boolean; size: number } {
   const n = s.length;
@@ -428,6 +470,64 @@ function repeatCount(digits: string): number {
 
 // ---- ambiguity ----
 
+const loops = (nd: PatternNode) => nd.op === "rep" && (nd.max < 0 || nd.max >= 2);
+
+function nullable(nd: PatternNode): boolean {
+  switch (nd.op) {
+    case "lit":
+      return false;
+    case "empty":
+      return true;
+    case "alt":
+      return nd.subs.some(nullable);
+    case "rep":
+      return nd.max === 0 || nd.min === 0 || nullable(nd.subs[0]);
+  }
+  return nd.subs.every(nullable);
+}
+
+/**
+ * A repeat of more than one whose body can match nothing. The browser ends
+ * `*` and `+` at an empty repetition, but a counted repeat such as `(a?){25}`
+ * it spreads the text over its repetitions in every way it can: a minute at
+ * 256 characters. No ui-spec needs one, so all are refused.
+ */
+function refuseEmptyRepeats(nd: PatternNode): void {
+  if (loops(nd) && nullable(nd.subs[0])) throw new Rejected("nested-quantifier");
+  nd.subs.forEach(refuseEmptyRepeats);
+}
+
+const hasLoop = (nd: PatternNode): boolean => loops(nd) || nd.subs.some(hasLoop);
+
+const countPositions = (nd: PatternNode): number =>
+  nd.op === "lit" ? 1 : nd.subs.reduce((c, sub) => c + countPositions(sub), 0);
+
+/**
+ * Copies out a counted repeat of at most MAX_EXPANDED_COUNT with no loop
+ * inside — `x{1,3}` becomes `x(x(x)?)?` — so its bounded ambiguity is scored as
+ * bounded instead of as a loop's.
+ */
+function expand(parser: Parser, nd: PatternNode): PatternNode {
+  const c: PatternNode = { ...nd, subs: nd.subs.map((sub) => expand(parser, sub)) };
+  if (
+    !loops(c) || c.max > MAX_EXPANDED_COUNT || c.min > c.max || hasLoop(c.subs[0]) ||
+    parser.sets.length + countPositions(c.subs[0]) * (c.max - 1) > MAX_POSITIONS
+  ) {
+    return c;
+  }
+  const copies = [c.subs[0]];
+  while (copies.length < c.max) copies.push(parser.clone(c.subs[0]));
+  const wrap = (op: "cat" | "rep", subs: PatternNode[]) =>
+    node({ op, subs, min: 0, max: 1, start: c.start, end: c.end, posLo: c.posLo, posHi: c.posHi });
+  let tail: PatternNode | null = null;
+  for (let i = c.max - 1; i >= c.min; i--) {
+    tail = wrap("rep", [tail ? wrap("cat", [copies[i], tail]) : copies[i]]);
+  }
+  const out = wrap("cat", copies.slice(0, c.min));
+  if (tail) out.subs.push(tail);
+  return out;
+}
+
 /**
  * One node of the pattern as a position automaton that keeps count (up to 2)
  * of how many distinct ways lead to each position.
@@ -448,19 +548,29 @@ function nonZero(v: Uint8Array): number[] {
   return idx;
 }
 
+function ceilLog2(v: number): number {
+  let bits = 0;
+  while (2 ** bits < v) bits++;
+  return bits;
+}
+
 class AmbiguityAnalyzer {
   /** n*n: ways from one position straight to the next. */
   readonly follow: Uint8Array;
+  /** n*n: the transition goes around a loop. */
+  readonly loopEdge: Uint8Array;
 
   constructor(readonly n: number) {
     this.follow = new Uint8Array(n * n);
+    this.loopEdge = new Uint8Array(n * n);
   }
 
-  private connect(last: Uint8Array, first: Uint8Array) {
+  private connect(last: Uint8Array, first: Uint8Array, loop: boolean) {
     for (const x of nonZero(last)) {
       for (const y of nonZero(first)) {
         const k = x * this.n + y;
         this.follow[k] = cap2(this.follow[k] + last[x] * first[y]);
+        if (loop) this.loopEdge[k] = 1;
       }
     }
   }
@@ -480,7 +590,7 @@ class AmbiguityAnalyzer {
         g.nullable = 1;
         for (const sub of nd.subs) {
           const b = this.info(sub);
-          this.connect(g.last, b.first);
+          this.connect(g.last, b.first, false);
           for (let y = 0; y < n; y++) {
             g.first[y] = cap2(g.first[y] + g.nullable * b.first[y]);
             g.last[y] = cap2(b.last[y] + b.nullable * g.last[y]);
@@ -509,10 +619,11 @@ class AmbiguityAnalyzer {
         if (nd.max === 1) {
           g.nullable = nd.min === 0 ? cap2(b.nullable + 1) : b.nullable;
         } else {
-          // Any count above one is treated as unbounded: `(a{1,20})+`
-          // backtracks like `(a+)+`. The browser ends a loop on an empty
-          // repetition, so only non-empty ones connect.
-          this.connect(b.last, b.first);
+          // A count above MAX_EXPANDED_COUNT is treated as unbounded:
+          // `(a{1,20})+` backtracks like `(a+)+`. Its body cannot match
+          // nothing — refuseEmptyRepeats saw to that — so every repetition
+          // consumes and only non-empty ones connect.
+          this.connect(b.last, b.first, true);
           g.nullable = nd.min === 0 ? 1 : b.nullable;
         }
         break;
@@ -523,11 +634,12 @@ class AmbiguityAnalyzer {
 }
 
 /**
- * Walks pairs of runs over the same text, starting together, and counts how
- * often two runs that parted meet again at one position: along a chain of
- * pairs that is the log2 of the ways the text can be matched.
+ * Walks pairs of runs over the same text, starting together, and scores each
+ * time two runs that parted meet again at one position.
  */
-function checkAmbiguity(parser: Parser, root: PatternNode): void {
+function checkAmbiguity(parser: Parser, parsed: PatternNode): void {
+  refuseEmptyRepeats(parsed);
+  const root = expand(parser, parsed);
   if (parser.sets.length === 0) return;
   // A pattern that does not start with `^` is tried again from every position
   // of the value. Model that as a loop over any character in front of it, at
@@ -540,21 +652,32 @@ function checkAmbiguity(parser: Parser, root: PatternNode): void {
   if (!anchored) {
     const prefix = n - 1;
     a.follow[prefix * n + prefix] = 1;
+    a.loopEdge[prefix * n + prefix] = 1;
     for (const y of nonZero(start.first)) a.follow[prefix * n + y] = start.first[y];
     start.first[prefix] = 1;
   }
 
   const compat = new Uint8Array(n * n);
   const succ: number[][] = Array.from({ length: n }, () => []);
+  const inWays = new Int32Array(n);
   for (let x = 0; x < n; x++) {
     for (let y = 0; y < n; y++) {
       compat[x * n + y] = setsIntersect(sets[x], sets[y]) ? 1 : 0;
-      if (a.follow[x * n + y] > 0) succ[x].push(y);
+      if (a.follow[x * n + y] > 0) {
+        succ[x].push(y);
+        inWays[y] += a.follow[x * n + y];
+      }
     }
   }
+  // A merge with no loop between parting and meeting: the ways into the
+  // position bound how many runs meet there.
+  const finiteMerge = (x: number) => 2 * ceilLog2(Math.max(2, inWays[x]));
 
-  const dist = new Int32Array(n * n).fill(-1);
-  const queued = new Uint8Array(n * n);
+  // State: a pair of positions, and for a pair that has parted, whether the
+  // parting has gone around a loop since.
+  const key = (u: number, v: number, acrossLoop: boolean) => (u * n + v) * 2 + (acrossLoop ? 1 : 0);
+  const dist = new Int32Array(2 * n * n).fill(-1);
+  const queued = new Uint8Array(2 * n * n);
   const queue: number[] = [];
   const relax = (k: number, w: number) => {
     if (w <= dist[k]) return;
@@ -570,22 +693,33 @@ function checkAmbiguity(parser: Parser, root: PatternNode): void {
   for (const x of firsts) {
     for (const y of firsts) {
       if (!compat[x * n + y]) continue;
-      relax(x * n + y, x === y && start.first[x] === 2 ? 1 : 0);
+      relax(key(x, y, false), x === y && start.first[x] === 2 ? 2 : 0);
     }
   }
   let work = 0;
   for (let head = 0; head < queue.length; head++) {
     const k = queue[head];
     queued[k] = 0;
-    const u = Math.floor(k / n);
-    const v = k % n;
+    const pair = Math.floor(k / 2);
+    const u = Math.floor(pair / n);
+    const v = pair % n;
+    const parted = k % 2 === 1;
     for (const x of succ[u]) {
       for (const y of succ[v]) {
         if (++work > ANALYSIS_BUDGET) throw new Rejected("nested-quantifier");
         if (!compat[x * n + y]) continue;
         let w = dist[k];
-        if (x === y && (u !== v || a.follow[u * n + x] === 2)) w++;
-        relax(x * n + y, w);
+        let acrossLoop = parted || a.loopEdge[u * n + x] === 1 || a.loopEdge[v * n + y] === 1;
+        if (u === v && x === y) {
+          if (a.follow[u * n + x] === 2) w += a.loopEdge[u * n + x] ? LOOP_MERGE_COST : 2;
+          relax(key(x, x, false), w);
+        } else if (x === y) {
+          w += acrossLoop ? LOOP_MERGE_COST : finiteMerge(x);
+          relax(key(x, x, false), w);
+        } else {
+          if (u === v) acrossLoop = a.loopEdge[u * n + x] === 1 || a.loopEdge[u * n + y] === 1;
+          relax(key(x, y, acrossLoop), w);
+        }
       }
     }
   }

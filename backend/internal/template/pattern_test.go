@@ -87,6 +87,13 @@ var patternCases = []struct {
 	{`^a{01}$`, "dialect"}, // Go: literal "{01}"; JS: exactly one "a"
 	{`^a{0,01}$`, "dialect"},
 	{`^[a-\d]$`, "dialect"}, // the other way round: Go refuses it, JS reads "a", "-" and digits
+	// A flagless RegExp reads a character outside the BMP as two UTF-16 halves.
+	// (A lone half cannot be held in a Go string; ui-spec-pattern.test.ts
+	// covers that case on its own.)
+	{`^[😀]+$`, "dialect"},       // JS: a class of two halves; Go: one character
+	{`^([😀]|[😁])+$`, "dialect"}, // ...and both classes share the first half, which is ambiguous too
+	{`^a😀$`, "dialect"},         // outside a class as well
+	{`^\uD83D$`, "dialect"},     // JS: a lone half; Go refuses \u
 
 	{`^(a+)+$`, "nested-quantifier"},
 	{`^(a*)*$`, "nested-quantifier"},
@@ -108,6 +115,22 @@ var patternCases = []struct {
 	{`^[a-z0-9]+[-a-z0-9]*[a-z0-9]+$`, "nested-quantifier"}, // three overlapping repeats; write `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	{`\w+\w+`, "nested-quantifier"},                         // unanchored, so the browser retries it from every position
 	{`[a-z]+`, ""},                                          // ...which one repeat can afford
+	// Ambiguity without a loop is bounded: `[01]?[0-9][0-9]?` reads "10" two
+	// ways, and four octets make at most 2^4. Small counts are copied out
+	// rather than treated as loops, so these stay accepted.
+	{`^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`, ""},                        // OWASP IPv4
+	{`^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\/(?:3[0-2]|[12]?[0-9])$`, ""}, // ...as CIDR
+	{`^(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`, ""},
+	{strings.Repeat("(?:a|a)", 20), "nested-quantifier"}, // but 2^20 ways is not
+	// A body that can match nothing: V8 ends `*` on an empty repetition but
+	// not a counted repeat, which it spreads the text over every way it can.
+	{`^(a?){25}a{25}$`, "nested-quantifier"}, // about a minute at 256 characters
+	{`^([a-z]?){20}x$`, "nested-quantifier"},
+	{`^(a?){25}$`, "nested-quantifier"},
+	{`^(a*){3}b$`, "nested-quantifier"},
+	{`^(a|){10}b$`, "nested-quantifier"},
+	{`^[a-z0-9]+(?:(?:[._]|__|[-]*)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|[-]*)[a-z0-9]+)*)*$`, "nested-quantifier"},                                                     // distribution v2 path: 20 s at 32 characters
+	{`^(@(annually|yearly|monthly|weekly|daily|hourly|reboot))|(@every (\d+(ns|us|µs|ms|s|m|h))+)|((((\d+,)+\d+|(\d+(\/|-)\d+)|\d+|\*) ?){5,7})$`, "nested-quantifier"}, // cron with macros
 }
 
 func TestCheckPattern(t *testing.T) {

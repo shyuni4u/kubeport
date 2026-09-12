@@ -43,6 +43,24 @@ func TestValidateSpec_RefusesANestedRepeat(t *testing.T) {
 	require.Contains(t, err.Error(), "`^[a-z]+(-[a-z]+)*$`")
 }
 
+// Ambiguity with no loop in it is bounded per part but multiplies along the
+// pattern; the separator advice would be wrong for it (#187).
+func TestValidateSpec_ExplainsAmbiguityAlongThePattern(t *testing.T) {
+	err := template.ValidateSpec(fieldTypeResources, patternSpec("string", "^"+strings.Repeat("(?:a|a)", 20)+"$"))
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "along the whole pattern, not only inside a repeat")
+	require.Contains(t, err.Error(), "`(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])`")
+}
+
+func TestValidateSpec_RefusesARepeatOfSomethingThatCanBeEmpty(t *testing.T) {
+	err := template.ValidateSpec(fieldTypeResources, patternSpec("string", `^(a?){25}a{25}$`))
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "repeats `(a?){25}`, whose body can match nothing")
+	require.Contains(t, err.Error(), "`a{0,25}`")
+}
+
 func TestValidateSpec_SuggestsListingCharactersForUnicodeClasses(t *testing.T) {
 	err := template.ValidateSpec(fieldTypeResources, patternSpec("string", `^\pL+$`))
 

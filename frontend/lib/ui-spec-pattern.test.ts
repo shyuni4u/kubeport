@@ -77,6 +77,12 @@ const cases: [string, PatternProblemKind | null][] = [
   [r`^a{01}$`, "dialect"], // Go: literal "{01}"; JS: exactly one "a"
   [r`^a{0,01}$`, "dialect"],
   [r`^[a-\d]$`, "dialect"], // the other way round: Go refuses it, JS reads "a", "-" and digits
+  // A flagless RegExp reads a character outside the BMP as two UTF-16 halves.
+  // (A lone half cannot be held in a Go string; the test below covers it here.)
+  [r`^[😀]+$`, "dialect"], // JS: a class of two halves; Go: one character
+  [r`^([😀]|[😁])+$`, "dialect"], // ...and both classes share the first half, which is ambiguous too
+  [r`^a😀$`, "dialect"], // outside a class as well
+  [r`^\uD83D$`, "dialect"], // JS: a lone half; Go refuses \u
 
   [r`^(a+)+$`, "nested-quantifier"],
   [r`^(a*)*$`, "nested-quantifier"],
@@ -98,6 +104,22 @@ const cases: [string, PatternProblemKind | null][] = [
   [r`^[a-z0-9]+[-a-z0-9]*[a-z0-9]+$`, "nested-quantifier"], // three overlapping repeats; write `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
   [r`\w+\w+`, "nested-quantifier"], // unanchored, so the browser retries it from every position
   [r`[a-z]+`, null], // ...which one repeat can afford
+  // Ambiguity without a loop is bounded: `[01]?[0-9][0-9]?` reads "10" two
+  // ways, and four octets make at most 2^4. Small counts are copied out
+  // rather than treated as loops, so these stay accepted.
+  [r`^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`, null], // OWASP IPv4
+  [r`^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\/(?:3[0-2]|[12]?[0-9])$`, null], // ...as CIDR
+  [r`^(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`, null],
+  ["(?:a|a)".repeat(20), "nested-quantifier"], // but 2^20 ways is not
+  // A body that can match nothing: V8 ends `*` on an empty repetition but
+  // not a counted repeat, which it spreads the text over every way it can.
+  [r`^(a?){25}a{25}$`, "nested-quantifier"], // about a minute at 256 characters
+  [r`^([a-z]?){20}x$`, "nested-quantifier"],
+  [r`^(a?){25}$`, "nested-quantifier"],
+  [r`^(a*){3}b$`, "nested-quantifier"],
+  [r`^(a|){10}b$`, "nested-quantifier"],
+  [r`^[a-z0-9]+(?:(?:[._]|__|[-]*)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|[-]*)[a-z0-9]+)*)*$`, "nested-quantifier"], // distribution v2 path: 20 s at 32 characters
+  [r`^(@(annually|yearly|monthly|weekly|daily|hourly|reboot))|(@every (\d+(ns|us|µs|ms|s|m|h))+)|((((\d+,)+\d+|(\d+(\/|-)\d+)|\d+|\*) ?){5,7})$`, "nested-quantifier"], // cron with macros
 ];
 
 describe("patternProblem", () => {
@@ -113,6 +135,13 @@ describe("patternProblem", () => {
       expect(() => patternProblem(pattern)).not.toThrow();
     },
   );
+
+  // Only a JavaScript string can hold half a surrogate pair, so the Go table
+  // has no counterpart; the API never sees one (JSON decodes it as U+FFFD).
+  it("refuses a lone surrogate written into the pattern", () => {
+    expect(patternProblem("^\uD83D$")).toBe("dialect");
+    expect(patternProblem("^[\uDE00]$")).toBe("dialect");
+  });
 
   // The analysis runs on every keystroke in the editor preview too.
   it.each([
@@ -142,6 +171,20 @@ function adversarialInputs(pattern: string): string[] {
   const out: string[] = [];
   for (const c of list) out.push(c.repeat(256) + "!", c.repeat(256) + "\n");
   for (const c of list) for (const d of list) if (c !== d) out.push((c + d).repeat(128) + "!");
+  // Characters outside the BMP and lone halves of one: a flagless RegExp sees
+  // each half as its own character, and `.` or a negated class matches it.
+  // Lengths around every count the pattern names, and a spread of others: a
+  // counted repeat fails slowest just short of the count it needs.
+  const counts = new Set([7, 8, 15, 16, 31, 32, 63, 64, 127]);
+  for (const m of pattern.matchAll(/\{(\d+)(?:,(\d*))?\}/g)) {
+    for (const d of [m[1], m[2]]) {
+      const k = Number(d);
+      if (d && k > 0 && k <= 255) for (const len of [k - 1, k, 2 * k - 1, 2 * k]) if (len > 0 && len <= 255) counts.add(len);
+    }
+  }
+  for (const c of list) for (const len of counts) out.push(c.repeat(len) + "!");
+  for (const c of list) out.push(("😀" + c).repeat(85) + "!");
+  out.push("😀".repeat(128) + "!", "\uD83D".repeat(255) + "!", "\uDE00".repeat(255) + "!", "\uDE00\uD83D".repeat(127) + "!");
   return out;
 }
 
@@ -151,8 +194,15 @@ function adversarialInputs(pattern: string): string[] {
 describe("patterns patternProblem accepts run quickly in the browser's engine", () => {
   const accepted = cases.filter(([, kind]) => kind === null).map(([pattern]) => pattern);
   it.each(accepted)("%s", (pattern) => {
-    const re = new RegExp(pattern);
-    for (const input of adversarialInputs(pattern)) {
+    // The form also runs the pattern in Unicode mode, for values that hold
+    // characters outside the BMP (ui-spec-to-zod.ts).
+    const regexes = [new RegExp(pattern)];
+    try {
+      regexes.push(new RegExp(pattern, "u"));
+    } catch {
+      // Not valid in Unicode mode: the form leaves such values to the API.
+    }
+    for (const re of regexes) for (const input of adversarialInputs(pattern)) {
       let best = Infinity;
       for (let k = 0; k < 3 && best >= 5; k++) {
         const started = performance.now();

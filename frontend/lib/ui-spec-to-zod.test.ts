@@ -791,6 +791,21 @@ describe("normalizeUISpec", () => {
     expect(issues("A".repeat(257))).toEqual(["too_big"]);
   });
 
+  // Without the `u` flag the browser reads "😀" as two halves, while the API
+  // reads one character. A value holding such characters is checked the way
+  // the API reads it, or left to the API.
+  it("checks a value with characters outside the BMP the way the API reads it", () => {
+    const check = (pattern: string, value: string) =>
+      schemaFromUISpec({ fields: [{ path: "a", label: "A", type: "string", pattern }] }).safeParse({ a: value })
+        .success;
+    expect(check("^[^a]{2}$", "😀")).toBe(false); // flagless, the two halves would match
+    expect(check("^.{2}$", "😀😀")).toBe(true); // flagless, the four halves would not
+    expect(check("^.$", "\uD83D")).toBe(true); // a lone half reaches the API as U+FFFD
+    expect(check("^\\_$", "😀")).toBe(true); // no Unicode-mode reading: left to the API
+    expect(check("^\\_$", "_")).toBe(true);
+    expect(check("^\\_$", "a")).toBe(false);
+  });
+
   // The live demo reseeds from these files daily. A rule that sets their
   // patterns aside would leave the demo's deploy form without them.
   it("keeps every pattern in the demo seed fixtures", () => {

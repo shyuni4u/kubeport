@@ -21,19 +21,33 @@ import (
 // is also what the frontend counts).
 const maxPatternLength = 200
 
-// maxAmbiguity is the number of times two ways of matching the same text merge
-// back together along one run at which a pattern is refused. Each merge
-// multiplies the work a backtracking engine does when a match fails; a merge
-// inside a loop (`(a+)+`, `(a|a)*`) repeats without end, so every exponential
-// pattern reaches it, and so do three overlapping loops in a row. One merge is
-// the ambiguity real patterns have — an image reference whose registry part
-// can also be read as its path, or an unanchored `[a-z]+` the browser retries
-// at every position — and costs roughly the square of the value's length.
-const maxAmbiguity = 2
-
-// analysisBudget caps the work spent looking. A pattern that needs more is
-// refused as too complex to vouch for.
-const analysisBudget = 200000
+// Ambiguity is scored as an estimate, in bits, of the extra work a
+// backtracking engine does when a match fails: two runs over the same text
+// that parted and meet again at one position double it, or more.
+const (
+	// loopMergeCost is a merge whose runs parted and met again across a loop:
+	// where each run left the loop is a choice among up to the value's length
+	// (256 characters in the form), so it counts nine bits.
+	loopMergeCost = 9
+	// maxAmbiguity is the score at which a pattern is refused. Two loop merges
+	// reach it — three overlapping loops such as `^[a-z0-9]+[-a-z0-9]*[a-z0-9]+$`,
+	// an unanchored `\w+\w+` — and so does any merge on a cycle, which scores
+	// without end (`(a+)+`, `(a|a)*`). A merge with no loop between the parting
+	// and the meeting is bounded; it counts two bits per doubling (a pair of
+	// runs sees about every other independent choice), so the four octets of
+	// an IPv4 pattern written with `[01]?[0-9][0-9]?` fit and 2^9 choices do not.
+	maxAmbiguity = 18
+	// maxExpandedCount: a counted repeat up to this many, with no loop inside,
+	// is copied out rather than treated as a loop, so the ambiguity in
+	// `(octet\.){3}` is scored as the bounded thing it is.
+	maxExpandedCount = 4
+	// maxPositions caps copying out; past it a repeat is treated as a loop,
+	// which only ever scores higher.
+	maxPositions = 400
+	// analysisBudget caps the work spent looking. A pattern that needs more is
+	// refused as too complex to vouch for.
+	analysisBudget = 200000
+)
 
 type patternProblem struct {
 	// kind is "too-long", "dialect" or "nested-quantifier" — the names the
@@ -53,6 +67,18 @@ func dialectProblem(format string, args ...any) *patternProblem {
 func checkPattern(pattern string) *patternProblem {
 	if utf8.RuneCountInString(pattern) > maxPatternLength {
 		return &patternProblem{kind: "too-long", reason: fmt.Sprintf("is longer than %d characters", maxPatternLength)}
+	}
+	// A flagless RegExp runs on UTF-16 code units, so a character outside the
+	// Basic Multilingual Plane is two characters to the browser and one to Go:
+	// `[😀]` is a class of two halves there, and `([😀]|[😁])+` is ambiguous
+	// because both share the first half. Refusing them keeps every accepted
+	// pattern the same sequence of characters on both sides, which is what the
+	// analysis below assumes. (A lone half is refused too; only the frontend's
+	// strings can hold one.)
+	for _, r := range pattern {
+		if r > 0xFFFF || (r >= 0xD800 && r <= 0xDFFF) {
+			return dialectProblem("uses `%c`, a character outside the Basic Multilingual Plane, which the browser reads as two separate halves; leave it out of the pattern, or let such characters through with a negated class, as in `[^\\x00-\\x7F]`", r)
+		}
 	}
 	p := &patternParser{s: []rune(pattern), names: map[string]bool{}}
 	root := p.parseAlt()
@@ -135,7 +161,9 @@ func singleRune(s charSet) (rune, bool) {
 }
 
 // The browser's meaning of the classes, since that is where backtracking
-// happens.
+// happens. Sets run to U+10FFFF: for a flagless RegExp, which sees only code
+// units, that over-approximates (safe); for the Unicode-mode run the form uses
+// on values holding surrogates, it is exact.
 var (
 	digitSet = setOf('0', '9')
 	wordSet  = setOf('0', '9', 'A', 'Z', '_', '_', 'a', 'z')
@@ -164,13 +192,14 @@ type patternNode struct {
 	assert       bool
 	caret        bool // the assertion is `^`
 	start, end   int  // the source runes it covers
-	posLo, posHi int  // the positions created inside it
+	posLo, posHi int  // the source positions created inside it
 }
 
 type patternParser struct {
 	s          []rune
 	i          int
 	sets       []charSet // one per position (a character the pattern consumes)
+	origin     []int     // the source position each position was copied from
 	names      map[string]bool
 	prob       *patternProblem
 	incomplete bool // the compiler, not this, reports what is wrong
@@ -180,6 +209,7 @@ func (p *patternParser) failed() bool { return p.prob != nil || p.incomplete }
 
 func (p *patternParser) lit(set charSet) *patternNode {
 	p.sets = append(p.sets, set)
+	p.origin = append(p.origin, len(p.sets)-1)
 	return &patternNode{op: opLit, pos: len(p.sets) - 1}
 }
 
@@ -339,7 +369,7 @@ func (p *patternParser) quantifierAt(i int) (min, max, size int) {
 // scanEscape reads the escape at s[i] == '\\'. size 0 means the pattern ends
 // there. Letters and digits are an allowlist: what is not on it either does not
 // compile in Go or means something else in the browser (`\A`, `\z`, `\pL`,
-// `\Q`, `\a`, `\1`), and the browser reads them all without complaint.
+// `\Q`, `\a`, `\1`, `\u`), and the browser reads them all without complaint.
 func scanEscape(s []rune, i int, inClass bool) (set charSet, assert bool, size int, prob *patternProblem) {
 	n := len(s)
 	if i+1 >= n {
@@ -550,6 +580,125 @@ func repeatCount(digits string) int {
 
 // ---- ambiguity ----
 
+func loops(nd *patternNode) bool { return nd.op == opRep && (nd.max < 0 || nd.max >= 2) }
+
+func nullable(nd *patternNode) bool {
+	switch nd.op {
+	case opLit:
+		return false
+	case opEmpty:
+		return true
+	case opAlt:
+		for _, sub := range nd.subs {
+			if nullable(sub) {
+				return true
+			}
+		}
+		return false
+	case opRep:
+		return nd.max == 0 || nd.min == 0 || nullable(nd.subs[0])
+	}
+	for _, sub := range nd.subs {
+		if !nullable(sub) {
+			return false
+		}
+	}
+	return true
+}
+
+// emptyRepeat finds a repeat of more than one whose body can match nothing.
+// The browser ends `*` and `+` at an empty repetition, but a counted repeat
+// such as `(a?){25}` it spreads the text over its repetitions in every way it
+// can: a minute at 256 characters. No ui-spec needs one, so all are refused.
+func (p *patternParser) emptyRepeat(nd *patternNode) *patternProblem {
+	if loops(nd) && nullable(nd.subs[0]) {
+		return &patternProblem{
+			kind: "nested-quantifier",
+			reason: fmt.Sprintf("repeats `%s`, whose body can match nothing, so the browser tries every way of spreading the text over the repetitions, which can freeze the page; "+
+				"make the body match at least one character, as in `a{0,25}` rather than `(a?){25}`", string(p.s[nd.start:nd.end])),
+		}
+	}
+	for _, sub := range nd.subs {
+		if prob := p.emptyRepeat(sub); prob != nil {
+			return prob
+		}
+	}
+	return nil
+}
+
+func hasLoop(nd *patternNode) bool {
+	if loops(nd) {
+		return true
+	}
+	for _, sub := range nd.subs {
+		if hasLoop(sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func countPositions(nd *patternNode) int {
+	if nd.op == opLit {
+		return 1
+	}
+	c := 0
+	for _, sub := range nd.subs {
+		c += countPositions(sub)
+	}
+	return c
+}
+
+func (p *patternParser) clone(nd *patternNode) *patternNode {
+	c := *nd
+	if nd.op == opLit {
+		p.sets = append(p.sets, p.sets[nd.pos])
+		p.origin = append(p.origin, p.origin[nd.pos])
+		c.pos = len(p.sets) - 1
+		return &c
+	}
+	c.subs = make([]*patternNode, len(nd.subs))
+	for i, sub := range nd.subs {
+		c.subs[i] = p.clone(sub)
+	}
+	return &c
+}
+
+// expand copies out a counted repeat of at most maxExpandedCount with no loop
+// inside — `x{1,3}` becomes `x(x(x)?)?` — so its bounded ambiguity is scored as
+// bounded instead of as a loop's.
+func (p *patternParser) expand(nd *patternNode) *patternNode {
+	c := *nd
+	c.subs = make([]*patternNode, len(nd.subs))
+	for i, sub := range nd.subs {
+		c.subs[i] = p.expand(sub)
+	}
+	if !loops(&c) || c.max > maxExpandedCount || c.min > c.max || hasLoop(c.subs[0]) ||
+		len(p.sets)+countPositions(c.subs[0])*(c.max-1) > maxPositions {
+		return &c
+	}
+	copies := []*patternNode{c.subs[0]}
+	for len(copies) < c.max {
+		copies = append(copies, p.clone(c.subs[0]))
+	}
+	wrap := func(op nodeOp, subs ...*patternNode) *patternNode {
+		return &patternNode{op: op, subs: subs, min: 0, max: 1, start: c.start, end: c.end, posLo: c.posLo, posHi: c.posHi}
+	}
+	var tail *patternNode
+	for i := c.max - 1; i >= c.min; i-- {
+		body := copies[i]
+		if tail != nil {
+			body = wrap(opCat, copies[i], tail)
+		}
+		tail = wrap(opRep, body)
+	}
+	out := wrap(opCat, copies[:c.min]...)
+	if tail != nil {
+		out.subs = append(out.subs, tail)
+	}
+	return out
+}
+
 // glushkov describes one node of the pattern as a position automaton that
 // keeps count (up to 2) of how many distinct ways lead to each position.
 type glushkov struct {
@@ -558,11 +707,12 @@ type glushkov struct {
 }
 
 type ambiguityAnalyzer struct {
-	n      int
-	follow []uint8        // n*n: ways from one position straight to the next
-	dup    []*patternNode // n*n: the repeat that made a transition two ways
-	stack  []*patternNode
-	loops  []*patternNode // repeats that loop
+	n        int
+	follow   []uint8        // n*n: ways from one position straight to the next
+	loopEdge []bool         // n*n: the transition goes around a loop
+	dup      []*patternNode // n*n: the repeat that made a transition two ways
+	stack    []*patternNode
+	loops    []*patternNode // repeats that loop
 }
 
 func cap2(v int) uint8 {
@@ -582,19 +732,26 @@ func nonZero(v []uint8) []int {
 	return idx
 }
 
-func (a *ambiguityAnalyzer) addFollow(x, y, ways int) {
-	k := x*a.n + y
-	before := a.follow[k]
-	a.follow[k] = cap2(int(before) + ways)
-	if before < 2 && a.follow[k] == 2 && len(a.stack) > 0 {
-		a.dup[k] = a.stack[len(a.stack)-1]
+func ceilLog2(v int) int {
+	bits := 0
+	for (1 << bits) < v {
+		bits++
 	}
+	return bits
 }
 
-func (a *ambiguityAnalyzer) connect(last, first []uint8) {
+func (a *ambiguityAnalyzer) connect(last, first []uint8, loop bool) {
 	for _, x := range nonZero(last) {
 		for _, y := range nonZero(first) {
-			a.addFollow(x, y, int(last[x])*int(first[y]))
+			k := x*a.n + y
+			before := a.follow[k]
+			a.follow[k] = cap2(int(before) + int(last[x])*int(first[y]))
+			if loop {
+				a.loopEdge[k] = true
+			}
+			if before < 2 && a.follow[k] == 2 && len(a.stack) > 0 {
+				a.dup[k] = a.stack[len(a.stack)-1]
+			}
 		}
 	}
 }
@@ -610,7 +767,7 @@ func (a *ambiguityAnalyzer) info(nd *patternNode) glushkov {
 		g.null = 1
 		for _, sub := range nd.subs {
 			b := a.info(sub)
-			a.connect(g.last, b.first)
+			a.connect(g.last, b.first, false)
 			for y := 0; y < a.n; y++ {
 				g.first[y] = cap2(int(g.first[y]) + g.null*int(b.first[y]))
 				g.last[y] = cap2(int(b.last[y]) + b.null*int(g.last[y]))
@@ -640,11 +797,12 @@ func (a *ambiguityAnalyzer) info(nd *patternNode) glushkov {
 		case nd.max == 1:
 			g.null = b.null
 		default:
-			// Any count above one is treated as unbounded: `(a{1,20})+`
-			// backtracks like `(a+)+`. The browser ends a loop on an empty
-			// repetition, so only non-empty ones connect.
+			// A count above maxExpandedCount is treated as unbounded:
+			// `(a{1,20})+` backtracks like `(a+)+`. Its body cannot match
+			// nothing — emptyRepeat refused that — so every repetition
+			// consumes and only non-empty ones connect.
 			a.loops = append(a.loops, nd)
-			a.connect(b.last, b.first)
+			a.connect(b.last, b.first, true)
 			g.null = b.null
 			if nd.min == 0 {
 				g.null = 1
@@ -656,9 +814,12 @@ func (a *ambiguityAnalyzer) info(nd *patternNode) glushkov {
 }
 
 // checkAmbiguity walks pairs of runs over the same text, starting together,
-// and counts how often two runs that parted meet again at one position: along
-// a chain of pairs that is the log2 of the ways the text can be matched.
+// and scores each time two runs that parted meet again at one position.
 func checkAmbiguity(p *patternParser, root *patternNode) *patternProblem {
+	if prob := p.emptyRepeat(root); prob != nil {
+		return prob
+	}
+	root = p.expand(root)
 	if len(p.sets) == 0 {
 		return nil
 	}
@@ -672,11 +833,12 @@ func checkAmbiguity(p *patternParser, root *patternNode) *patternProblem {
 		n++
 		sets = append(append([]charSet(nil), p.sets...), charSet{{0, maxRuneValue}})
 	}
-	a := &ambiguityAnalyzer{n: n, follow: make([]uint8, n*n), dup: make([]*patternNode, n*n)}
+	a := &ambiguityAnalyzer{n: n, follow: make([]uint8, n*n), loopEdge: make([]bool, n*n), dup: make([]*patternNode, n*n)}
 	start := a.info(root)
 	if !anchored {
 		prefix := n - 1
 		a.follow[prefix*n+prefix] = 1
+		a.loopEdge[prefix*n+prefix] = true
 		for _, y := range nonZero(start.first) {
 			a.follow[prefix*n+y] = start.first[y]
 		}
@@ -685,20 +847,34 @@ func checkAmbiguity(p *patternParser, root *patternNode) *patternProblem {
 
 	compat := make([]bool, n*n)
 	succ := make([][]int, n)
+	inWays := make([]int, n)
 	for x := 0; x < n; x++ {
 		for y := 0; y < n; y++ {
 			compat[x*n+y] = setsIntersect(sets[x], sets[y])
 			if a.follow[x*n+y] > 0 {
 				succ[x] = append(succ[x], y)
+				inWays[y] += int(a.follow[x*n+y])
 			}
 		}
 	}
+	// A merge with no loop between parting and meeting: the ways into the
+	// position bound how many runs meet there.
+	finiteMerge := func(x int) int { return 2 * ceilLog2(max(2, inWays[x])) }
 
-	dist := make([]int, n*n)
+	// State: a pair of positions, and for a pair that has parted, whether
+	// the parting has gone around a loop since.
+	key := func(u, v int, acrossLoop bool) int {
+		k := (u*n + v) * 2
+		if acrossLoop {
+			k++
+		}
+		return k
+	}
+	dist := make([]int, 2*n*n)
 	for k := range dist {
 		dist[k] = -1
 	}
-	queued := make([]bool, n*n)
+	queued := make([]bool, 2*n*n)
 	var queue []int
 	relax := func(k, w int) bool {
 		if w <= dist[k] {
@@ -723,10 +899,10 @@ func checkAmbiguity(p *patternParser, root *patternNode) *patternProblem {
 			}
 			w := 0
 			if x == y && start.first[x] == 2 {
-				w = 1
+				w = 2
 			}
-			if relax(x*n+y, w) {
-				return a.ambiguous(p, anchored, nil, x, y)
+			if relax(key(x, y, false), w) {
+				return a.ambiguous(p, anchored, false, nil, x, y)
 			}
 		}
 	}
@@ -734,7 +910,7 @@ func checkAmbiguity(p *patternParser, root *patternNode) *patternProblem {
 	for head := 0; head < len(queue); head++ {
 		k := queue[head]
 		queued[k] = false
-		u, v := k/n, k%n
+		u, v, parted := k/2/n, k/2%n, k%2 == 1
 		for _, x := range succ[u] {
 			for _, y := range succ[v] {
 				work++
@@ -745,17 +921,37 @@ func checkAmbiguity(p *patternParser, root *patternNode) *patternProblem {
 					continue
 				}
 				w := dist[k]
+				acrossLoop := parted || a.loopEdge[u*n+x] || a.loopEdge[v*n+y]
 				var rep *patternNode
-				if x == y {
-					if u != v {
-						w++
-					} else if a.follow[u*n+x] == 2 {
-						w++
+				switch {
+				case u == v && x == y:
+					if a.follow[u*n+x] == 2 {
+						acrossLoop = a.loopEdge[u*n+x]
 						rep = a.dup[u*n+x]
+						w += 2
+						if acrossLoop {
+							w += loopMergeCost - 2
+						}
 					}
-				}
-				if relax(x*n+y, w) {
-					return a.ambiguous(p, anchored, rep, u, v, x)
+					if relax(key(x, x, false), w) {
+						return a.ambiguous(p, anchored, acrossLoop, rep, u, x)
+					}
+				case x == y:
+					if acrossLoop {
+						w += loopMergeCost
+					} else {
+						w += finiteMerge(x)
+					}
+					if relax(key(x, x, false), w) {
+						return a.ambiguous(p, anchored, acrossLoop, nil, u, v, x)
+					}
+				default:
+					if u == v {
+						acrossLoop = a.loopEdge[u*n+x] || a.loopEdge[u*n+y]
+					}
+					if relax(key(x, y, acrossLoop), w) {
+						return a.ambiguous(p, anchored, acrossLoop, nil, u, v, x, y)
+					}
 				}
 			}
 		}
@@ -763,19 +959,29 @@ func checkAmbiguity(p *patternParser, root *patternNode) *patternProblem {
 	return nil
 }
 
-// ambiguous names the smallest loop the ambiguity sits in, so the admin knows
-// which part to rewrite.
-func (a *ambiguityAnalyzer) ambiguous(p *patternParser, anchored bool, rep *patternNode, positions ...int) *patternProblem {
+// ambiguous says which part to rewrite: the smallest loop the ambiguity sits
+// in, or — when no loop is involved — that the ways multiply along the whole
+// pattern.
+func (a *ambiguityAnalyzer) ambiguous(p *patternParser, anchored, acrossLoop bool, rep *patternNode, positions ...int) *patternProblem {
+	if !acrossLoop {
+		return &patternProblem{
+			kind: "nested-quantifier",
+			reason: "can match the same text in too many ways: the ways multiply along the whole pattern, not only inside a repeat (`[01]?[0-9][0-9]?` reads `10` two ways), " +
+				"and the deploy form runs it in the browser on every keystroke, where that can freeze the page; " +
+				"write each part so it matches one way, as in `(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])`",
+		}
+	}
 	if rep == nil {
 		lo, hi := -1, -1
 		for _, x := range positions {
-			if x >= len(p.sets) {
+			if x >= len(p.origin) {
 				continue // the unanchored prefix is not part of the source
 			}
-			if lo < 0 || x < lo {
-				lo = x
+			o := p.origin[x]
+			if lo < 0 || o < lo {
+				lo = o
 			}
-			hi = max(hi, x)
+			hi = max(hi, o)
 		}
 		for _, l := range a.loops {
 			if lo >= 0 && l.posLo <= lo && hi < l.posHi && (rep == nil || l.end-l.start < rep.end-rep.start) {
