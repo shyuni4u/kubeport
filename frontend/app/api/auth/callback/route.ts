@@ -6,6 +6,7 @@ import { externalOrigin } from "@/lib/request-origin";
 import { loginErrorFromIdp, type LoginErrorCode } from "@/lib/login-error";
 import { sanitizeNext } from "@/lib/safe-next";
 import { pool } from "@/lib/db";
+import { OIDC_STATE_COOKIE, clearAuthCookie } from "@/lib/cookie-names";
 
 /**
  * Send the user back to the landing page with a code it can explain, and drop
@@ -17,7 +18,7 @@ import { pool } from "@/lib/db";
  * back — and a route-handler throw isn't caught by app/error.tsx anyway.
  */
 async function backToLanding(req: NextRequest, code: LoginErrorCode) {
-  (await cookies()).delete("kbp_oidc_state");
+  clearAuthCookie(await cookies(), OIDC_STATE_COOKIE);
   return NextResponse.redirect(new URL(`/?login_error=${code}`, externalOrigin(req)));
 }
 
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
   }
 
   const cookieStore = await cookies();
-  const raw = cookieStore.get("kbp_oidc_state")?.value;
+  const raw = cookieStore.get(OIDC_STATE_COOKIE)?.value;
   // No state cookie: either the 10-minute window elapsed with the login form
   // open, or this callback was reached without going through /api/auth/login.
   if (!raw) return backToLanding(req, "expired");
@@ -110,7 +111,7 @@ export async function GET(req: NextRequest) {
     return backToLanding(req, "failed");
   }
 
-  cookieStore.delete("kbp_oidc_state");
+  clearAuthCookie(cookieStore, OIDC_STATE_COOKIE);
   // Back to whatever they were trying to reach when the proxy sent them to
   // log in, or the catalog if they just logged in from landing. Sanitized
   // again on the way out: /login checked it too, but this is the value that

@@ -3,8 +3,7 @@ import { pool } from "./db";
 import { getConfig, client, parseProvider } from "./oidc";
 import type { Provider } from "./oidc";
 import crypto from "node:crypto";
-
-const COOKIE = "kbp_sid";
+import { AUTH_COOKIE_ATTRS, SESSION_COOKIE, clearAuthCookie } from "./cookie-names";
 
 export interface Session {
   id: string;
@@ -76,18 +75,12 @@ export async function createSession(
     ],
   );
   const cookieStore = await cookies();
-  cookieStore.set(COOKIE, id, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    expires: expiresAt,
-  });
+  cookieStore.set(SESSION_COOKIE, id, { ...AUTH_COOKIE_ATTRS, expires: expiresAt });
 }
 
 export async function getSession(): Promise<Session | null> {
   const cookieStore = await cookies();
-  const id = cookieStore.get(COOKIE)?.value;
+  const id = cookieStore.get(SESSION_COOKIE)?.value;
   if (!id) return null;
   const { rows } = await pool.query(
     `SELECT id, user_id, id_token_encrypted, refresh_token_encrypted, id_token_exp, provider
@@ -135,9 +128,9 @@ export async function updateSessionTokens(
 
 export async function destroySession() {
   const cookieStore = await cookies();
-  const id = cookieStore.get(COOKIE)?.value;
+  const id = cookieStore.get(SESSION_COOKIE)?.value;
   if (id) await pool.query("DELETE FROM sessions WHERE id=$1", [id]);
-  cookieStore.delete(COOKIE);
+  clearAuthCookie(cookieStore, SESSION_COOKIE);
 }
 
 /**

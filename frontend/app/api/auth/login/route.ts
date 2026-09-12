@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getConfig, client, parseProvider, providerEnv, demoEnabled } from "@/lib/oidc";
 import { sanitizeNext } from "@/lib/safe-next";
+import { AUTH_COOKIE_ATTRS, OIDC_STATE_COOKIE } from "@/lib/cookie-names";
 
 export async function GET(req: NextRequest) {
   const provider = parseProvider(req.nextUrl.searchParams.get("provider"));
@@ -23,11 +24,8 @@ export async function GET(req: NextRequest) {
   const next = sanitizeNext(req.nextUrl.searchParams.get("next"));
 
   const cookieStore = await cookies();
-  cookieStore.set("kbp_oidc_state", JSON.stringify({ state, nonce, verifier, provider, next }), {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
+  cookieStore.set(OIDC_STATE_COOKIE, JSON.stringify({ state, nonce, verifier, provider, next }), {
+    ...AUTH_COOKIE_ATTRS,
     maxAge: 600,
   });
 
