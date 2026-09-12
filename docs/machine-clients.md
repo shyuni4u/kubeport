@@ -506,6 +506,10 @@ dry-run·apply 나 종류마다 DeleteCollection 을 부르는 가장 비싼 경
 동의 화면이 `200` 으로 떨어져서 순진한 클라이언트가 성공으로 오인한다. 2xx 가 아닌 응답은 전부 실패로
 처리할 것.
 
+**예외 하나 — 경로 끝의 `/`.** `GET /v1/templates/` 는 HTML 본문의 `301`, `POST /v1/releases/` 는 본문 없는 `307` 이다
+([#127](https://github.com/shyuni4u/kubeport/issues/127)). 에러가 아니라 gin 의 트레일링 슬래시 정규화라 `Problem` 이 아니다.
+`Location` 이 같은 `/v1` 안을 가리키는 3xx 를 받으면 따라가지 말고 **경로 끝의 `/` 를 떼고 다시 호출**한다 — 애초에 붙이지 않는 게 맞다.
+
 **배포 전에 두 번 물어볼 수 있다.** 값이 맞는지는 `POST /v1/templates/{name}/render`(적용 없이 렌더만),
 권한이 있는지는 `POST /v1/selfsubjectaccessreview`. 둘 다 부작용이 없으니 실패를 겪기 전에 쓰는 게 낫다.
 
