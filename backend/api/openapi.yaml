@@ -2219,7 +2219,10 @@ components:
             is admin-only.
         resources_yaml:
           type: string
-          description: Read when authoring_mode is `yaml`.
+          description: |
+            Read when authoring_mode is `yaml`. At most 50 objects (non-empty
+            documents); more is a 400 `validation-error`, because a release
+            could not apply them within the apply lock's hold (#281).
         ui_spec_yaml:
           type: string
           description: Read when authoring_mode is `yaml`.
@@ -2236,7 +2239,9 @@ components:
         authoring_mode:
           type: string
           enum: [yaml, ui]
-        resources_yaml: { type: string }
+        resources_yaml:
+          type: string
+          description: At most 50 objects, as in CreateTemplateRequest (#281).
         ui_spec_yaml:
           type: string
           contentMediaType: application/yaml
