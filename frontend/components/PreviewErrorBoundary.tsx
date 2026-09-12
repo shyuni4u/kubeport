@@ -2,7 +2,18 @@
 
 import { Component, type ReactNode } from "react";
 
-type Props = { fallback: (message: string) => ReactNode; children: ReactNode };
+type Props = {
+  fallback: (message: string) => ReactNode;
+  children: ReactNode;
+  /**
+   * When set, the fallback clears only when this changes. Without it, any
+   * change to `children` clears it — which is what the editor preview wants,
+   * but a parent that recreates its children on every render (the deploy form,
+   * re-rendering on each value change and permission check) would clear the
+   * fallback, throw again, and loop (#188).
+   */
+  resetKey?: unknown;
+};
 type State = { message: string | null };
 
 /**
@@ -18,6 +29,9 @@ type State = { message: string | null };
  * is what throws, and the failures worth surviving here are the ones nobody
  * predicted. The specific one that started this is handled properly upstream
  * in `schemaFromUISpec`.
+ *
+ * The deploy form uses it too (#188), with `resetKey`, so a form nobody
+ * predicted would throw shows a sentence instead of a blank page.
  */
 export class PreviewErrorBoundary extends Component<Props, State> {
   state: State = { message: null };
@@ -27,12 +41,15 @@ export class PreviewErrorBoundary extends Component<Props, State> {
   }
 
   componentDidUpdate(prev: Props) {
+    if (this.state.message === null) return;
     // The admin's next keystroke is the retry. Without this the fallback
     // would stick for the rest of the session, which reads as "the editor is
     // broken" rather than "that line was".
-    if (prev.children !== this.props.children && this.state.message !== null) {
-      this.setState({ message: null });
-    }
+    const changed =
+      this.props.resetKey !== undefined
+        ? prev.resetKey !== this.props.resetKey
+        : prev.children !== this.props.children;
+    if (changed) this.setState({ message: null });
   }
 
   render() {

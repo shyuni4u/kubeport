@@ -271,6 +271,7 @@
     "namespaceLabel": "Area",
     "namespaceHelp": "The compartment inside the cluster where your things live (a namespace). If it is empty, or the permission check denies it, ask an admin which area you may deploy to.",
     "blockedByRbac": "You do not have permission to deploy this right now. Check the 'Permission check' notes, then ask an admin.",
+    "formCrashed": "This template's form could not be drawn. The template may have a problem, so please let an admin know.",
     "errors": {
       "forbidden": "You do not have permission to perform this action. Please contact an admin.",
       "conflict": "A release with the same name already exists. Use a different name or check the existing release.",
