@@ -56,7 +56,7 @@ describe("useTemplateYamlValidation", () => {
   it("still reports syntax errors when no cluster answers", async () => {
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
     const { result } = renderHook(() => useTemplateYamlValidation("a: [1, 2\nb: 3\n", ""));
-    await waitFor(() => expect(result.current.resources.map((i) => i.code)).toContain("syntax"));
+    await waitFor(() => expect(result.current.resources.map((i) => i.code)).toContain("unclosedFlow"));
   });
 
   it("never requests an apiVersion that is not a GroupVersion", async () => {

@@ -58,7 +58,9 @@ describe("useSaveBlockedReason", () => {
         <Reason resources={"a: [1, 2\nb: 3\n"} uiSpec="" />
       </NextIntlClientProvider>,
     );
-    expect(screen.getByText(/^Fix 1 error\(s\) to save\. resources\.yaml line \d+: YAML syntax error:/)).toBeInTheDocument();
+    expect(
+      screen.getByText("Fix 1 error(s) to save. resources.yaml line 1: The [ opened here is never closed."),
+    ).toBeInTheDocument();
   });
 
   it("does not block on warnings alone", () => {
