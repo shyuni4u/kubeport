@@ -1,3 +1,7 @@
+// @vitest-environment node
+// The route handler runs on the server. Under the default jsdom environment the
+// global AbortController is jsdom's, and Node 24's Request (undici) rejects its
+// signal as "not an instance of AbortSignal" — Node 22 happened not to check.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
