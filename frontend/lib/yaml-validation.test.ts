@@ -580,19 +580,41 @@ spec:
   // Stored input: the next visitor to open a version pays for whatever is in it.
   describe("(f) size and depth", () => {
     const CONFIGMAP = "apiVersion: v1\nkind: ConfigMap\nmetadata: { name: big }\ndata:\n";
-    const ms = (f: () => void) => {
-      const t0 = performance.now();
-      f();
-      return performance.now() - t0;
+    // Linear time is judged by growth, not by a wall-clock budget. The suite
+    // runs on shared CI runners and on a machine several sessions test on at
+    // once, where the same call takes twice as long for reasons unrelated to
+    // the code: a 500ms budget passed at 375ms alone and failed at 685ms under
+    // the full suite. Quadrupling the input should about quadruple the time;
+    // the quadratic paths these guard (duplicate keys, anchor lookup) grew 16x.
+    // Small and large runs alternate, so load lands on both and each call is a
+    // different text than the last — the per-file parse cache can't answer it.
+    const GROWTH_LIMIT = 10;
+    const growth = (small: string, large: string, run: (text: string) => void) => {
+      let s = Infinity;
+      let l = Infinity;
+      for (let k = 0; k < 3; k++) {
+        let t0 = performance.now();
+        run(small);
+        s = Math.min(s, performance.now() - t0);
+        t0 = performance.now();
+        run(large);
+        l = Math.min(l, performance.now() - t0);
+      }
+      return { small: s, large: l };
+    };
+    const expectLinear = ({ small, large }: { small: number; large: number }, what: string) => {
+      // The floor keeps a sub-millisecond small run from turning timer noise into a ratio.
+      expect(large, `${what}: ${large.toFixed(1)}ms vs ${small.toFixed(1)}ms at a quarter of the size`).toBeLessThan(
+        Math.max(small * GROWTH_LIMIT, 50),
+      );
     };
 
-    it("skips a file too large to check, quickly and without blocking", () => {
+    it("skips a file too large to check, without blocking", () => {
       const keys = Array.from({ length: 20_000 }, (_, i) => `  k${i}: "v${i}"`).join("\n");
       const res = `${CONFIGMAP}${keys}\n`;
       expect(res.length).toBeGreaterThan(MAX_CHECKED_CHARS);
-      let r: Result | undefined;
-      expect(ms(() => (r = validateTemplateYaml(res, UISPEC, lookup)))).toBeLessThan(500);
-      expect(r!.resources).toEqual([
+      const r = validateTemplateYaml(res, UISPEC, lookup);
+      expect(r.resources).toEqual([
         expect.objectContaining({ severity: "warning", code: "tooLarge", startLine: 1, startCol: 1 }),
       ]);
       expect(errorsOf(r!.uiSpec)).toEqual([]);
@@ -614,13 +636,14 @@ spec:
         lines.push(line);
         size += line.length;
       }
-      const res = `${CONFIGMAP}${lines.join("")}  k0: again\n`;
+      const file = (keyLines: string[]) => `${CONFIGMAP}${keyLines.join("")}  k0: again\n`;
+      const res = file(lines);
       expect(res.length).toBeLessThanOrEqual(MAX_CHECKED_CHARS);
       expect(lines.length).toBeGreaterThan(5_000);
-      let r: Result | undefined;
       // The quadratic parse took seconds here.
-      expect(ms(() => (r = validateTemplateYaml(res, "", lookup)))).toBeLessThan(1500);
-      expect(codes(errorsOf(r!.resources))).toEqual(["duplicateKey"]);
+      const quarter = file(lines.slice(0, Math.floor(lines.length / 4)));
+      expectLinear(growth(quarter, res, (text) => validateTemplateYaml(text, "", lookup)), "many keys");
+      expect(codes(errorsOf(validateTemplateYaml(res, "", lookup).resources))).toEqual(["duplicateKey"]);
     });
 
     // Both shapes save (measured), so a demo visitor can store one. Anchor
@@ -631,13 +654,12 @@ spec:
     it.each([
       ["an anchor used from every later document", anchorsPerDocument],
       ["an anchor redefined and used down a list", anchorsInAList],
-    ])("resolves %s in linear time", (_name, shape) => {
-      for (const n of [21_000, Math.floor((MAX_CHECKED_CHARS - 40) / 12)]) {
-        const res = shape(n);
-        let r: Result | undefined;
-        expect(ms(() => (r = validateTemplateYaml(res, "", lookup))), `${res.length} chars`).toBeLessThan(500);
-        expect(blocking(r!)).toEqual([]);
-      }
+    ])("resolves %s in linear time", (name, shape) => {
+      const n = Math.floor((MAX_CHECKED_CHARS - 40) / 12);
+      const res = shape(n);
+      expect(res.length).toBeLessThanOrEqual(MAX_CHECKED_CHARS);
+      expectLinear(growth(shape(Math.floor(n / 4)), res, (text) => validateTemplateYaml(text, "", lookup)), name);
+      expect(blocking(validateTemplateYaml(res, "", lookup))).toEqual([]);
     });
 
     it("refuses flow nesting deeper than yaml.v3's 10000 levels, without parsing it", () => {
