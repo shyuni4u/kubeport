@@ -352,6 +352,7 @@
       "errors": {
         "forbidden": "You don't have permission for this action. Only the kubeport-admin group can change global templates.",
         "demoRestricted": "Demo accounts can only change templates created in the demo.",
+        "demoPublishRestricted": "Demo accounts can't publish versions or change a published version's status. Drafts and previews still work.",
         "conflict": "The state changed and the request could not be processed (already published, or another draft exists). Refresh and check again.",
         "generic": "The request failed (HTTP {status})."
       },

@@ -78,9 +78,9 @@ func main() {
 	if cfg.DemoEmailDomain != "" {
 		log.Printf("demo restrictions enabled for *@%s", cfg.DemoEmailDomain)
 		if cfg.DemoAllowTemplateCreate {
-			log.Printf("WARN: KBP_DEMO_ALLOW_TEMPLATE_CREATE=true — demo accounts may author templates. " +
+			log.Printf("WARN: KBP_DEMO_ALLOW_TEMPLATE_CREATE=true — demo accounts may author templates and publish, deprecate or undeprecate versions. " +
 				"Their templates stay out of real users' catalogs, but they persist past a demo reset " +
-				"once someone deploys from them.")
+				"once someone deploys from them, and a published version can read other visitors' Secrets through pod logs.")
 		}
 	}
 

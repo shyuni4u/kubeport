@@ -15,7 +15,8 @@ type Config struct {
 	// sessions are deleted. Zero uses session.DefaultInterval.
 	SessionReapInterval time.Duration
 	// DemoAllowTemplateCreate — KBP_DEMO_ALLOW_TEMPLATE_CREATE. Lets demo
-	// accounts author templates. Off by default; see api.Deps for why.
+	// accounts author templates and publish, deprecate or undeprecate versions.
+	// Off by default; see api.Deps for why.
 	DemoAllowTemplateCreate bool
 	// HealthPublicCatalog — KBP_HEALTH_PUBLIC_CATALOG. Lets /healthz?verbose=1
 	// report how many templates the catalog holds. Off by default: /healthz is

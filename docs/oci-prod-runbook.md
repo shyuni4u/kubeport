@@ -515,7 +515,8 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
 - **오너 RBAC**: 오너 Google 이메일의 cluster-admin 바인딩 이름은 `kubeport-owner-admin`
   (예전 이름 `kubeport-demo-admin` 은 이름과 달리 오너 바인딩이었음 — 삭제 전 subject 확인).
   데모 계정은 chart 의 `demo` ns RoleBinding 만 갖는다. 검증: `kubectl auth can-i create deployments --as=dex:demo-user@demo.kubeport -n default` → **no**.
-- **데모 계정의 템플릿 저작**: 기본은 **막혀 있다**(`POST /v1/templates` → 403 `demo-restricted`).
+- **데모 계정의 템플릿 저작**: 기본은 **막혀 있다**(`POST /v1/templates`·버전 게시·사용 중단·해제 `.../versions/:v/publish`·`/deprecate`·`/undeprecate` → 403 `demo-restricted`).
+  초안 작성·미리보기는 열려 있다. 게시까지 막는 이유는 #294 — 공용 데모 계정이 게시한 버전은 다른 방문자가 배포한 Secret 을 파드 로그로 읽을 수 있다. `undeprecate` 는 다시 게시하는 것이고, `deprecate` 는 한 방문자가 시드 템플릿을 리셋까지 배포 불가로 만들 수 있어 같이 막는다.
   데모 계정은 `kubeport-admin` 을 갖지만, 저작은 결과물이 방문자의 세션보다 오래 남고 남에게 보이는
   유일한 관리자 권한이라서다. 저작 체험까지 보여주려면 `--set demo.allowTemplateCreate=true`
   (backend `KBP_DEMO_ALLOW_TEMPLATE_CREATE`). 켜도 데모가 만든 템플릿은 실제 사용자 카탈로그에
@@ -619,7 +620,7 @@ port-forward 로 밖에서 잡는다.
 | 로그아웃을 누르면 "로그아웃하지 못했습니다. 아직 로그인된 상태입니다" 알림이 뜨고 화면이 그대로 | 거의 항상 로그아웃 라우트의 origin 검사 거부(403 `cross-origin request rejected`)다 — 서버 로그엔 안 남으니 브라우저 개발자도구 Network 탭의 `POST /api/auth/logout` 응답으로 확인한다. **다시 눌러도 안 풀린다.** 브라우저가 보는 origin 이 허용목록(§4)에 없는 것이므로, 도메인을 추가했거나 **TLS 를 클러스터 밖에서 종료하면서 `tls.enabled=false`** 로 뒀다면 `frontend.publicOrigins` 에 실제 https origin 을 넣고 `helm upgrade`. 응답이 403 이 아니라 네트워크 오류면 프록시 origin(§4) 을 본다. (#166 이전에는 실패해도 `/` 로 가서 성공처럼 보였다) |
 | 로그인 후 `/` 로 되돌아오고 "로그인하지 못했습니다" 배너 | 콜백이 `?login_error=` 로 돌려보낸 것. 원인은 화면에 안 나오므로 `kubectl logs -n kubeport deploy/kubeport-frontend \| grep '\[auth/callback\]'` 확인. `cancelled` = 사용자가 동의화면에서 취소, `expired` = 10분 state 쿠키 만료, `failed` = IdP/DB 오류. 로그에 `suspicious=true` 면 state/nonce 불일치 — 콜백 위조·재생 시도일 수 있다 |
 | 데모 로그인 후 배포 401/403 | k3s `auth.yaml` 에 Dex issuer 있는지, prefix `dex:` 와 RoleBinding subject 일치하는지 |
-| "템플릿이 안 보여요" / 버전 상세 403·404 | 대부분 publish 누락이다. 초안은 소유자에게만 보인다(전역=`kubeport-admin`, 팀=그 팀 멤버). admin 토큰으로 `GET /v1/templates/<name>/versions` 를 호출해 draft 만 있는지 먼저 확인. **published 인데도 404 라면 데모 경계다**(#238) — 데모 계정에겐 데모 계정이 만들지 않은 템플릿이, 데모가 아닌 비관리자에겐 데모 템플릿이 없는 것과 같은 404 로 보인다. 운영자(데모 아닌 admin) 토큰은 이 경계를 통과하므로 재현에 쓰지 않는다. 변경 경로(`PATCH /v1/templates/<name>`, 버전 생성·수정·삭제, publish·deprecate·undeprecate)도 같다(#244) — 템플릿이 있는데 404 면 데모 경계이거나 한 번도 게시되지 않은 남의 초안이고, 사유가 담긴 403 은 볼 수 있는 템플릿에만 온다. 재현은 데모 계정 토큰이나 팀 비멤버 토큰으로 한다 |
+| "템플릿이 안 보여요" / 버전 상세 403·404 | 대부분 publish 누락이다. 초안은 소유자에게만 보인다(전역=`kubeport-admin`, 팀=그 팀 멤버). admin 토큰으로 `GET /v1/templates/<name>/versions` 를 호출해 draft 만 있는지 먼저 확인. **published 인데도 404 라면 데모 경계다**(#238) — 데모 계정에겐 데모 계정이 만들지 않은 템플릿이, 데모가 아닌 비관리자에겐 데모 템플릿이 없는 것과 같은 404 로 보인다. 운영자(데모 아닌 admin) 토큰은 이 경계를 통과하므로 재현에 쓰지 않는다. 변경 경로(`PATCH /v1/templates/<name>`, 버전 생성·수정·삭제, publish·deprecate·undeprecate)도 같다(#244) — 템플릿이 있는데 404 면 데모 경계이거나 한 번도 게시되지 않은 남의 초안이고, 사유가 담긴 403 은 볼 수 있는 템플릿에만 온다. 재현은 데모 계정 토큰이나 팀 비멤버 토큰으로 한다. 단 데모 계정 토큰의 publish·deprecate·undeprecate 는 템플릿을 찾기 전에 403 `demo-restricted` 로 거절되므로(#294), 이 세 경로의 재현은 팀 비멤버 토큰으로 한다 |
 
 ## 8. 보안 후속 (권장)
 
