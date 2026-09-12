@@ -50,6 +50,15 @@ case "${1:-}" in
         say "$svc was created from $wd — it will be recreated from $DIR"
       fi
     done
+    # docker-compose.yml publishes dex on ${KBP_DEX_BIND:-127.0.0.1} (#63).
+    # compose also reads $DIR/.env, so look there when the shell has nothing.
+    bind="${KBP_DEX_BIND:-}"
+    if [[ -z "$bind" && -f "$DIR/.env" ]]; then
+      bind="$(grep -m1 '^KBP_DEX_BIND=' "$DIR/.env" | cut -d= -f2- || true)"
+    fi
+    if [[ -n "$bind" && "$bind" != "127.0.0.1" ]]; then
+      say "WARNING: dex will be published on $bind:5556 — its passwords are public, so this reaches past this machine unless a firewall blocks it (#63)"
+    fi
     ;;
 esac
 

@@ -16,8 +16,19 @@ services:
   dex:
     image: dexidp/dex:v2.39.0
     command: ["dex", "serve", "/config/dex.yaml"]
-    # Binds on all interfaces so kind cluster containers can reach via host-gateway.
-    ports: ["5556:5556"]
+    # Loopback by default, like postgres above (#63). dex.yaml's static
+    # passwords are in this public repo, so publishing on every interface let
+    # anyone on the same Wi-Fi or office network sign in and get a valid
+    # id_token for as long as a local backend trusts this issuer.
+    #
+    # Who reaches it: host processes (backend, BFF, go test, ci.yml's backend
+    # job) use host.docker.internal -> 127.0.0.1, so loopback is enough. So is
+    # a kind cluster on Docker Desktop (Windows/macOS), which forwards
+    # host.docker.internal to the host's loopback. A kind apiserver on native
+    # Linux docker — and CI's playwright.yml — comes in through the docker
+    # network gateway instead, which a loopback publish does not answer; those
+    # set KBP_DEX_BIND=0.0.0.0 (docs/local-e2e.md §4).
+    ports: ["${KBP_DEX_BIND:-127.0.0.1}:5556:5556"]
     volumes:
       - ./dex.yaml:/config/dex.yaml:ro
       - ./certs:/config/certs:ro
