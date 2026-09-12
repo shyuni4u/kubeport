@@ -34,14 +34,14 @@ func TestLogCursor_RoundTripsInOneFixedShape(t *testing.T) {
 // a single-instance id, a typo, or a header someone rewrote.
 func TestLogCursor_RefusesWhatIsNotACursor(t *testing.T) {
 	for name, s := range map[string]string{
-		"empty":              "",
-		"a single-instance id": "2026-09-09T07:36:36.000000000Z",
-		"no time":            "web-1@",
-		"no pod":             "@2026-09-09T07:36:36Z",
-		"a time that is not one": "web-1@yesterday",
+		"empty":                          "",
+		"a single-instance id":           "2026-09-09T07:36:36.000000000Z",
+		"no time":                        "web-1@",
+		"no pod":                         "@2026-09-09T07:36:36Z",
+		"a time that is not one":         "web-1@yesterday",
 		"a name Kubernetes would refuse": "Web_1@2026-09-09T07:36:36Z",
-		"the same pod twice": "web-1@2026-09-09T07:36:36Z,web-1@2026-09-09T07:37:00Z",
-		"a trailing comma":   "web-1@2026-09-09T07:36:36Z,",
+		"the same pod twice":             "web-1@2026-09-09T07:36:36Z,web-1@2026-09-09T07:37:00Z",
+		"a trailing comma":               "web-1@2026-09-09T07:36:36Z,",
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, ok := parseLogCursor(s)
