@@ -65,4 +65,11 @@ describe("DemoBanner", () => {
     renderBanner("ko");
     expect(message()).toMatch(/\b0?3:00\b/);
   });
+
+  // #142 — the hour is Asia/Seoul's; say so, or a visitor abroad reads it as
+  // their own clock. Loose on the name: ICU data varies between runtimes.
+  it("names the time zone of the reset time", () => {
+    renderBanner("en");
+    expect(message()).toMatch(/GMT\+9|UTC\+9|KST/);
+  });
 });

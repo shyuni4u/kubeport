@@ -49,8 +49,16 @@ export function DemoBanner({ resetAtIso }: { resetAtIso: string | null }) {
   // resetAtIso is null when the configured schedule is not a shape we read.
   // The banner still warns that a reset is coming; it just does not claim to
   // know when, because a wrong hour is worse than no hour (#153).
+  //
+  // The zone is named for the same reason RelativeTime names it (#142): the
+  // hour is Asia/Seoul's, and a visitor elsewhere would otherwise plan around
+  // "06:00" on their own clock.
   const time = resetAtIso
-    ? format.dateTime(new Date(resetAtIso), { hour: "2-digit", minute: "2-digit" })
+    ? format.dateTime(new Date(resetAtIso), {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZoneName: "short",
+      })
     : null;
   return (
     <div role="status" className="flex items-center gap-3 border-b border-amber-300 bg-amber-50 px-6 py-2 text-sm text-amber-900">
