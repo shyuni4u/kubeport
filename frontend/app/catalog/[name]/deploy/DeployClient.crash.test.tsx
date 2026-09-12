@@ -10,15 +10,22 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }));
 
-// A render failure nobody has found yet. The message stands in for whatever
-// internal reason such a failure would carry.
+// A render failure nobody has found yet, set off by a field on the spec so a
+// test can hand the same page a spec that renders. The message stands in for
+// whatever internal reason such a failure would carry.
 vi.mock("@/components/DynamicForm", () => ({
-  DynamicForm: () => {
-    throw new Error("internal reason: schemaFromUISpec exploded");
+  DynamicForm: ({ spec }: { spec: UISpec }) => {
+    if (spec.fields.some((f) => f.path === "boom")) {
+      throw new Error("internal reason: schemaFromUISpec exploded");
+    }
+    return <div>form rendered</div>;
   },
 }));
 
-const spec: UISpec = {
+const crashing: UISpec = {
+  fields: [{ path: "boom", label: "Boom", type: "integer", default: 1 }],
+};
+const healthy: UISpec = {
   fields: [{ path: "spec.replicas", label: "Replicas", type: "integer", default: 1 }],
 };
 
@@ -57,7 +64,7 @@ describe("DeployClient when the form cannot render", () => {
   });
 
   it("says so in a sentence for users, without the internal reason, and keeps the page", async () => {
-    render(<DeployClient templateName="web-app" version={1} team={null} spec={spec} />);
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={crashing} />);
     expect(await screen.findByText(CRASHED)).toBeInTheDocument();
     expect(screen.queryByText(/internal reason|schemaFromUISpec/)).toBeNull();
     expect(screen.getByLabelText("배포 이름")).toBeInTheDocument();
@@ -67,10 +74,22 @@ describe("DeployClient when the form cannot render", () => {
   // its children change would clear the sentence, throw again, and loop.
   it("stays on that sentence while the rest of the page re-renders", async () => {
     const user = userEvent.setup();
-    render(<DeployClient templateName="web-app" version={1} team={null} spec={spec} />);
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={crashing} />);
     await screen.findByText(CRASHED);
     await user.type(screen.getByLabelText("배포 이름"), "my-app");
     expect(screen.getAllByText(CRASHED)).toHaveLength(1);
     expect(screen.getByLabelText("배포 이름")).toHaveValue("my-app");
+  });
+
+  // The boundary is keyed on the spec, so a different spec is a new attempt:
+  // the page must not stay stuck on the sentence once it gets a form that draws.
+  it("draws the form again when it is given a spec that renders", async () => {
+    const { rerender } = render(
+      <DeployClient templateName="web-app" version={1} team={null} spec={crashing} />,
+    );
+    await screen.findByText(CRASHED);
+    rerender(<DeployClient templateName="web-app" version={2} team={null} spec={healthy} />);
+    expect(await screen.findByText("form rendered")).toBeInTheDocument();
+    expect(screen.queryByText(CRASHED)).toBeNull();
   });
 });
