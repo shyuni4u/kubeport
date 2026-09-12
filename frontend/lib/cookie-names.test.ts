@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ResponseCookies } from "next/dist/compiled/@edge-runtime/cookies";
 
 // #165: the names are computed at module load from NODE_ENV, so each case
 // loads a fresh copy of the module under the environment it is about.
@@ -44,5 +45,24 @@ describe("clearAuthCookie", () => {
       sameSite: "lax",
       path: "/",
     });
+  });
+
+  // The call arguments above are not the contract; the header is. Serialize
+  // through Next's own ResponseCookies and check what the browser would get.
+  it("emits a Set-Cookie a browser accepts for a __Host- cookie", async () => {
+    const m = await load("production");
+    const headers = new Headers();
+    m.clearAuthCookie(new ResponseCookies(headers), m.SESSION_COOKIE);
+    const setCookie = headers.get("set-cookie") ?? "";
+    expect(setCookie).toMatch(/^__Host-kbp_sid=; /);
+    expect(setCookie).toContain("Path=/");
+    expect(setCookie).toContain("Secure");
+    expect(setCookie).not.toMatch(/Domain=/i);
+  });
+
+  it("is needed: a bare delete(name) emits no Secure, which a browser drops for __Host-", () => {
+    const headers = new Headers();
+    new ResponseCookies(headers).delete("__Host-kbp_sid");
+    expect(headers.get("set-cookie") ?? "").not.toContain("Secure");
   });
 });
