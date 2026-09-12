@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { requestIdFor } from "@/lib/bff-path";
 import { bffProblem } from "@/lib/bff-problem";
+import { applySecurityHeaders } from "@/lib/security-headers";
 
 /**
  * `/api/v1` with no path segments.
@@ -23,10 +24,17 @@ function root(req: NextRequest) {
   );
 }
 
+// The security headers are set here as well as in proxy.ts: a request with a
+// body is not matched by the proxy (see proxy.ts), so for POST/PUT/PATCH this
+// is the only place they come from.
+function handler(req: NextRequest) {
+  return applySecurityHeaders(root(req));
+}
+
 export {
-  root as GET,
-  root as POST,
-  root as PUT,
-  root as PATCH,
-  root as DELETE,
+  handler as GET,
+  handler as POST,
+  handler as PUT,
+  handler as PATCH,
+  handler as DELETE,
 };

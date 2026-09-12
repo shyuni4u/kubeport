@@ -630,9 +630,12 @@ Changing a budget needs a code change (`backend/internal/api/routes.go`).
 The frontend sets these at request time, from `frontend.securityHeaders`
 (#80, #143), on every response the app produces — pages, `/_next/static`, the
 `/api` BFF, 404s and its own login redirect. They are not baked into the image,
-so each install can change them. (Next's internal trailing-slash 308, e.g.
-`/catalog/` → `/catalog`, is answered before the app and carries none; a
-browser has already received HSTS from any page by then.)
+so each install can change them. Two kinds of response are answered by Next
+before the app and carry none: its internal trailing-slash 308 (e.g.
+`/catalog/` → `/catalog`), and its automatic 405 for a method an `/api` route
+does not define when the request has a body (such requests skip the proxy, so
+that uploads are not buffered before the BFF's own checks). Neither has an HTML
+body, and a browser has already received HSTS from any page by then.
 
 | Value | Default | What it does |
 |---|---|---|
