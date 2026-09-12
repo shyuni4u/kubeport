@@ -2240,7 +2240,10 @@ components:
                   than 200 characters; and a pattern that can match the same
                   text in more than one way inside a repeat, as in `(a+)+`,
                   `(a|a)*` or `(a{1,20})+`, which can freeze the browser
-                  (bounded counts are judged like unbounded ones). A separator
+                  (a count of five or more, or a count around `*`, `+` or
+                  another count of five or more, is judged like an unbounded
+                  repeat; `{2}` to `{4}` over anything else is read as that
+                  many copies, so `^(\d{3}-?){2}\d{4}$` passes). A separator
                   nothing else in the repeat can match keeps it unambiguous,
                   at either end: `^[a-z]+(-[a-z]+)*$`, `^([a-z]+,)*[a-z]+$`.
                   A repeat of something that can match nothing, as in

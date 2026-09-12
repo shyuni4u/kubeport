@@ -341,7 +341,9 @@ could freeze the browser:
   else in it can match, at either end — `^[a-z]+(-[a-z]+)*$`,
   `^([a-z]+,)*[a-z]+$`, `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` — and start the pattern
   with `^`. A repeat of something that can match nothing, such as `(a?){25}`,
-  is refused too. Ways also multiply along the whole pattern, not only inside a
+  is refused too. A count of two to four is read as that many copies unless it
+  holds `*`, `+` or a count of five or more, so `^(\d{3}-?){2}\d{4}$` is accepted
+  while `(a{1,20}){2}` and `(a|a){5}` are judged like `*`. Ways also multiply along the whole pattern, not only inside a
   repeat: a few two-way parts are fine (the common IPv4 pattern built from
   `[01]?[0-9][0-9]?` is accepted), but many are refused; write each part so it
   matches one way, as in `(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])`.
