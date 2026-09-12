@@ -75,7 +75,15 @@ export function securityHeaders(env: Env = process.env): [string, string][] {
     headers.push(["Content-Security-Policy", frameAncestors]);
     return headers;
   }
-  const policy = `${env.SECURITY_CSP || defaultCsp(env.NODE_ENV !== "production")}; ${frameAncestors}`;
+  // A browser honors the first frame-ancestors in a policy, so one inside a
+  // custom SECURITY_CSP would silently win over SECURITY_FRAME_ANCESTORS.
+  // Drop it: framing is decided by the dedicated value alone.
+  const base = (env.SECURITY_CSP || defaultCsp(env.NODE_ENV !== "production"))
+    .split(";")
+    .map((d) => d.trim())
+    .filter((d) => d !== "" && !/^frame-ancestors(\s|$)/i.test(d))
+    .join("; ");
+  const policy = `${base}; ${frameAncestors}`;
   if (mode === "report-only") {
     // frame-ancestors is ignored inside Report-Only, so it keeps enforcing on
     // its own header while the rest of the policy is only reported.

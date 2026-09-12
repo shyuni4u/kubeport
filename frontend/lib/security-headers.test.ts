@@ -67,4 +67,14 @@ describe("securityHeaders switches (chart values, #80)", () => {
     const csp = asMap(securityHeaders({ ...prod, SECURITY_CSP: "default-src 'none'" }))["Content-Security-Policy"];
     expect(csp).toBe("default-src 'none'; frame-ancestors 'none'");
   });
+
+  // Browsers honor the first frame-ancestors, so a custom policy's own would
+  // otherwise override the configured one and reopen framing.
+  it("drops a frame-ancestors inside SECURITY_CSP in favour of SECURITY_FRAME_ANCESTORS", () => {
+    const csp = asMap(
+      securityHeaders({ ...prod, SECURITY_CSP: "default-src 'self'; Frame-Ancestors *; img-src 'self';" }),
+    )["Content-Security-Policy"];
+    expect(csp).toBe("default-src 'self'; img-src 'self'; frame-ancestors 'none'");
+    expect(csp.match(/frame-ancestors/gi)).toHaveLength(1);
+  });
 });
