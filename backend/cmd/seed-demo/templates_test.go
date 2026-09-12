@@ -283,6 +283,34 @@ func TestTemplateSeeder_RepairWithoutAPublishedVersionUsesTheFixture(t *testing.
 	requireCatalogIsTheFixture(t, s, ctx, f, draft)
 }
 
+// Security review of ef8f935: a version a visitor published before the gate
+// existed is published and immutable, but it is not the fixture. If it is
+// current and deprecated, the reset must publish the fixture instead of
+// bringing the visitor's content back.
+func TestTemplateSeeder_RepairDoesNotUndeprecateAVisitorsVersion(t *testing.T) {
+	s, ctx := newTestSeeder(t)
+	require.NoError(t, s.Run(ctx))
+	f := fixtures.All()[0]
+	conn, err := pgx.Connect(ctx, testDSN())
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+
+	tpl, err := s.st.GetTemplateByName(ctx, f.Name)
+	require.NoError(t, err)
+	visitors := tpl.CurrentVersionID
+	_, err = conn.Exec(ctx, `UPDATE template_versions SET resources_yaml = $2, status = 'deprecated' WHERE id = $1`,
+		visitors, visitorYAML)
+	require.NoError(t, err)
+
+	require.NoError(t, s.Run(ctx))
+	requireCatalogIsTheFixture(t, s, ctx, f, store.TemplateVersion{})
+	for _, v := range versionsOf(t, s, ctx, f.Name) {
+		if v.ID == visitors {
+			require.Equal(t, "deprecated", v.Status, "the visitor's version must stay out of the catalog")
+		}
+	}
+}
+
 func TestTemplateSeeder_RefusesAnotherOwnersTemplate(t *testing.T) {
 	s, ctx := newTestSeeder(t)
 	require.NoError(t, s.Run(ctx))

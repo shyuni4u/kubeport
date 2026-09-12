@@ -129,9 +129,13 @@ func (t *templateSeeder) repair(ctx context.Context, tpl store.GetTemplateByName
 		// Never publish a draft that is already there. Demo visitors can rewrite
 		// any draft, and publishing is what puts content in front of every other
 		// visitor: a draft published here would bypass the gate on the publish
-		// route (#294). What goes back into the catalog comes from something
-		// that was already published — immutable since — or from the fixture.
-		if current != nil && current.Status == "deprecated" {
+		// route (#294). What goes back into the catalog is the fixture: a
+		// deprecated version is brought back only when it still is the
+		// fixture's content. One a visitor published before the gate existed
+		// is immutable but not ours, and a reset that could not delete the demo
+		// versions (a non-demo release holds one) must not revive it (#306).
+		if current != nil && current.Status == "deprecated" &&
+			current.ResourcesYaml == f.ResourcesYAML && current.UiSpecYaml == f.UISpecYAML {
 			if _, err := t.st.SetTemplateVersionStatus(ctx, store.SetTemplateVersionStatusParams{
 				ID: current.ID, Status: "published",
 			}); err != nil {
