@@ -72,8 +72,8 @@ export type UISpec = { fields: UISpecField[] };
  * Build a Zod schema from a ui-spec. Keys are flat dotted paths; optional
  * fields accept a missing key (undefined); required fields reject it.
  *
- * Integer fields use `z.coerce.number().int()` so HTML form string inputs
- * ("3") are accepted while still validating `min`/`max`.
+ * Integer fields accept number strings ("3") while still validating
+ * `min`/`max`, and read null or "" as missing rather than 0 (see integerInput).
  */
 const KNOWN_TYPES = [
   "string",
@@ -294,6 +294,22 @@ export function normalizeUISpec(spec: UISpec): {
 }
 
 /**
+ * An integer field's value as the form holds it, made ready to check (#309).
+ *
+ * null, undefined and a blank string are no value: `undefined`, which a
+ * required field refuses as missing and an optional one leaves out of the
+ * payload. A number string becomes its number ("8080" → 8080), as the number
+ * box and stored values may hold one. Anything else — a boolean, an array — is
+ * passed on as it is, so it is refused as not a number instead of being turned
+ * into 0 or 1 by `Number`.
+ */
+function integerInput(v: unknown): unknown {
+  if (v === null || v === undefined) return undefined;
+  if (typeof v === "string") return v.trim() === "" ? undefined : Number(v);
+  return v;
+}
+
+/**
  * Never throws. A field it cannot describe is left out of the schema instead.
  *
  * It used to do neither. `let zs: ZodTypeAny;` had no initialiser and the
@@ -314,6 +330,16 @@ export function schemaFromUISpec(
 ): z.ZodObject<Record<string, ZodTypeAny>> {
   const shape: Record<string, ZodTypeAny> = {};
   for (const f of spec.fields) {
+    // Moving a release to another version cannot carry a Secret over (#196).
+    // Its field starts empty and has to be filled, required or not, or the
+    // update would replace the running Secret with a default without a word.
+    //
+    // A kept Secret is required for the same reason (#288). It starts from the
+    // placeholder, so leaving it alone passes; but "enter a new value" empties
+    // it, and an optional one sent empty would reach the backend as missing
+    // and be filled from the ui-spec default.
+    const required =
+      f.required || opts.reenterSecrets?.has(f.path) || opts.keptSecrets?.has(f.path);
     let zs: ZodTypeAny;
     switch (f.type) {
       // `string` and `autocomplete` share the validation shape — `values`
@@ -350,21 +376,19 @@ export function schemaFromUISpec(
         break;
       }
       case "integer": {
-        const mustBeGiven = opts.keptSecrets?.has(f.path) || opts.reenterSecrets?.has(f.path);
-        // `z.coerce.number()` reads null and "" as 0. For a Secret the user has
-        // to give, that let an emptied box through as 0 over the running
-        // Secret (codex review of #288), so empty is taken out before any
-        // number is made of it and fails as missing. Other integer fields keep
-        // the coercion they have always had.
-        let n = mustBeGiven ? z.number().int() : z.coerce.number().int();
+        // Not `z.coerce.number()`: that is `Number(v)`, which reads null, ""
+        // (and false, []) as 0. An emptied kept Secret went out as 0 over the
+        // running one (codex review of #288), and a release whose stored
+        // values held null for any integer sent 0 on update (#309). Empty is
+        // taken out before any number is made of it — missing, so a required
+        // field says "required" and an optional one is left out — and what
+        // remains is checked without coercion.
+        let n = z.number().int();
         if (f.min !== undefined) n = n.min(f.min);
         if (f.max !== undefined) n = n.max(f.max);
-        zs = mustBeGiven
-          ? z.preprocess(
-              (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
-              n,
-            )
-          : n;
+        // The optional has to sit inside the preprocess: outside, it only lets
+        // `undefined` through, and null would reach `n` as missing.
+        zs = z.preprocess(integerInput, required ? n : n.optional());
         break;
       }
       case "boolean":
@@ -390,16 +414,6 @@ export function schemaFromUISpec(
     if (opts.keptSecrets?.has(f.path)) {
       zs = z.union([z.literal(REDACTED_SECRET), zs]);
     }
-    // Moving a release to another version cannot carry a Secret over (#196).
-    // Its field starts empty and has to be filled, required or not, or the
-    // update would replace the running Secret with a default without a word.
-    //
-    // A kept Secret is required for the same reason (#288). It starts from the
-    // placeholder, so leaving it alone passes; but "enter a new value" empties
-    // it, and an optional one sent empty would reach the backend as missing
-    // and be filled from the ui-spec default.
-    const required =
-      f.required || opts.reenterSecrets?.has(f.path) || opts.keptSecrets?.has(f.path);
     shape[f.path] = required ? zs : zs.optional();
   }
   return z.object(shape);

@@ -736,6 +736,87 @@ describe("DynamicForm kept Secrets", () => {
   });
 });
 
+// #309 — an update form starts from the release's stored values. Where those
+// held null (or "") for an integer, `z.coerce.number()` read it as 0 and the
+// update sent `0` for a field the user never touched and could not see.
+describe("DynamicForm stored empty integers", () => {
+  const port = "Deployment[web].spec.template.spec.containers[0].ports[0].containerPort";
+  const replicas = "Deployment[web].spec.replicas";
+  const spec: UISpec = {
+    fields: [
+      { path: "metadata.name", label: "Name", type: "string", default: "web" },
+      { path: port, label: "Port", type: "integer", required: true },
+      { path: replicas, label: "Replicas", type: "integer", min: 0, max: 5, required: true },
+    ],
+  };
+
+  for (const stored of [null, ""]) {
+    it(`shows a required number box stored as ${JSON.stringify(stored)} empty and refuses it`, async () => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn();
+      renderWithIntl(
+        <DynamicForm
+          spec={spec}
+          initialValues={{ "metadata.name": "web", [port]: stored, [replicas]: 2 }}
+          submitLabel="업데이트"
+          onSubmit={onSubmit}
+        />,
+      );
+      const input = screen.getByRole("spinbutton", { name: /Port/ });
+      expect(input).toHaveValue(null);
+
+      await user.click(screen.getByRole("button", { name: "업데이트" }));
+      await waitFor(() => expect(screen.getByText(ko.form.validation.required)).toBeInTheDocument());
+      expect(onSubmit).not.toHaveBeenCalled();
+      expect(input).toHaveAttribute("aria-invalid", "true");
+
+      await user.type(input, "8080");
+      await user.click(screen.getByRole("button", { name: "업데이트" }));
+      await waitFor(() =>
+        expect(onSubmit).toHaveBeenCalledWith({ "metadata.name": "web", [port]: 8080, [replicas]: 2 }),
+      );
+    });
+  }
+
+  // A Slider has no empty state; stored null reads the same as no value at
+  // all, which is how a required slider without a default already behaves.
+  it("refuses a required slider stored as null rather than sending 0", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(
+      <DynamicForm
+        spec={spec}
+        initialValues={{ "metadata.name": "web", [port]: 80, [replicas]: null }}
+        onSubmit={onSubmit}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(screen.getByText(ko.form.validation.required)).toBeInTheDocument());
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("leaves an optional integer stored as null out of the submitted values", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const optional: UISpec = {
+      fields: [
+        { path: "metadata.name", label: "Name", type: "string", default: "web" },
+        { path: port, label: "Port", type: "integer", default: 80 },
+      ],
+    };
+    renderWithIntl(
+      <DynamicForm spec={optional} initialValues={{ "metadata.name": "web", [port]: null }} onSubmit={onSubmit} />,
+    );
+    expect(screen.getByRole("spinbutton", { name: /Port/ })).toHaveValue(null);
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const sent = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    expect(sent[port]).toBeUndefined();
+    // What DeployClient puts on the wire: the key is gone, not 0 or null.
+    expect(JSON.parse(JSON.stringify({ values: sent }))).toEqual({ values: { "metadata.name": "web" } });
+  });
+});
+
 // #31 — a second click before the parent re-renders used to fire a second
 // POST /v1/releases. The parent's `disabled` prop lands a render too late,
 // so the guard has to live inside the form.
