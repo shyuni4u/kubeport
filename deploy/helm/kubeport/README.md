@@ -635,6 +635,12 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
   `/seed-demo --reset` (shipped in the backend image).
   The demo banner derives its "next reset" from the same value; it understands
   `<minute> <hour|*/N|list> * * *` only and omits the time for any other form.
+  `demo.resetTimeZone` only sets the zone the CronJob reads its schedule in.
+  It does not change the zone the UI shows times in. Every time the UI shows
+  (relative-time tooltips, the demo banner, log line times) is rendered in
+  `Asia/Seoul`, and absolute times are labelled with its offset (`UTC+9`). That
+  zone is the `TIME_ZONE` constant in `frontend/i18n/request.ts`, not a chart
+  value. To show another zone, change it and build your own frontend image.
 - The deploy form starts demo sessions in `demo.namespace` (passed to the
   frontend as `DEMO_NAMESPACE`), not in the cluster's `default_namespace`.
   Changing `demo.namespace` moves the namespace, its RBAC, the reset job and

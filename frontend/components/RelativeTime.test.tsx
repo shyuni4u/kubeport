@@ -65,6 +65,27 @@ describe("RelativeTime", () => {
     expect(screen.getByRole("button").textContent).toMatch(/7:00|19:00/);
   });
 
+  // #142 — the absolute time is pinned to Asia/Seoul, and an English reader
+  // elsewhere read it as their own clock. The label is an offset worked out
+  // from numbers, so it is the same text in every runtime and locale.
+  it("names the time zone the absolute time is in", () => {
+    renderAt("2026-09-09T10:00:00.000Z", "en");
+    expect(screen.getByRole("button").textContent).toMatch(/UTC\+9\)$/);
+    cleanup();
+    renderAt("2026-09-09T10:00:00.000Z", "ko");
+    expect(screen.getByRole("button").textContent).toMatch(/UTC\+9\)$/);
+  });
+
+  // Passing `timeZoneName` alongside `dateStyle` makes Intl throw, and
+  // next-intl then prints `Date.toString()` — which also contains "GMT+0900",
+  // so the test above alone would not catch it. Pin the formatted date too.
+  it("keeps the formatted date when it adds the zone, not the raw Date string", () => {
+    renderAt("2026-09-09T10:00:00.000Z", "en");
+    const text = screen.getByRole("button").textContent ?? "";
+    expect(text).toMatch(/Sep 9, 2026/);
+    expect(text).not.toMatch(/Wed Sep|GMT\+0900/);
+  });
+
   // Hover alone cannot reach a tooltip on a touch screen, and `title` cannot
   // be focused. The trigger is a button for both reasons (the HelpHint rule).
   it("exposes the timestamp through a focusable trigger", () => {

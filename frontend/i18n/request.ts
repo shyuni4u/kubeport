@@ -15,6 +15,11 @@ export const LOCALE_COOKIE = "NEXT_LOCALE";
  * Fixed rather than per-user: kubeport has no timezone preference yet, and a
  * wrong-but-consistent zone is easier to reason about than a value that
  * changes with the deployment host. Revisit if non-KST users show up.
+ *
+ * Absolute times say which zone they are in ("… UTC+9", #142), so a
+ * self-hosted install elsewhere sees a labelled clock, not a silently shifted
+ * one. This constant is not a chart value; the chart README says how to change
+ * it, and that it is unrelated to `demo.resetTimeZone`.
  */
 export const TIME_ZONE = "Asia/Seoul";
 

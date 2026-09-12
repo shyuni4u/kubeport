@@ -1,8 +1,10 @@
 "use client";
 
-import { useFormatter, useNow } from "next-intl";
+import { useMemo } from "react";
+import { useFormatter, useNow, useTimeZone } from "next-intl";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { utcOffsetLabel } from "@/lib/utc-offset";
 import { cn } from "@/lib/utils";
 
 type Props = { iso: string; className?: string };
@@ -36,6 +38,7 @@ export const RELATIVE_TIME_UPDATE_MS = 30_000;
  */
 export function RelativeTime({ iso, className }: Props) {
   const format = useFormatter();
+  const timeZone = useTimeZone();
   // The provider's `now` is pinned per request so the server render and the
   // hydrated render agree — but the root layout does not re-render on a
   // client-side navigation, so that `now` froze at the last full page load.
@@ -44,6 +47,12 @@ export function RelativeTime({ iso, className }: Props) {
   // (#100). useNow starts from the same pinned value, so hydration still
   // matches, and then keeps the clock running.
   const now = useNow({ updateInterval: RELATIVE_TIME_UPDATE_MS });
+  // The zone is labelled: every time is pinned to TIME_ZONE (Asia/Seoul), and
+  // an English reader in London took "Sep 9, 2026, 4:36 PM" for their own
+  // clock — eight hours off, with nothing on screen to say so (#142). The zone
+  // stays pinned; only the label is new. Memoized: the phrase re-renders every
+  // RELATIVE_TIME_UPDATE_MS, the label only changes with the timestamp.
+  const zone = useMemo(() => utcOffsetLabel(new Date(iso), timeZone), [iso, timeZone]);
   const date = new Date(iso);
   // A malformed timestamp from the backend should not take the page down.
   if (Number.isNaN(date.getTime())) return null;
@@ -52,10 +61,11 @@ export function RelativeTime({ iso, className }: Props) {
   // just happened as "in a few seconds". Nothing here is scheduled for the
   // future, so a future timestamp reads as now.
   const shown = date.getTime() > now.getTime() ? now : date;
-  const absolute = format.dateTime(date, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  // Appended rather than passed as `timeZoneName`: Intl rejects that together
+  // with dateStyle/timeStyle, and next-intl then prints `Date.toString()`.
+  const absolute = [format.dateTime(date, { dateStyle: "medium", timeStyle: "short" }), zone]
+    .filter(Boolean)
+    .join(" ");
   return (
     <Tooltip>
       <TooltipTrigger

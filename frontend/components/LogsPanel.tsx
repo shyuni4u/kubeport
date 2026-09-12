@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { LogTime } from "@/components/LogTime";
 import { termLabel } from "@/lib/kube-term-map";
 import { useKubeTermsStore } from "@/stores/kube-terms-store";
 
@@ -498,7 +499,7 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
               those values from node_modules and holds both ends.
             */}
             <span className="text-slate-400">
-              [{new Date(l.time).toLocaleTimeString()}]
+              [<LogTime ms={l.time} />]
             </span>{" "}
             <span className="text-cyan-300">[{l.pod}]</span>{" "}
             {l.kind === "error" ? streamErrorText(t, l, kube) : l.text}
