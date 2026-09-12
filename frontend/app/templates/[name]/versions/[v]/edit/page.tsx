@@ -137,6 +137,13 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
           ui_spec_yaml: string;
           status: string;
         };
+        // Every body is read before any state is set. The editor turns editable
+        // once `state` is set, and the dirty baseline comes from the first render
+        // that has everything: setting state between these awaits let the admin
+        // edit the metadata while the rest was still in flight, and that edit
+        // became the baseline (#274).
+        const tmpl = tRes.ok ? ((await tRes.json()) as TemplateMetaFromAPI) : null;
+        const clusterList = cRes.ok ? ((await cRes.json()) as { clusters: Array<{ name: string }> }) : null;
         setSourceStatus(ver.status);
         setSourceAuthoringMode(ver.authoring_mode);
         if (ver.authoring_mode === "ui") {
@@ -156,19 +163,18 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
           setConvertWarnings(warnings);
         }
 
-        if (tRes.ok) {
-          const t = await tRes.json() as TemplateMetaFromAPI;
+        if (tmpl) {
           const loaded: TemplateMeta = {
-            name: t.name,
-            display_name: t.display_name,
-            tags: t.tags ?? [],
+            name: tmpl.name,
+            display_name: tmpl.display_name,
+            tags: tmpl.tags ?? [],
           };
           setMeta(loaded);
           setInitialMeta(loaded);
         }
 
-        if (cRes.ok) {
-          const d = await cRes.json() as { clusters: Array<{ name: string }> };
+        if (clusterList) {
+          const d = clusterList;
           setClusters(d.clusters);
           // Prefer a previously-chosen cluster (sessionStorage). Otherwise the
           // first entry. The frontend has no way to know which cluster is the

@@ -1,15 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { stableStringify, useDirtyAgainstBaseline } from "./useDirtyGuard";
 
 // A stand-in editor: `text` is what a save would send, `dirty` is the page's
 // flag, and each button is an edit handler — setting the text and marking
-// dirty at once, the way the editor pages do.
+// dirty at once, the way the editor pages do. "start save" keeps the
+// markSaved of that render, as an async save() does, and "save succeeds"
+// calls it later.
 function Editor({ initial }: { initial: string | null }) {
   const [text, setText] = useState<string | null>(initial);
   const [dirty, setDirty] = useState(false);
   const markSaved = useDirtyAgainstBaseline(text, dirty, setDirty);
+  const pending = useRef<(() => void) | null>(null);
   const edit = (next: string) => () => {
     setText(next);
     setDirty(true);
@@ -24,6 +27,8 @@ function Editor({ initial }: { initial: string | null }) {
       <button onClick={edit("loaded + edit")}>set loaded + edit</button>
       <button onClick={() => setDirty(true)}>touch only</button>
       <button onClick={markSaved}>saved</button>
+      <button onClick={() => { pending.current = markSaved; }}>start save</button>
+      <button onClick={() => pending.current?.()}>save succeeds</button>
     </>
   );
 }
@@ -72,6 +77,27 @@ describe("useDirtyAgainstBaseline", () => {
     expect(dirty()).toBe("true");
     press("set ab");
     expect(dirty()).toBe("false");
+  });
+
+  // Save "ab", undo back to "a" while the request is out: "a" is no longer what
+  // is stored, so it must read as unsaved once the save lands.
+  it("counts an undo made while the save was in flight", () => {
+    render(<Editor initial="a" />);
+    press("set ab");
+    press("start save");
+    press("set a");
+    expect(dirty()).toBe("false");
+    press("save succeeds");
+    expect(dirty()).toBe("true");
+  });
+
+  it("counts an edit made while the save was in flight", () => {
+    render(<Editor initial="a" />);
+    press("set ab");
+    press("start save");
+    press("set loaded");
+    press("save succeeds");
+    expect(dirty()).toBe("true");
   });
 });
 

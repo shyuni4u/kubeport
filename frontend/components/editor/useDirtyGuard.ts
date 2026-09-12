@@ -60,17 +60,18 @@ export function stableStringify(value: unknown): string {
  * "저장하지 않은 변경 사항이 있습니다" mark and the leave prompt both stayed.
  *
  * `snapshot` is a string of everything a save would send (build it with
- * stableStringify), or null until the editor has finished loading — every
- * part of it, so the baseline is never the placeholder of a part still in
- * flight. The first non-null value is the baseline. Edit handlers may still
- * mark dirty at once; this runs after the commit and puts it back to "differs
- * from the baseline", including when a handler fired without changing anything
- * (re-picking the same team).
+ * stableStringify), or null until the editor has what it loaded — all of it,
+ * so the baseline is never a placeholder or an edit made mid-load. The first
+ * non-null value is the baseline. Edit handlers may still mark dirty at once;
+ * this runs after the commit and puts it back to "differs from the baseline",
+ * including when a handler fired without changing anything (re-picking the
+ * same team).
  *
  * Returns `markSaved`: call it where a save succeeds, instead of onDirty(false).
- * It moves the baseline to the state that was sent, so the effect does not
- * set dirty again while the page navigates away. A mode switch remounts the
- * editor, which starts a new baseline on its own.
+ * The callback from the render the save started in holds what was sent; it
+ * becomes the baseline, and dirty is set from whatever the editor holds now —
+ * an edit, or an undo, made while the request was out still counts. A mode
+ * switch remounts the editor, which starts a new baseline on its own.
  */
 export function useDirtyAgainstBaseline(
   snapshot: string | null,
@@ -78,17 +79,21 @@ export function useDirtyAgainstBaseline(
   onDirty: (dirty: boolean) => void,
 ): () => void {
   const baseline = useRef<string | null>(null);
+  const latest = useRef<string | null>(snapshot);
   useEffect(() => {
+    latest.current = snapshot;
     if (snapshot === null) return;
     if (baseline.current === null) baseline.current = snapshot;
     const differs = snapshot !== baseline.current;
     if (differs !== dirty) onDirty(differs);
   }, [snapshot, dirty, onDirty]);
-  // Captures the snapshot of the render the save started from: that is what
-  // was sent, and an edit typed while the request was out stays dirty.
   return useCallback(() => {
-    if (snapshot !== null) baseline.current = snapshot;
-    onDirty(false);
+    if (snapshot === null) {
+      onDirty(false);
+      return;
+    }
+    baseline.current = snapshot;
+    onDirty(latest.current !== null && latest.current !== snapshot);
   }, [snapshot, onDirty]);
 }
 
