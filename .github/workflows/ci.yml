@@ -93,30 +93,49 @@ jobs:
         #
         # The scan reads only `//go:build <word>` and cannot understand an
         # expression (`!windows`, `a || b`, `integration && linux`), so after
-        # vetting with what it found, check that nothing is still left out
-        # (#175). `go list ./...` cannot answer that: it drops a package whose
-        # files are all constrained out, even with -e (backend/e2e under default
-        # tags). Listing every directory that holds .go files by path does — a
-        # fully excluded package comes back with an error, a partly excluded one
-        # with IgnoredGoFiles. Anything still there fails the step and names it.
+        # the two vets, check that no file was left out of both (#175).
         #
-        # A file constrained by GOOS/GOARCH (a `_windows.go`, `//go:build darwin`)
-        # would also show up here on this Linux runner. There is none today; if
-        # one appears, exclude it explicitly below rather than loosening the check.
+        # `go list ./...` cannot answer that: it drops a package whose files are
+        # all constrained out, even with -e (backend/e2e under default tags).
+        # Listing every directory that holds .go files by path does, and fills
+        # IgnoredGoFiles for fully and partly excluded packages alike. A file
+        # counts as unvetted only if it is ignored under BOTH the default tags
+        # and the discovered ones — a `//go:build !e2e` twin of an e2e file is
+        # compiled by the first vet and is fine.
+        #
+        # Directories and files starting with `_` or `.` are skipped: go tooling
+        # ignores them by design, so they are not "left out by a constraint".
+        # A file constrained by GOOS/GOARCH (`_windows.go`, `//go:build darwin`)
+        # would show up here on this Linux runner; there is none today.
+        #
+        # Each go list is its own assignment so that, under the default
+        # `bash -e`, a go list that fails stops the step instead of reading as
+        # "nothing left out".
         run: |
           cd backend
           go vet ./...
           TAGS=$(grep -rho '^//go:build [a-z0-9_]*' --include='*.go' . | awk '{print $2}' | sort -u | paste -sd,)
           echo "build tags found: ${TAGS:-none}"
           if [ -n "$TAGS" ]; then go vet -tags="$TAGS" ./...; fi
-          mapfile -t DIRS < <(find . -name '*.go' -not -path './vendor/*' -not -path '*/testdata/*' -printf '%h\n' | sort -u)
-          LEFT=$(go list -e -tags="$TAGS" -f '{{if or .IgnoredGoFiles .Error}}{{.ImportPath}} ignored={{.IgnoredGoFiles}} err={{.Error}}{{end}}' "${DIRS[@]}" | grep -v '^$' || true)
-          if [ -n "$LEFT" ]; then
-            echo "::error title=Go files left out of vet::these stay excluded even with the discovered tags (${TAGS:-none}); the tag scan did not understand their build constraint (#175):"
-            echo "$LEFT"
+
+          mapfile -t DIRS < <(find . -name '*.go' -not -path './vendor/*' -not -path '*/testdata/*' -not -path '*/_*' -not -path '*/.*' -printf '%h\n' | sort -u)
+          if [ "${#DIRS[@]}" -eq 0 ]; then
+            echo "::error title=No Go directories::found no .go files under backend/ to check"
             exit 1
           fi
-          echo "every Go file under backend/ was vetted (tags: ${TAGS:-none})"
+          IGN_FMT='{{$d := .Dir}}{{range .IgnoredGoFiles}}{{$d}}/{{.}}{{"\n"}}{{end}}'
+          IGN_DEFAULT=$(go list -e -f "$IGN_FMT" "${DIRS[@]}")
+          IGN_TAGGED=$(go list -e -tags="$TAGS" -f "$IGN_FMT" "${DIRS[@]}")
+          LEFT=$(comm -12 <(printf '%s\n' "$IGN_DEFAULT" | grep -v '^$' | sort -u) <(printf '%s\n' "$IGN_TAGGED" | grep -v '^$' | sort -u))
+          ERRS_RAW=$(go list -e -tags="$TAGS" -f '{{with .Error}}{{$.ImportPath}}: {{.}}{{end}}' "${DIRS[@]}")
+          ERRS=$(printf '%s\n' "$ERRS_RAW" | grep -v '^$' | grep -v 'build constraints exclude all Go files' || true)
+          if [ -n "$LEFT" ] || [ -n "$ERRS" ]; then
+            echo "::error title=Go files left out of vet::these are compiled by neither vet pass (default tags, or ${TAGS:-none}); the tag scan did not understand their build constraint (#175):"
+            [ -z "$LEFT" ] || echo "$LEFT"
+            [ -z "$ERRS" ] || echo "$ERRS"
+            exit 1
+          fi
+          echo "no Go file under backend/ is left out of both vet passes (tags: ${TAGS:-none})"
 
       - name: go test
         env:
