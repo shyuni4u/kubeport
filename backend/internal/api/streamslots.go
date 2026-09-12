@@ -2,8 +2,10 @@ package api
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,14 +49,32 @@ const defaultLogStreamsPerCaller = 16
 // may hold open (#200). The per-caller cap above is, for a demo account, one
 // pool for every visitor, and a single visitor holding all of it — a script
 // opening sixteen streams, say — left the log tab refusing everyone else.
-// Four is more than one reader's tabs need.
-const demoLogStreamsPerLogin = 4
+// Eight is half the pool, and more than one reader's tabs need: a stream whose
+// connection dropped without closing holds its slot until a write to it fails,
+// which can take minutes, while the browser reconnects under the same sign-in —
+// so a reader on a flaky connection needs room above their open tabs, or they
+// lock themselves out (security review).
+const demoLogStreamsPerLogin = 8
 
 // loginKey names one sign-in by the id token it presented. A digest, not the
 // token: the token is a credential, and the key sits in a map for as long as
 // the stream lives.
+//
+// Digested with its signature decoded, not as the text sent. The verifier
+// decodes a JWS signature leniently, so its base64url text has spare trailing
+// bits that can be flipped without the token failing to verify — sixteen
+// spellings of one 2048-bit RSA signature. Hashing the text gave each spelling
+// its own cap, and one sign-in the whole pool again (codex review). The header
+// and payload stay as sent: they are what the signature covers, so changing
+// their spelling does fail verification.
 func loginKey(idToken string) string {
-	sum := sha256.Sum256([]byte(idToken))
+	signed := idToken
+	if i := strings.LastIndexByte(idToken, '.'); i >= 0 {
+		if sig, err := base64.RawURLEncoding.DecodeString(idToken[i+1:]); err == nil {
+			signed = idToken[:i+1] + string(sig)
+		}
+	}
+	sum := sha256.Sum256([]byte(signed))
 	return hex.EncodeToString(sum[:16])
 }
 

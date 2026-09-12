@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kubeport/internal/api"
+	"kubeport/internal/auth"
 	"kubeport/internal/config"
 	"kubeport/internal/k8s"
 )
@@ -20,15 +21,30 @@ import (
 // the log tab refusing everybody else signed in to that account. Each sign-in
 // to a demo account now has a cap of its own, below the account's.
 
-// demoLogsRouter seeds a release deployed by the demo admin and returns a router
-// signed in as that account, and the release's logs path.
-func demoLogsRouter(t *testing.T, applier *fakeK8sApplier) (http.Handler, string) {
+// demoCapPerSignIn mirrors api.demoLogStreamsPerLogin.
+const demoCapPerSignIn = 8
+
+// logsRouterFor seeds a release deployed by the caller verifier signs in, on an
+// install with demo mode on, and returns a router for that caller and the
+// release's logs path. demoTemplate picks a template on the demo's side of the
+// line, which a demo account needs and a real user may not deploy.
+func logsRouterFor(t *testing.T, verifier api.TokenVerifier, demoTemplate bool, applier *fakeK8sApplier) (http.Handler, string) {
 	t.Helper()
 	s := testStore(t)
 	adminRouter := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: s})
 	clusterName := seedCluster(t, adminRouter)
-	tpl := seedDemoTemplate(t, s)
-	r := newDemoAdminRouter(t, s, applier)
+	var tpl string
+	if demoTemplate {
+		tpl = seedDemoTemplate(t, s)
+	} else {
+		tpl = seedPublishedTemplate(t, adminRouter)
+	}
+	r := api.NewRouter(config.Config{}, api.Deps{
+		Verifier:        verifier,
+		Store:           s,
+		K8sFactory:      &fakeK8sFactory{applier: applier},
+		DemoEmailDomain: demoDomain,
+	})
 	w := do(t, r, http.MethodPost, "/v1/releases", deployBody(t, tpl, clusterName, "logs-"+randSuffix()))
 	require.Equal(t, http.StatusCreated, w.Code, "seed release: %s", w.Body.String())
 	var created map[string]any
@@ -71,18 +87,20 @@ func openAs(r http.Handler, path, token string) *httptest.ResponseRecorder {
 	return rec
 }
 
+func stopAll(stops []func()) {
+	for _, stop := range stops {
+		stop()
+	}
+}
+
 func TestStreamReleaseLogs_OneDemoSignInCannotTakeTheAccountsStreams(t *testing.T) {
 	started := make(chan struct{}, 1)
 	applier := &fakeK8sApplier{instances: []k8s.Instance{{Name: "web-1"}}, streamStarted: started}
-	r, path := demoLogsRouter(t, applier)
+	r, path := logsRouterFor(t, demoVerifier{email: "demo-admin@" + demoDomain}, true, applier)
 
 	var stops []func()
-	defer func() {
-		for _, stop := range stops {
-			stop()
-		}
-	}()
-	for range 4 {
+	defer func() { stopAll(stops) }()
+	for range demoCapPerSignIn {
 		stops = append(stops, holdStreamAs(t, r, path, "visitor-a", started))
 	}
 
@@ -102,32 +120,46 @@ func TestStreamReleaseLogs_OneDemoSignInCannotTakeTheAccountsStreams(t *testing.
 func TestStreamReleaseLogs_ADemoSignInsSlotComesBackWhenItsStreamEnds(t *testing.T) {
 	started := make(chan struct{}, 1)
 	applier := &fakeK8sApplier{instances: []k8s.Instance{{Name: "web-1"}}, streamStarted: started}
-	r, path := demoLogsRouter(t, applier)
+	r, path := logsRouterFor(t, demoVerifier{email: "demo-admin@" + demoDomain}, true, applier)
 
 	var stops []func()
-	for range 4 {
+	for range demoCapPerSignIn {
 		stops = append(stops, holdStreamAs(t, r, path, "visitor-a", started))
 	}
 	require.Equal(t, http.StatusTooManyRequests, openAs(r, path, "visitor-a").Code)
 
 	stops[0]()
 	stops = append(stops[1:], holdStreamAs(t, r, path, "visitor-a", started))
-	for _, stop := range stops {
-		stop()
+	stopAll(stops)
+}
+
+// Security review: on an install with demo mode on, a real user signed in
+// alongside the demo accounts is one person, and their cap is the only one.
+func TestStreamReleaseLogs_ARealUserUnderDemoModeHasNoPerSignInCap(t *testing.T) {
+	started := make(chan struct{}, 1)
+	applier := &fakeK8sApplier{instances: []k8s.Instance{{Name: "web-1"}}, streamStarted: started}
+	suffix := randSuffix()
+	real := customVerifier{claims: auth.Claims{Subject: "real-" + suffix, Email: "real-" + suffix + "@example.com"}}
+	r, path := logsRouterFor(t, real, false, applier)
+
+	var stops []func()
+	defer func() { stopAll(stops) }()
+	for range demoCapPerSignIn + 1 {
+		stops = append(stops, holdStreamAs(t, r, path, "x", started))
 	}
 }
 
-// Outside the demo a caller is one person, and their cap is the only one.
-func TestStreamReleaseLogs_OnlyDemoAccountsHaveAPerSignInCap(t *testing.T) {
+// Security review: which accounts are demo accounts does not turn on how the
+// address is capitalised.
+func TestStreamReleaseLogs_TheDemoCapIgnoresTheEmailsCase(t *testing.T) {
 	started := make(chan struct{}, 1)
 	applier := &fakeK8sApplier{instances: []k8s.Instance{{Name: "web-1"}}, streamStarted: started}
-	r, path, _ := slotRouter(t, 0, applier)
+	r, path := logsRouterFor(t, demoVerifier{email: "Demo-Admin@DEMO.KUBEPORT"}, true, applier)
 
 	var stops []func()
-	for range 5 {
-		stops = append(stops, holdStreamAs(t, r, path, "x", started))
+	defer func() { stopAll(stops) }()
+	for range demoCapPerSignIn {
+		stops = append(stops, holdStreamAs(t, r, path, "visitor-a", started))
 	}
-	for _, stop := range stops {
-		stop()
-	}
+	require.Equal(t, http.StatusTooManyRequests, openAs(r, path, "visitor-a").Code)
 }

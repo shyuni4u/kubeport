@@ -1,6 +1,9 @@
 package api
 
 import (
+	"bytes"
+	"encoding/base64"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -8,6 +11,33 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+// codex review of #200: a JWS signature's base64url text has spare trailing
+// bits the verifier ignores, so one signed token has several spellings that all
+// verify. Each must name the same sign-in, or one sign-in gets a cap per
+// spelling.
+func TestLoginKey_EverySpellingOfOneSignatureIsOneSignIn(t *testing.T) {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	sig := bytes.Repeat([]byte{0xa5}, 256) // an RS256 signature is 256 bytes
+	canonical := base64.RawURLEncoding.EncodeToString(sig)
+
+	// 256 bytes is 2048 bits in 342 characters of 6: the last carries 4 spare.
+	last := strings.IndexByte(alphabet, canonical[len(canonical)-1])
+	require.Zero(t, last&0x0f, "a canonical encoding leaves the spare bits clear")
+	variant := canonical[:len(canonical)-1] + string(alphabet[last|0x05])
+	decoded, err := base64.RawURLEncoding.DecodeString(variant)
+	require.NoError(t, err, "the lenient decoder the verifier uses accepts the variant")
+	require.Equal(t, sig, decoded, "the variant is the same signature")
+
+	token := "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJkZW1vIn0." + canonical
+	respelled := "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJkZW1vIn0." + variant
+	require.NotEqual(t, token, respelled)
+	require.Equal(t, loginKey(token), loginKey(respelled))
+
+	other := "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJkZW1vIn0." +
+		base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x5a}, 256))
+	require.NotEqual(t, loginKey(token), loginKey(other), "another sign-in's signature is another key")
+}
 
 // A log stream costs one rate-limit token to open and nothing after that, so
 // the per-minute budget bounds how often a caller opens streams, not how many
