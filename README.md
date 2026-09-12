@@ -95,7 +95,9 @@ cluster without it the Ingress is created and then simply never picked up by any
 controller. Nothing errors; the address stays empty.
 
 On ingress-nginx, also pass
-`--set-string ingress.annotations.nginx\.ingress\.kubernetes\.io/proxy-body-size=4m`.
+`--set-string 'ingress.annotations.nginx\.ingress\.kubernetes\.io/proxy-body-size=4m'`
+(the single quotes keep the backslashes from the shell, so Helm reads the dots as
+part of one annotation name).
 kubeport accepts request bodies up to 4 MiB, but nginx's default limit is 1m, so
 without it any template or request between 1 and 4 MiB is refused by nginx with
 an HTML 413 before kubeport sees it. Traefik (k3s) has no default limit.
