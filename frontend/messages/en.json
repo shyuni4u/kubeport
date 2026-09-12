@@ -374,6 +374,7 @@
       "publish": "Publish",
       "publishing": "Publishing…",
       "publishFromDetail": "Publish from the template detail page after saving.",
+      "unsavedChanges": "Unsaved changes",
       "switchModeLosesEdits": "You have unsaved edits. Switching mode will discard them. Continue?",
       "leaveLosesEdits": "You have unsaved edits. Leaving this page will discard them. Continue?",
       "schemaLoading": "Loading schema… (cluster {cluster})",
