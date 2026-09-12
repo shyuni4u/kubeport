@@ -82,8 +82,13 @@ const DEPLOYMENT: SchemaNode = {
 const lookup: SchemaLookup = (apiVersion, kind) =>
   apiVersion === "apps/v1" && kind === "Deployment" ? DEPLOYMENT : undefined;
 
+type Result = { resources: YamlIssue[]; uiSpec: YamlIssue[] };
 const codes = (issues: YamlIssue[]) => issues.map((i) => i.code);
 const errorsOf = (issues: YamlIssue[]) => issues.filter((i) => i.severity === "error");
+/** Codes that would block save, across both files. */
+const blocking = (r: Result) => errorsOf([...r.resources, ...r.uiSpec]).map((i) => i.code);
+/** Everything but the guard's own note. */
+const substantive = (issues: YamlIssue[]) => issues.filter((i) => i.code !== "advisoryOnly");
 
 describe("validateTemplateYaml", () => {
   it("finds nothing wrong with the starter template", () => {
@@ -249,24 +254,31 @@ describe("validateTemplateYaml", () => {
       ]);
       expect(codes(validateTemplateYaml(RESOURCES, "fields:\n", lookup).uiSpec)).toEqual([]);
     });
+
+    it("judges a blank label by Go's strings.TrimSpace, not String.trim", () => {
+      const withLabel = (label: string) => UISPEC.replace('label: "인스턴스 개수"', `label: "${label}"`);
+      // yaml.v3 + TrimSpace: a lone BOM is a label; NEL and NBSP are blank (measured).
+      expect(blocking(validateTemplateYaml(RESOURCES, withLabel("\uFEFF"), lookup))).toEqual([]);
+      expect(blocking(validateTemplateYaml(RESOURCES, withLabel("\u0085"), lookup))).toEqual(["missingLabel"]);
+      expect(blocking(validateTemplateYaml(RESOURCES, withLabel("\u00A0"), lookup))).toEqual(["missingLabel"]);
+    });
   });
 
   // gopkg.in/yaml.v3 resolves anchors, aliases and `<<` merge keys before
   // ValidateSpec sees a field. Each case here was run through the real
-  // ValidateSpec / parseMultiDoc, and the expectation follows its answer.
+  // ValidateSpec / parseMultiDoc. All of them trip the structural guard, so
+  // nothing here blocks; resolution still decides what is reported, and where.
   describe("(d) YAML the backend resolves", () => {
     const P = "Deployment[web].spec.replicas";
-    const blocking = (r: { resources: YamlIssue[]; uiSpec: YamlIssue[] }) =>
-      errorsOf([...r.resources, ...r.uiSpec]).map((i) => i.code);
 
     it("accepts a field entry built from an anchor and a merge key", () => {
       const spec = `base: &base\n  type: integer\n  label: Replicas\nfields:\n  - <<: *base\n    path: ${P}\n`;
-      expect(validateTemplateYaml(RESOURCES, spec, lookup).uiSpec).toEqual([]);
+      expect(substantive(validateTemplateYaml(RESOURCES, spec, lookup).uiSpec)).toEqual([]);
     });
 
     it("accepts an aliased fields list", () => {
       const spec = `x: &list\n  - path: ${P}\n    label: R\n    type: integer\nfields: *list\n`;
-      expect(validateTemplateYaml(RESOURCES, spec, lookup).uiSpec).toEqual([]);
+      expect(substantive(validateTemplateYaml(RESOURCES, spec, lookup).uiSpec)).toEqual([]);
     });
 
     it("accepts an aliased scalar label, a whole aliased entry and an aliased key", () => {
@@ -274,44 +286,59 @@ describe("validateTemplateYaml", () => {
       const entry = `e: &e {path: "${P}", label: R, type: integer}\nfields:\n  - *e\n`;
       const key = `k: &k label\nfields:\n  - path: ${P}\n    *k : R\n    type: integer\n`;
       for (const spec of [label, entry, key]) {
-        expect(validateTemplateYaml(RESOURCES, spec, lookup).uiSpec, spec).toEqual([]);
+        expect(substantive(validateTemplateYaml(RESOURCES, spec, lookup).uiSpec), spec).toEqual([]);
       }
     });
 
-    it("still refuses an alias to an empty label", () => {
+    it("still reports an alias to an empty label, as a warning", () => {
       const spec = `l: &l ""\nfields:\n  - path: ${P}\n    label: *l\n    type: integer\n`;
-      expect(blocking(validateTemplateYaml(RESOURCES, spec, lookup))).toEqual(["missingLabel"]);
+      const r = validateTemplateYaml(RESOURCES, spec, lookup);
+      expect(blocking(r)).toEqual([]);
+      expect(codes(substantive(r.uiSpec))).toEqual(["missingLabel"]);
     });
 
     it("follows merge precedence: explicit keys win, then the first source", () => {
       const anchors = "bad: &bad {type: int, label: R}\ngood: &good {type: integer, label: R}\n";
       const entry = (body: string) => `${anchors}fields:\n  - ${body}\n    path: ${P}\n`;
-      expect(blocking(validateTemplateYaml(RESOURCES, entry("<<: [*good, *bad]"), lookup))).toEqual([]);
-      expect(blocking(validateTemplateYaml(RESOURCES, entry("<<: [*bad, *good]"), lookup))).toEqual(["unknownType"]);
-      expect(blocking(validateTemplateYaml(RESOURCES, entry("<<: *bad\n    type: integer"), lookup))).toEqual([]);
-      expect(blocking(validateTemplateYaml(RESOURCES, entry("type: integer\n    <<: *bad"), lookup))).toEqual([]);
+      const found = (body: string) => codes(substantive(validateTemplateYaml(RESOURCES, entry(body), lookup).uiSpec));
+      expect(found("<<: [*good, *bad]")).toEqual([]);
+      expect(found("<<: [*bad, *good]")).toEqual(["unknownType"]);
+      expect(found("<<: *bad\n    type: integer")).toEqual([]);
+      expect(found("type: integer\n    <<: *bad")).toEqual([]);
       // A merge chain: the anchor merges another.
       const chain = `a: &a {type: integer}\nb: &b {<<: *a, label: R}\nfields:\n  - <<: *b\n    path: ${P}\n`;
-      expect(validateTemplateYaml(RESOURCES, chain, lookup).uiSpec).toEqual([]);
+      expect(substantive(validateTemplateYaml(RESOURCES, chain, lookup).uiSpec)).toEqual([]);
     });
 
-    it("places a merged field's error on the merge in that entry", () => {
+    it("honours the merge tag in every spelling yaml.v3 does, and only those", () => {
+      const spec = (key: string) => `d: &d {type: integer, label: R}\nfields:\n  - ${key}: *d\n    path: ${P}\n`;
+      for (const key of ["!!merge '<<'", "!!merge <<", '!!merge "<<"', "!<tag:yaml.org,2002:merge> <<", "! <<"]) {
+        const r = validateTemplateYaml(RESOURCES, spec(key), lookup);
+        expect(blocking(r), key).toEqual([]);
+        expect(substantive(r.uiSpec), key).toEqual([]);
+      }
+      // Ordinary keys to yaml.v3, so the entry has no type (measured).
+      for (const key of ["!!str <<", "!!merge foo", '"<<"']) {
+        const r = validateTemplateYaml(RESOURCES, spec(key), lookup);
+        expect(blocking(r), key).toEqual([]);
+        expect(codes(substantive(r.uiSpec)), key).toEqual(["unknownType"]);
+      }
+    });
+
+    it("places a merged field's problem on the merge in that entry", () => {
       const spec = `bad: &bad {type: int, label: R}\nfields:\n  - <<: *bad\n    path: ${P}\n`;
-      const [e] = validateTemplateYaml(RESOURCES, spec, lookup).uiSpec;
+      const [e] = substantive(validateTemplateYaml(RESOURCES, spec, lookup).uiSpec);
       expect(e).toMatchObject({ code: "unknownType", startLine: 3, startCol: 9 });
     });
 
-    it("treats a quoted \"<<\" as the literal key it is", () => {
-      const spec = `a: &a {type: integer, label: R}\nfields:\n  - "<<": *a\n    path: ${P}\n`;
-      expect(blocking(validateTemplateYaml(RESOURCES, spec, lookup))).toEqual(["unknownType"]);
-    });
-
-    it("blocks two merge keys in one mapping, which yaml.v3 refuses as a repeated key", () => {
+    it("reports two merge keys in one mapping, which yaml.v3 refuses as a repeated key", () => {
       const spec = `a: &a {type: integer}\nb: &b {label: R}\nfields:\n  - <<: *a\n    <<: *b\n    path: ${P}\n`;
-      expect(blocking(validateTemplateYaml(RESOURCES, spec, lookup))).toEqual(["duplicateKey"]);
+      const r = validateTemplateYaml(RESOURCES, spec, lookup);
+      expect(blocking(r)).toEqual([]);
+      expect(codes(substantive(r.uiSpec))).toContain("duplicateKey");
     });
 
-    it("does not block what it cannot resolve: a missing anchor, a merged scalar", () => {
+    it("stays quiet about what it cannot resolve: a missing anchor, a merged scalar", () => {
       const missing = `fields:\n  - <<: *nope\n    path: ${P}\n`;
       const scalar = `s: &s hello\nfields:\n  - <<: *s\n    path: ${P}\n    label: R\n    type: integer\n`;
       for (const spec of [missing, scalar]) {
@@ -323,17 +350,26 @@ describe("validateTemplateYaml", () => {
       expect(validateTemplateYaml(RESOURCES, "fields:\n  - ~\n", lookup).uiSpec).toEqual([]);
     });
 
-    it("accepts tags, flow style and block scalars the backend reads the same way", () => {
+    it("accepts flow style and block scalars the backend reads the same way", () => {
       const specs = [
-        `fields:\n  - path: !!str ${P}\n    label: !!str 3\n    type: !!str integer\n`,
         `fields: [{path: "${P}", label: R, type: integer}]\n`,
         `fields:\n  - path: ${P}\n    label: |\n      Replicas\n    type: integer\n`,
         `fields:\n  - path: >-\n      ${P}\n    label: R\n    type: integer\n`,
-        `fields:\n  - path: ${P}\n    label: !!binary aGVsbG8=\n    type: integer\n`,
         `fields:\n  - path: ${P}\n    label: true\n    type: integer\n`,
       ];
       for (const spec of specs) {
         expect(validateTemplateYaml(RESOURCES, spec, lookup).uiSpec, spec).toEqual([]);
+      }
+    });
+
+    it("accepts tagged values, with only the guard's note", () => {
+      const specs = [
+        `fields:\n  - path: !!str ${P}\n    label: !!str 3\n    type: !!str integer\n`,
+        `fields:\n  - path: ${P}\n    label: !!binary aGVsbG8=\n    type: integer\n`,
+      ];
+      for (const spec of specs) {
+        const r = validateTemplateYaml(RESOURCES, spec, lookup);
+        expect(codes(r.uiSpec), spec).toEqual(["advisoryOnly"]);
       }
     });
 
@@ -359,7 +395,7 @@ spec:
 `;
       const spec = `fields:\n  - path: Deployment[web].spec.template.spec.containers[0].image\n    label: Image\n    type: string\n`;
       const r = validateTemplateYaml(res, spec, lookup);
-      expect(r.resources).toEqual([]);
+      expect(substantive(r.resources)).toEqual([]);
       expect(r.uiSpec).toEqual([]);
     });
 
@@ -374,7 +410,7 @@ spec:
       const res = `apiVersion: v1\nkind: ConfigMap\nmetadata: &m {name: a}\n---\napiVersion: v1\nkind: Secret\nmetadata: *m\n`;
       const spec = "fields:\n  - path: Secret[a].stringData.k\n    label: K\n    type: string\n";
       const r = validateTemplateYaml(res, spec, lookup);
-      expect(r.resources).toEqual([]);
+      expect(substantive(r.resources)).toEqual([]);
       expect(r.uiSpec).toEqual([]);
     });
 
@@ -389,22 +425,20 @@ spec:
       const specBomb = `${levels.join("\n")}\nfields:\n  - path: ConfigMap[x].spec.k\n    label: K\n    type: string\n`;
       const r = validateTemplateYaml(resBomb, specBomb, lookup);
       expect(blocking(r)).toEqual([]);
-      expect(r.uiSpec).toEqual([]);
+      expect(substantive(r.uiSpec)).toEqual([]);
     });
   });
 
   // What yaml.v3 actually decodes. Each input was run through the real
   // parseMultiDoc / ValidateSpec first.
   describe("(g) only what the backend decodes", () => {
-    const blockingCodes = (r: { resources: YamlIssue[]; uiSpec: YamlIssue[] }) =>
-      errorsOf([...r.resources, ...r.uiSpec]).map((i) => i.code);
     const NESTED_ANCHOR =
       "x: &m {apiVersion: v1, kind: ConfigMap, metadata: {name: b}}\napiVersion: v1\nkind: Secret\nmetadata: {name: a}\n---\n*m\n";
 
     it("resolves a document whose root is an alias to an earlier anchor", () => {
       const spec = "fields:\n  - path: ConfigMap[b].data.k\n    label: K\n    type: string\n";
       const r = validateTemplateYaml(NESTED_ANCHOR, spec, lookup);
-      expect(r.resources).toEqual([]);
+      expect(substantive(r.resources)).toEqual([]);
       expect(r.uiSpec).toEqual([]);
       expect(resourceKinds(NESTED_ANCHOR)).toEqual([
         { apiVersion: "v1", kind: "Secret" },
@@ -416,38 +450,39 @@ spec:
       const res = "--- &m\napiVersion: v1\nkind: ConfigMap\nmetadata: {name: a}\n---\n*m\n";
       const spec = "fields:\n  - path: ConfigMap.data.k\n    label: K\n    type: string\n";
       const r = validateTemplateYaml(res, spec, lookup);
-      expect(r.resources).toEqual([]);
+      expect(substantive(r.resources)).toEqual([]);
       expect(codes(r.uiSpec)).toEqual(["resourceAmbiguous"]);
     });
 
-    it("still refuses a root alias to a scalar, and drops one to null as parseMultiDoc does", () => {
-      expect(blockingCodes(validateTemplateYaml("x: &s hello\nkind: A\n---\n*s\n", "", lookup))).toEqual([
-        "documentNotMapping",
-      ]);
+    it("reports a root alias to a scalar, and drops one to null as parseMultiDoc does", () => {
+      const scalar = validateTemplateYaml("x: &s hello\nkind: A\n---\n*s\n", "", lookup);
+      expect(blocking(scalar)).toEqual([]);
+      expect(codes(substantive(scalar.resources))).toEqual(["documentNotMapping"]);
       const res =
         "x: &n ~\nkind: ConfigMap\nmetadata: {name: a}\n---\n*n\n---\nkind: ConfigMap\nmetadata: {name: b}\n";
       const spec = "fields:\n  - path: ConfigMap[1].data.k\n    label: K\n    type: string\n";
       const r = validateTemplateYaml(res, spec, lookup);
-      expect(r.resources).toEqual([]);
+      expect(substantive(r.resources)).toEqual([]);
       expect(r.uiSpec).toEqual([]);
     });
 
     it("does not block a root alias to an anchor it cannot find", () => {
-      expect(blockingCodes(validateTemplateYaml("kind: A\n---\n*nope\n", "", lookup))).toEqual([]);
+      expect(blocking(validateTemplateYaml("kind: A\n---\n*nope\n", "", lookup))).toEqual([]);
     });
 
     it("type-checks an aliased document root once", () => {
       const res =
         "x: &m {apiVersion: apps/v1, kind: Deployment, metadata: {name: b}, spec: {replicas: many}}\napiVersion: v1\nkind: ConfigMap\nmetadata: {name: a}\n---\n*m\n";
-      expect(codes(validateTemplateYaml(res, "", lookup).resources)).toEqual(["schemaType"]);
+      expect(codes(substantive(validateTemplateYaml(res, "", lookup).resources))).toEqual(["schemaType"]);
     });
 
-    it("blocks a repeated key anywhere in resources.yaml, which decodes whole", () => {
+    it("blocks a repeated key anywhere in a plain resources.yaml, which decodes whole", () => {
       const res = "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: a}\nunused: {a: 1, a: 2}\n";
-      expect(blockingCodes(validateTemplateYaml(res, "", lookup))).toEqual(["duplicateKey"]);
-      expect(blockingCodes(validateTemplateYaml("base: &b {a: 1, a: 2}\ndata:\n  <<: *b\n", "", lookup))).toEqual([
-        "duplicateKey",
-      ]);
+      expect(blocking(validateTemplateYaml(res, "", lookup))).toEqual(["duplicateKey"]);
+      // Behind a merge it is still found, and only reported.
+      const merged = validateTemplateYaml("base: &b {a: 1, a: 2}\ndata:\n  <<: *b\n", "", lookup);
+      expect(blocking(merged)).toEqual([]);
+      expect(codes(substantive(merged.resources))).toContain("duplicateKey");
     });
 
     const P = "Deployment[web].spec.replicas";
@@ -457,17 +492,24 @@ spec:
       ["the root's own keys", "x: 1\nx: 2\nfields: []\n"],
       ["a default value", `${ENTRY}    default: {a: 1, a: 2}\n`],
       ["a nested default value", `${ENTRY}    default: {x: {a: 1, a: 2}}\n`],
-      ["an aliased default value", `d: &d {a: 1, a: 2}\n${ENTRY}    default: *d\n`],
       ["help", `${ENTRY}    help: {a: 1, a: 2}\n`],
       ["values", `fields:\n  - path: ${P}\n    label: R\n    type: enum\n    values: {a: 1, a: 2}\n`],
       ["a field entry's unknown keys", `${ENTRY}    x: 1\n    x: 2\n`],
+    ])("blocks a repeated key in %s of ui-spec.yaml", (_name, spec) => {
+      expect(blocking(validateTemplateYaml(RESOURCES, spec, lookup))).toEqual(["duplicateKey"]);
+    });
+
+    it.each([
+      ["an aliased default value", `d: &d {a: 1, a: 2}\n${ENTRY}    default: *d\n`],
       ["a merge source of an entry", `base: &b {type: integer, label: R, zz: 1, zz: 2}\nfields:\n  - <<: *b\n    path: ${P}\n`],
       ["a merge source's default", `base: &b {type: integer, label: R, default: {a: 1, a: 2}}\nfields:\n  - <<: *b\n    path: ${P}\n`],
       ["an aliased entry", `e: &e {path: "${P}", label: R, type: integer, zz: 1, zz: 2}\nfields:\n  - *e\n`],
       ["an entry of an aliased fields list", `l: &l\n  - {path: "${P}", label: R, type: integer, label: S}\nfields: *l\n`],
       ["a merge source of the root", "base: &b {q: 1, q: 2}\n<<: *b\nfields: []\n"],
-    ])("blocks a repeated key in %s of ui-spec.yaml", (_name, spec) => {
-      expect(blockingCodes(validateTemplateYaml(RESOURCES, spec, lookup))).toEqual(["duplicateKey"]);
+    ])("reports, without blocking, a repeated key yaml.v3 decodes through %s", (_name, spec) => {
+      const r = validateTemplateYaml(RESOURCES, spec, lookup);
+      expect(blocking(r)).toEqual([]);
+      expect(codes(substantive(r.uiSpec))).toContain("duplicateKey");
     });
 
     it.each([
@@ -482,21 +524,78 @@ spec:
     });
   });
 
+  // One construct at a time, each beside a problem that would otherwise block.
+  describe("(h) structural guard", () => {
+    const expectAdvisory = (issues: YamlIssue[], construct: string) => {
+      expect(errorsOf(issues)).toEqual([]);
+      expect(issues[0]).toMatchObject({ severity: "warning", code: "advisoryOnly", params: { construct } });
+      expect(substantive(issues).length).toBeGreaterThan(0);
+    };
+
+    it.each([
+      ["tag", "x: !!str a\nfields: nope\n"],
+      ["anchor", "x: &a 1\nfields: nope\n"],
+      ["alias", "fields: nope\ny: *a\n"],
+      ["merge", "fields:\n  - <<: {type: int}\n    path: Deployment[web].spec.replicas\n    label: R\n"],
+      ["directive", "%YAML 1.2\n---\nfields: nope\n"],
+      ["documents", "---\nfields: nope\n---\n"],
+      ["documents", "fields: nope\n...\n"],
+    ])("downgrades every error in a ui-spec.yaml with a %s", (construct, spec) => {
+      expectAdvisory(validateTemplateYaml(RESOURCES, spec, lookup).uiSpec, construct);
+    });
+
+    it.each([
+      ["tag", "apiVersion: !!str v1\nkind: ConfigMap\nmetadata: {name: a}\ndata: [\n"],
+      ["anchor", "apiVersion: v1\nkind: ConfigMap\nmetadata: &m {name: a}\nx: 1\nx: 2\n"],
+      ["merge", "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: a}\ndata:\n  <<: {a: '1'}\n  b: 1\n  b: 2\n"],
+      ["directive", "%YAML 1.2\n---\n- not a mapping\n"],
+    ])("downgrades every error in a resources.yaml with a %s", (construct, res) => {
+      expectAdvisory(validateTemplateYaml(res, "", lookup).resources, construct);
+    });
+
+    it("does not guard resources.yaml for having several documents", () => {
+      const r = validateTemplateYaml("a: 1\n---\nb: [\n", "", lookup);
+      expect(codes(r.resources)).toEqual(["unclosedFlow"]);
+      expect(r.resources[0].severity).toBe("error");
+    });
+
+    it("still blocks the plain #181 repro and a plain repeated key", () => {
+      const repro = validateTemplateYaml(RESOURCES.replace("replicas: 1", "replicas: [1, 2"), UISPEC, lookup);
+      expect(blocking(repro)).toEqual(["unclosedFlow"]);
+      expect(blocking(validateTemplateYaml("a: 1\na: 2\n", "", lookup))).toEqual(["duplicateKey"]);
+    });
+
+    it("ends ui-spec.yaml's first document at a second ---, even an empty one", () => {
+      // yaml.Unmarshal reads the empty first document and stops (measured).
+      const r = validateTemplateYaml(RESOURCES, "---\n---\nx: [\n", lookup);
+      expect(errorsOf(r.uiSpec)).toEqual([]);
+      expect(codes(r.uiSpec)).not.toContain("unclosedFlow");
+    });
+
+    it("reads resources.yaml past an empty first document, as parseMultiDoc does", () => {
+      expect(blocking(validateTemplateYaml("---\n---\nx: [\n", "", lookup))).toEqual(["unclosedFlow"]);
+    });
+  });
+
   // Stored input: the next visitor to open a version pays for whatever is in it.
-  describe("(f) size", () => {
+  describe("(f) size and depth", () => {
     const CONFIGMAP = "apiVersion: v1\nkind: ConfigMap\nmetadata: { name: big }\ndata:\n";
+    const ms = (f: () => void) => {
+      const t0 = performance.now();
+      f();
+      return performance.now() - t0;
+    };
 
     it("skips a file too large to check, quickly and without blocking", () => {
       const keys = Array.from({ length: 20_000 }, (_, i) => `  k${i}: "v${i}"`).join("\n");
       const res = `${CONFIGMAP}${keys}\n`;
       expect(res.length).toBeGreaterThan(MAX_CHECKED_CHARS);
-      const t0 = performance.now();
-      const r = validateTemplateYaml(res, UISPEC, lookup);
-      expect(performance.now() - t0).toBeLessThan(500);
-      expect(r.resources).toEqual([
+      let r: Result | undefined;
+      expect(ms(() => (r = validateTemplateYaml(res, UISPEC, lookup)))).toBeLessThan(500);
+      expect(r!.resources).toEqual([
         expect.objectContaining({ severity: "warning", code: "tooLarge", startLine: 1, startCol: 1 }),
       ]);
-      expect(errorsOf(r.uiSpec)).toEqual([]);
+      expect(errorsOf(r!.uiSpec)).toEqual([]);
       expect(resourceKinds(res)).toEqual([]);
     });
 
@@ -517,13 +616,39 @@ spec:
       }
       const res = `${CONFIGMAP}${lines.join("")}  k0: again\n`;
       expect(res.length).toBeLessThanOrEqual(MAX_CHECKED_CHARS);
-      expect(lines.length).toBeGreaterThan(20_000);
-      const t0 = performance.now();
-      const r = validateTemplateYaml(res, "", lookup);
-      const ms = performance.now() - t0;
-      expect(codes(errorsOf(r.resources))).toEqual(["duplicateKey"]);
-      // The quadratic parse took tens of seconds here.
-      expect(ms).toBeLessThan(3000);
+      expect(lines.length).toBeGreaterThan(5_000);
+      let r: Result | undefined;
+      // The quadratic parse took seconds here.
+      expect(ms(() => (r = validateTemplateYaml(res, "", lookup)))).toBeLessThan(1500);
+      expect(codes(errorsOf(r!.resources))).toEqual(["duplicateKey"]);
+    });
+
+    // Both shapes save (measured), so a demo visitor can store one. Anchor
+    // lookup was quadratic in them: 9.9s and 4.4s at 256k characters.
+    const anchorsPerDocument = (n: number) => `--- &z {kind: A}\n${"--- {a: *z}\n".repeat(n)}`;
+    const anchorsInAList = (n: number) => `kind: A\nx:\n${"- &a 1\n- *a\n".repeat(n)}`;
+
+    it.each([
+      ["an anchor used from every later document", anchorsPerDocument],
+      ["an anchor redefined and used down a list", anchorsInAList],
+    ])("resolves %s in linear time", (_name, shape) => {
+      for (const n of [21_000, Math.floor((MAX_CHECKED_CHARS - 40) / 12)]) {
+        const res = shape(n);
+        let r: Result | undefined;
+        expect(ms(() => (r = validateTemplateYaml(res, "", lookup))), `${res.length} chars`).toBeLessThan(500);
+        expect(blocking(r!)).toEqual([]);
+      }
+    });
+
+    it("refuses flow nesting deeper than yaml.v3's 10000 levels, without parsing it", () => {
+      const nest = (n: number) => `x: ${"[".repeat(n)}${"]".repeat(n)}\n`;
+      const deep = validateTemplateYaml(nest(10_001), "", lookup);
+      expect(deep.resources).toEqual([expect.objectContaining({ severity: "error", code: "tooDeep", startLine: 1 })]);
+      expect(resourceKinds(nest(10_001))).toEqual([]);
+      // 10000 saves; the `yaml` parser gives up sooner, which only warns.
+      expect(blocking(validateTemplateYaml(nest(10_000), "", lookup))).toEqual([]);
+      // In a ui-spec document yaml.Unmarshal never reads, it saves.
+      expect(blocking(validateTemplateYaml(RESOURCES, `fields: []\n---\n${nest(10_001)}`, lookup))).toEqual([]);
     });
   });
 
@@ -531,18 +656,48 @@ spec:
   // run through the real parseMultiDoc / ValidateSpec first.
   describe("(e) parser strictness", () => {
     const HEAD = "apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\nspec:\n";
+    const POD = `${HEAD}  containers:\n    - name: app\n`;
+    const CM = "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: a}\n";
 
     it.each([
       ["a flow list indented less than its key", `${HEAD}      containers: [\n      {name: app, image: nginx}\n  ]\n`],
-      ["a flow list continued at column 0", `${HEAD}  containers:\n    - name: app\n      args: ["a",\n"b"]\n`],
-      ["a tab inside a flow list", `${HEAD}  containers:\n    - name: app\n      args: [\n\t"a"]\n`],
+      ["a flow list continued at column 0", `${POD}      args: ["a",\n"b"]\n`],
+      ["a tab inside a flow list", `${POD}      args: [\n\t"a"]\n`],
       ["a comment with no space before #", 'apiVersion: v1\nkind: Pod\nmetadata:\n  name: "web"# name\n'],
+      // The lexer abandons these lists and reads `]` as part of a plain scalar.
+      ["an under-indented list ending in a plain scalar", `${POD}      command: [sh, -c,\n    echo hi]\n`],
+      ["a plain continuation indented less than its key", `${POD}      args: [a,\n  b]\n`],
+      ["a plain continuation at column 0", `${POD}      args: [a,\nb]\n`],
+      ["a plain continuation after a tab", `${POD}      args: [a,\n\tb]\n`],
+      ["a flow mapping continued at column 0", `${POD}      env: [{name: a,\nvalue: b}]\n`],
+      ["a nested list continued at column 0", `${POD}      args: [\n[a],\n"b"]\n`],
+      // A comment ends at these for yaml.v3, not for the `yaml` lexer.
+      ["a comment ended by U+2028", `${CM}extra: [b # c\u2028]\n`],
+      ["a comment ended by a lone CR", `${CM}extra: [b # c\r]\n`],
+      ["a comment ended by NEL", `${CM}extra: [b # c\u0085]\n`],
     ])("does not block save on %s, which yaml.v3 accepts", (_name, res) => {
       const r = validateTemplateYaml(res, "", lookup);
       expect(errorsOf(r.resources)).toEqual([]);
-      // Still marked — as warnings.
+    });
+
+    it("warns rather than blocks on what only the `yaml` parser refuses", () => {
+      const r = validateTemplateYaml(`${POD}      command: [sh, -c,\n    echo hi]\n`, "", lookup);
       expect(r.resources.length).toBeGreaterThan(0);
       expect(r.resources.every((i) => i.severity === "warning" && i.code === "syntax")).toBe(true);
+    });
+
+    it("does not read a key inside an abandoned flow list as a repeated top-level key", () => {
+      const r = validateTemplateYaml('b: 1\nx: [\n"b": 2]\n', "", lookup);
+      expect(errorsOf(r.resources)).toEqual([]);
+    });
+
+    it("does not read a bracket inside a tag as a flow list", () => {
+      expect(blocking(validateTemplateYaml(`${CM}extra: !x[ b\n`, "", lookup))).toEqual([]);
+    });
+
+    it("still blocks lists that yaml.v3 finds unclosed", () => {
+      expect(blocking(validateTemplateYaml("x: [a,\nb", "", lookup))).toEqual(["unclosedFlow"]);
+      expect(blocking(validateTemplateYaml(`${POD}      args: [a,\n    b\n`, "", lookup))).toEqual(["unclosedFlow"]);
     });
 
     it("blocks an unclosed { at the bracket, per document", () => {
@@ -622,9 +777,10 @@ spec:
       expect(validateTemplateYaml(bad, UISPEC).resources).toEqual([]);
     });
 
-    it("stops after a bounded number of issues on a huge document", () => {
-      const items = Array.from({ length: 2000 }, () => "        - name: app\n          image: nginx\n          ports: [{ containerPort: x }]").join("\n");
+    it("stops after a bounded number of issues on a large document", () => {
+      const items = Array.from({ length: 600 }, () => "        - name: app\n          image: nginx\n          ports: [{ containerPort: x }]").join("\n");
       const huge = RESOURCES.replace(/      containers:\n[\s\S]*$/, `      containers:\n${items}\n`);
+      expect(huge.length).toBeLessThanOrEqual(MAX_CHECKED_CHARS);
       const r = validateTemplateYaml(huge, "", lookup);
       expect(r.resources.length).toBeLessThanOrEqual(100);
       expect(r.resources.length).toBeGreaterThan(0);

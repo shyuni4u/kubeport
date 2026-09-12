@@ -473,6 +473,8 @@
         "unclosedFlow": "The {bracket} opened here is never closed.",
         "duplicateKey": "The key {key} appears more than once in this mapping.",
         "tooLarge": "This file is too large to check in the editor. The server still checks it on save.",
+        "tooDeep": "This file nests deeper than 10000 levels, which the server refuses.",
+        "advisoryOnly": "This file uses {construct, select, tag {a YAML tag} anchor {an anchor} alias {an alias} merge {a merge key} directive {a % directive} documents {more than one document marker} other {YAML the editor does not model}}, where the editor can read YAML differently from the server. Its problems are shown as warnings and do not block saving.",
         "documentNotMapping": "A resource document must be a mapping of key: value pairs.",
         "uiSpecNotMapping": "ui-spec.yaml must be a mapping with a fields: list.",
         "fieldsNotList": "fields must be a list of entries (- path: …).",

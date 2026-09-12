@@ -11,6 +11,7 @@ import { resourceKinds, validateTemplateYaml } from "./yaml-validation";
 
 describe("parsing", () => {
   it("parses each text once across the debounced check, the schema kinds and the save re-check", () => {
+    vi.mocked(parseAllDocuments).mockClear();
     const res = "apiVersion: v1\nkind: ConfigMap\nmetadata: { name: a }\n";
     const spec = "fields: []\n";
     validateTemplateYaml(res, spec);
@@ -28,6 +29,14 @@ describe("parsing", () => {
     const huge = `data:\n${"  k: v\n".repeat(50_000)}`;
     validateTemplateYaml(huge, huge);
     resourceKinds(huge);
+    expect(vi.mocked(parseAllDocuments)).not.toHaveBeenCalled();
+  });
+
+  it("does not parse flow nesting the backend refuses as too deep", () => {
+    vi.mocked(parseAllDocuments).mockClear();
+    const deep = `x: ${"[".repeat(10_001)}${"]".repeat(10_001)}\n`;
+    validateTemplateYaml(deep, `x: ${"{a: ".repeat(10_001)}1${"}".repeat(10_001)}\n`);
+    resourceKinds(deep);
     expect(vi.mocked(parseAllDocuments)).not.toHaveBeenCalled();
   });
 });
