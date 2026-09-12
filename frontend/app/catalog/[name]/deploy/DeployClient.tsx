@@ -9,7 +9,8 @@ import { useDebounce, useDebouncedCallback } from "use-debounce";
 import { CLUSTER_CHANGED_EVENT } from "@/components/ClusterPicker";
 import { DynamicForm } from "@/components/DynamicForm";
 import { HelpHint } from "@/components/HelpHint";
-import { RBACCheckPanel, type RbacStatus } from "@/components/RBACCheckPanel";
+import { RBACCheckPanel, type KindRef, type RbacStatus } from "@/components/RBACCheckPanel";
+import { groupOf } from "@/lib/kube-kinds";
 import { ResourcesPreview } from "@/components/ResourcesPreview";
 import { Input } from "@/components/ui/input";
 import {
@@ -303,16 +304,19 @@ export function DeployClient({
   // included resources are reflected correctly.
   // Deduplicated: a template with two Deployments needs one SSAR, not two,
   // and RBACCheckPanel keys its rows by resource name.
-  const kinds = useMemo(() => {
+  // Each carries its apiVersion, so a CRD named like a core kind is not
+  // checked as that core kind (#248); deduplicated by group and kind.
+  const kinds = useMemo<KindRef[]>(() => {
     if (!rendered) return [];
     try {
-      return [
-        ...new Set(
-          YAML.parseAllDocuments(rendered)
-            .map((d) => (d.toJS() as { kind?: string } | null)?.kind)
-            .filter((k): k is string => !!k),
-        ),
-      ];
+      const seen = new Map<string, KindRef>();
+      for (const d of YAML.parseAllDocuments(rendered)) {
+        const o = d.toJS() as { apiVersion?: unknown; kind?: unknown } | null;
+        if (typeof o?.kind !== "string" || !o.kind) continue;
+        const apiVersion = typeof o.apiVersion === "string" ? o.apiVersion : "";
+        seen.set(`${groupOf(apiVersion)}/${o.kind}`, { apiVersion, kind: o.kind });
+      }
+      return [...seen.values()];
     } catch {
       return [];
     }

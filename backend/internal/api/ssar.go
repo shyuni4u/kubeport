@@ -95,6 +95,10 @@ func (h *Handlers) CheckSelfSubjectAccess(c *gin.Context) {
 			"verb must be one of: "+strings.Join(sortedSSARVerbs(), ", "))
 		return
 	}
+	// TODO(v1.1 CRDs, #103): admin-registered CRDs are a settled roadmap item
+	// (CLAUDE.md, resource scope v1.1). When they land, allow the union of
+	// mvpResources and the registered set here, or the deploy form's
+	// permission check answers 400 for every CRD while the deploy itself works.
 	if !k8s.IsMVPResource(req.Group, req.Resource) {
 		// Name the set rather than pointing at a list the caller cannot read —
 		// the verb error above already does, and a client that can only learn

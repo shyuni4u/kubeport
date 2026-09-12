@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { kindLabel } from "@/lib/kube-kinds";
+import { groupOf, kindLabel } from "@/lib/kube-kinds";
 import { useKubeTermsStore } from "@/stores/kube-terms-store";
 
 /**
@@ -17,10 +17,23 @@ import { useKubeTermsStore } from "@/stores/kube-terms-store";
  */
 export type RbacStatus = "unknown" | "allowed" | "denied";
 
+/**
+ * A rendered object to check. With its apiVersion, a kind is checked only when
+ * that apiVersion is in the group the name maps to: Knative's
+ * `serving.knative.dev/v1` Service is not a core Service, and an SSAR about
+ * core `services` would answer a question nobody asked (#248). A bare kind
+ * name is taken at its word.
+ */
+export type KindRef = string | { apiVersion: string; kind: string };
+
+const refKind = (r: KindRef) => (typeof r === "string" ? r : r.kind);
+const refApiVersion = (r: KindRef) => (typeof r === "string" ? undefined : r.apiVersion);
+const refKey = (r: KindRef) => (typeof r === "string" ? r : `${groupOf(r.apiVersion)}/${r.kind}`);
+
 type Props = {
   cluster: string;
   namespace: string;
-  kinds: string[];
+  kinds: KindRef[];
   /**
    * Reports the panel's verdict upward so the deploy form can block a submit
    * that k8s has already told us will fail (#30). Must be referentially
@@ -32,6 +45,12 @@ type Props = {
 type CheckResult = {
   allowed: boolean;
   resource: string;
+  // The object's apiVersion when the caller gave one; names the row in the
+  // viewer's words only when it is the group the kind name maps to.
+  apiVersion?: string;
+  // Unique per checked object: a core Service and a CRD called Service are
+  // two rows.
+  key: string;
   reason: string;
   // When the check itself failed (network / non-2xx), we surface a distinct
   // "check failed" message instead of an RBAC-deny message.
@@ -88,10 +107,15 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     Promise.all(
-      kinds.map(async (k): Promise<CheckResult> => {
+      kinds.map(async (ref): Promise<CheckResult> => {
+        const k = refKind(ref);
+        const apiVersion = refApiVersion(ref);
+        const base = { resource: k, apiVersion, key: refKey(ref) };
         const map = KIND_TO_RESOURCE[k];
-        if (!map) {
-          return { allowed: false, skipped: true, resource: k, reason: "" };
+        // No mapping, or a CRD that only shares a core kind's name: nothing
+        // kubeport can ask about, so not checked rather than asked wrongly.
+        if (!map || (apiVersion !== undefined && groupOf(apiVersion) !== map.group)) {
+          return { ...base, allowed: false, skipped: true, reason: "" };
         }
         try {
           const res = await fetch("/api/v1/selfsubjectaccessreview", {
@@ -101,18 +125,18 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
           });
           if (!res.ok) {
             return {
+              ...base,
               allowed: false,
-              resource: k,
               reason: `HTTP ${res.status}`,
               httpStatus: res.status,
             };
           }
           const body = (await res.json()) as { allowed: boolean; reason: string };
-          return { allowed: body.allowed, resource: k, reason: body.reason ?? "" };
+          return { ...base, allowed: body.allowed, reason: body.reason ?? "" };
         } catch (err) {
           return {
+            ...base,
             allowed: false,
-            resource: k,
             reason: err instanceof Error ? err.message : String(err),
             httpStatus: 0,
           };
@@ -142,7 +166,7 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cluster, namespace, kinds.join(","), hasInputs]);
+  }, [cluster, namespace, kinds.map(refKey).join(","), hasInputs]);
 
   // When inputs are missing we render the placeholder regardless of any
   // stale `results` from a previous valid render — avoids calling setState
@@ -175,7 +199,7 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
   // else on the page.
   const kube = useKubeTermsStore((s) => s.showKubeTerms);
   const tKinds = useTranslations("kinds");
-  const kind = (k: string) => kindLabel(k, kube, (key) => tKinds(key));
+  const kind = (r: CheckResult) => kindLabel(r.resource, kube, (key) => tKinds(key), r.apiVersion);
 
   return (
     <Card>
@@ -233,10 +257,10 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
                 const map = KIND_TO_RESOURCE[r.resource];
                 const label = kube
                   ? `create ${map?.group ? `${map.group}/` : ""}${map?.resource ?? r.resource}`
-                  : kind(r.resource);
+                  : kind(r);
                 return (
                   <li
-                    key={r.resource}
+                    key={r.key}
                     className="flex items-start gap-1.5 text-red-700"
                     title={r.reason || undefined}
                   >
@@ -267,7 +291,7 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
             />
             <span>
               {t("skipped", {
-                kinds: skipped.map((r) => kind(r.resource)).join(", "),
+                kinds: skipped.map((r) => kind(r)).join(", "),
               })}
             </span>
           </p>
