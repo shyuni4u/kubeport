@@ -607,6 +607,43 @@ release that is not yours) does not spend that budget, and the demo reset's
 seeder — which runs as the demo user — waits out a 429 rather than failing.
 Changing a budget needs a code change (`backend/internal/api/routes.go`).
 
+### Security headers
+
+The frontend puts these on every response — pages, `/_next/static`, the `/api`
+BFF, 404s and redirects — at request time, from `frontend.securityHeaders`
+(#80, #143). They are not baked into the image, so each install can change them.
+
+| Value | Default | What it does |
+|---|---|---|
+| `frontend.securityHeaders.enabled` | `true` | `false` sends none of them. For a proxy in front that sets its own. |
+| `frontend.securityHeaders.hsts` | `max-age=63072000; includeSubDomains` | `Strict-Transport-Security`. Empty sends no HSTS. |
+| `frontend.securityHeaders.frameAncestors` | `'none'` | CSP `frame-ancestors` sources. |
+| `frontend.securityHeaders.cspMode` | `enforce` | `enforce`, `report-only` (the policy goes out as `Content-Security-Policy-Report-Only`; `frame-ancestors` still enforces) or `off` (only `frame-ancestors`). |
+| `frontend.securityHeaders.contentSecurityPolicy` | `""` | A whole policy replacing the default; `frame-ancestors` is appended. |
+
+`X-Content-Type-Options: nosniff` and `Referrer-Policy:
+strict-origin-when-cross-origin` are always sent while `enabled` is true.
+
+The default policy allows scripts, styles, fonts, images, workers and
+connections from the app's own origin only, plus `https://cdn.jsdelivr.net` —
+the YAML editor (Monaco) loads from there. Inline scripts and styles are still
+allowed (Next.js needs them without nonces). `object-src 'none'` and
+`base-uri 'self'` close the rest. The exact string is in
+`frontend/lib/security-headers.ts`.
+
+When to change them:
+
+- **A proxy in front already sends HSTS** — set `hsts=""` so the browser does
+  not see two, or `enabled=false` if it sends the whole set.
+- **Installed on an apex domain with sibling http services** — drop
+  `includeSubDomains` (`hsts="max-age=63072000"`). With it, visitors' browsers
+  force those siblings onto https for two years, and you cannot undo that.
+- **Embedding kubeport in a portal iframe** — list the portal's origin:
+  `--set-string "frontend.securityHeaders.frameAncestors=https://portal.example.com"`.
+- **A self-hosted editor, analytics or another CDN is blocked** — roll out with
+  `cspMode=report-only`, read the reports in the browser console, then set
+  `contentSecurityPolicy` to a policy that allows it and go back to `enforce`.
+
 ## Schema sync
 
 The chart embeds a copy of `backend/migrations/schema.hcl` at
