@@ -53,7 +53,7 @@ type Meta = { name: string; cluster: string; namespace: string };
  */
 type ProblemBody = {
   title?: unknown;
-  conflicts?: Array<{ owner?: unknown; owner_unknown?: unknown }>;
+  conflicts?: Array<{ owner?: unknown; owner_unknown?: unknown; same_name?: unknown }>;
   pinned_namespace?: unknown;
   template_defect?: unknown;
 };
@@ -69,18 +69,23 @@ function parseProblem(body: string): ProblemBody | null {
 
 /**
  * Who holds the objects behind a `resource-conflict` 409. `owner` is the first
- * release named; `unreadable` is set when an object exists but this account may
- * not read who holds it. Both empty means kubeport did not create what holds
- * them. Null for any other body.
+ * other release named; `leftover` is set when objects carry this release's own
+ * name under another release's id (#195) — naming "this release" as their
+ * holder would read as nonsense; `unreadable` is set when an object exists but
+ * this account may not read who holds it. All empty means kubeport did not
+ * create what holds them. Null for any other body.
  */
 function resourceConflictOf(
   p: ProblemBody | null,
-): { owner: string; unreadable: boolean } | null {
+): { owner: string; leftover: boolean; unreadable: boolean } | null {
   if (p?.title !== "resource-conflict") return null;
   const conflicts = Array.isArray(p.conflicts) ? p.conflicts : [];
-  const held = conflicts.find((c) => typeof c?.owner === "string" && c.owner !== "");
+  const held = conflicts.find(
+    (c) => typeof c?.owner === "string" && c.owner !== "" && c?.same_name !== true,
+  );
   return {
     owner: typeof held?.owner === "string" ? held.owner : "",
+    leftover: conflicts.some((c) => c?.same_name === true),
     unreadable: conflicts.some((c) => c?.owner_unknown === true),
   };
 }
@@ -124,6 +129,11 @@ export function DeployClient({
           return isUpdate
             ? t("errors.resourceConflictUpdate", { owner: held.owner })
             : t("errors.resourceConflict", { owner: held.owner });
+        }
+        if (held?.leftover) {
+          return isUpdate
+            ? t("errors.resourceConflictLeftoverUpdate")
+            : t("errors.resourceConflictLeftover");
         }
         if (held?.unreadable) return t("errors.resourceConflictUnreadable");
         if (held) {

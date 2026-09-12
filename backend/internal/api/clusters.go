@@ -3,8 +3,11 @@ package api
 import (
 	"crypto/x509"
 	"errors"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -88,6 +91,28 @@ func validateCABundle(pem string) error {
 	return nil
 }
 
+// normalizeAPIURL is an apiserver URL in one spelling: scheme and host
+// lowercased, a trailing dot on the host and a default port dropped, no
+// trailing slash. A URL that does not parse is compared as typed, trimmed.
+func normalizeAPIURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return strings.TrimSpace(raw)
+	}
+	scheme := strings.ToLower(u.Scheme)
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	port := u.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return scheme + "://" + host + strings.TrimRight(u.EscapedPath(), "/")
+}
+
 func (h *Handlers) CreateCluster(c *gin.Context) {
 	var r createClusterReq
 	if err := c.ShouldBindJSON(&r); err != nil {
@@ -104,14 +129,53 @@ func (h *Handlers) CreateCluster(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
 		return
 	}
-	cl, err := h.deps.Store.InsertCluster(c.Request.Context(), store.InsertClusterParams{
-		Name:             r.Name,
-		DisplayName:      store.PgText(r.DisplayName),
-		ApiUrl:           r.APIURL,
-		CaBundle:         store.PgText(r.CABundle),
-		OidcIssuerUrl:    r.OIDCIssuerURL,
-		DefaultNamespace: store.PgText(r.DefaultNamespace),
+	// One apiserver under two names let releases under each share a name and
+	// namespace — each other's objects — since the release name is unique only
+	// per registered cluster (#195). Objects now carry the release's id, so a
+	// takeover is refused either way; refusing the second registration keeps the
+	// catalog from offering two targets that are one cluster.
+	//
+	// Normalised, not compared as typed, so a trailing slash, a trailing dot or
+	// an explicit default port is not a new cluster. A second DNS name or an IP
+	// for the same apiserver cannot be told apart from here.
+	//
+	// The check and the insert run under one lock, in one transaction: checked
+	// first and inserted after, two registrations of one apiserver arriving
+	// together both passed (codex review).
+	ctx := c.Request.Context()
+	var cl store.Cluster
+	var registeredAs string
+	err := h.deps.Store.WithTx(ctx, func(q *store.Queries) error {
+		if err := q.LockClusterRegistration(ctx); err != nil {
+			return err
+		}
+		existing, err := q.ListClusters(ctx)
+		if err != nil {
+			return err
+		}
+		for _, other := range existing {
+			// The same name is the name clash the insert reports, which is the
+			// clearer answer when both match.
+			if other.Name != r.Name && normalizeAPIURL(other.ApiUrl) == normalizeAPIURL(r.APIURL) {
+				registeredAs = other.Name
+				return nil
+			}
+		}
+		cl, err = q.InsertCluster(ctx, store.InsertClusterParams{
+			Name:             r.Name,
+			DisplayName:      store.PgText(r.DisplayName),
+			ApiUrl:           r.APIURL,
+			CaBundle:         store.PgText(r.CABundle),
+			OidcIssuerUrl:    r.OIDCIssuerURL,
+			DefaultNamespace: store.PgText(r.DefaultNamespace),
+		})
+		return err
 	})
+	if err == nil && registeredAs != "" {
+		writeError(c, http.StatusConflict, "conflict",
+			"api_url is already registered as cluster "+strconv.Quote(registeredAs)+"; register each apiserver once")
+		return
+	}
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {

@@ -77,6 +77,146 @@ func TestRender_AppliesValuesAndStampsLabels(t *testing.T) {
 	lbls := meta["labels"].(map[string]any)
 	require.Equal(t, "my-api", lbls["kubeport.io/release"])
 	require.Equal(t, "2", lbls["kubeport.io/template-version"])
+	// #195: the id is a label, on the object and on its pods.
+	require.Equal(t, "rel_abc", lbls["kubeport.io/release-uid"])
+	podLbls := spec["template"].(map[string]any)["metadata"].(map[string]any)["labels"].(map[string]any)
+	require.Equal(t, "rel_abc", podLbls["kubeport.io/release-uid"])
+}
+
+// A workload's selector is immutable. The id goes on pod template labels only;
+// in the selector it would refuse every update of an existing release.
+func TestRender_LeavesWorkloadSelectorsAlone(t *testing.T) {
+	const res = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: nginx
+`
+	out, err := template.Render(res, "fields: []\n", json.RawMessage(`{}`), template.Labels{
+		ReleaseName: "r", TemplateName: "t", TemplateVersion: 1, ReleaseID: "11111111-1111-1111-1111-111111111111",
+	})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal(out, &doc))
+	spec := doc["spec"].(map[string]any)
+	require.Equal(t, map[string]any{"matchLabels": map[string]any{"app": "web"}}, spec["selector"])
+	podLbls := spec["template"].(map[string]any)["metadata"].(map[string]any)["labels"].(map[string]any)
+	require.Equal(t, "11111111-1111-1111-1111-111111111111", podLbls["kubeport.io/release-uid"])
+}
+
+// A Job's pod template is immutable, so a release with a Job applied before the
+// id existed could not be updated once the id appeared in it. The Job carries
+// the id; its pods do not. A CronJob's job template can change, so its pods do.
+func TestRender_KeepsTheIDOffAJobsPodTemplate(t *testing.T) {
+	const res = `apiVersion: batch/v1
+kind: Job
+metadata:
+  name: once
+spec:
+  template:
+    spec:
+      containers:
+        - name: once
+          image: busybox
+      restartPolicy: Never
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly
+spec:
+  schedule: "0 3 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: nightly
+              image: busybox
+          restartPolicy: Never
+`
+	const uid = "11111111-1111-1111-1111-111111111111"
+	out, err := template.Render(res, "fields: []\n", json.RawMessage(`{}`), template.Labels{
+		ReleaseName: "r", TemplateName: "t", TemplateVersion: 1, ReleaseID: uid,
+	})
+	require.NoError(t, err)
+
+	var docs []map[string]any
+	dec := yaml.NewDecoder(bytes.NewReader(out))
+	for {
+		m := map[string]any{}
+		if err := dec.Decode(&m); err != nil {
+			break
+		}
+		docs = append(docs, m)
+	}
+	require.Len(t, docs, 2)
+	labelsAt := func(m map[string]any, path ...string) map[string]any {
+		for _, p := range path {
+			m = m[p].(map[string]any)
+		}
+		return m["labels"].(map[string]any)
+	}
+
+	job, cron := docs[0], docs[1]
+	require.Equal(t, uid, labelsAt(job, "metadata")["kubeport.io/release-uid"])
+	jobPod := labelsAt(job, "spec", "template", "metadata")
+	require.NotContains(t, jobPod, "kubeport.io/release-uid")
+	require.Equal(t, "r", jobPod["kubeport.io/release"], "the pods still carry the name")
+	require.Equal(t, uid, labelsAt(cron, "spec", "jobTemplate", "spec", "template", "metadata")["kubeport.io/release-uid"])
+}
+
+// The id label is reserved: a template cannot claim to be another release by
+// writing it — on an object, on a Job's pod template where no id is stamped,
+// or in a preview.
+func TestRender_ATemplateCannotSetTheReleaseIDLabel(t *testing.T) {
+	const res = `apiVersion: batch/v1
+kind: Job
+metadata:
+  name: once
+  labels:
+    kubeport.io/release-uid: 99999999-9999-9999-9999-999999999999
+spec:
+  template:
+    metadata:
+      labels:
+        kubeport.io/release-uid: 99999999-9999-9999-9999-999999999999
+    spec:
+      containers:
+        - name: once
+          image: busybox
+      restartPolicy: Never
+`
+	for _, id := range []string{"11111111-1111-1111-1111-111111111111", ""} {
+		out, err := template.Render(res, "fields: []\n", json.RawMessage(`{}`), template.Labels{
+			ReleaseName: "r", TemplateName: "t", TemplateVersion: 1, ReleaseID: id,
+		})
+		require.NoError(t, err)
+		require.NotContains(t, string(out), "99999999-9999-9999-9999-999999999999", "id=%q", id)
+	}
+}
+
+// A preview renders for no release, so there is no id to stamp — and an empty
+// label would match every unstamped object a selector on it was meant to skip.
+func TestRender_WithoutAReleaseIDStampsNoIDLabel(t *testing.T) {
+	values, _ := json.Marshal(map[string]any{"Deployment[web].spec.replicas": 3})
+
+	out, err := template.Render(resourcesYAML, uiSpecYAML, values, template.Labels{ReleaseName: "preview"})
+
+	require.NoError(t, err)
+	require.NotContains(t, string(out), "kubeport.io/release-uid")
 }
 
 func TestRender_ValidatesMin(t *testing.T) {

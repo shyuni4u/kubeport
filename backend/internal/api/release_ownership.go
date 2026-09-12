@@ -45,12 +45,13 @@ func releaseTargetProblem(namespace, name string) string {
 // checkOwnership asks the cluster whether rendered can be applied as release
 // without taking anything over, and answers the request itself when it
 // cannot. It reports whether the caller should go on to apply.
-func (h *Handlers) checkOwnership(c *gin.Context, cli K8sApplier, op, namespace, release string, rendered []byte) bool {
+func (h *Handlers) checkOwnership(c *gin.Context, cli K8sApplier, op string, ref k8s.ReleaseRef, rendered []byte) bool {
+	namespace, release := ref.Namespace, ref.Name
 	// An existing release cannot move namespace, so advice that suits a create
 	// ("deploy elsewhere") is impossible on an update; and only a create can
 	// probe objects the caller may not read (see k8s.CheckApply).
 	update := op == "UpdateRelease"
-	check, err := cli.CheckApply(c.Request.Context(), namespace, release, rendered, !update)
+	check, err := cli.CheckApply(c.Request.Context(), ref, rendered, !update)
 	var mismatch *k8s.NamespaceMismatchError
 	switch {
 	case errors.As(err, &mismatch):
@@ -106,6 +107,11 @@ type ProblemConflict struct {
 	// OwnerUnknown is true when the object exists but the caller may not read
 	// it, so Owner is empty because nobody could look.
 	OwnerUnknown bool `json:"owner_unknown,omitempty"`
+	// SameName is true when Owner is the name of the release being deployed,
+	// held under another release's id: objects left by an earlier release of
+	// that name, or held by a release of that name under another registration
+	// of the cluster (#195).
+	SameName bool `json:"same_name,omitempty"`
 }
 
 // withConflicts lists every conflicting object. Unlike detail it is not capped:
@@ -117,7 +123,7 @@ func withConflicts(conflicts []k8s.Conflict) problemOption {
 		for i, cf := range conflicts {
 			p.Conflicts[i] = ProblemConflict{
 				Kind: cf.Kind, Name: cf.Name, Namespace: cf.Namespace,
-				Owner: cf.Owner, OwnerUnknown: cf.OwnerUnknown,
+				Owner: cf.Owner, OwnerUnknown: cf.OwnerUnknown, SameName: cf.SameName,
 			}
 		}
 	}
@@ -152,6 +158,9 @@ func conflictDetail(conflicts []k8s.Conflict, update bool) string {
 			break
 		}
 		switch {
+		case cf.SameName:
+			parts = append(parts, fmt.Sprintf("%s (left by an earlier release named %s, or held by one of that name under another registration of this cluster)",
+				cf.ObjectRef.String(), strconv.Quote(cf.Owner)))
 		case cf.Owner != "":
 			parts = append(parts, fmt.Sprintf("%s (release %s)", cf.ObjectRef.String(), strconv.Quote(cf.Owner)))
 		case cf.OwnerUnknown:

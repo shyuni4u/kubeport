@@ -112,13 +112,14 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 		return
 	}
 
-	// Render with new values. ReleaseID uses rel.Name for consistency with
-	// CreateRelease (labels use the stable human name, not the UUID).
+	// Render with new values, stamped with the release's id (#195). Objects
+	// applied before the id existed gain it on this apply.
+	uid := releaseUID(rel.ID)
 	rendered, err := template.Render(tv.ResourcesYaml, tv.UiSpecYaml, req.Values, template.Labels{
 		ReleaseName:     rel.Name,
 		TemplateName:    rel.TemplateName,
 		TemplateVersion: req.Version,
-		ReleaseID:       rel.Name,
+		ReleaseID:       uid,
 		AppliedBy:       u.Email,
 	})
 	if err != nil {
@@ -142,8 +143,23 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 	// A new version can add an object, and an exposed metadata.name can rename
 	// one, so an update can land on another release's objects as readily as a
 	// create can (#161).
-	if !h.checkOwnership(c, cli, "UpdateRelease", rel.Namespace, rel.Name, rendered) {
+	// NameOnly from what was last applied: a release from before #195 still
+	// owns its unstamped objects on this update, which stamps them.
+	ref := releaseRef(rel)
+	if !h.checkOwnership(c, cli, "UpdateRelease", ref, rendered) {
 		return
+	}
+	// This update ends the name-only fallback, and it stamps only what it
+	// applies. What the release owns by name alone and this update does not
+	// apply — dropped now or by an update before #195 — is stamped first, so
+	// the release's delete still removes it (codex review). Before the apply:
+	// stamping them is harmless if the apply then fails, and a stamping error
+	// stops the update with nothing applied.
+	if ref.NameOnly {
+		if err := cli.StampLeftBehind(ctx, ref, []byte(rel.RenderedYaml), rendered); err != nil {
+			upstreamError(c, "UpdateRelease: stamp previous objects", err)
+			return
+		}
 	}
 	if err := cli.ApplyAll(ctx, rel.Namespace, rendered); err != nil {
 		upstreamError(c, "UpdateRelease: apply", err)

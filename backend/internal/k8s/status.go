@@ -6,6 +6,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -25,17 +26,28 @@ type Instance struct {
 	Message string `json:"message,omitempty"`
 }
 
-// ListInstances returns pod status for all pods matching the release label.
-func (c *Client) ListInstances(ctx context.Context, namespace, release string) ([]Instance, error) {
+// ListInstances returns pod status for the release's pods (#195): pods with
+// its name and id, pods with its name and no id when it is a NameOnly release,
+// and pods whose controller is the release's (see podBelongs).
+func (c *Client) ListInstances(ctx context.Context, ref ReleaseRef) ([]Instance, error) {
 	gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
-	list, err := c.dyn.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: ReleaseLabel + "=" + release,
+	list, err := c.dyn.Resource(gvr).Namespace(ref.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: ReleaseLabel + "=" + ref.Name,
 	})
 	if err != nil {
 		return nil, err
 	}
 	out := make([]Instance, 0, len(list.Items))
-	for _, p := range list.Items {
+	owners := map[string]bool{}
+	for i := range list.Items {
+		p := list.Items[i]
+		own, err := c.podBelongs(ctx, &p, ref, owners)
+		if err != nil {
+			return nil, err
+		}
+		if !own {
+			continue
+		}
 		ins := Instance{Name: p.GetName()}
 		if status, ok := p.Object["status"].(map[string]any); ok {
 			if phase, ok := status["phase"].(string); ok {
@@ -48,6 +60,87 @@ func (c *Client) ListInstances(ctx context.Context, namespace, release string) (
 		out = append(out, ins)
 	}
 	return out, nil
+}
+
+// podControllers are the kinds that create a release's pods, and
+// replicaSetControllers the one that creates its ReplicaSets.
+var (
+	podControllers = map[string]schema.GroupVersionResource{
+		"Job":         {Group: "batch", Version: "v1", Resource: "jobs"},
+		"StatefulSet": {Group: "apps", Version: "v1", Resource: "statefulsets"},
+		"DaemonSet":   {Group: "apps", Version: "v1", Resource: "daemonsets"},
+		"ReplicaSet":  {Group: "apps", Version: "v1", Resource: "replicasets"},
+	}
+	replicaSetControllers = map[string]schema.GroupVersionResource{
+		"Deployment": {Group: "apps", Version: "v1", Resource: "deployments"},
+	}
+)
+
+// podBelongs is belongsTo for a pod. A pod with ref's name and no id still
+// counts when its controller is ref's by id. A Job's pods never carry the id,
+// because a Job's pod template is immutable (the Job carries it instead). And
+// the first update of a release from before the id does not replace every pod
+// it runs: a StatefulSet or DaemonSet updating OnDelete keeps its pods, and a
+// Deployment mid-rollout keeps the old ReplicaSet's (codex review). Otherwise
+// a pod left by an earlier release of the same name — or one under another
+// registration of the cluster — would show up in this release's status and
+// logs.
+//
+// The controller is matched by uid, not only by name: a pod orphaned from an
+// earlier Job still names it, and a new release may since have created a Job
+// of that name (codex review). A ReplicaSet without the id counts through its
+// Deployment. owners caches the verdict per controller uid.
+//
+// A controller that is gone is not ref's. One that cannot be read is an error:
+// counting its pods out would report a release with no pods where the cluster
+// refused an answer (codex review).
+func (c *Client) podBelongs(ctx context.Context, p *unstructured.Unstructured, ref ReleaseRef, owners map[string]bool) (bool, error) {
+	labels := p.GetLabels()
+	if belongsTo(labels, ref) {
+		return true, nil
+	}
+	if labels[ReleaseLabel] != ref.Name || labels[ReleaseUIDLabel] != "" {
+		return false, nil
+	}
+	return c.controlledBy(ctx, p, ref, podControllers, owners)
+}
+
+// controlledBy reports whether obj's controller, of one of the kinds, is ref's.
+func (c *Client) controlledBy(ctx context.Context, obj *unstructured.Unstructured, ref ReleaseRef,
+	kinds map[string]schema.GroupVersionResource, owners map[string]bool) (bool, error) {
+	for _, owner := range obj.GetOwnerReferences() {
+		gvr, ok := kinds[owner.Kind]
+		if !ok || owner.UID == "" || owner.Controller == nil || !*owner.Controller {
+			continue
+		}
+		// The whole reference is the key: a pod naming one controller with
+		// another's uid must not settle the verdict for the real one's pods
+		// (security review).
+		key := owner.Kind + "/" + owner.Name + "/" + string(owner.UID)
+		if own, seen := owners[key]; seen {
+			return own, nil
+		}
+		ctrl, err := c.dyn.Resource(gvr).Namespace(ref.Namespace).Get(ctx, owner.Name, metav1.GetOptions{})
+		switch {
+		case apierrors.IsNotFound(err):
+			owners[key] = false
+			return false, nil
+		case err != nil:
+			return false, fmt.Errorf("get %s/%s: %w", owner.Kind, owner.Name, err)
+		}
+		own := false
+		if ctrl.GetUID() == owner.UID {
+			own = belongsTo(ctrl.GetLabels(), ref)
+			if !own && owner.Kind == "ReplicaSet" {
+				if own, err = c.controlledBy(ctx, ctrl, ref, replicaSetControllers, owners); err != nil {
+					return false, err
+				}
+			}
+		}
+		owners[key] = own
+		return own, nil
+	}
+	return false, nil
 }
 
 // allContainersReady returns true if every container in the pod reports ready.
@@ -211,7 +304,11 @@ const (
 //
 // Objects are looked up in the release's namespace: one that pins another is
 // refused before it is ever applied (#137).
-func (c *Client) ReleasePresence(ctx context.Context, namespace, release string, multiDoc []byte) (Presence, error) {
+//
+// An object counts only when it is ref's by id, or by name for a NameOnly
+// release (#195).
+func (c *Client) ReleasePresence(ctx context.Context, ref ReleaseRef, multiDoc []byte) (Presence, error) {
+	namespace := ref.Namespace
 	objs, err := splitYAML(multiDoc)
 	if err != nil {
 		return PresenceUnknown, fmt.Errorf("split yaml: %w", err)
@@ -231,7 +328,7 @@ func (c *Client) ReleasePresence(ctx context.Context, namespace, release string,
 		switch {
 		case err == nil:
 			readable = true
-			if got.GetLabels()[ReleaseLabel] == release {
+			if belongsTo(got.GetLabels(), ref) {
 				return PresenceFound, nil
 			}
 		case apierrors.IsNotFound(err):

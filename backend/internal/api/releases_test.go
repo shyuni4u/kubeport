@@ -84,7 +84,14 @@ type fakeK8sApplier struct {
 	applyCheck      k8s.ApplyCheck
 	applyCheckErr   error
 	checkedReleases []string
+	checkedUIDs     []string
 	checkedCreating []bool
+
+	// deleteCalls records each DeleteByRelease's release id and whether the
+	// release was NameOnly (#195).
+	deleteCalls []deleteCall
+	// stampCalls records each StampLeftBehind (#195).
+	stampCalls []stampCall
 
 	// presence is what ReleasePresence reports once ListInstances has found no
 	// pods; presenceErr is returned alongside it. The zero value is
@@ -93,12 +100,13 @@ type fakeK8sApplier struct {
 	presenceErr error
 }
 
-func (f *fakeK8sApplier) ReleasePresence(context.Context, string, string, []byte) (k8s.Presence, error) {
+func (f *fakeK8sApplier) ReleasePresence(context.Context, k8s.ReleaseRef, []byte) (k8s.Presence, error) {
 	return f.presence, f.presenceErr
 }
 
-func (f *fakeK8sApplier) CheckApply(_ context.Context, _, release string, _ []byte, creating bool) (k8s.ApplyCheck, error) {
-	f.checkedReleases = append(f.checkedReleases, release)
+func (f *fakeK8sApplier) CheckApply(_ context.Context, ref k8s.ReleaseRef, _ []byte, creating bool) (k8s.ApplyCheck, error) {
+	f.checkedReleases = append(f.checkedReleases, ref.Name)
+	f.checkedUIDs = append(f.checkedUIDs, ref.UID)
 	f.checkedCreating = append(f.checkedCreating, creating)
 	if f.applyCheckErr != nil {
 		return k8s.ApplyCheck{}, f.applyCheckErr
@@ -106,20 +114,36 @@ func (f *fakeK8sApplier) CheckApply(_ context.Context, _, release string, _ []by
 	return f.applyCheck, nil
 }
 
+func (f *fakeK8sApplier) StampLeftBehind(_ context.Context, ref k8s.ReleaseRef, previous, _ []byte) error {
+	f.stampCalls = append(f.stampCalls, stampCall{UID: ref.UID, Previous: string(previous)})
+	return nil
+}
+
+type stampCall struct {
+	UID      string
+	Previous string
+}
+
 func (f *fakeK8sApplier) ApplyAll(_ context.Context, _ string, y []byte) error {
 	f.applied = append(f.applied, y)
 	return nil
 }
 
-func (f *fakeK8sApplier) DeleteByRelease(_ context.Context, _, release string) error {
+type deleteCall struct {
+	UID      string
+	NameOnly bool
+}
+
+func (f *fakeK8sApplier) DeleteByRelease(_ context.Context, ref k8s.ReleaseRef) error {
+	f.deleteCalls = append(f.deleteCalls, deleteCall{UID: ref.UID, NameOnly: ref.NameOnly})
 	if f.deleteErr != nil {
 		return f.deleteErr
 	}
-	f.deleted = append(f.deleted, release)
+	f.deleted = append(f.deleted, ref.Name)
 	return nil
 }
 
-func (f *fakeK8sApplier) ListInstances(ctx context.Context, _, _ string) ([]k8s.Instance, error) {
+func (f *fakeK8sApplier) ListInstances(ctx context.Context, _ k8s.ReleaseRef) ([]k8s.Instance, error) {
 	if f.instancesStall {
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -241,8 +265,10 @@ func seedCluster(t *testing.T, r http.Handler) string {
 	t.Helper()
 	name := "cluster-" + randSuffix()
 	body, _ := json.Marshal(map[string]any{
-		"name":            name,
-		"api_url":         "https://k8s.example.com",
+		"name": name,
+		// One apiserver is registered once (#195), so each fixture cluster has
+		// its own URL.
+		"api_url":         "https://k8s.example.com/" + name,
 		"oidc_issuer_url": "http://localhost:5556",
 		"ca_bundle":       testCAPEM(),
 	})

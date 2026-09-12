@@ -405,6 +405,42 @@ ui-spec fields are now checked the way the contract always described them:
   scalars. A release whose stored values have `2.5` for an integer field, or a
   list for an enum, fails to update until the value is corrected.
 
+### Behaviour changes when upgrading past #195
+
+A release's objects now carry its database id as a label,
+`kubeport.io/release-uid`, next to `kubeport.io/release`. Ownership, delete and
+status go by name **and** id, because a name alone was not an identity: a
+deleted release frees its name while objects it could not delete still carry
+it, and one apiserver registered under two cluster names lets two releases
+share a name and namespace.
+
+- **Existing releases keep working unchanged.** A release whose last applied
+  YAML has no id counts objects without one as its own by name — for status,
+  logs, update and delete — and gains the id the next time it is updated. After
+  that, and for every release created after the upgrade, an object without the
+  id is not the release's: it was left by an earlier release of that name.
+- **The first update of an existing release rolls its pods once.** The id is
+  added to pod template labels (never to `spec.selector`, which is immutable).
+  A Job's pod template is immutable too, so a Job carries the id on itself only
+  and its pods count through the Job that owns them. Deleting a release now
+  deletes a Job's pods with it (background propagation) instead of orphaning
+  them.
+- **A new release no longer adopts objects left by a deleted release of the same
+  name.** The create is a 409 `resource-conflict` whose conflicts carry
+  `same_name: true`. Clean up the leftovers (`kubectl -n <ns> get all,cm,secret
+  -l kubeport.io/release=<name>`) or deploy elsewhere.
+- **A cluster whose `api_url` is already registered is refused** (409
+  `conflict`, naming the existing cluster), comparing URLs with a trailing slash
+  or default port removed. Duplicate registrations made before the upgrade are
+  not removed: releases created after the upgrade are told apart by id, but
+  objects from before it still match by name until their release is updated —
+  so remove the extra registration once its releases are gone. To find them:
+
+  ```sql
+  SELECT lower(rtrim(api_url, '/')) AS api_url, array_agg(name) AS clusters
+    FROM clusters GROUP BY 1 HAVING count(*) > 1;
+  ```
+
 ## Uninstall
 
 ```bash
