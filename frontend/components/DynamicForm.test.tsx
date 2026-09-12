@@ -456,6 +456,49 @@ describe("DynamicForm onChange callback", () => {
   });
 });
 
+// #196 security review: moving a release to another version cannot carry a
+// Secret over. The field must not quietly start from the ui-spec default —
+// submitting that would overwrite the running Secret — but empty, required,
+// and saying why.
+describe("DynamicForm secrets to enter again", () => {
+  const path = "Secret[app].stringData.PASSWORD";
+  const spec: UISpec = {
+    fields: [
+      { path: "metadata.name", label: "Name", type: "string", default: "web" },
+      { path, label: "Password", type: "string", default: "changeme" },
+    ],
+  };
+
+  it("starts the Secret empty, asks for it, and sends what was typed", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(
+      <DynamicForm spec={spec} reenterSecrets={[path]} onSubmit={onSubmit} />,
+    );
+
+    const input = screen.getByLabelText(/Password/) as HTMLInputElement;
+    expect(input.value).toBe("");
+    expect((screen.getByLabelText(/Name/) as HTMLInputElement).value).toBe("web");
+    expect(screen.getByText(ko.form.secretReenter)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText("필수 항목입니다.")).toBeInTheDocument();
+
+    await user.type(input, "s3cret");
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith({ "metadata.name": "web", [path]: "s3cret" }),
+    );
+  });
+
+  it("keeps the default for a form that is not moving version", () => {
+    renderWithIntl(<DynamicForm spec={spec} onSubmit={() => {}} />);
+    expect((screen.getByLabelText(/Password/) as HTMLInputElement).value).toBe("changeme");
+    expect(screen.queryByText(ko.form.secretReenter)).toBeNull();
+  });
+});
+
 // #31 — a second click before the parent re-renders used to fire a second
 // POST /v1/releases. The parent's `disabled` prop lands a render too late,
 // so the guard has to live inside the form.

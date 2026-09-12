@@ -67,6 +67,7 @@
     "retryLogin": "다시 로그인"
   },
   "form": {
+    "secretReenter": "버전을 바꾸면 Secret 값은 옮겨지지 않아요. 다시 입력해 주세요.",
     "validation": {
       "required": "필수 항목입니다.",
       "tooSmall": "{min} 이상이어야 합니다.",

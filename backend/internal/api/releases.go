@@ -342,6 +342,9 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		upstreamError(c, "CreateRelease: apply", err)
 		return
 	}
+	// Redacted like every other read of a release (#196).
+	rel.ValuesJson = redactSecretValues(rel.ValuesJson)
+	rel.RenderedYaml = redactRenderedSecrets(rel.RenderedYaml)
 	c.JSON(http.StatusCreated, rel)
 }
 
@@ -516,8 +519,8 @@ func respondReleaseOverview(c *gin.Context, rel store.GetReleaseByIDRow, instanc
 		"template":        gin.H{"name": rel.TemplateName, "version": rel.TemplateVersion},
 		"cluster":         rel.ClusterName,
 		"namespace":       rel.Namespace,
-		"values_json":     rel.ValuesJson,
-		"rendered_yaml":   rel.RenderedYaml,
+		"values_json":     redactSecretValues(rel.ValuesJson),
+		"rendered_yaml":   redactRenderedSecrets(rel.RenderedYaml),
 		"instances_total": len(instances),
 		"instances_ready": ready,
 		"instances":       instances,

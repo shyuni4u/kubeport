@@ -251,7 +251,10 @@ export function normalizeUISpec(spec: UISpec): {
  * form stays usable, and `uiSpecProblems` is what tells the admin which ones
  * dropped out and why.
  */
-export function schemaFromUISpec(spec: UISpec): z.ZodObject<Record<string, ZodTypeAny>> {
+export function schemaFromUISpec(
+  spec: UISpec,
+  opts: { keptSecrets?: ReadonlySet<string>; reenterSecrets?: ReadonlySet<string> } = {},
+): z.ZodObject<Record<string, ZodTypeAny>> {
   const shape: Record<string, ZodTypeAny> = {};
   for (const f of spec.fields) {
     let zs: ZodTypeAny;
@@ -264,6 +267,8 @@ export function schemaFromUISpec(spec: UISpec): z.ZodObject<Record<string, ZodTy
       case "string":
       case "autocomplete": {
         let s = z.string();
+        // A Secret to enter again needs a value, not an emptied box.
+        if (opts.reenterSecrets?.has(f.path)) s = s.min(1);
         if (f.minLength !== undefined) s = s.min(f.minLength);
         if (f.maxLength !== undefined) s = s.max(f.maxLength);
         // Defence in depth — normalizeUISpec drops an uncompilable pattern
@@ -299,9 +304,45 @@ export function schemaFromUISpec(spec: UISpec): z.ZodObject<Record<string, ZodTy
       default:
         continue;
     }
-    shape[f.path] = f.required ? zs : zs.optional();
+    // A release is read back with its Secret values redacted (#196), and the
+    // update form starts from that read. A Secret it came back redacted for
+    // may be sent back unchanged — the server keeps the value it has — so the
+    // placeholder passes whatever the field's own type and constraints are.
+    if (opts.keptSecrets?.has(f.path)) {
+      zs = z.union([z.literal(REDACTED_SECRET), zs]);
+    }
+    // Moving a release to another version cannot carry a Secret over (#196).
+    // Its field starts empty and has to be filled, required or not, or the
+    // update would replace the running Secret with a default without a word.
+    const required = f.required || opts.reenterSecrets?.has(f.path);
+    shape[f.path] = required ? zs : zs.optional();
   }
   return z.object(shape);
+}
+
+/** What a release's Secret values read as (#196); see backend secret_redact.go. */
+export const REDACTED_SECRET = "<redacted>";
+
+/**
+ * Whether a ui-spec path is under a Secret kind, read the way the backend's
+ * path grammar reads a kind — the longest run of letters (`^[A-Z][A-Za-z]+`),
+ * so `SecretStore` is another kind. Broader than the backend's isSecretPath
+ * (data and stringData only) on purpose: it only picks among starting values
+ * that were exactly the placeholder, which the backend sends for data and
+ * stringData alone — to accept the placeholder back on the same version, and
+ * to empty and require the field when an update moves to another version.
+ */
+export function isSecretPath(path: string): boolean {
+  return /^Secret(?![A-Za-z])/.test(path);
+}
+
+/** The Secret paths whose starting value is the redacted placeholder. */
+export function keptSecretPaths(initialValues: Record<string, unknown> | undefined): Set<string> {
+  const kept = new Set<string>();
+  for (const [path, value] of Object.entries(initialValues ?? {})) {
+    if (value === REDACTED_SECRET && isSecretPath(path)) kept.add(path);
+  }
+  return kept;
 }
 
 /**

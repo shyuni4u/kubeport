@@ -32,6 +32,8 @@ type Props = {
   spec: UISpec;
   updateReleaseId?: string;
   initialValues?: Record<string, unknown>;
+  /** Secret paths to enter again on a move to another version (#196). */
+  reenterSecrets?: string[];
   /**
    * Pre-filled release name. Computed on the server (demo accounts get a
    * random suffix) so SSR and the first client render agree — deriving it
@@ -98,6 +100,7 @@ export function DeployClient({
   spec,
   updateReleaseId,
   initialValues,
+  reenterSecrets,
   defaultName = "",
   demoNamespace,
 }: Props) {
@@ -281,7 +284,10 @@ export function DeployClient({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ values }),
+            // An update names its release, so a Secret it left as the redacted
+            // placeholder previews with the stored value, redacted again in
+            // the response (#196).
+            body: JSON.stringify(updateReleaseId ? { values, release_id: updateReleaseId } : { values }),
           },
         );
         if (!res.ok) {
@@ -533,6 +539,7 @@ export function DeployClient({
         <DynamicForm
           spec={spec}
           initialValues={initialValues}
+          reenterSecrets={reenterSecrets}
           submitLabel={
             submitting
               ? t("submitting")

@@ -19,6 +19,12 @@ import (
 // the template's ui-spec decides which keys are required.
 type previewRenderReq struct {
 	Values json.RawMessage `json:"values"`
+	// ReleaseID names the release an update form is previewing (#196). Its
+	// Secret values read back redacted, and the form sends the placeholder for
+	// one left unchanged; with the release named, the preview renders the
+	// stored value in its place — and redacts the rendered output, so the
+	// preview never shows what the read hid.
+	ReleaseID string `json:"release_id,omitempty"`
 }
 
 // PreviewRender renders a template with the supplied values for UI preview.
@@ -55,6 +61,37 @@ func (h *Handlers) PreviewRender(c *gin.Context) {
 		return
 	}
 
+	forRelease := r.ReleaseID != ""
+	if forRelease {
+		id, err := parseUUID(r.ReleaseID)
+		if err != nil {
+			writeError(c, http.StatusBadRequest, "validation-error", "invalid release_id")
+			return
+		}
+		rel, err := h.deps.Store.GetReleaseByID(c.Request.Context(), id)
+		if err != nil {
+			writeError(c, http.StatusNotFound, "not-found", "release")
+			return
+		}
+		// The same gate as reading the release: its stored values are what
+		// this puts back.
+		if !h.authorizeReleaseAccess(c, rel) {
+			return
+		}
+		if rel.TemplateName != name {
+			writeError(c, http.StatusBadRequest, "validation-error", "release_id is not a release of this template")
+			return
+		}
+		// Only for the release's own version, whose rules the stored value
+		// already passed, so the response cannot depend on it. Checked against
+		// another version — a draft whose pattern the caller wrote — a 200 or
+		// 400 would say whether the stored value matches (security review).
+		// There the placeholder stays as sent and is validated as it is.
+		if tv.ID == rel.TemplateVersionID {
+			r.Values, _ = restoreRedactedSecrets(r.Values, rel.ValuesJson)
+		}
+	}
+
 	rendered, err := template.Render(tv.ResourcesYaml, tv.UiSpecYaml, r.Values, template.Labels{
 		TemplateName:    name,
 		TemplateVersion: int(tv.Version),
@@ -65,11 +102,15 @@ func (h *Handlers) PreviewRender(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
 		return
 	}
+	out := string(rendered)
+	if forRelease {
+		out = redactRenderedSecrets(out)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"template":      name,
 		"version":       tv.Version,
-		"rendered_yaml": string(rendered),
+		"rendered_yaml": out,
 	})
 }
 

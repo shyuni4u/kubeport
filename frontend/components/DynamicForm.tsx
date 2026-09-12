@@ -35,6 +35,7 @@ import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 import {
+  keptSecretPaths,
   schemaFromUISpec,
   defaultsFromUISpec,
   normalizeUISpec,
@@ -51,6 +52,11 @@ type FormShape = Record<string, unknown>;
 type Props = {
   spec: UISpec;
   initialValues?: Record<string, unknown>;
+  /**
+   * Secret paths an update to another version has to be given again (#196).
+   * They start empty — no ui-spec default either — are required, and say why.
+   */
+  reenterSecrets?: readonly string[];
   submitLabel?: string;
   /**
    * Emphasis of the submit button. The admin's ui-spec preview passes
@@ -155,6 +161,7 @@ function rangedIntValue(field: IntegerField, value: unknown): number {
 export function DynamicForm({
   spec: rawSpec,
   initialValues,
+  reenterSecrets,
   submitLabel = "배포하기",
   submitVariant = "default",
   disabled = false,
@@ -184,8 +191,10 @@ export function DynamicForm({
   // names dot-free (encoded) and write a thin resolver that decodes values
   // before validation, then returns errors flat-keyed by the encoded names.
   const tv = useTranslations("form.validation");
+  const keptSecrets = useMemo(() => keptSecretPaths(initialValues), [initialValues]);
+  const reenter = useMemo(() => new Set(reenterSecrets ?? []), [reenterSecrets]);
   const resolver = useMemo<Resolver<FormShape>>(() => {
-    const schema = schemaFromUISpec(spec);
+    const schema = schemaFromUISpec(spec, { keptSecrets, reenterSecrets: reenter });
     // Zod's default messages are English developer strings ("Required",
     // "String must contain at most 80 character(s)"). Translate by issue
     // code so non-k8s users get a plain-language sentence in their locale.
@@ -236,12 +245,14 @@ export function DynamicForm({
       }
       return { values: {}, errors: errors as never };
     };
-  }, [spec, tv]);
+  }, [spec, tv, keptSecrets, reenter]);
 
   const defaults = useMemo<FormShape>(() => {
     const flat = { ...defaultsFromUISpec(spec), ...(initialValues ?? {}) };
+    // A default here would go out as the Secret's new value, unseen.
+    for (const path of reenter) delete flat[path];
     return encodeValues(flat);
-  }, [spec, initialValues]);
+  }, [spec, initialValues, reenter]);
 
   const form = useForm<FormShape>({
     resolver,
@@ -280,7 +291,12 @@ export function DynamicForm({
     <Form {...form}>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         {spec.fields.map((field) => (
-          <FieldRow key={field.path} field={field} control={form.control} />
+          <FieldRow
+            key={field.path}
+            field={field}
+            control={form.control}
+            reenter={reenter.has(field.path)}
+          />
         ))}
         <div className="flex justify-end">
           {/*
@@ -311,11 +327,14 @@ function autocompleteListId(path: string): string {
 function FieldRow({
   field,
   control,
+  reenter = false,
 }: {
   field: UISpecField;
   control: Control<FormShape>;
+  reenter?: boolean;
 }) {
   const tv = useTranslations("form.validation");
+  const tf = useTranslations("form");
   return (
     <FormField
       control={control}
@@ -330,7 +349,7 @@ function FieldRow({
           <div className="flex items-center gap-1">
             <FormLabel>
               {field.label}
-              {field.required ? (
+              {field.required || reenter ? (
                 <span className="ml-1 text-destructive">*</span>
               ) : null}
             </FormLabel>
@@ -386,6 +405,9 @@ function FieldRow({
           field.pattern &&
           !field.help ? (
             <p className="text-xs text-muted-foreground">{tv("hasPattern")}</p>
+          ) : null}
+          {reenter ? (
+            <p className="text-xs text-muted-foreground">{tf("secretReenter")}</p>
           ) : null}
           <FormMessage />
         </FormItem>
