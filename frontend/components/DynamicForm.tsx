@@ -636,8 +636,14 @@ function renderWidget(
           </div>
         );
       }
-      // No full range → plain number input. Empty string → undefined so
-      // zod treats the field as missing (important for optional ints).
+      // No full range → plain number input. An empty box is null (#321), not
+      // undefined: react-hook-form reads an undefined field back from its
+      // default values, so a ui-spec default came back into the box the
+      // moment it was cleared, and typing appended to it (3, clear, 5 → 35).
+      // The schema reads null as no value (integerInput): required says
+      // "required", optional leaves the key out. A lone "-" or other partial
+      // input the browser cannot parse also reads as "" and lands here, which
+      // keeps it on screen instead of being overwritten by the default.
       return (
         <Input
           type="number"
@@ -650,7 +656,7 @@ function renderWidget(
           }
           onChange={(e) => {
             const raw = e.target.value;
-            rhf.onChange(raw === "" ? undefined : Number(raw));
+            rhf.onChange(raw === "" ? null : Number(raw));
           }}
           onBlur={rhf.onBlur}
           name={rhf.name}
