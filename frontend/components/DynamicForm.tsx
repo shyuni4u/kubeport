@@ -53,6 +53,15 @@ export type { UISpec, UISpecField } from "@/lib/ui-spec-to-zod";
 
 type FormShape = Record<string, unknown>;
 
+/**
+ * The form's values as submit would send them, or that submit would refuse
+ * them. `values` is the schema's output: an optional field with no value is
+ * left out, a kept Secret's placeholder passes as it is.
+ */
+export type ParsedFormValues =
+  | { success: true; values: Record<string, unknown> }
+  | { success: false };
+
 type Props = {
   spec: UISpec;
   initialValues?: Record<string, unknown>;
@@ -74,7 +83,16 @@ type Props = {
    * settles so a second click cannot fire a second request (#31).
    */
   onSubmit: (values: Record<string, unknown>) => void | Promise<void>;
+  /** The raw values the form holds, on first paint and every change. */
   onChange?: (values: Record<string, unknown>) => void;
+  /**
+   * The same moments as onChange, parsed by the schema the submit uses (#319).
+   * The deploy form's preview used the raw values: a stored null reached the
+   * render API, which refused it, while submit would have left the key out.
+   * Building the payload here, from the one schema, keeps the two from
+   * drifting apart again.
+   */
+  onParsedChange?: (parsed: ParsedFormValues) => void;
 };
 
 // React Hook Form treats `.` in field names as a nested-path separator, so a
@@ -171,6 +189,7 @@ export function DynamicForm({
   disabled = false,
   onSubmit,
   onChange,
+  onParsedChange,
 }: Props) {
   // The trust boundary sits here, not in the callers (#164).
   //
@@ -197,8 +216,13 @@ export function DynamicForm({
   const tv = useTranslations("form.validation");
   const keptSecrets = useMemo(() => keptSecretPaths(initialValues), [initialValues]);
   const reenter = useMemo(() => new Set(reenterSecrets ?? []), [reenterSecrets]);
+  // One instance for the resolver (what submit sends) and onParsedChange
+  // (what the deploy form previews), so they cannot disagree.
+  const schema = useMemo(
+    () => schemaFromUISpec(spec, { keptSecrets, reenterSecrets: reenter }),
+    [spec, keptSecrets, reenter],
+  );
   const resolver = useMemo<Resolver<FormShape>>(() => {
-    const schema = schemaFromUISpec(spec, { keptSecrets, reenterSecrets: reenter });
     // Zod's default messages are English developer strings ("Required",
     // "String must contain at most 80 character(s)"). Translate by issue
     // code so non-k8s users get a plain-language sentence in their locale.
@@ -257,7 +281,7 @@ export function DynamicForm({
       }
       return { values: {}, errors: errors as never };
     };
-  }, [spec, tv, keptSecrets, reenter]);
+  }, [schema, tv]);
 
   const defaults = useMemo<FormShape>(() => {
     const flat = { ...defaultsFromUISpec(spec), ...(initialValues ?? {}) };
@@ -273,17 +297,26 @@ export function DynamicForm({
   });
 
   useEffect(() => {
-    if (!onChange) return;
+    if (!onChange && !onParsedChange) return;
+    const emit = (values: Record<string, unknown>) => {
+      const decoded = decodeValues(values);
+      onChange?.(decoded);
+      if (!onParsedChange) return;
+      // The resolver's parse, on the same decoded values: submit sends
+      // `result.data` (the resolver returns it, handleSubmit decodes it).
+      const result = schema.safeParse(decoded);
+      onParsedChange(result.success ? { success: true, values: result.data } : { success: false });
+    };
     // RHF's watch() only emits on *change*, so a user who accepts every
     // default never triggered a render preview — and therefore never
     // triggered the RBAC preflight that gates the submit button (#30).
     // Emit the initial values once so both are live from first paint.
-    onChange(decodeValues(form.getValues() as Record<string, unknown>));
+    emit(form.getValues() as Record<string, unknown>);
     const sub = form.watch((values) => {
-      onChange(decodeValues(values as Record<string, unknown>));
+      emit(values as Record<string, unknown>);
     });
     return () => sub.unsubscribe();
-  }, [form, onChange]);
+  }, [form, onChange, onParsedChange, schema]);
 
   // A ref, not state: the second click of a double-click arrives in the same
   // tick as the first, before any re-render could flip a `disabled` prop. The

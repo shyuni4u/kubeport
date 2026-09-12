@@ -10,11 +10,17 @@ import { useKubeTermsStore } from "@/stores/kube-terms-store";
 type Props = {
   renderedYaml: string | null;
   pending: boolean;
+  /**
+   * The form's values do not parse, so no preview was asked for (#319). Says
+   * so instead of the "fill in the form" hint, which reads as if nothing were
+   * entered yet.
+   */
+  paused?: boolean;
 };
 
 type Resource = { apiVersion: string; kind: string; name: string | null };
 
-export function ResourcesPreview({ renderedYaml, pending }: Props) {
+export function ResourcesPreview({ renderedYaml, pending, paused = false }: Props) {
   const t = useTranslations("deploy.preview");
   const tKinds = useTranslations("kinds");
   const kube = useKubeTermsStore((s) => s.showKubeTerms);
@@ -58,7 +64,7 @@ export function ResourcesPreview({ renderedYaml, pending }: Props) {
       </div>
       {pending && <p className="text-xs text-muted-foreground">{t("rendering")}</p>}
       {!pending && resources.length === 0 && (
-        <p className="text-xs text-muted-foreground">{t("empty")}</p>
+        <p className="text-xs text-muted-foreground">{t(paused ? "invalid" : "empty")}</p>
       )}
       {resources.length > 0 && (
         <ul className="flex flex-col gap-1">

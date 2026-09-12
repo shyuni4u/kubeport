@@ -618,3 +618,224 @@ describe("DeployClient release name", () => {
     expect(submitButton()).toBeDisabled();
   });
 });
+
+// #319 — the preview sent the raw form values while submit sent the parsed
+// ones. A release whose stored values held null sent that null to the render
+// API, which refused it, and the preview stayed empty.
+describe("DeployClient preview payload", () => {
+  beforeEach(() => {
+    pushMock.mockReset();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  const INVALID = "필수 항목을 채우고 표시된 오류를 고치면 미리보기가 나옵니다.";
+  const RBAC_WAITS = "미리보기가 나오면 만들 수 있는지 확인합니다.";
+  const ALL_ALLOWED = "위 목록을 모두 만들 수 있습니다.";
+  // ResourcesPreview's row for the mocked Deployment, which has no name.
+  const PREVIEW_ROW = "(이름 없음)";
+  const RENDERED = "apiVersion: apps/v1\nkind: Deployment\n";
+
+  const updateSpec: UISpec = {
+    fields: [
+      { path: "metadata.name", label: "앱 이름", type: "string", required: true },
+      { path: "metadata.labels.tier", label: "등급", type: "string" },
+      { path: "Secret[app].stringData.password", label: "비밀번호", type: "string" },
+    ],
+  };
+
+  type Call = [string, RequestInit | undefined];
+
+  /** The render API as the backend answers it: a null value is a 400. */
+  function backendFetch() {
+    const base = routedFetch({});
+    return vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/render")) {
+        const body = JSON.parse(String(init?.body)) as { values: Record<string, unknown> };
+        return Object.values(body.values).includes(null)
+          ? jsonResponse({ title: "validation-error", status: 400 }, 400)
+          : jsonResponse({ rendered_yaml: RENDERED });
+      }
+      if (url.startsWith("/api/v1/releases/")) return jsonResponse({}, 200);
+      return base(url, init);
+    });
+  }
+
+  const renderCalls = (m: { mock: { calls: unknown[] } }) =>
+    (m.mock.calls as Call[]).filter(([url]) => url.includes("/render"));
+  const bodyOf = ([, init]: Call) => JSON.parse(String(init?.body)) as Record<string, unknown>;
+
+  /** Longer than the preview's 300ms debounce. */
+  const pastDebounce = () =>
+    act(async () => {
+      await new Promise((r) => setTimeout(r, 450));
+    });
+
+  it("leaves a stored null on an optional field out of the preview, and renders it", async () => {
+    const fetchMock = backendFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <DeployClient
+        templateName="web-app"
+        version={2}
+        team={null}
+        spec={updateSpec}
+        updateReleaseId="rel-1"
+        initialValues={{ "metadata.name": "web", "metadata.labels.tier": null }}
+      />,
+    );
+
+    expect(await screen.findByText(PREVIEW_ROW)).toBeInTheDocument();
+    const calls = renderCalls(fetchMock);
+    expect(calls).toHaveLength(1);
+    expect(bodyOf(calls[0])).toEqual({ values: { "metadata.name": "web" }, release_id: "rel-1" });
+    expect(String(calls[0][1]?.body)).not.toContain("tier");
+  });
+
+  it("holds the preview while a required field holds a stored null, and sends it once filled", async () => {
+    const user = userEvent.setup();
+    const fetchMock = backendFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <DeployClient
+        templateName="web-app"
+        version={2}
+        team={null}
+        spec={updateSpec}
+        updateReleaseId="rel-1"
+        initialValues={{ "metadata.name": null, "metadata.labels.tier": "gold" }}
+      />,
+    );
+
+    await pastDebounce();
+    expect(renderCalls(fetchMock)).toHaveLength(0);
+    expect(screen.getByText(INVALID)).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/앱 이름/), "web");
+
+    expect(await screen.findByText(PREVIEW_ROW)).toBeInTheDocument();
+    expect(screen.queryByText(INVALID)).not.toBeInTheDocument();
+    expect(bodyOf(renderCalls(fetchMock).at(-1)!)).toEqual({
+      values: { "metadata.name": "web", "metadata.labels.tier": "gold" },
+      release_id: "rel-1",
+    });
+  });
+
+  it("previews a kept Secret with the same values submit sends", async () => {
+    const user = userEvent.setup();
+    const fetchMock = backendFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <DeployClient
+        templateName="web-app"
+        version={2}
+        team={null}
+        spec={updateSpec}
+        updateReleaseId="rel-1"
+        initialValues={{ "metadata.name": "web", "Secret[app].stringData.password": "<redacted>" }}
+      />,
+    );
+
+    expect(await screen.findByText(PREVIEW_ROW)).toBeInTheDocument();
+    const preview = bodyOf(renderCalls(fetchMock).at(-1)!);
+
+    const button = screen.getByRole("button", { name: /배포하기|업데이트/ });
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/releases/rel-1"));
+    const put = (fetchMock.mock.calls as Call[]).find(([url]) => url === "/api/v1/releases/rel-1")!;
+
+    expect(preview.values).toEqual({
+      "metadata.name": "web",
+      "Secret[app].stringData.password": "<redacted>",
+    });
+    expect(JSON.stringify(preview.values)).toBe(JSON.stringify(bodyOf(put).values));
+  });
+
+  it("sends a valid new deploy's preview exactly as before", async () => {
+    const fetchMock = backendFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={spec} />);
+
+    expect(await screen.findByText(PREVIEW_ROW)).toBeInTheDocument();
+    const calls = renderCalls(fetchMock);
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]?.body).toBe(
+      JSON.stringify({ values: { "spec.replicas": 1, "metadata.name": "nginx" } }),
+    );
+  });
+
+  // No default: an emptied field would read back as its default in the box
+  // (react-hook-form), and typing would append to it.
+  const portSpec: UISpec = {
+    fields: [{ path: "spec.port", label: "포트", type: "integer", required: true }],
+  };
+
+  it("does not keep a permission verdict for values that no longer parse", async () => {
+    const user = userEvent.setup();
+    const fetchMock = backendFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={portSpec} />);
+    await fillMeta(user);
+
+    // A new form that starts with a required field empty says why nothing is
+    // shown, in both panels, and asks nothing of the API.
+    await pastDebounce();
+    expect(renderCalls(fetchMock)).toHaveLength(0);
+    expect(screen.getByText(INVALID)).toBeInTheDocument();
+    expect(screen.getByText(RBAC_WAITS)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /배포하기/ })).toBeEnabled();
+
+    await user.type(screen.getByLabelText(/포트/), "8080");
+    expect(await screen.findByText(ALL_ALLOWED)).toBeInTheDocument();
+
+    const before = renderCalls(fetchMock).length;
+    await user.clear(screen.getByLabelText(/포트/));
+
+    await waitFor(() => expect(screen.getByText(INVALID)).toBeInTheDocument());
+    expect(screen.queryByText(ALL_ALLOWED)).not.toBeInTheDocument();
+    expect(screen.queryByText(PREVIEW_ROW)).not.toBeInTheDocument();
+    expect(screen.getByText(RBAC_WAITS)).toBeInTheDocument();
+    await pastDebounce();
+    expect(renderCalls(fetchMock)).toHaveLength(before);
+
+    await user.type(screen.getByLabelText(/포트/), "80");
+    expect(await screen.findByText(ALL_ALLOWED)).toBeInTheDocument();
+    expect(screen.queryByText(RBAC_WAITS)).not.toBeInTheDocument();
+    expect(bodyOf(renderCalls(fetchMock).at(-1)!)).toEqual({ values: { "spec.port": 80 } });
+  });
+
+  it("drops a preview that answers after the values stopped parsing", async () => {
+    const user = userEvent.setup();
+    const pending: Array<() => void> = [];
+    const base = backendFetch();
+    const fetchMock = vi.fn((url: string, init?: RequestInit) =>
+      url.includes("/render")
+        ? new Promise<Response>((resolve) => {
+            pending.push(() => resolve(jsonResponse({ rendered_yaml: RENDERED })));
+          })
+        : base(url, init),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={portSpec} />);
+    await fillMeta(user);
+    await user.type(screen.getByLabelText(/포트/), "8080");
+    await waitFor(() => expect(pending.length).toBeGreaterThan(0));
+
+    await user.clear(screen.getByLabelText(/포트/));
+    await waitFor(() => expect(screen.getByText(INVALID)).toBeInTheDocument());
+    await act(async () => {
+      pending.forEach((answer) => answer());
+    });
+    await pastDebounce();
+
+    expect(screen.queryByText(PREVIEW_ROW)).not.toBeInTheDocument();
+    expect(screen.queryByText(ALL_ALLOWED)).not.toBeInTheDocument();
+    expect(screen.getByText(INVALID)).toBeInTheDocument();
+  });
+});
