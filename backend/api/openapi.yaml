@@ -2309,7 +2309,30 @@ components:
               max: { type: integer }
               pattern:
                 type: string
-                description: Go RE2 syntax.
+                description: |
+                  For `string` and `autocomplete`. Checked with Go RE2 on
+                  deploy, and by the deploy form in the browser as a
+                  JavaScript RegExp (no flags) while the user types, so it
+                  must be written in the subset both read the same way. Saving
+                  a template refuses anything else with 400 `validation-error`:
+                  RE2-only syntax such as `(?i)`, `(?s)`, `(?P<name>...)`,
+                  `\A`, `\z`, `\Q...\E`, `\pL`, `[[:alpha:]]`, or a character
+                  outside the Basic Multilingual Plane such as an emoji,
+                  which the browser reads as two halves (use
+                  `(?:...)` and `(?<name>...)` for groups); a pattern longer
+                  than 200 characters; and a pattern that can match the same
+                  text in more than one way inside a repeat, as in `(a+)+`,
+                  `(a|a)*` or `(a{1,20})+`, which can freeze the browser
+                  (a count of five or more, or a count around `*`, `+` or
+                  another count of five or more, is judged like an unbounded
+                  repeat; `{2}` to `{4}` over anything else is read as that
+                  many copies, so `^(\d{3}-?){2}\d{4}$` passes). A separator
+                  nothing else in the repeat can match keeps it unambiguous,
+                  at either end: `^[a-z]+(-[a-z]+)*$`, `^([a-z]+,)*[a-z]+$`.
+                  A repeat of something that can match nothing, as in
+                  `(a?){25}`, is refused as well. Ways also multiply along the
+                  whole pattern, not only inside a repeat: a few two-way
+                  parts pass (IPv4 built from `[01]?[0-9][0-9]?`), many do not.
               values:
                 type: array
                 items: { type: string }

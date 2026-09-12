@@ -1,5 +1,7 @@
 import { z, type ZodTypeAny } from "zod";
 
+import { patternProblem } from "./ui-spec-pattern";
+
 /**
  * A single field in a template's ui-spec overlay. Discriminated by `type`.
  *
@@ -82,23 +84,67 @@ const KNOWN_TYPES = [
 ] as const;
 
 /**
- * A RegExp, or null while the pattern is still being typed.
+ * A RegExp, or null when the form should not run this pattern.
  *
  * `new RegExp("[")` throws, and a lone `[` is one keystroke on the way to
  * every character class anyone has ever written (#164).
  *
- * "safe" here means *it compiles*, and nothing more. A pattern that compiles
- * but backtracks catastrophically (`^(a+)+$`) passes, and the deploy form
- * validates on every keystroke — so an admin can still freeze a user's tab
- * with one. Out of reach for demo visitors, who cannot author templates at
- * all, but not a guarantee this function makes.
+ * It is also null for what `patternProblem` names, even when it compiles:
+ * RE2-only syntax, which here either throws or means something else, so the
+ * form would run a rule the API does not have (#189); a pattern over 200
+ * characters; and a repeated group holding an unlimited repeat (`^(a+)+$`),
+ * or any other pattern that can match the same text in exponentially many
+ * ways — `(a|a)*`, `(a{1,20})+` — which the form would run on every keystroke
+ * until the tab froze (#187). The API refuses all of these on save, so only a
+ * version saved before that reaches the form with one — and the API still
+ * checks it on deploy.
  */
 function safeRegExp(pattern: string): RegExp | null {
+  if (patternProblem(pattern) !== null) return null;
   try {
     return new RegExp(pattern);
   } catch {
     return null;
   }
+}
+
+/**
+ * The longest value the form runs a pattern against. The API has no such
+ * bound and checks every value on deploy, so a longer one is left to it rather
+ * than refused here.
+ *
+ * Exponential patterns are refused before they get here, and so are three
+ * overlapping loops in a row (`^\w*\w*\w*!$`: ~5 ms at 256 characters in V8,
+ * ~36 ms at 512, ~280 ms at 1024). What is left can match a text at most two
+ * ways per run — two overlapping loops, or an unanchored repeat retried from
+ * every position — which grows with the square of the value's length;
+ * ui-spec-pattern.test.ts holds every accepted table pattern under 50 ms at 256
+ * on adversarial input. 256 covers the longest name-shaped value Kubernetes
+ * has (a DNS subdomain, 253).
+ */
+const MAX_PATTERN_INPUT = 256;
+
+/**
+ * Values are the other half of the UTF-16 problem ui-spec-pattern.ts refuses
+ * in patterns. A flagless RegExp reads "😀" as two characters and Go as one, so
+ * `^[^a]{2}$` would pass it here and fail on deploy. For a value holding any
+ * surrogate, the form runs the pattern in Unicode mode instead, which reads
+ * code points as Go does, with each lone half turned into U+FFFD the way the
+ * API's JSON decoding turns it. A pattern that is not valid in Unicode mode
+ * (`\_`, a lone `{`) leaves such a value to the API.
+ */
+const SURROGATE = /[\uD800-\uDFFF]/;
+
+function unicodeRegExp(pattern: string): RegExp | null {
+  try {
+    return new RegExp(pattern, "u");
+  } catch {
+    return null;
+  }
+}
+
+function withLoneSurrogatesReplaced(value: string): string {
+  return value.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDFFF]/g, (m) => (m.length === 2 ? m : String.fromCharCode(0xfffd)));
 }
 
 /**
@@ -108,7 +154,15 @@ function safeRegExp(pattern: string): RegExp | null {
  * type is not valid", which was wrong about the second kind twice over: the
  * field was still there, and the type was fine (#197).
  */
-export type UISpecIssue = { at: string; kind: "dropped" | "ignored" };
+export type UISpecIssue = {
+  at: string;
+  /**
+   * `refused` is a pattern kubeport will not save (see ui-spec-pattern.ts). It
+   * is set aside like an `ignored` one, but it is finished, so telling the
+   * admin to wait until it is complete would be wrong.
+   */
+  kind: "dropped" | "ignored" | "refused";
+};
 
 /**
  * What is wrong with this spec's fields, described for a human.
@@ -141,7 +195,7 @@ export function uiSpecIssues(spec: UISpec): UISpecIssue[] {
       f.pattern &&
       safeRegExp(f.pattern) === null
     ) {
-      out.push({ at: `${at}.pattern`, kind: "ignored" });
+      out.push({ at: `${at}.pattern`, kind: patternProblem(f.pattern) === null ? "ignored" : "refused" });
     }
   });
   return out;
@@ -189,6 +243,8 @@ export function normalizeUISpec(spec: UISpec): {
   dropped: string[];
   /** Settings set aside while their field stays in the form. */
   ignored: string[];
+  /** Patterns set aside because kubeport refuses them on save. */
+  refused: string[];
 } {
   const issues = uiSpecIssues(spec);
   // Same document-level guard as uiSpecIssues: `fields:` → null, no key →
@@ -233,6 +289,7 @@ export function normalizeUISpec(spec: UISpec): {
     problems: issues.map((issue) => issue.at),
     dropped: issues.filter((issue) => issue.kind === "dropped").map((issue) => issue.at),
     ignored: issues.filter((issue) => issue.kind === "ignored").map((issue) => issue.at),
+    refused: issues.filter((issue) => issue.kind === "refused").map((issue) => issue.at),
   };
 }
 
@@ -271,14 +328,24 @@ export function schemaFromUISpec(
         if (opts.reenterSecrets?.has(f.path)) s = s.min(1);
         if (f.minLength !== undefined) s = s.min(f.minLength);
         if (f.maxLength !== undefined) s = s.max(f.maxLength);
-        // Defence in depth — normalizeUISpec drops an uncompilable pattern
-        // before it reaches here, but this function must not throw for a
+        // Defence in depth — normalizeUISpec drops an unusable pattern before
+        // it reaches here, but this function must not throw or hang for a
         // caller that skipped it.
-        if (f.pattern) {
-          const re = safeRegExp(f.pattern);
-          if (re) s = s.regex(re);
-        }
-        zs = s;
+        const re = f.pattern ? safeRegExp(f.pattern) : null;
+        const reUnicode = re && f.pattern ? unicodeRegExp(f.pattern) : null;
+        // Not `.regex(re)` behind `.max()`: zod runs every check, so a value
+        // over maxLength still reached the pattern. The bound has to sit in
+        // front of `re.test` itself. The issue keeps `.regex`'s code, which
+        // DynamicForm turns into its "not an allowed format" message.
+        zs = re
+          ? s.superRefine((v, ctx) => {
+              if (v.length > MAX_PATTERN_INPUT) return;
+              const halves = SURROGATE.test(v);
+              const target = halves ? reUnicode : re;
+              if (!target || target.test(halves ? withLoneSurrogatesReplaced(v) : v)) return;
+              ctx.addIssue({ code: z.ZodIssueCode.invalid_string, validation: "regex", message: "Invalid" });
+            })
+          : s;
         break;
       }
       case "integer": {

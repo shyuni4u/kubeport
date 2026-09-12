@@ -445,6 +445,7 @@
         "previewFailed": "Failed to build the preview (HTTP {status}). {detail}",
         "skippedFields": "Left out of the preview: {fields}. Their type or values are not complete yet.",
         "ignoredSettings": "Ignored in the preview: {parts}. The field stays; only this value is set aside until it is complete.",
+        "ignoredPattern": "Pattern not checked in the preview: {parts}. kubeport refuses this pattern on save; the save error says why and how to rewrite it.",
         "renderFailed": "Could not draw the preview. The editor is untouched — undo the line you just changed. ({detail})"
       },
       "convert": {
