@@ -294,10 +294,12 @@ ssh -i "$KEY" ubuntu@168.107.55.95 \
   2. **실패한 Job 이면** `kubectl -n kubeport logs job/<잡> -c preflight`(Dex·API·DB — 아무것도 안 지웠다, #140)
      → `-c wipe-k8s`(kubectl·RBAC — DB 는 그대로) → `-c seed` 순으로 첫 에러 줄.
   3. **Job 이 성공(`seed-demo: done`)했는데 경보가 그대로면** `-c seed` 로그의
-     `WARN: reset: … skipped — referenced by non-demo releases`. 데모가 아닌 릴리스가 데모 템플릿 버전을
-     **하나라도** 참조하면 리셋의 `template_versions`·`templates` DELETE 가 문장째 건너뛰어 **데모 카탈로그
-     전체가** 남는다(데모가 아닌 admin 은 데모 카탈로그를 보고 배포할 수 있다). 이때는 수동 리셋을 돌려도
-     안 풀린다 — 그 릴리스를 먼저 지운다.
+     `WARN: reset: kept N demo template versions referenced by non-demo releases`. 데모가 아닌 릴리스(데모가 아닌
+     admin 은 데모 카탈로그를 보고 배포할 수 있다)가 참조하는 **그 버전과 그 템플릿만** 리셋이 남긴다. 나머지 데모
+     카탈로그는 지운다(#306 — 예전엔 참조 하나에 DELETE 가 문장째 건너뛰어 카탈로그 전체가 남았다). 남은 템플릿의
+     오래된 `created_at` 때문에 경보가 이어진다. 남은 버전 중 fixture 와 내용이 다른 published 버전은 seeder 가
+     deprecate 한다(로그 `template <이름> v<N> deprecated: not the fixture's content`) — 그 버전으로 새 배포·업데이트는
+     400 이고 돌고 있는 릴리스는 그대로다. 수동 리셋을 돌려도 경보는 안 풀린다 — 그 릴리스를 먼저 지운다.
 
   원인을 치운 뒤 §5 "리셋" 의 수동 실행을 한 번 돌리면 값이 새로 찍혀 경보가 풀린다.
   필드가 없거나 형식이 틀려도 실패한다(감시가 꺼진 것을 감시가 알린다) — #148 머지 직후 배포가 끝나기 전의
@@ -521,8 +523,8 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
   유일한 관리자 권한이라서다. 저작 체험까지 보여주려면 `--set demo.allowTemplateCreate=true`
   (backend `KBP_DEMO_ALLOW_TEMPLATE_CREATE`). 켜도 데모가 만든 템플릿은 실제 사용자 카탈로그에
   안 보이고, 관리자가 아닌 실사용자는 이름을 알아도 그걸로 배포할 수 없다(404, #226). 다만 데모가 아닌
-  **admin** 이 그걸로 배포하면(또는 #226 이전에 만들어진 그런 릴리스가 남아 있으면) 리셋이 **데모 템플릿 삭제를
-  통째로** 건너뛴다(`tolerateFK` — DELETE 가 문장 단위라 그 템플릿만이 아니다. `last_seed` 경보가 이걸로 뜬다, §3-2).
+  **admin** 이 그걸로 배포하면(또는 #226 이전에 만들어진 그런 릴리스가 남아 있으면) 리셋이 그 릴리스가 가리키는
+  **버전과 그 템플릿을 남긴다**(#306 — 예전엔 DELETE 가 문장 단위라 데모 카탈로그 전체가 남았다. `last_seed` 경보가 이걸로 뜬다, §3-2).
   결정 근거: [brainstorming-summary §14](brainstorming-summary.md).
   **리셋 CronJob 은 이 플래그와 무관하다** — 시드는 API 가 아니라 DB 로 직접 쓴다
   (`cmd/seed-demo/templates.go`). 한때 API 를 타서, 게이트가 닫힌 상태로 배포하자 리셋마다

@@ -174,18 +174,27 @@ func (*preflight) reset(ctx context.Context, dsn, demoDomain string) error {
 	}
 	defer conn.Close(ctx)
 	like := "%@" + demoDomain
+	const demoTemplates = `SELECT id FROM templates WHERE owner_user_id IN (SELECT id FROM users WHERE lower(email) LIKE lower($1))`
 	stmts := []struct {
 		what string
 		sql  string
 		// tolerateFK: a foreign-key violation means something outside the demo
 		// still references this row (e.g. a real user deployed a release from a
 		// demo template). Losing that reference would be worse than skipping
-		// the delete, and the seeder 409-skips the surviving template anyway.
+		// the delete. The statements below already leave referenced rows out, so
+		// this only covers a release created between them.
 		tolerateFK bool
 	}{
 		{"releases", `DELETE FROM releases WHERE created_by_user_id IN (SELECT id FROM users WHERE lower(email) LIKE lower($1))`, false},
-		{"template_versions", `DELETE FROM template_versions WHERE template_id IN (SELECT id FROM templates WHERE owner_user_id IN (SELECT id FROM users WHERE lower(email) LIKE lower($1)))`, true},
-		{"templates", `DELETE FROM templates WHERE owner_user_id IN (SELECT id FROM users WHERE lower(email) LIKE lower($1))`, true},
+		// Only versions no release points at. One statement over all of them
+		// used to fail as a whole on the first reference, so a single non-demo
+		// release kept every demo template and every version — including ones a
+		// visitor published before the #294 gate, still deployable (#306).
+		{"template_versions", `DELETE FROM template_versions tv WHERE tv.template_id IN (` + demoTemplates + `)
+		   AND NOT EXISTS (SELECT 1 FROM releases r WHERE r.template_version_id = tv.id)`, true},
+		// Only templates left with no version; the rest are repaired by the seeder.
+		{"templates", `DELETE FROM templates t WHERE t.id IN (` + demoTemplates + `)
+		   AND NOT EXISTS (SELECT 1 FROM template_versions tv WHERE tv.template_id = t.id)`, true},
 		{"sessions", `DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE lower(email) LIKE lower($1))`, false},
 	}
 	for _, st := range stmts {
@@ -199,6 +208,14 @@ func (*preflight) reset(ctx context.Context, dsn, demoDomain string) error {
 			return err
 		}
 		log.Printf("reset: %s → %d rows", st.what, tag.RowsAffected())
+	}
+	var kept int
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM template_versions WHERE template_id IN (`+demoTemplates+`)`, like).Scan(&kept); err != nil {
+		return err
+	}
+	if kept > 0 {
+		log.Printf("WARN: reset: kept %d demo template versions referenced by non-demo releases; "+
+			"the seeder deprecates the ones that are not fixture content", kept)
 	}
 	return nil
 }

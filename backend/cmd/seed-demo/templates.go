@@ -125,6 +125,26 @@ func (t *templateSeeder) repair(ctx context.Context, tpl store.GetTemplateByName
 		}
 	}
 
+	// Every published version must be the fixture. Any other was published by
+	// someone else — a visitor before the #294 gate existed, or on an install
+	// that opted in — and any published version can be deployed, current or
+	// not. A reset keeps versions a non-demo release still points at, so those
+	// can be here; the release keeps running, but nothing new deploys from
+	// them (#306).
+	for i := range versions {
+		v := &versions[i]
+		if v.Status != "published" || (v.ResourcesYaml == f.ResourcesYAML && v.UiSpecYaml == f.UISpecYAML) {
+			continue
+		}
+		if _, err := t.st.SetTemplateVersionStatus(ctx, store.SetTemplateVersionStatusParams{
+			ID: v.ID, Status: "deprecated",
+		}); err != nil {
+			return err
+		}
+		v.Status = "deprecated"
+		log.Printf("template %s v%d deprecated: not the fixture's content", f.Name, v.Version)
+	}
+
 	if current == nil || current.Status != "published" {
 		// Never publish a draft that is already there. Demo visitors can rewrite
 		// any draft, and publishing is what puts content in front of every other
