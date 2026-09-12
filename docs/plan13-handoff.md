@@ -19,6 +19,11 @@
 전체 절차와 명령은 [deploy/oci/README.md §7.6](../deploy/oci/README.md) 과
 [플랜 Task 12](superpowers/plans/2026-09-07-plan13-demo-mode.md) 에 있다. 요약 체크리스트:
 
+> **과거 기록이다 — 아래 명령을 따라 치지 않는다.** B3·B4 는 2026-09-08 롤아웃 당시 그대로 남긴 것으로,
+> Dex client secret 을 `--set` 으로 넘기고(`ps`·history 노출, #303) `-f values-oci-phase2.yaml` 과
+> `--reuse-values` 를 함께 쓴다(지금은 금지 — 시크릿·`host` 가 덮어써진다). 현재 절차는
+> [deploy/oci/README.md §7.6](../deploy/oci/README.md) 이다.
+
 - [x] **B1. 이미지**: 브랜치가 main 에 머지되어 `build-images.yml` 이 새 태그를 푸시했는지 확인 (`seed-demo` 바이너리가 backend 이미지에 포함된 첫 빌드).
 - [x] **B2. DNS**: GoDaddy(`enzo.kr`, 네임서버 `domaincontrol.com`) A 레코드 `dex.kubeport.enzo.kr` → 현재 공인 IP. 공인 IP 는 ephemeral 이라 stop/start 시 두 레코드(`kubeport.`, `dex.`) 모두 갱신해야 한다.
 - [x] **B3. 시크릿 생성 후 비밀번호 관리자에 저장**:

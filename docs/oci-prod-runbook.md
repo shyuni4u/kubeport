@@ -16,7 +16,7 @@
 | OCI 인스턴스 | `kubeport`, `VM.Standard.A1.Flex` 4 OCPU/24GB, Ubuntu 24.04 ARM, 리전 `ap-chuncheon-1` |
 | SSH | `ssh -i "$KEY" ubuntu@168.107.55.95` — **`$KEY` 는 머신마다 다르다. 아래 "SSH 키 위치" 를 먼저 읽을 것.** `kuberport` 는 초기 오타지만 **실제 키 파일·디렉터리 이름**이라 그대로 쓴다 (이름을 바꾸면 gpg 번들·GHA 시크릿 스크립트도 같이 바꿔야 함; `upload-gha-secrets.sh` 는 `oci_kubeport.pub` 이 있으면 그것을 우선 쓴다) |
 | SSH 키 출처 | gpg 번들 `kubeport-ssh.tar.gz.gpg`(대칭 암호화 — 별도 터미널에서 `gpg --pinentry-mode loopback -d ... \| tar -xz -C ~/.ssh/kuberport-oci`). 번들엔 키·config 만 있고 prod 시크릿 파일은 없음 — 시크릿은 Helm values 에서 조회 |
-| 데모 시크릿 | Helm 릴리스 values 가 원본: `sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm -n kubeport get values kubeport -o json \| jq '{pw:.demo.passwordHint, dex:.dex.clientSecret}'`. `DEMO_PW` 는 랜딩에 공개되는 값, `DEX_SECRET` 은 비밀번호 관리자에도 보관 |
+| 데모 시크릿 | Helm 릴리스 values 가 원본: 데모 비밀번호(랜딩에 공개되는 값)는 `sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm -n kubeport get values kubeport -o json \| jq -r .demo.passwordHint`. Dex client secret(`dex.clientSecret`)은 비밀번호 관리자에도 보관하고, 릴리스에서 꺼낼 때는 **화면에 출력하지 않고** 파일로만: `d="$(mktemp -d)" && … \| jq -j .dex.clientSecret > "$d/dex_client_secret"` (옮긴 뒤 `rm -rf "$d"`) |
 | DNS | **GoDaddy** (`enzo.kr`, ns `domaincontrol.com`). A 레코드 2개: `kubeport` · `dex.kubeport` → 공인 IP. IP 변경 시 둘 다 갱신 |
 | prod 시크릿 | `~/.ssh/kuberport-oci/kuberport-prod-secrets.env` (600). **password manager 로 옮길 것.** 담긴 것: `APP_ENCRYPTION_KEY_B64`(분실=DB 복호화 불가), `POSTGRES_PASSWORD`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` |
 | kubeconfig (VM 내) | `/etc/rancher/k3s/k3s.yaml` (`export KUBECONFIG=...` 후 `kubectl`) |
@@ -471,7 +471,9 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
      그 `helm upgrade` 한가운데에 떨어진다. **2단계와 확인까지 끝나면 `gh workflow enable deploy.yml`.**
   1. [deploy/oci/README.md §7.6](../deploy/oci/README.md) 의 `--set` 목록을 새 `DEMO_PW`/`HASH` 로
      다시 실행 (`staticPasswords[N]` 네 필드 전부, `--reset-then-reuse-values`, `flock` 락 포함 — 이미지
-     태그는 올리지 않는다). `DEX_SECRET` 은 유지해도 된다.
+     태그는 올리지 않는다). Dex client secret(`dex.clientSecret`)은 바꾸지 않는다 — §7.6 의 `d=…`·
+     `openssl rand … dex_client_secret` 두 줄과 `--set-file dex.clientSecret` 줄은 빼고 실행한다.
+     `--reset-then-reuse-values` 가 기존 값을 유지한다.
   2. **`sudo systemctl restart k3s`.** 1 단계가 Dex pod 를 재시작시키고, Dex 는 `storage: memory`
      라 서명 키가 새로 생긴다. apiserver 의 JWKS 캐시를 비우지 않으면 **새 비밀번호로 로그인은
      되는데 클러스터 호출이 전부 401** 이다 (§5 위 주의 참조).
