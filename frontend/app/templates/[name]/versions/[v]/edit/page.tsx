@@ -344,7 +344,7 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
     }
   }
 
-  if (err && !state) return <div className="text-red-600 text-sm whitespace-pre">{err}</div>;
+  if (err && !state) return <div className="text-red-600 dark:text-red-400 text-sm whitespace-pre">{err}</div>;
   if (!state) return <div>{t("loading")}</div>;
 
   const tree = (
@@ -394,7 +394,7 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
       // The page-top banner says this too, but it is a screen height away from
       // the inspector on a long draft — the reader editing a field never sees
       // it, and meets a save button that stays off with no reason given (#184).
-      <div role="note" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+      <div role="note" className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100 px-3 py-2 text-xs text-amber-900">
         {t("convert.yamlDraftInspector")}{" "}
         <a href={`/templates/${name}/versions/${v}/edit?mode=yaml`} className="underline">
           {t("convert.editInYaml")}
@@ -458,7 +458,7 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
           YAML draft, and an edit would also arm the leave-page guard (#184). */}
       <MetaRow meta={meta} onChange={(m) => { setMeta(m); touch(); }} nameLocked hideTeam readOnly={isYamlDraft} />
       {sourceAuthoringMode !== "ui" && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 space-y-1">
+        <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100 px-4 py-3 text-sm text-amber-900 space-y-1">
           <div>
             <strong>{t("convert.convertedTitle")}</strong>{" "}
             {isYamlDraft
@@ -482,7 +482,7 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
         preview={preview}
         selectionEvent={selectionEvent}
       />
-      {err && <div className="text-red-600 text-sm mt-2 whitespace-pre">{err}</div>}
+      {err && <div className="text-red-600 dark:text-red-400 text-sm mt-2 whitespace-pre">{err}</div>}
       <BottomBar
         canSave={canSave}
         canPublish={canPublish}
@@ -585,18 +585,18 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
     }
   }
 
-  if (err && !loaded) return <div className="text-red-600 text-sm whitespace-pre">{err}</div>;
+  if (err && !loaded) return <div className="text-red-600 dark:text-red-400 text-sm whitespace-pre">{err}</div>;
   if (!loaded) return <div>{t("loading")}</div>;
 
   return (
     <div className="space-y-3">
       {isUiDraft && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100 px-4 py-3 text-sm text-amber-900">
           {t("convert.uiDraftPreview")}
         </div>
       )}
       {!isDraft && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100 px-4 py-3 text-sm text-amber-800">
           {t("convert.nonDraftYaml", { version: v, status })}
         </div>
       )}
@@ -611,7 +611,7 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
           <UserFormPreview uiSpecYaml={uispecYaml} />
         </div>
       </details>
-      {err && <div className="text-red-600 text-sm whitespace-pre">{err}</div>}
+      {err && <div className="text-red-600 dark:text-red-400 text-sm whitespace-pre">{err}</div>}
       {/*
         Was a hand-rolled bg-green-600 button sitting next to the preview form's
         primary-coloured submit, so the fake action read louder than the real

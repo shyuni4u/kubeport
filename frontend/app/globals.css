@@ -2,7 +2,26 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
+/*
+  Dark mode is a choice (#155): <html class="dark"> or <html class="light"> from
+  the kbp_theme cookie, or neither for "system", which follows the OS here with
+  no script. `.dark` also matches the root itself so the token block below can
+  use `@variant dark`.
+
+  Specificity is kept at one class, as `:is(.dark *)` was: `:where(:root)`
+  contributes nothing and `:not(.light)` one class. Every existing `dark:` rule
+  keeps winning and losing against exactly the rules it did before.
+*/
+@custom-variant dark {
+  &:is(.dark, .dark *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:is(:where(:root):not(.light), :where(:root):not(.light) *) {
+      @slot;
+    }
+  }
+}
 
 @theme inline {
   --color-background: var(--background);
@@ -213,7 +232,28 @@
   --sidebar-ring: oklch(0.55 0.22 275);
 }
 
-.dark {
+/*
+  Native controls, scrollbars and form autofill follow the theme too. Kept out
+  of the light token block above so that block stays exactly as #110–#112 and
+  #130 left it.
+*/
+:root {
+  color-scheme: light;
+}
+
+/*
+  The dark tokens, written once (#155).
+
+  `@variant dark` expands through the custom variant at the top of this file,
+  so Tailwind emits this block twice: under `:root:is(.dark, …)` for an
+  explicit choice, and inside `@media (prefers-color-scheme: dark)` on a root
+  without `.light` for "system". A hand-kept copy for the media query would be
+  one edit away from drifting; this cannot. globals.test.ts compiles the file
+  and holds the two emitted copies identical.
+*/
+:root {
+  @variant dark {
+  color-scheme: dark;
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -221,7 +261,17 @@
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.65 0.22 275);
-  --primary-foreground: oklch(0.985 0 0);
+  /*
+    Near-black, not white (#150). White on this --primary is 3.42:1, under AA,
+    on every default button and badge. The label moved rather than the fill:
+    lowering --primary far enough for white (0.55 gives 5.03:1) would drop a
+    checked checkbox or switch — a primary fill on the --muted card the deploy
+    form draws them on — to 2.88:1, under 1.4.11's 3:1, and would drag --ring,
+    --chart-1 and --sidebar-primary along. 0.145 (= --background) is 5.54:1 and
+    touches nothing else. A separate label token was not needed: unlike
+    --primary before #149 split out --link, this token only ever has one job.
+  */
+  --primary-foreground: oklch(0.145 0 0);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
@@ -250,8 +300,21 @@
     have cost contrast, not gained it — the surfaces run the other way here.
   */
   --destructive: oklch(0.704 0.191 22.216);
+  /*
+    --border stays a 10% hairline: it divides cards and rows, which are told
+    apart by their fills and content, not by the line (WCAG 1.4.11 asks 3:1 of
+    what identifies a *control*).
+  */
   --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
+  /*
+    --input is what identifies a control — the outline of an input, select,
+    checkbox or outline button — so it owes 3:1. shadcn's `1 0 0 / 15%` was
+    1.48:1 on --background and 1.58:1 on --card (#155). Opaque 0.58 is 4.61:1,
+    4.18:1 and 3.53:1 on the --muted card, clearing the same 3.3 margin as the
+    tracks. The `dark:bg-input/30` field fill built on it leaves placeholder
+    text (--muted-foreground) at 4.91:1 or better on every surface.
+  */
+  --input: oklch(0.58 0 0);
   /*
     Lighter than the dark surface, for the same 3:1 reason as light mode.
     Not 0.48: that cleared --background (3.03:1) but only reached 2.74:1 against
@@ -260,9 +323,14 @@
     for, so it gets the same treatment. 0.53 is 3.39:1 there.
   */
   --slider-track: oklch(0.53 0 0);
-  /* Defined for token-block parity; dark mode's Switch keeps shadcn's
-     `dark:data-unchecked:bg-input/80` until dark mode is reachable (#155). */
-  --switch-track: oklch(0.53 0 0);
+  /*
+    Now that dark mode is reachable the Switch uses this in dark too, instead
+    of shadcn's `dark:data-unchecked:bg-input/80`, which was 1.46:1 on the
+    --muted card. Not the slider's 0.53: the switch that matters sits on
+    --muted, where 0.53 is 2.88:1. 0.58 is 3.53:1 there, and the unchecked thumb
+    (--foreground) reads 4.11:1 on it.
+  */
+  --switch-track: oklch(0.58 0 0);
   --ring: oklch(0.65 0.22 275);
   --chart-1: oklch(0.65 0.22 275);
   --chart-2: oklch(0.7 0.16 50);
@@ -272,11 +340,13 @@
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.65 0.22 275);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
+  /* Same pair and same fix as --primary-foreground (#150). */
+  --sidebar-primary-foreground: oklch(0.145 0 0);
   --sidebar-accent: oklch(0.3 0.08 275);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.65 0.22 275);
+  }
 }
 
 @layer base {

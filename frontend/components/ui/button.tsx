@@ -17,7 +17,10 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
+        // `/90` in dark: the label there is near-black (#150), and fading the
+        // fill toward a dark page darkens it under the label — `/80` read 3.90:1
+        // on --background, `/90` reads 4.67:1 or better on every surface.
+        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80 dark:[a]:hover:bg-primary/90",
         // `bg-hover`, not `bg-muted`: --muted is a surface and sits 1.12:1 from
         // the page, so an outline or ghost button gave no feedback at all on
         // hover (#130). --hover is defined per theme, which is what a state

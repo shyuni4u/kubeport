@@ -9,7 +9,8 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
+        // `/90` in dark for the same reason as Button's default (#150).
+        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80 dark:[a]:hover:bg-primary/90",
         secondary:
           "bg-secondary text-secondary-foreground [a]:hover:bg-hover",
         // Opaque, like its `success` and `warning` siblings. `bg-destructive/10`
@@ -24,9 +25,9 @@ const badgeVariants = cva(
         ghost: "hover:bg-hover hover:text-foreground",
         link: "text-link underline-offset-4 hover:underline",
         success:
-          "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200 [a]:hover:bg-green-200",
+          "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200 [a]:hover:bg-green-200 dark:[a]:hover:bg-green-900",
         warning:
-          "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200 [a]:hover:bg-amber-200",
+          "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200 [a]:hover:bg-amber-200 dark:[a]:hover:bg-amber-900",
         // The fill stays `bg-muted` — a muted chip is a surface, and that is
         // what this variant is for. Only its hover moves to the state token:
         // `bg-muted/80` is *lighter* than the chip it sits in, so hovering a

@@ -1,5 +1,7 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import {
   compositeOver,
@@ -22,13 +24,19 @@ import {
  * resource panel, the editor meta row) and cannot be darkened to interaction
  * weight without making those surfaces heavy. So interaction state got tokens
  * of its own, and this file is where their floors are written down.
+ *
+ * #155 made dark mode reachable, which turned every dark value in the file from
+ * a guess into something users see; #150 was the first one found wrong.
  */
 
 const css = readFileSync(path.resolve(__dirname, "globals.css"), "utf8");
 
+/** The dark token block: `:root { @variant dark { … } }`, emitted twice by Tailwind (see below). */
+const DARK = "@variant dark";
+
 function block(selector: string): string {
-  // The token blocks are top-level and brace-free inside, so the first "}"
-  // after the selector ends them.
+  // The token blocks are brace-free inside, so the first "}" after the
+  // selector's own "{" ends them.
   const start = css.indexOf(`${selector} {`);
   if (start === -1) throw new Error(`no ${selector} block in globals.css`);
   const end = css.indexOf("}", start);
@@ -54,7 +62,7 @@ const SURFACES = ["--background", "--card"] as const;
 
 const THEMES = [
   { name: "light", scope: ":root" },
-  { name: "dark", scope: ".dark" },
+  { name: "dark", scope: DARK },
 ] as const;
 
 /**
@@ -116,7 +124,7 @@ describe("dark-mode surface tokens", () => {
   // Dark mode was never broken; this keeps a later edit from levelling it the
   // way light mode was levelled.
   it.each(["--muted", "--secondary"])("%s is not the page background", (name) => {
-    expect(ratio(".dark", name, "--background")).not.toBe(1);
+    expect(ratio(DARK, name, "--background")).not.toBe(1);
   });
 });
 
@@ -158,6 +166,45 @@ describe.each(["--foreground", "--muted-foreground", "--link"] as const)("%s", (
   it.each(THEMES)("clears 4.5:1 on every text surface in $name mode", ({ scope }) => {
     for (const surface of TEXT_SURFACES) {
       expect(ratio(scope, fg, surface), `${fg} on ${surface}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
+
+/**
+ * Every `*-foreground` token is a label for exactly one fill. Written as pairs
+ * because that is how they are used — `bg-primary text-primary-foreground` —
+ * and because #150 was one of these at 3.42:1 for as long as dark mode existed,
+ * unmeasured because nothing listed the pair.
+ */
+const LABEL_PAIRS = [
+  ["--primary-foreground", "--primary"],
+  ["--sidebar-primary-foreground", "--sidebar-primary"],
+  ["--card-foreground", "--card"],
+  ["--popover-foreground", "--popover"],
+  ["--secondary-foreground", "--secondary"],
+  ["--accent-foreground", "--accent"],
+  ["--sidebar-foreground", "--sidebar"],
+  ["--sidebar-accent-foreground", "--sidebar-accent"],
+] as const;
+
+describe("labels on their fills", () => {
+  // #150: white on the dark --primary was 3.42:1 on every default button and
+  // badge. The label moved, not the fill — see the comment on the token.
+  it.each(THEMES.flatMap((t) => LABEL_PAIRS.map(([fg, bg]) => ({ ...t, fg, bg }))))(
+    "$fg clears 4.5:1 on $bg in $name mode",
+    ({ scope, fg, bg }) => {
+      expect(ratio(scope, fg, bg)).toBeGreaterThanOrEqual(4.5);
+    },
+  );
+
+  // Why #150 moved the label and not the fill. --primary is also the fill of a
+  // checked checkbox, a checked switch and a slider's range, and those are
+  // non-text components under 1.4.11 — the deploy form draws them on a --muted
+  // card. Lowering dark --primary to 0.55 so white could stay would have put
+  // them at 2.88:1 there.
+  it.each(THEMES)("--primary as a checked-control fill clears 3:1 on every surface in $name mode", ({ scope }) => {
+    for (const surface of [...SURFACES, "--muted"] as const) {
+      expect(ratio(scope, "--primary", surface), surface).toBeGreaterThanOrEqual(3);
     }
   });
 });
@@ -245,7 +292,7 @@ describe("--destructive", () => {
   // assertion above — it is written against the token, not the rendered
   // pixel — while still inheriting its real contrast from the row underneath.
   it("has an opaque chip fill in both themes", () => {
-    for (const scope of [":root", ".dark"]) {
+    for (const { scope } of THEMES) {
       expect(() => token(scope, "--destructive-surface")).not.toThrow();
     }
   });
@@ -309,21 +356,57 @@ describe("--slider-track", () => {
 describe("--switch-track", () => {
   // #39 put a Switch on the --muted preview card, where the unchecked track
   // (--input, 0.922) read 1.02:1 — users, who start with it off, saw no
-  // control at all. Same WCAG 1.4.11 floor as --slider-track. Light mode only:
-  // dark mode keeps shadcn's `dark:data-unchecked:bg-input/80` (#155).
-  it("clears 3:1 against every light surface, --muted included", () => {
+  // control at all. Same WCAG 1.4.11 floor as --slider-track. Both themes since
+  // #155: the dark Switch used shadcn's `bg-input/80`, 1.46:1 on the same card.
+  //
+  // The unchecked thumb differs by theme — `bg-background` in light,
+  // `dark:data-unchecked:bg-foreground` in dark — so each is measured against
+  // the track it actually sits on.
+  const THUMB = { light: "--background", dark: "--foreground" } as const;
+
+  it.each(THEMES)("clears 3:1 against every surface in $name mode, --muted included", ({ scope }) => {
     // SURFACES is page and card; the switch that failed sat on a bg-muted card.
     for (const surface of [...SURFACES, "--muted"] as const) {
-      expect(ratio(":root", "--switch-track", surface), surface).toBeGreaterThanOrEqual(
+      expect(ratio(scope, "--switch-track", surface), surface).toBeGreaterThanOrEqual(
         SLIDER_TRACK_MIN_CONTRAST,
       );
     }
   });
 
-  it("leaves the thumb (--background) readable on the track", () => {
-    expect(ratio(":root", "--background", "--switch-track")).toBeGreaterThanOrEqual(
+  it.each(THEMES)("leaves the unchecked thumb readable on the track in $name mode", ({ name, scope }) => {
+    expect(ratio(scope, THUMB[name], "--switch-track")).toBeGreaterThanOrEqual(
       SLIDER_TRACK_MIN_CONTRAST,
     );
+  });
+});
+
+describe("--input (dark)", () => {
+  /**
+   * The outline of an input, select, checkbox or outline button: what
+   * identifies the control, so WCAG 1.4.11's 3:1 (with the tracks' 3.3 margin).
+   * shadcn's `1 0 0 / 15%` was 1.48:1 on the dark page.
+   *
+   * Dark only. Light mode's --input (0.922) is shadcn's and #110–#112 left it,
+   * and light tokens are out of this change's scope; that gap is recorded in
+   * the design spec rather than papered over here.
+   */
+  it("is opaque and clears 3.3:1 on every dark surface, --muted included", () => {
+    for (const surface of [...SURFACES, "--muted"] as const) {
+      expect(ratio(DARK, "--input", surface), surface).toBeGreaterThanOrEqual(
+        SLIDER_TRACK_MIN_CONTRAST,
+      );
+    }
+  });
+
+  // The same token is the field fill at 30% (`dark:bg-input/30`), and
+  // placeholder text is --muted-foreground on it. Lifting the border lifts the
+  // fill, so the placeholder has to be re-measured on it.
+  it("leaves placeholder text readable on the bg-input/30 field fill", () => {
+    const input = rgb(DARK, "--input");
+    for (const surface of [...SURFACES, "--muted"] as const) {
+      const fill = compositeOver(input, 0.3, rgb(DARK, surface));
+      expect(contrastRatio(rgb(DARK, "--muted-foreground"), fill), surface).toBeGreaterThanOrEqual(4.5);
+    }
   });
 });
 
@@ -335,7 +418,7 @@ describe("token blocks", () => {
     "%s is defined in both themes",
     (name) => {
       expect(() => token(":root", name)).not.toThrow();
-      expect(() => token(".dark", name)).not.toThrow();
+      expect(() => token(DARK, name)).not.toThrow();
     },
   );
 
@@ -348,4 +431,83 @@ describe("token blocks", () => {
       expect(css).toContain(`${name}:`);
     },
   );
+});
+
+/**
+ * #155. The dark tokens are written once and reach the page two ways — an
+ * explicit `.dark` on <html>, or no class and an OS in dark mode. That only
+ * holds if Tailwind really expands `@variant dark` into both, with the same
+ * declarations, and the `dark:` utilities follow the same two routes. So the
+ * file is compiled here, with the Tailwind that is installed, rather than
+ * trusted from reading it.
+ */
+describe("compiled dark theme", () => {
+  async function compile(): Promise<string> {
+    const frontend = path.resolve(__dirname, "..");
+    const req = createRequire(path.join(frontend, "package.json"));
+    const tailwindPath = req.resolve("@tailwindcss/postcss");
+    // pnpm does not hoist postcss to the app; take the one Tailwind resolves.
+    const postcss = createRequire(tailwindPath)("postcss");
+    const tailwind = req("@tailwindcss/postcss");
+    // No source scan: the tokens do not depend on it, and one utility is named
+    // inline to see how a `dark:` class compiles.
+    const source =
+      css.replace('@import "tailwindcss";', '@import "tailwindcss" source(none);') +
+      '\n@source inline("dark:bg-card");\n';
+    const result = await postcss([tailwind({ base: frontend, optimize: false })]).process(source, {
+      from: path.join(__dirname, "globals.css"),
+    });
+    return result.css as string;
+  }
+
+  /** Declarations of the first rule with this exact selector, comments dropped. */
+  function declarations(out: string, selector: string, after = 0): string[] {
+    const at = out.indexOf(`${selector} {`, after);
+    if (at === -1) throw new Error(`no \`${selector}\` rule in the compiled CSS`);
+    const body = out.slice(out.indexOf("{", at) + 1, out.indexOf("}", at));
+    return body
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split(";")
+      .map((d) => d.trim())
+      .filter(Boolean);
+  }
+
+  const EXPLICIT = ":root:is(.dark, .dark *)";
+  const SYSTEM = ":root:is(:where(:root):not(.light), :where(:root):not(.light) *)";
+
+  it("emits the dark tokens for .dark and for system preference, identically", async () => {
+    const out = await compile();
+    const explicit = declarations(out, EXPLICIT);
+    const media = out.indexOf("@media (prefers-color-scheme: dark)", out.indexOf(EXPLICIT));
+    expect(media, "no prefers-color-scheme copy after the .dark rule").toBeGreaterThan(-1);
+    const system = declarations(out, SYSTEM, media);
+
+    expect(explicit).toContain("color-scheme: dark");
+    expect(explicit).toContain("--primary-foreground: oklch(0.145 0 0)");
+    expect(system).toEqual(explicit);
+    // And they are the source block, not a subset of it.
+    const source = block(DARK)
+      .slice(block(DARK).indexOf("{") + 1)
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split(";")
+      .map((d) => d.trim())
+      .filter(Boolean);
+    expect(explicit).toEqual(source);
+  });
+
+  it("routes dark: utilities through both the class and the media query", async () => {
+    const out = await compile();
+    expect(out).toContain(".dark\\:bg-card:is(.dark, .dark *)");
+    expect(out).toMatch(
+      /@media \(prefers-color-scheme: dark\) \{\s*\.dark\\:bg-card:is\(:where\(:root\):not\(\.light\), :where\(:root\):not\(\.light\) \*\)/,
+    );
+  });
+
+  // A light choice on a dark OS must stay light, so the media copy excludes
+  // .light; and the light tokens stay unconditional on :root.
+  it("keeps light tokens unconditional and lets .light opt out of the OS", async () => {
+    const out = await compile();
+    expect(declarations(out, ":root")).toContain("--background: oklch(0.97 0 0)");
+    expect(SYSTEM).toContain(":not(.light)");
+  });
 });

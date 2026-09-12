@@ -37,6 +37,12 @@
     "noClusters": "No clusters registered",
     "openMenu": "Open menu",
     "localeSwitchLabel": "Select language",
+    "themeSwitchLabel": "Color theme",
+    "theme": {
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark"
+    },
     "role": {
       "adminDesc": "authors templates",
       "userDesc": "consumes the catalog"

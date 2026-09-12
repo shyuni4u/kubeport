@@ -5,12 +5,14 @@ import { nextResetAt } from "@/lib/demo-reset";
 import { roleFromGroups } from "@/lib/role";
 import { DemoBanner } from "./DemoBanner";
 import { KubeTermsProvider } from "./KubeTermsProvider";
+import type { Theme } from "@/lib/theme";
 import { LocaleSwitch } from "./LocaleSwitch";
+import { ThemeSwitch } from "./ThemeSwitch";
 import { MobileSidebar } from "./MobileSidebar";
 import { Sidebar } from "./Sidebar";
 import { TopBarUserMenu } from "./TopBarUserMenu";
 
-export async function AppShell({ children }: { children: React.ReactNode }) {
+export async function AppShell({ children, theme }: { children: React.ReactNode; theme: Theme }) {
   const me = await apiFetch("/v1/me")
     .then((r) => (r.ok ? r.json() : null))
     .catch(() => null);
@@ -30,6 +32,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
           <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-6">
             <MobileSidebar role={role} />
             <div className="flex-1" />
+            <ThemeSwitch initial={theme} />
             <LocaleSwitch />
             {me ? (
               <TopBarUserMenu email={email} role={role} />

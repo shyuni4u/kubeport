@@ -237,7 +237,7 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
 
   if (!loaded) return <div>{t("loading")}</div>;
   if (clusters.length === 0) {
-    if (err) return <div className="text-red-600 text-sm whitespace-pre">{err}</div>;
+    if (err) return <div className="text-red-600 dark:text-red-400 text-sm whitespace-pre">{err}</div>;
     return <div>{t("noClusters")}</div>;
   }
 
@@ -360,7 +360,7 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
         preview={preview}
         selectionEvent={selectionEvent}
       />
-      {err && <div className="text-red-600 text-sm whitespace-pre">{err}</div>}
+      {err && <div className="text-red-600 dark:text-red-400 text-sm whitespace-pre">{err}</div>}
       <BottomBar
         canSave={canSave}
         dirty={dirty}
@@ -510,7 +510,7 @@ function YamlModeNew({ dirty, onDirty }: ModeProps) {
           <UserFormPreview uiSpecYaml={uispecYaml} />
         </div>
       </details>
-      {err && <div className="text-red-600 text-sm whitespace-pre">{err}</div>}
+      {err && <div className="text-red-600 dark:text-red-400 text-sm whitespace-pre">{err}</div>}
       <BottomBar
         canSave={canSave}
         dirty={dirty}

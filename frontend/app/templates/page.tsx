@@ -31,7 +31,7 @@ export default async function TemplatesPage() {
           {t("new")}
         </Link>
       </div>
-      <table className="w-full bg-white border rounded">
+      <table className="w-full bg-card border rounded">
         <thead className="text-xs text-muted-foreground">
           <tr>
             <th className="p-2 text-left">{t("colName")}</th>

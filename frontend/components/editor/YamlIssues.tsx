@@ -66,7 +66,7 @@ export function YamlIssueList({ validation }: { validation: TemplateYamlValidati
       <div className="font-semibold">{t("summary", { errors, warnings: issues.length - errors })}</div>
       <ul className="space-y-0.5">
         {issues.slice(0, MAX_LISTED).map((issue, k) => (
-          <li key={k} className={issue.severity === "error" ? "text-destructive" : "text-amber-800"}>
+          <li key={k} className={issue.severity === "error" ? "text-destructive" : "text-amber-800 dark:text-amber-400"}>
             {/* The word as well as the colour: the two severities are the
                 difference between "cannot save" and "saves, may not deploy". */}
             <strong>{issue.severity === "error" ? t("error") : t("warning")}</strong>{" "}

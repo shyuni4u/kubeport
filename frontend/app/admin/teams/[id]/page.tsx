@@ -86,7 +86,7 @@ export default async function TeamDetailPage({
       )}
 
       <h2 className="font-semibold mb-2">{t("membersHeading")}</h2>
-      <table className="w-full bg-white border rounded text-sm mb-6">
+      <table className="w-full bg-card border rounded text-sm mb-6">
         <thead className="text-xs text-muted-foreground">
           <tr><th className="p-2 text-left">{t("colEmail")}</th><th className="p-2 text-left">{t("colRole")}</th><th className="p-2"></th></tr>
         </thead>
@@ -100,7 +100,7 @@ export default async function TeamDetailPage({
                   <input type="hidden" name="user_id" value={m.user_id} />
                   <ConfirmSubmit
                     message={t("confirmRemoveMember", { email: m.email ?? m.user_id })}
-                    className="text-red-600 text-sm"
+                    className="text-red-600 dark:text-red-400 text-sm"
                   >
                     {t("removeMember")}
                   </ConfirmSubmit>

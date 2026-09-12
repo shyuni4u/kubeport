@@ -35,7 +35,7 @@ export function ActionForm({
       {state?.error ? (
         <span
           role="alert"
-          className={cn("text-xs text-red-600", className ? "self-center" : "ml-2")}
+          className={cn("text-xs text-red-600 dark:text-red-400", className ? "self-center" : "ml-2")}
         >
           {state.error}
         </span>

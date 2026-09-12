@@ -79,7 +79,7 @@ export function UserFormPreview(props: Props) {
   const err = local ? (local.parseError && t("parseFailed", { detail: local.parseError })) : fetchErr;
   const parsed = local ? local.spec : fetched;
 
-  if (err) return <div className="text-sm text-red-600 whitespace-pre">{err}</div>;
+  if (err) return <div className="text-sm text-red-600 dark:text-red-400 whitespace-pre">{err}</div>;
   if (!parsed) return <div className="text-sm text-muted-foreground">{t("loading")}</div>;
 
   // The trust boundary (#164). Everything below — DynamicForm, its widgets,
@@ -128,7 +128,7 @@ export function UserFormPreview(props: Props) {
   return (
     <PreviewErrorBoundary
       fallback={(message) => (
-        <div className="text-sm text-red-600 whitespace-pre-wrap">
+        <div className="text-sm text-red-600 dark:text-red-400 whitespace-pre-wrap">
           {t("renderFailed", { detail: message })}
         </div>
       )}

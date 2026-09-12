@@ -239,7 +239,7 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult, idleReason
           out ahead of it.
         */}
         {!checking && allAllowed && (
-          <span className="flex items-center gap-1.5 text-green-700">
+          <span className="flex items-center gap-1.5 text-green-700 dark:text-green-400">
             <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             {t("allAllowed")}
           </span>
@@ -267,7 +267,7 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult, idleReason
                 return (
                   <li
                     key={r.key}
-                    className="flex items-start gap-1.5 text-red-700"
+                    className="flex items-start gap-1.5 text-red-700 dark:text-red-400"
                     title={r.reason || undefined}
                   >
                     <XCircle
@@ -286,11 +286,11 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult, idleReason
                 );
               })}
             </ul>
-            <p className="text-red-700">{t("deniedNext")}</p>
+            <p className="text-red-700 dark:text-red-400">{t("deniedNext")}</p>
           </>
         )}
         {!checking && skipped.length > 0 && (
-          <p className="flex items-start gap-1.5 text-amber-700">
+          <p className="flex items-start gap-1.5 text-amber-700 dark:text-amber-400">
             <AlertTriangle
               className="mt-0.5 h-3.5 w-3.5 shrink-0"
               aria-hidden="true"
