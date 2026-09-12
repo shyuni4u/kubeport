@@ -82,6 +82,12 @@ info:
     - errors inside an open SSE stream carry the same `Problem` schema as
       errors before it opened (#82).
 
+    One response on these paths is not a `Problem`, because it is not an
+    error: a trailing slash. `GET /v1/templates/` answers `301` with an HTML
+    body and `POST /v1/releases/` a bodiless `307` — gin normalising the path
+    (#127). A 3xx whose `Location` stays inside `/v1` is that: do not follow
+    it, drop the trailing `/` and call again. Better, never send one.
+
     No fallback echoes the request path back. A 405 does tell an
     **unauthenticated** caller that the path exists — the fallbacks run on the
     router's global middleware, which is outside the `/v1` group's auth gate,

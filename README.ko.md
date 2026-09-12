@@ -65,7 +65,7 @@ Browser ── Next.js (k8s Pod, BFF) ── Go API (in k8s) ── Target k8s c
        (sessions + meta)             k8s RBAC 가 최종 판정자)
 ```
 
-- **프론트엔드**: Next.js 15 (App Router), Tailwind + shadcn/ui, YAML 은 Monaco, 동적 폼은 React Hook Form + Zod. Go API 와 같은 Helm chart 안의 k8s `Deployment` 로 배포 — `helm install` 한 번으로 스택 전체가 올라간다.
+- **프론트엔드**: Next.js 16 (App Router), Tailwind + shadcn/ui, YAML 은 Monaco, 동적 폼은 React Hook Form + Zod. Go API 와 같은 Helm chart 안의 k8s `Deployment` 로 배포 — `helm install` 한 번으로 스택 전체가 올라간다.
 - **백엔드**: Go 1.26+, Gin, `client-go`, `sqlc`, `atlas`, `coreos/go-oidc`.
 - **데이터**: 운영은 PostgreSQL 16 (개발은 SQLite), OIDC + httpOnly 쿠키 세션, 리프레시 토큰은 저장 시 암호화.
 - **보안 모델**: 앱은 UX 레이어일 뿐이다. 모든 k8s 쓰기는 로그인한 사용자의 OIDC id_token 으로 수행되므로, 실제 허용 여부는 Kubernetes RBAC 가 결정한다.
@@ -226,7 +226,7 @@ make e2e
 
 - Docker (로컬 Postgres + dex)
 - Go 1.26+
-- Node 20+, pnpm 10+
+- Node 20.9+ (Next 16 의 engines 하한 — CI·이미지는 24 로 돈다), pnpm 10+
 - [`atlas`](https://atlasgo.io) CLI, `sqlc`
 - `openssl` (0단계 dex 인증서 + 위 설치 명령의 시크릿 생성)
 - (설치 전용) [`helm`](https://helm.sh) 3.x — 차트 스냅샷을 재생성할 거라면 CI 와

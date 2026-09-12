@@ -65,7 +65,7 @@ Browser ── Next.js (k8s Pod, BFF) ── Go API (in k8s) ── Target k8s c
        (sessions + meta)             k8s RBAC is the final authority)
 ```
 
-- **Frontend**: Next.js 15 (App Router), Tailwind + shadcn/ui, Monaco for YAML, React Hook Form + Zod for dynamic forms. Shipped as a k8s `Deployment` alongside the Go API in the same Helm chart — one `helm install` boots the whole stack.
+- **Frontend**: Next.js 16 (App Router), Tailwind + shadcn/ui, Monaco for YAML, React Hook Form + Zod for dynamic forms. Shipped as a k8s `Deployment` alongside the Go API in the same Helm chart — one `helm install` boots the whole stack.
 - **Backend**: Go 1.26+, Gin, `client-go`, `sqlc`, `atlas`, `coreos/go-oidc`.
 - **Data**: PostgreSQL 16 in prod (SQLite for dev); OIDC + httpOnly cookie session, refresh tokens encrypted at rest.
 - **Security model**: the app is a UX layer. Every k8s write is performed with the signed-in user's OIDC id_token, so Kubernetes RBAC decides what actually happens.
@@ -245,7 +245,7 @@ make e2e
 
 - Docker (for local Postgres + dex)
 - Go 1.26+
-- Node 20+, pnpm 10+
+- Node 20.9+ (Next 16's engines floor; CI and the image run 24), pnpm 10+
 - [`atlas`](https://atlasgo.io) CLI (DB migrations), `sqlc`
 - `openssl` (the dex cert in step 0; also generates the install secrets above)
 - (install only) [`helm`](https://helm.sh) 3.x — pin **v3.20.2** if you will

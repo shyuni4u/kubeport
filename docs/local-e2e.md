@@ -43,8 +43,10 @@ a pod come up.
 ## Prereqs (install once per machine)
 
 - Docker Desktop (WSL2 integration on for Windows)
-- Go 1.26+, Node 20+, pnpm 10+
-- `atlas`, `kind` (`v0.23+`), `kubectl`, `jq`
+- Go 1.26+, Node 20.9+ (Next 16's engines floor; CI runs 24), pnpm 10+
+- `atlas`, `kind` (`v0.23+`), `kubectl`
+- `jq` — only for the manual `curl` examples in §9. `scripts/e2e/*` do not use it
+  (node instead), so the §0 path does not need it
 - `openssl`
 
 See [dev-setup.md](dev-setup.md) for Docker Desktop / WSL2 gotchas. Everything

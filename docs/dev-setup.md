@@ -69,8 +69,9 @@ cd kubeport
 # Node.js LTS (nvm 경유 — 버전 전환 쉬움)
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
 source ~/.bashrc
-nvm install --lts
-npm install -g pnpm
+nvm install 24   # CI(.github/workflows/ci.yml)와 frontend/Dockerfile 이 24 로 돈다
+# pnpm 은 frontend/package.json 의 packageManager 버전으로 고정한다 — 버전 없는 전역 설치는 lockfile 과 어긋난다
+corepack enable && corepack prepare pnpm@10.15.0 --activate
 
 # Go (go.mod 가 요구하는 버전 이상)
 # https://go.dev/dl/ 에서 최신 stable 확인 후
@@ -158,7 +159,7 @@ cd <repo root>
 docker --version
 docker compose version
 go version          # go.mod 의 요구 버전 이상이어야 함
-node -v             # LTS (현재 Plan 기준 20.x 이상)
+node -v             # 24.x 권장(CI·이미지와 같음). 최소 20.9.0 — 20.8 이하는 Next 16 engines 때문에 pnpm dev 가 엔진 에러로 죽는다
 pnpm -v
 atlas version
 kubectl version --client

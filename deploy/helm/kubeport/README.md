@@ -761,7 +761,7 @@ an `Ingress`/`Certificate` on `dex.host` (mirrors the main chart's
 `ingress.className` / `tls.certManager.*`).
 
 **k3s must trust the Dex issuer** for the RBAC bindings above to resolve —
-see [`deploy/oci/README.md` §7.6](../../oci/README.md#76). `dex.host` needs
+see [`deploy/oci/README.md` §7.6](../../oci/README.md#76-demo-idp-dex-신뢰-추가). `dex.host` needs
 its own DNS record pointing at the cluster ingress, separate from the main
 `host`.
 
