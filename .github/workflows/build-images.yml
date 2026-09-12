@@ -108,9 +108,11 @@ jobs:
     # and `push:` below); a PR or dispatch run still receives this token,
     # because job permissions cannot depend on the event. Splitting a
     # read-only build job from a publishing one would duplicate every step
-    # below; with every action pinned, the token reaches only pinned action
-    # code. The Dockerfile build itself gets no token: the context is a local
-    # path and no build secrets are passed. Fork PRs get a read-only token.
+    # below; with every third-party action pinned, the token reaches only the
+    # pinned docker/* code and GitHub's own actions/checkout, which is told
+    # not to persist it. The Dockerfile build itself gets no token: the context
+    # is a local path and no build secrets are passed. Fork and dependabot PRs
+    # get a read-only token.
     permissions:
       contents: read
       packages: write
@@ -125,6 +127,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # Nothing after this talks to the remote repository. Without this the
+          # packages: write token sits in .git/config for every later step.
+          persist-credentials: false
 
       - name: Set up QEMU (for arm64 emulation when needed)
         uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
