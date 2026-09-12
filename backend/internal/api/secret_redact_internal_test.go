@@ -16,7 +16,8 @@ func TestIsSecretPath(t *testing.T) {
 		"Secret[0].data.TOKEN":                  true,
 		"Secret.stringData.API_KEY":             true,
 		`Secret["stringData"]`:                  true,
-		"Secret_x.y":                            true,  // kind Secret by the grammar; over-redacting is safe
+		"Secret_x.y":                            false, // kind Secret by the grammar, but not its content
+		"Secret[x].metadata.annotations.note":   false, // not redacted in rendered_yaml either
 		"secret[app].stringData.KEY":            false, // the grammar refuses a lowercase kind
 		"SecretStore[vault].spec.provider":      false,
 		"Deployment[web].spec.replicas":         false,
@@ -39,7 +40,9 @@ func TestRedactAndRestoreSecretValues_EverySpellingOfASecretPath(t *testing.T) {
 	sent, err := json.Marshal(redacted)
 	require.NoError(t, err)
 	var restored map[string]any
-	require.NoError(t, json.Unmarshal(restoreRedactedSecrets(sent, stored), &restored))
+	back, kept := restoreRedactedSecrets(sent, stored)
+	require.True(t, kept)
+	require.NoError(t, json.Unmarshal(back, &restored))
 	require.Equal(t, "sk-1", restored["Secret.stringData.API_KEY"])
 	require.Equal(t, "dG9r", restored["Secret[app].data.T"])
 }

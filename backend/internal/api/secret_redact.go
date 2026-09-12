@@ -19,14 +19,16 @@ import (
 // values out of kubeport's own database would read around that.
 const redactedSecret = "<redacted>"
 
-// isSecretPath reports whether a ui-spec path points into a Secret, whose value
-// is the Secret's content. Asked of the path grammar itself: a selector is
-// optional — `Secret.stringData.KEY` names the template's only Secret (codex
-// review) — and `SecretStore[x]` is another kind. A hand-written copy of that
-// grammar would miss the next spelling it gains (security review).
+// isSecretPath reports whether a ui-spec path points into a Secret's content:
+// its data or stringData, the same fields redactRenderedSecrets hides, so the
+// values and the rendered YAML agree on what is secret (security review). Asked
+// of the path grammar itself: a selector is optional — `Secret.stringData.KEY`
+// names the template's only Secret (codex review) — and `SecretStore[x]` is
+// another kind. A hand-written copy of that grammar would miss the next
+// spelling it gains (security review).
 func isSecretPath(path string) bool {
-	kind, ok := template.PathKind(path)
-	return ok && kind == "Secret"
+	kind, key, ok := template.PathHead(path)
+	return ok && kind == "Secret" && (key == "data" || key == "stringData")
 }
 
 // redactRenderedSecrets returns rendered with every value under a Secret's
@@ -131,10 +133,14 @@ func redactSecretValues(values json.RawMessage) json.RawMessage {
 // not overwrite a Secret with the placeholder. A Secret path with no stored
 // value is dropped, leaving the template's default. Values that are not a
 // JSON object are returned as they are, for the update's own validation.
-func restoreRedactedSecrets(next, previous json.RawMessage) json.RawMessage {
+//
+// kept reports whether any stored value was put back: a request whose
+// validation then fails must not say why in terms of that value (see
+// UpdateRelease), or the answer leaks it a bit at a time.
+func restoreRedactedSecrets(next, previous json.RawMessage) (out json.RawMessage, kept bool) {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(next, &m); err != nil {
-		return next
+		return next, false
 	}
 	var prev map[string]json.RawMessage
 	_ = json.Unmarshal(previous, &prev)
@@ -149,17 +155,18 @@ func restoreRedactedSecrets(next, previous json.RawMessage) json.RawMessage {
 		}
 		if old, ok := prev[k]; ok {
 			m[k] = old
+			kept = true
 		} else {
 			delete(m, k)
 		}
 		changed = true
 	}
 	if !changed {
-		return next
+		return next, false
 	}
-	out, err := json.Marshal(m)
+	b, err := json.Marshal(m)
 	if err != nil {
-		return next
+		return next, false
 	}
-	return out
+	return b, kept
 }

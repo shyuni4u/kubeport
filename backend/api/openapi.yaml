@@ -645,9 +645,11 @@ paths:
                   type: string
                   format: uuid
                   description: |
-                    The release an update is previewing (#196). A path into a
+                    The release an update is previewing (#196). When the
+                    requested version is the release's own, a path into a
                     Secret sent as `"<redacted>"` renders with that release's
-                    stored value, and the response's `rendered_yaml` has every
+                    stored value; for any other version the placeholder is
+                    validated as sent. The response's `rendered_yaml` has every
                     Secret value redacted. Requires the same access as reading
                     the release, and the release must be of this template.
       responses:
@@ -1119,7 +1121,10 @@ paths:
         A release is read back with its Secret values redacted (#196). A path
         into a Secret sent as `"<redacted>"` keeps the value the release
         already has — so values read from `GET /v1/releases/{id}` can be sent
-        back as they are. Any other value replaces it.
+        back as they are. Any other value replaces it. Moving to another
+        version checks a kept value against that version's rules; if the
+        values do not fit, the 400 asks for the Secret values again rather than
+        naming the rule, since the caller was never shown the value.
       parameters: [{ $ref: "#/components/parameters/ReleaseID" }]
       requestBody:
         required: true

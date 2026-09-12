@@ -82,7 +82,14 @@ func (h *Handlers) PreviewRender(c *gin.Context) {
 			writeError(c, http.StatusBadRequest, "validation-error", "release_id is not a release of this template")
 			return
 		}
-		r.Values = restoreRedactedSecrets(r.Values, rel.ValuesJson)
+		// Only for the release's own version, whose rules the stored value
+		// already passed, so the response cannot depend on it. Checked against
+		// another version — a draft whose pattern the caller wrote — a 200 or
+		// 400 would say whether the stored value matches (security review).
+		// There the placeholder stays as sent and is validated as it is.
+		if tv.ID == rel.TemplateVersionID {
+			r.Values, _ = restoreRedactedSecrets(r.Values, rel.ValuesJson)
+		}
 	}
 
 	rendered, err := template.Render(tv.ResourcesYaml, tv.UiSpecYaml, r.Values, template.Labels{

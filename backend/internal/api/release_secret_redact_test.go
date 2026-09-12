@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -172,4 +173,58 @@ func TestPreviewRender_ForSomeoneElsesReleaseIsRefused(t *testing.T) {
 	w := do(t, outsider, http.MethodPost, "/v1/templates/"+tpl+"/render?version=1", bytes.NewReader(body))
 	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
 	require.NotContains(t, w.Body.String(), apiKey)
+}
+
+// addSecretVersion adds version 2 of tpl, whose API key must match pattern,
+// and publishes it when asked.
+func addSecretVersion(t *testing.T, r http.Handler, tpl, pattern string, publish bool) {
+	t.Helper()
+	uiSpec := strings.Replace(secretUISpec, `pattern: "^sk-[a-z-]+$"`, `pattern: "`+pattern+`"`, 1)
+	body, _ := json.Marshal(map[string]any{
+		"authoring_mode": "yaml", "resources_yaml": secretResources, "ui_spec_yaml": uiSpec,
+	})
+	w := do(t, r, http.MethodPost, "/v1/templates/"+tpl+"/versions", bytes.NewReader(body))
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	if publish {
+		w = do(t, r, http.MethodPost, "/v1/templates/"+tpl+"/versions/2/publish", nil)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	}
+}
+
+// Security review: previewing another version with the release named — a draft
+// whose pattern the caller wrote — must not check the stored Secret against
+// that pattern, or the 200/400 answer says whether it matches. The answer is
+// the one the same request gets without the release.
+func TestPreviewRender_AnotherVersionDoesNotCheckTheStoredSecret(t *testing.T) {
+	r, _, id, tpl := seedSecretReleaseOf(t)
+	values := readRelease(t, r, id)["values_json"].(map[string]any)
+	addSecretVersion(t, r, tpl, "^sk-live", false)
+	path := "/v1/templates/" + tpl + "/render?version=2"
+
+	body, _ := json.Marshal(map[string]any{"values": values})
+	without := do(t, r, http.MethodPost, path, bytes.NewReader(body))
+	body, _ = json.Marshal(map[string]any{"values": values, "release_id": id})
+	with := do(t, r, http.MethodPost, path, bytes.NewReader(body))
+
+	require.Equal(t, http.StatusBadRequest, without.Code, without.Body.String())
+	require.Equal(t, without.Code, with.Code, "the stored value matches the draft's pattern; the answer must not say so")
+	require.Equal(t, problemShape(t, without.Body.String()), problemShape(t, with.Body.String()))
+}
+
+// Security review: an update to another version checks a kept Secret against
+// that version's rules. When it does not fit, the refusal says to enter the
+// Secret again — not which rule the stored value broke.
+func TestUpdateRelease_AKeptSecretThatDoesNotFitANewVersionSaysOnlyThat(t *testing.T) {
+	r, _, id, tpl := seedSecretReleaseOf(t)
+	values := readRelease(t, r, id)["values_json"].(map[string]any)
+	addSecretVersion(t, r, tpl, "^x", true)
+
+	body, _ := json.Marshal(map[string]any{"version": 2, "values": values})
+	w := do(t, r, http.MethodPut, "/v1/releases/"+id, bytes.NewReader(body))
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	p := problemShape(t, w.Body.String())
+	require.NotContains(t, p.Detail, "pattern")
+	require.NotContains(t, p.Detail, "^x")
+	require.Contains(t, p.Detail, "enter the Secret values again")
 }

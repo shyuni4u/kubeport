@@ -42,13 +42,25 @@ func parseHead(p string) (string, string, string, error) {
 	return m[1], m[2], strings.TrimPrefix(m[3], "."), nil
 }
 
-// PathKind is the kind a ui-spec path points into, read by the same grammar
-// that applies the path, and false for a path that grammar refuses. Callers
-// that act on a path's kind — redacting what points into a Secret (#196) —
-// ask it rather than re-parsing, so they follow the grammar when it changes.
-func PathKind(p string) (string, bool) {
-	kind, _, _, err := parseHead(p)
-	return kind, err == nil
+// PathHead is the kind a ui-spec path points into and the first key under that
+// resource, read by the same grammar that applies the path; ok is false for a
+// path that grammar refuses. key is "" when the path addresses the resource
+// itself or starts with an index. Callers that act on where a path points —
+// redacting a Secret's data (#196) — ask it rather than re-parsing, so they
+// follow the grammar when it changes.
+func PathHead(p string) (kind, key string, ok bool) {
+	kind, _, rest, err := parseHead(p)
+	if err != nil {
+		return "", "", false
+	}
+	segs, err := parsePathSegments(rest)
+	if err != nil {
+		return "", "", false
+	}
+	if len(segs) > 0 && !segs[0].arr {
+		key = segs[0].key
+	}
+	return kind, key, true
 }
 
 func findDoc(docs []map[string]any, kind, selector string) (map[string]any, error) {
