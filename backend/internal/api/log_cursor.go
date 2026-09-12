@@ -10,13 +10,25 @@ import (
 // positions for (#172). The cursor rides on every log frame as its SSE id, so it
 // grows with the pod count on every line: eight pods with 63-character names
 // come to about 760 bytes a frame, where a release usually runs one to three.
-// Past the bound the stream sends no ids and a reconnect replays from the
-// beginning, as every `all` stream did before — a cost in bandwidth and
-// duplicates, never a gap.
+// Past the bound the stream's ids are noCursorID and a reconnect replays from
+// the beginning, as every `all` stream did before — a cost in bandwidth, never
+// a gap.
 const maxCursorPods = 8
+
+// noCursorID is the id of a stamped log frame on an `all` stream past
+// maxCursorPods. It is deliberately not a cursor, so handing it back starts the
+// stream over (with a `replay` frame) instead of resuming from an older cursor
+// the browser would otherwise still hold.
+const noCursorID = "-"
 
 // maxPodNameLen is Kubernetes' own limit on an object name.
 const maxPodNameLen = 253
+
+// maxCursorLen is the longest cursor parseLogCursor can accept: maxCursorPods
+// items of a longest name, `@`, the longest RFC3339 time (nine fractional
+// digits and an offset, which a hand-written `?since=` may carry) and a
+// separating comma.
+const maxCursorLen = maxCursorPods * (maxPodNameLen + 1 + len(time.RFC3339Nano) + 1)
 
 // formatLogCursor renders per-pod positions as an `instance=all` resume point:
 // `pod@time` pairs sorted by pod and joined with commas, each time in the same
@@ -52,7 +64,13 @@ func parseLogCursor(s string) (map[string]time.Time, bool) {
 	if s == "" {
 		return nil, false
 	}
-	items := strings.Split(s, ",")
+	// Bounded before anything is allocated per item: the value is a header or a
+	// query string the caller controls, and splitting all of it first would let
+	// one request of commas cost a slice far larger than any cursor we hand out.
+	if len(s) > maxCursorLen {
+		return nil, false
+	}
+	items := strings.SplitN(s, ",", maxCursorPods+1)
 	if len(items) > maxCursorPods {
 		return nil, false
 	}

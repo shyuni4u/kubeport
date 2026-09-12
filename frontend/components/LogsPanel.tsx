@@ -359,6 +359,12 @@ function Stream({ releaseId, instance, autoscroll, onReconnect }: StreamProps) {
       // finished, and calling that "failed" would be a lie about a completed Job.
       setStatus(lastError ? "failed" : "ended");
     });
+    // The server starting over although this stream sent it a resume point —
+    // an id it could not read, or a cursor on an `all` stream past its pod
+    // bound (#172). Everything comes again, so what is on screen goes first.
+    // The pane cannot tell on its own: an event with no id still reports the
+    // last id this EventSource saw.
+    es.addEventListener("replay", () => setLines([]));
     // Whether this EventSource has connected before. Every open after the first
     // is the browser reconnecting by itself after a drop.
     let opened = false;

@@ -98,6 +98,10 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 		}
 	}
 
+	// Whether the caller handed us a resume point at all, readable or not. A
+	// stream that then starts over anyway says so first — see replay below.
+	presented := c.Query("since") != "" || c.GetHeader("Last-Event-ID") != ""
+
 	// Take a slot for as long as this request lives. The route's rate limiter
 	// priced the open; this bounds how many a caller keeps (#169).
 	//
@@ -215,6 +219,16 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 		positions[p] = at
 	}
 
+	// A resume point the caller sent but this stream does not apply — an
+	// unreadable Last-Event-ID, or a cursor on an `all` stream past the pod
+	// bound — means everything is sent again from the start. A client that kept
+	// what it had would show it twice, and it cannot tell from the frames: an
+	// SSE event with no id still reports the id before it. So the stream says
+	// so, before anything else.
+	replay := presented &&
+		((want == "all" && (cursor == nil || !emitIDs)) ||
+			(want != "all" && resumeFrom.IsZero()))
+
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	// Not reused after the stream, because of the write deadline below: with no
@@ -263,6 +277,11 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 		}
 		c.SSEvent("end", `{"reason":"all pods stopped emitting"}`)
 		return false
+	}
+
+	if replay {
+		c.SSEvent("replay", `{}`)
+		c.Writer.Flush()
 	}
 
 	c.Stream(func(w io.Writer) bool {
@@ -373,7 +392,15 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 			// A frame with no id leaves the browser's cursor where it was,
 			// which is exactly right.
 			ev := sse.Event{Event: "log", Data: string(body)}
-			if emitIDs && !line.At.IsZero() {
+			if !line.At.IsZero() && want == "all" && !emitIDs {
+				// Past the bound there is no position to give, but there is
+				// still an id: it replaces the cursor the browser kept from when
+				// the release had fewer pods. A reconnect then sends this, which
+				// is not a cursor, and starts over with a `replay` frame — rather
+				// than resuming from positions this stream has since replayed
+				// past, into a pane that already holds those lines.
+				ev.Id = noCursorID
+			} else if !line.At.IsZero() {
 				if want == "all" {
 					if prev, ok := positions[line.Pod]; !ok || line.At.After(prev) {
 						positions[line.Pod] = line.At

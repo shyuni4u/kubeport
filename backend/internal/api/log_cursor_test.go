@@ -62,3 +62,20 @@ func TestLogCursor_RefusesMorePodsThanItCovers(t *testing.T) {
 	_, ok = parseLogCursor(strings.Join(items[:maxCursorPods], ","))
 	require.True(t, ok, "exactly maxCursorPods must still be accepted")
 }
+
+// The value is a header or query string the caller controls, so its size is
+// checked before it is split: a request of nothing but commas must be refused
+// without first becoming a slice of that many strings. The largest cursor that
+// can legitimately exist still fits.
+func TestLogCursor_RefusesAnOversizedValueButNotTheLargestRealOne(t *testing.T) {
+	_, ok := parseLogCursor(strings.Repeat(",", 1<<20))
+	require.False(t, ok)
+
+	items := make([]string, maxCursorPods)
+	for i := range items {
+		name := fmt.Sprintf("%d%s", i, strings.Repeat("a", maxPodNameLen-1))
+		items[i] = name + "@2026-09-09T16:36:36.123456789+09:00"
+	}
+	_, ok = parseLogCursor(strings.Join(items, ","))
+	require.True(t, ok, "the longest cursor a caller can legitimately send was refused")
+}

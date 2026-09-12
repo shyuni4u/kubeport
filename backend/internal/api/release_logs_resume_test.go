@@ -421,6 +421,7 @@ func TestStreamReleaseLogs_AllIgnoresAPlainInstantInTheHeader(t *testing.T) {
 
 	require.Nil(t, applier.sinceSeen, "asked the cluster for a window one instant cannot honour per pod")
 	require.Contains(t, body, "older history", "history a slower pod had not reached was dropped")
+	require.Contains(t, body, "event:replay", "starting over despite a resume point went unannounced")
 }
 
 // A caller with no EventSource hands the same cursor back as `?since=`.
@@ -441,9 +442,10 @@ func TestStreamReleaseLogs_AllResumesFromACursorInSince(t *testing.T) {
 }
 
 // The cursor rides on every frame, so it is bounded. Past the bound an `all`
-// stream carries no ids — and does not act on a cursor either, since the next
-// reconnect would bring back an id it no longer hands out.
-func TestStreamReleaseLogs_AllPastTheCursorBoundReplaysWithoutIds(t *testing.T) {
+// stream hands out no cursor and does not act on one either, since the next
+// reconnect would bring back an id it no longer hands out. It says it is
+// starting over, so a client that kept its lines can drop them first (#172).
+func TestStreamReleaseLogs_AllPastTheCursorBoundReplaysAndSaysSo(t *testing.T) {
 	var instances []k8s.Instance
 	for i := 0; i < 9; i++ {
 		instances = append(instances, k8s.Instance{Name: fmt.Sprintf("web-%d", i)})
@@ -460,7 +462,56 @@ func TestStreamReleaseLogs_AllPastTheCursorBoundReplaysWithoutIds(t *testing.T) 
 
 	require.Nil(t, applier.sinceSeen, "a stream past the cursor bound resumed from a cursor")
 	require.Contains(t, body, "a line")
-	require.NotContains(t, body, "id:", "a stream past the cursor bound handed out an id")
+	require.Contains(t, body, "event:replay", "a stream that ignored the cursor it was sent did not say so")
+	require.Contains(t, body, "id:-\n", "a stream past the cursor bound left the browser's old cursor standing")
+	require.NotContains(t, body, "@2026", "a stream past the cursor bound handed out a cursor")
+}
+
+// ...and coming back under the bound does not resume from the cursor the
+// browser kept from before it went over: the placeholder replaced it, so the
+// stream starts over and says so, instead of resending the lines since that old
+// cursor into a pane the replay already filled.
+func TestStreamReleaseLogs_AllBackUnderTheBoundStartsOverFromThePlaceholder(t *testing.T) {
+	at := time.Date(2026, 9, 9, 7, 36, 36, 0, time.UTC)
+	applier := &fakeK8sApplier{
+		instances:   []k8s.Instance{{Name: "web-1"}, {Name: "web-2"}},
+		logLines:    []string{"from the top"},
+		logLinePods: []string{"web-1"},
+		logLineAt:   at,
+	}
+
+	body := resumeRelease(t, applier, func(r *http.Request) {
+		r.Header.Set("Last-Event-ID", "-")
+	})
+
+	require.Nil(t, applier.sinceSeen)
+	require.Contains(t, body, "event:replay")
+	require.Contains(t, body, "id:"+cursor("web-1", at)+"\n", "back under the bound, the cursor did not return")
+}
+
+// `replay` is only for a resume point that was sent and not applied. A first
+// open and a resume that worked say nothing, or a client would throw away the
+// very lines the resume kept.
+func TestStreamReleaseLogs_NoReplayFrameWhenNothingIsIgnored(t *testing.T) {
+	at := time.Date(2026, 9, 9, 7, 40, 0, 0, time.UTC)
+	for name, tweak := range map[string]func(*http.Request){
+		"first open": func(*http.Request) {},
+		"applied cursor": func(r *http.Request) {
+			r.Header.Set("Last-Event-ID", cursor("web-1", at))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			applier := &fakeK8sApplier{
+				instances: []k8s.Instance{{Name: "web-1"}},
+				logLines:  []string{"x"},
+				logLineAt: at.Add(time.Minute),
+			}
+
+			body := resumeRelease(t, applier, tweak)
+
+			require.NotContains(t, body, "event:replay")
+		})
+	}
 }
 
 // An unstamped line must not advance the cursor. `at` falls back to now so the
@@ -523,6 +574,8 @@ func TestStreamReleaseLogs_AnUnreadableLastEventIDStartsOver(t *testing.T) {
 
 	require.Nil(t, applier.sinceSeen, "an unreadable header was turned into a window")
 	require.Contains(t, body, "from the top")
+	require.Contains(t, body, "event:replay",
+		"the stream started over without saying so, and the pane kept what it already had")
 }
 
 // ...while the same garbage in `?since=` is still refused. That one the caller

@@ -361,6 +361,14 @@ describe("LogsPanel in-stream termination", () => {
   });
 });
 
+// A server-sent `event: replay` frame: the stream is starting over although it
+// was handed a resume point.
+function emitReplay() {
+  const fn = listeners.get("replay");
+  if (!fn) throw new Error("LogsPanel registered no `replay` listener");
+  act(() => fn({ data: "{}" } as MessageEvent));
+}
+
 // #107 in the view most readers actually use. A browser reconnect hands the
 // server the last SSE id the stream carried. When there was one the server
 // resumes — a named instance from its time, `all` from a cursor holding each
@@ -421,5 +429,23 @@ describe("LogsPanel browser reconnect", () => {
 
     expect(screen.getByText(/p1 before the drop/)).toBeInTheDocument();
     expect(screen.getByText(/p2 before the drop/)).toBeInTheDocument();
+  });
+
+  // A stream that carried a cursor can still be answered from the top — the
+  // release grew past the cursor's pod bound between connections (#172). The
+  // server says so with `replay`, and the pane empties before the replay
+  // lands, or every line would be on screen twice.
+  it("empties the pane when the server replays despite the cursor", () => {
+    render(<LogsPanel releaseId="abc" instances={[{ name: "p1" }]} />);
+
+    reopen();
+    emitLog("p1", "before the drop", "p1@2026-09-09T07:36:36.000000000Z");
+    dropConnection();
+    reopen();
+    emitReplay();
+    emitLog("p1", "replayed from the top", "-");
+
+    expect(screen.queryByText(/before the drop/)).not.toBeInTheDocument();
+    expect(screen.getByText(/replayed from the top/)).toBeInTheDocument();
   });
 });
