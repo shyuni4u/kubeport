@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -44,14 +45,15 @@ func releaseTargetProblem(namespace, name string) string {
 
 // checkOwnership asks the cluster whether rendered can be applied as release
 // without taking anything over, and answers the request itself when it
-// cannot. It reports whether the caller should go on to apply.
-func (h *Handlers) checkOwnership(c *gin.Context, cli K8sApplier, op string, ref k8s.ReleaseRef, rendered []byte) bool {
+// cannot. It reports whether the caller should go on to apply. ctx bounds the
+// cluster calls: the caller holds the apply lock around them (#191).
+func (h *Handlers) checkOwnership(c *gin.Context, ctx context.Context, cli K8sApplier, op string, ref k8s.ReleaseRef, rendered []byte) bool {
 	namespace, release := ref.Namespace, ref.Name
 	// An existing release cannot move namespace, so advice that suits a create
 	// ("deploy elsewhere") is impossible on an update; and only a create can
 	// probe objects the caller may not read (see k8s.CheckApply).
 	update := op == "UpdateRelease"
-	check, err := cli.CheckApply(c.Request.Context(), ref, rendered, !update)
+	check, err := cli.CheckApply(ctx, ref, rendered, !update)
 	var mismatch *k8s.NamespaceMismatchError
 	switch {
 	case errors.As(err, &mismatch):

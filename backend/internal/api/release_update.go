@@ -147,13 +147,13 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 	ref := releaseRef(rel)
 	// Held through the apply and the rollback, so no other request's check
 	// for this namespace runs in between (#191).
-	unlock, err := h.lockApply(ctx, rel.ClusterApiUrl, rel.Namespace)
+	applyCtx, unlock, err := h.lockApply(ctx, rel.ClusterApiUrl, rel.Namespace)
 	if err != nil {
 		internalError(c, "UpdateRelease: apply lock", err)
 		return
 	}
 	defer unlock()
-	if !h.checkOwnership(c, cli, "UpdateRelease", ref, rendered) {
+	if !h.checkOwnership(c, applyCtx, cli, "UpdateRelease", ref, rendered) {
 		return
 	}
 	// This update ends the name-only fallback, and it stamps only what it
@@ -163,12 +163,12 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 	// stamping them is harmless if the apply then fails, and a stamping error
 	// stops the update with nothing applied.
 	if ref.NameOnly {
-		if err := cli.StampLeftBehind(ctx, ref, []byte(rel.RenderedYaml), rendered); err != nil {
+		if err := cli.StampLeftBehind(applyCtx, ref, []byte(rel.RenderedYaml), rendered); err != nil {
 			upstreamError(c, "UpdateRelease: stamp previous objects", err)
 			return
 		}
 	}
-	if err := cli.ApplyAll(ctx, rel.Namespace, rendered); err != nil {
+	if err := cli.ApplyAll(applyCtx, rel.Namespace, rendered); err != nil {
 		upstreamError(c, "UpdateRelease: apply", err)
 		return
 	}

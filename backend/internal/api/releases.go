@@ -289,19 +289,19 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 	ref := k8s.ReleaseRef{Namespace: r.Namespace, Name: r.Name, UID: uid}
 	// The check and the apply below must not interleave with another
 	// request's for this namespace (#191).
-	unlock, err := h.lockApply(ctx, cluster.ApiUrl, r.Namespace)
+	applyCtx, unlock, err := h.lockApply(ctx, cluster.ApiUrl, r.Namespace)
 	if err != nil {
 		dropRow()
 		internalError(c, "CreateRelease: apply lock", err)
 		return
 	}
 	defer unlock()
-	if !h.checkOwnership(c, cli, "CreateRelease", ref, rendered) {
+	if !h.checkOwnership(c, applyCtx, cli, "CreateRelease", ref, rendered) {
 		// checkOwnership has answered.
 		dropRow()
 		return
 	}
-	if err := cli.ApplyAll(ctx, r.Namespace, rendered); err != nil {
+	if err := cli.ApplyAll(applyCtx, r.Namespace, rendered); err != nil {
 		// Clean up partially created k8s resources with an independent context
 		// and a timeout so cleanup doesn't hang indefinitely. Only objects with
 		// this release's id (ref is not NameOnly): an unstamped object with the
