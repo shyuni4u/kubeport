@@ -33,6 +33,6 @@ start picks up main rather than a stale cached layer.)
 
 For an install you intend to keep, pin the per-commit tag (every main commit
 publishes one):
-  helm upgrade {{ .Release.Name }} deploy/helm/kubeport --namespace {{ .Release.Namespace }} --reuse-values \
+  helm upgrade {{ .Release.Name }} deploy/helm/kubeport --namespace {{ .Release.Namespace }} --reset-then-reuse-values \
     --set images.backend.tag=sha-<7> --set images.frontend.tag=sha-<7>
 {{- end }}

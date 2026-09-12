@@ -306,6 +306,14 @@ cd frontend
 NODE_EXTRA_CA_CERTS="$(pwd)/../deploy/docker/certs/dex.crt" pnpm dev
 ```
 
+`pnpm dev` sends a looser Content-Security-Policy than production: it adds
+`'unsafe-eval'` for React's dev build and `ws:`/`wss:` for hot reload
+(`frontend/lib/security-headers.ts`). The Playwright specs run against it too,
+so a page that works here can still be blocked live. To see the production
+policy, run `pnpm build && NODE_EXTRA_CA_CERTS=... pnpm start` and watch the
+browser console for "Refused to …" messages — the YAML editor (Monaco, loaded
+from cdn.jsdelivr.net) is the page most likely to hit one.
+
 ### 9. Register the cluster + seed a template
 
 > The token recipe below is documented in full — claims, gotchas, and the
