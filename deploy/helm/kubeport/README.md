@@ -299,6 +299,34 @@ The pod is `<release>-postgres-0`, or `<release>-kubeport-postgres-0` when the
 release name does not contain `kubeport`. With `postgres.embedded=false`, point
 your own `psql` at `postgres.externalUrl`.
 
+### Behaviour changes when upgrading past #268
+
+With `ingress.className=traefik` and `tls.enabled=true`, plain http now
+redirects to https (301) on the app host and the Dex host. The chart renders a
+Traefik `Middleware` (`traefik.io/v1alpha1`) named `<release>-https-redirect`
+and references it from each Ingress that serves TLS, through
+`traefik.ingress.kubernetes.io/router.middlewares`. Middlewares you already list
+in that annotation are kept, after the redirect.
+
+- **Before this, http served the whole app.** The HSTS header was sent, but a
+  browser ignores HSTS it receives over http, so a first visit stayed on http —
+  where the `Secure` auth cookies cannot be stored and login fails with
+  `login_error=expired`.
+- **Opt out** with `--set ingress.httpsRedirect=false` if something in front of
+  the cluster already redirects, or if your Traefik predates the `traefik.io`
+  CRDs (v2.10). The upgrade fails with `no matches for kind "Middleware"` in
+  that second case.
+- **Certificate renewal is unaffected.** cert-manager's HTTP-01 solver gets its
+  own route, and Let's Encrypt follows a redirect to https without checking
+  the certificate.
+
+Verify after the upgrade:
+
+```bash
+curl -sI http://<host>/ | head -3        # 301 with Location: https://<host>/
+curl -sI https://<host>/ | head -1       # the usual answer, not a redirect loop
+```
+
 ### Behaviour changes when upgrading past #253
 
 `dex.enabled=true` with `demo.enabled=false` no longer renders. A
@@ -505,6 +533,12 @@ answers first with its own non-JSON 413. ingress-nginx defaults to 1m — set
 `ingress.annotations."nginx.ingress.kubernetes.io/proxy-body-size": "4m"`.
 Traefik (k3s) has no default limit.
 
+http → https: with `traefik` and `tls.enabled=true` the chart redirects http
+itself (`ingress.httpsRedirect`, default true; see "upgrading past #268"). Other
+classes use their controller's own switch — nginx-ingress redirects by default
+when the Ingress has TLS; GKE needs a `FrontendConfig` with `redirectToHttps`;
+ALB a `listen-ports` + `ssl-redirect` annotation pair.
+
 ### Backend tuning (optional)
 
 Every one of these may be left empty; the backend then uses the default shown.
@@ -704,6 +738,7 @@ its own DNS record pointing at the cluster ingress, separate from the main
 | `demo-namespace.yaml`, `demo-rbac.yaml`, `demo-reset-cronjob.yaml` | `demo.enabled=true`, which requires `dex.enabled=true` |
 | `postgres-{statefulset,service,secret}.yaml` | `postgres.embedded=true` |
 | `ingress.yaml` | `ingress.enabled=true` |
+| `https-redirect-middleware.yaml` (Traefik `Middleware`, http → https) | `ingress.httpsRedirect=true` (default) AND `ingress.className=traefik` AND `tls.enabled=true`, with `ingress.enabled` or `dex.enabled` — each Ingress references it only when it serves TLS (#268) |
 | `certificate.yaml` | `tls.enabled=true` AND `tls.certManager.enabled=true` |
 | `migration-configmap.yaml` (schema.hcl + atlas.hcl) | `migration.enabled=true` (default true) — mounted by the backend Pod's `migrate` initContainer |
 

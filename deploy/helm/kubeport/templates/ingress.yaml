@@ -13,9 +13,9 @@ metadata:
   name: {{ include "kubeport.fullname" . }}
   labels:
     {{- include "kubeport.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
+  {{- with include "kubeport.ingressAnnotations" (dict "root" . "redirect" (and (eq (include "kubeport.httpsRedirect.enabled" .) "true") (ne $tlsSecret ""))) }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- . | nindent 4 }}
   {{- end }}
 spec:
   {{- if .Values.ingress.className }}

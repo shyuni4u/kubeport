@@ -1,0 +1,19 @@
+{{- if and (eq (include "kubeport.httpsRedirect.enabled" .) "true") (or .Values.ingress.enabled .Values.dex.enabled) -}}
+{{- /*
+http -> https for the app and Dex Ingresses (#268). Both reference it through
+the router.middlewares annotation (kubeport.ingressAnnotations). Traefik's
+redirect compares the rebuilt URL with the request's own, so a request that
+already arrived over https passes straight through — one Middleware serves the
+http and https routers alike without a loop.
+*/ -}}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "kubeport.httpsRedirect.name" . }}
+  labels:
+    {{- include "kubeport.labels" . | nindent 4 }}
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+{{- end -}}

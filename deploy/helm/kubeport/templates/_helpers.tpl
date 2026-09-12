@@ -276,3 +276,35 @@ containers sit in different lists.
 {{- end -}}
 {{- $emails -}}
 {{- end -}}
+
+{{/*
+http -> https redirect (#268). "true" when the chart should render the Traefik
+Middleware and reference it: asked for, a Traefik ingress class (the only one
+whose CRD this uses), and TLS terminated in the cluster. Each Ingress adds the
+reference only when it actually has a TLS host, so http never redirects to an
+https that is not served.
+*/}}
+{{- define "kubeport.httpsRedirect.enabled" -}}
+{{- if and .Values.ingress.httpsRedirect (eq (toString .Values.ingress.className) "traefik") .Values.tls.enabled -}}true{{- end -}}
+{{- end -}}
+
+{{- define "kubeport.httpsRedirect.name" -}}
+{{- printf "%s-https-redirect" (include "kubeport.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+Annotations for an Ingress: ingress.annotations, plus the redirect Middleware
+in router.middlewares when `redirect` is true. Merged, not replaced — an
+operator's own middlewares stay, after the redirect so it runs first.
+Call with (dict "root" $ "redirect" <bool>).
+*/}}
+{{- define "kubeport.ingressAnnotations" -}}
+{{- $ann := deepCopy (.root.Values.ingress.annotations | default dict) -}}
+{{- if .redirect -}}
+{{- $key := "traefik.ingress.kubernetes.io/router.middlewares" -}}
+{{- $ref := printf "%s-%s@kubernetescrd" .root.Release.Namespace (include "kubeport.httpsRedirect.name" .root) -}}
+{{- $existing := toString (get $ann $key) -}}
+{{- $_ := set $ann $key (ternary $ref (printf "%s,%s" $ref $existing) (empty $existing)) -}}
+{{- end -}}
+{{- with $ann }}{{ toYaml . }}{{ end -}}
+{{- end -}}
