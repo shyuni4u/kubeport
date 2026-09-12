@@ -950,8 +950,11 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
   created from a demo template before this check existed are kept the same
   way. The reset Job still succeeds, and its `seed` container logs
   `WARN: reset: kept N demo template versions referenced by non-demo releases`;
-  the seeder deprecates any kept version that is not fixture content, so
-  nothing new deploys from it. Delete that release (from its detail page or
+  the seeder deprecates any kept version of a seeded template that is not
+  fixture content, so nothing new deploys from it, and the release holding it
+  can no longer be updated in place (moving it to the current version needs its
+  Secret values entered again). A template a demo visitor created
+  (`demo.allowTemplateCreate=true`) is kept as it is. Delete that release (from its detail page or
   `DELETE /v1/releases/:id`) and the next reset removes the kept versions too —
   re-running the reset before that changes nothing. Creating *new* templates and publishing, deprecating or
   undeprecating versions are also

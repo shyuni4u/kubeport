@@ -78,6 +78,27 @@ func (t *templateSeeder) Run(ctx context.Context) error {
 	return nil
 }
 
+// currentVersions reports, for every fixture, the version its template points
+// at: after Run, a published version with the fixture's content. Seed releases
+// deploy that version. They pinned v1, which a reset no longer keeps when a
+// non-demo release holds another version, and which repair deprecates when it
+// is not the fixture's content (#306).
+func (t *templateSeeder) currentVersions(ctx context.Context) (map[string]int32, error) {
+	out := map[string]int32{}
+	for _, f := range fixtures.All() {
+		tpl, err := t.st.GetTemplateByName(ctx, f.Name)
+		if err != nil {
+			return nil, fmt.Errorf("lookup template %s: %w", f.Name, err)
+		}
+		v, err := t.st.GetTemplateVersionByID(ctx, tpl.CurrentVersionID)
+		if err != nil {
+			return nil, fmt.Errorf("current version of template %s: %w", f.Name, err)
+		}
+		out[f.Name] = v.Version
+	}
+	return out, nil
+}
+
 // create inserts the template with v1 published and v2 draft in one
 // transaction, so a failure halfway cannot leave a template with no version.
 func (t *templateSeeder) create(ctx context.Context, f fixtures.Template) error {

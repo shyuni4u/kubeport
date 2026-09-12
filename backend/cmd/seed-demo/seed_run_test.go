@@ -114,7 +114,16 @@ func seederAgainst(t *testing.T, status int, body string) *Seeder {
 	}))
 	t.Cleanup(srv.Close)
 	c := &apiClient{base: srv.URL, hc: srv.Client(), token: "t"}
-	return &Seeder{admin: c, user: c, cluster: "kind", ns: "demo"}
+	return &Seeder{admin: c, user: c, cluster: "kind", ns: "demo", versions: everyTemplateAt(1)}
+}
+
+// everyTemplateAt maps every seed release's template to version v.
+func everyTemplateAt(v int32) map[string]int32 {
+	m := map[string]int32{}
+	for _, r := range releaseSpecs() {
+		m[r.Template] = v
+	}
+	return m
 }
 
 // A release that is already there is the ordinary re-run and must stay quiet.
@@ -160,7 +169,7 @@ func TestSeederRun_WaitsOutARateLimit(t *testing.T) {
 	t.Cleanup(srv.Close)
 	c := &apiClient{base: srv.URL, hc: srv.Client(), token: "t"}
 	var waited []time.Duration
-	s := &Seeder{admin: c, user: c, cluster: "kind", ns: "demo",
+	s := &Seeder{admin: c, user: c, cluster: "kind", ns: "demo", versions: everyTemplateAt(1),
 		wait: func(_ context.Context, d time.Duration) error { waited = append(waited, d); return nil }}
 
 	if err := s.Run(context.Background()); err != nil {
@@ -187,7 +196,7 @@ func TestSeederRun_GivesUpOnAPersistentRateLimit(t *testing.T) {
 	t.Cleanup(srv.Close)
 	c := &apiClient{base: srv.URL, hc: srv.Client(), token: "t"}
 	var longest time.Duration
-	s := &Seeder{admin: c, user: c, cluster: "kind", ns: "demo",
+	s := &Seeder{admin: c, user: c, cluster: "kind", ns: "demo", versions: everyTemplateAt(1),
 		wait: func(_ context.Context, d time.Duration) error {
 			if d > longest {
 				longest = d
@@ -205,5 +214,50 @@ func TestSeederRun_GivesUpOnAPersistentRateLimit(t *testing.T) {
 	}
 	if longest != seedMaxRetryWait {
 		t.Fatalf("a huge Retry-After must be clamped to %s, waited up to %s", seedMaxRetryWait, longest)
+	}
+}
+
+// #306 security review: seed releases pinned v1. After a reset that kept only
+// another version, or a repair that deprecated v1, that create failed and so
+// did the reset Job. Each release now deploys the version it is given.
+func TestSeederRun_DeploysTheVersionItIsGiven(t *testing.T) {
+	got := map[string]float64{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Template string  `json:"template"`
+			Version  float64 `json:"version"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		got[body.Template] = body.Version
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"x"}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := &apiClient{base: srv.URL, hc: srv.Client(), token: "t"}
+	versions := map[string]int32{}
+	for i, r := range releaseSpecs() {
+		versions[r.Template] = int32(3 + i)
+	}
+	s := &Seeder{admin: c, user: c, cluster: "kind", ns: "demo", versions: versions}
+
+	if err := s.Run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	for tpl, v := range versions {
+		if got[tpl] != float64(v) {
+			t.Errorf("release of %s deployed version %v, want %d", tpl, got[tpl], v)
+		}
+	}
+}
+
+// A template with no version given is a loud failure, not a quiet v1.
+func TestSeederRun_FailsWithoutAVersionForATemplate(t *testing.T) {
+	s := seederAgainst(t, http.StatusCreated, `{"id":"x"}`)
+	s.versions = nil
+
+	err := s.Run(context.Background())
+
+	if err == nil || !strings.Contains(err.Error(), "no seeded version") {
+		t.Fatalf("want a failure naming the missing version, got %v", err)
 	}
 }

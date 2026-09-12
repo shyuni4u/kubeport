@@ -110,6 +110,9 @@ func (c *apiClient) doWithHeader(ctx context.Context, method, path string, body 
 type Seeder struct {
 	admin, user *apiClient
 	cluster, ns string
+	// versions is the version each fixture template's release deploys: its
+	// current one, read after the templates are seeded (#306).
+	versions map[string]int32
 	// wait sleeps between rate-limited attempts; nil means a real timer.
 	// Tests replace it so they do not sleep.
 	wait func(context.Context, time.Duration) error
@@ -181,8 +184,14 @@ func retryAfter(h http.Header) time.Duration {
 func (s *Seeder) Run(ctx context.Context) error {
 	// 201, or a 409 saying the release is already there, are both fine.
 	for _, r := range releaseSpecs() {
+		// Not a fixed v1: a reset can keep only another version, and repair
+		// deprecates a version that is not the fixture's content (#306).
+		version, ok := s.versions[r.Template]
+		if !ok {
+			return fmt.Errorf("create release %s: no seeded version of template %s", r.Name, r.Template)
+		}
 		code, b, err := s.createRelease(ctx, map[string]any{
-			"template": r.Template, "version": 1, "cluster": s.cluster, "namespace": s.ns, "name": r.Name, "values": r.Values,
+			"template": r.Template, "version": version, "cluster": s.cluster, "namespace": s.ns, "name": r.Name, "values": r.Values,
 		})
 		if err != nil {
 			return err

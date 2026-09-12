@@ -87,9 +87,15 @@ func main() {
 			log.Fatalf("reset: %v", err)
 		}
 	}
-	if err := (&templateSeeder{st: pf.st, owner: pf.owner}).Run(ctx); err != nil {
+	ts := &templateSeeder{st: pf.st, owner: pf.owner}
+	if err := ts.Run(ctx); err != nil {
 		log.Fatalf("seed templates: %v", err)
 	}
+	versions, err := ts.currentVersions(ctx)
+	if err != nil {
+		log.Fatalf("seed templates: %v", err)
+	}
+	pf.seeder.versions = versions
 	if err := pf.seeder.Run(ctx); err != nil {
 		log.Fatalf("seed releases: %v", err)
 	}
@@ -209,13 +215,25 @@ func (*preflight) reset(ctx context.Context, dsn, demoDomain string) error {
 		}
 		log.Printf("reset: %s → %d rows", st.what, tag.RowsAffected())
 	}
-	var kept int
-	if err := conn.QueryRow(ctx, `SELECT count(*) FROM template_versions WHERE template_id IN (`+demoTemplates+`)`, like).Scan(&kept); err != nil {
+	// Counted apart. A version a non-demo release holds stays until an operator
+	// deletes that release; one left for any other reason — a demo visitor's
+	// release created while the reset ran, or a statement skipped above — goes
+	// at the next reset, and the warning must not send anyone looking for it.
+	var held, left int
+	if err := conn.QueryRow(ctx, `SELECT
+	    (SELECT count(DISTINCT tv.id) FROM template_versions tv
+	       JOIN releases r ON r.template_version_id = tv.id
+	       JOIN users u ON u.id = r.created_by_user_id
+	      WHERE tv.template_id IN (`+demoTemplates+`) AND coalesce(lower(u.email), '') NOT LIKE lower($1)),
+	    (SELECT count(*) FROM template_versions WHERE template_id IN (`+demoTemplates+`))`, like).Scan(&held, &left); err != nil {
 		return err
 	}
-	if kept > 0 {
+	if held > 0 {
 		log.Printf("WARN: reset: kept %d demo template versions referenced by non-demo releases; "+
-			"the seeder deprecates the ones that are not fixture content", kept)
+			"the seeder deprecates the ones that are not fixture content", held)
+	}
+	if left > held {
+		log.Printf("reset: %d more demo template versions left (a release created during the reset); the next reset collects them", left-held)
 	}
 	return nil
 }
