@@ -1107,8 +1107,8 @@ paths:
         draft — one that was never published, or was published and rolled back —
         with 409.
 
-        A release is read back with its Secret values redacted (#196). A
-        `Secret[...]` path sent as `"<redacted>"` keeps the value the release
+        A release is read back with its Secret values redacted (#196). A path
+        into a Secret sent as `"<redacted>"` keeps the value the release
         already has — so values read from `GET /v1/releases/{id}` can be sent
         back as they are. Any other value replaces it.
       parameters: [{ $ref: "#/components/parameters/ReleaseID" }]
@@ -2281,8 +2281,9 @@ components:
           type: object
           additionalProperties: true
           description: |
-            The values the release was deployed with. Every `Secret[...]` path's
-            value reads as `"<redacted>"` (#196) — see ReleaseDetail.
+            The values the release was deployed with. The value of every path
+            into a Secret (`Secret[name].…`, `Secret[0].…` or `Secret.…`) reads
+            as `"<redacted>"` (#196) — see ReleaseDetail.
         rendered_yaml:
           type: string
           description: |
@@ -2324,8 +2325,9 @@ components:
           type: object
           additionalProperties: true
           description: |
-            The values the release was deployed with. Every `Secret[...]` path's
-            value reads as `"<redacted>"` (#196): the cluster's RBAC decides who
+            The values the release was deployed with. The value of every path
+            into a Secret (`Secret[name].…`, `Secret[0].…` or `Secret.…`) reads
+            as `"<redacted>"` (#196): the cluster's RBAC decides who
             reads a Secret, and a caller may be allowed to write one and not read
             it back. Send `"<redacted>"` back on `PUT /v1/releases/{id}` to keep a
             Secret's value.

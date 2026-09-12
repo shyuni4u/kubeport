@@ -35,6 +35,7 @@ import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 import {
+  keptSecretPaths,
   schemaFromUISpec,
   defaultsFromUISpec,
   normalizeUISpec,
@@ -184,8 +185,9 @@ export function DynamicForm({
   // names dot-free (encoded) and write a thin resolver that decodes values
   // before validation, then returns errors flat-keyed by the encoded names.
   const tv = useTranslations("form.validation");
+  const keptSecrets = useMemo(() => keptSecretPaths(initialValues), [initialValues]);
   const resolver = useMemo<Resolver<FormShape>>(() => {
-    const schema = schemaFromUISpec(spec);
+    const schema = schemaFromUISpec(spec, { keptSecrets });
     // Zod's default messages are English developer strings ("Required",
     // "String must contain at most 80 character(s)"). Translate by issue
     // code so non-k8s users get a plain-language sentence in their locale.
@@ -236,7 +238,7 @@ export function DynamicForm({
       }
       return { values: {}, errors: errors as never };
     };
-  }, [spec, tv]);
+  }, [spec, tv, keptSecrets]);
 
   const defaults = useMemo<FormShape>(() => {
     const flat = { ...defaultsFromUISpec(spec), ...(initialValues ?? {}) };

@@ -17,9 +17,19 @@ import (
 // values out of kubeport's own database would read around that.
 const redactedSecret = "<redacted>"
 
-// secretValuePrefix marks a ui-spec path into a Secret, whose value is the
-// Secret's content.
-const secretValuePrefix = "Secret["
+// isSecretPath reports whether a ui-spec path points into a Secret, whose value
+// is the Secret's content. The path's head is its kind, then either a selector
+// in brackets or nothing at all — `Secret.stringData.KEY` names the template's
+// only Secret (template.parseHead) — so the kind has to end at "[", "." or the
+// end of the path; `SecretStore[x]` is another kind (codex review).
+func isSecretPath(path string) bool {
+	const kind = "Secret"
+	if !strings.HasPrefix(path, kind) {
+		return false
+	}
+	rest := path[len(kind):]
+	return rest == "" || rest[0] == '[' || rest[0] == '.'
+}
 
 // redactRenderedSecrets returns rendered with every value under a Secret's
 // data and stringData replaced by redactedSecret. YAML that does not decode is
@@ -102,7 +112,7 @@ func redactSecretValues(values json.RawMessage) json.RawMessage {
 	}
 	changed := false
 	for k := range m {
-		if strings.HasPrefix(k, secretValuePrefix) {
+		if isSecretPath(k) {
 			m[k] = json.RawMessage(`"` + redactedSecret + `"`)
 			changed = true
 		}
@@ -132,7 +142,7 @@ func restoreRedactedSecrets(next, previous json.RawMessage) json.RawMessage {
 	_ = json.Unmarshal(previous, &prev)
 	changed := false
 	for k, v := range m {
-		if !strings.HasPrefix(k, secretValuePrefix) {
+		if !isSecretPath(k) {
 			continue
 		}
 		var s string

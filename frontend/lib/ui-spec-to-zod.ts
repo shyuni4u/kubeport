@@ -251,7 +251,10 @@ export function normalizeUISpec(spec: UISpec): {
  * form stays usable, and `uiSpecProblems` is what tells the admin which ones
  * dropped out and why.
  */
-export function schemaFromUISpec(spec: UISpec): z.ZodObject<Record<string, ZodTypeAny>> {
+export function schemaFromUISpec(
+  spec: UISpec,
+  opts: { keptSecrets?: ReadonlySet<string> } = {},
+): z.ZodObject<Record<string, ZodTypeAny>> {
   const shape: Record<string, ZodTypeAny> = {};
   for (const f of spec.fields) {
     let zs: ZodTypeAny;
@@ -299,9 +302,36 @@ export function schemaFromUISpec(spec: UISpec): z.ZodObject<Record<string, ZodTy
       default:
         continue;
     }
+    // A release is read back with its Secret values redacted (#196), and the
+    // update form starts from that read. A Secret it came back redacted for
+    // may be sent back unchanged — the server keeps the value it has — so the
+    // placeholder passes whatever the field's own type and constraints are.
+    if (opts.keptSecrets?.has(f.path)) {
+      zs = z.union([z.literal(REDACTED_SECRET), zs]);
+    }
     shape[f.path] = f.required ? zs : zs.optional();
   }
   return z.object(shape);
+}
+
+/** What a release's Secret values read as (#196); see backend secret_redact.go. */
+export const REDACTED_SECRET = "<redacted>";
+
+/**
+ * Whether a ui-spec path points into a Secret: its kind is exactly `Secret`,
+ * followed by a selector in brackets, a dot, or nothing.
+ */
+export function isSecretPath(path: string): boolean {
+  return /^Secret(?:[[.]|$)/.test(path);
+}
+
+/** The Secret paths whose starting value is the redacted placeholder. */
+export function keptSecretPaths(initialValues: Record<string, unknown> | undefined): Set<string> {
+  const kept = new Set<string>();
+  for (const [path, value] of Object.entries(initialValues ?? {})) {
+    if (value === REDACTED_SECRET && isSecretPath(path)) kept.add(path);
+  }
+  return kept;
 }
 
 /**
