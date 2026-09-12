@@ -99,7 +99,10 @@ const payloadTooLargeDetail = "request body exceeds 4 MiB"
 // than any request may carry; answering it on its merits would mean holding
 // the connection for bytes kubeport has already decided not to read. It tells
 // an unauthenticated caller nothing: the cap is the same on every path and is
-// published in the spec.
+// published in the spec. The cost is attribution: auth has not run, so the
+// access log records such a 413 with user="-" even when the request carried a
+// valid token. Nothing ran, so nothing is hidden — join it to the BFF's line by
+// request_id.
 //
 // A body of unknown length (chunked) cannot be judged until it is read, so it
 // is wrapped in a MaxBytesReader and the overflow surfaces at the read, where

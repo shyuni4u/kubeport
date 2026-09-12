@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { PAYLOAD_TOO_LARGE_DETAIL, readBoundedBody } from "@/lib/bff-body";
 import { requestIdFor, upstreamUrl } from "@/lib/bff-path";
 import { bffProblem } from "@/lib/bff-problem";
 import { getSession, getValidToken } from "@/lib/session";
@@ -79,10 +80,20 @@ async function proxy(
   // otherwise leak a per-pod goroutine in the Go backend on each disconnect.
   let upstream: Response;
   try {
+    // Bounded, and only after the session check above: a caller without a
+    // session is refused before a byte of its body is read (#128).
+    let body: Uint8Array<ArrayBuffer> | undefined;
+    if (!["GET", "HEAD"].includes(req.method)) {
+      const read = await readBoundedBody(req);
+      if (read === "too-large") {
+        return bffProblem("payload-too-large", 413, PAYLOAD_TOO_LARGE_DETAIL, requestId);
+      }
+      body = read;
+    }
     upstream = await fetch(url, {
       method: req.method,
       headers,
-      body: ["GET", "HEAD"].includes(req.method) ? undefined : await req.text(),
+      body,
       signal: req.signal,
     });
   } catch (e) {

@@ -99,3 +99,51 @@ describe("BFF proxy — resume header", () => {
     }
   });
 });
+
+// The backend caps bodies at 4 MiB, but the BFF read the whole body into memory
+// before forwarding it, so the cap protected everything except the one process
+// facing the internet (#128).
+describe("BFF proxy — body cap", () => {
+  const MiB = 1024 * 1024;
+
+  function post(body: string) {
+    return POST(
+      new NextRequest(new URL("https://kubeport.enzo.kr/api/v1/templates/preview"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      }),
+      { params: Promise.resolve({ path: ["templates", "preview"] }) },
+    );
+  }
+
+  it("answers an oversized body with the backend's 413 and does not forward it", async () => {
+    const res = await post("a".repeat(4 * MiB + 1));
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({
+      title: "payload-too-large",
+      status: 413,
+      detail: "request body exceeds 4 MiB",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("forwards a body within the cap byte for byte", async () => {
+    await post('{"name":"web"}');
+
+    const sent = fetchMock.mock.calls[0][1].body as Uint8Array;
+    expect(new TextDecoder().decode(sent)).toBe('{"name":"web"}');
+  });
+
+  // Order matters for the machine-client contract: through the BFF, no session
+  // is 401 whatever the size, and nothing of the body is read to find that out.
+  it("still answers 401 first to a caller without a session", async () => {
+    getValidToken.mockResolvedValue(null);
+
+    const res = await post("a".repeat(4 * MiB + 1));
+
+    expect(res.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
