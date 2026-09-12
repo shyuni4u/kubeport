@@ -71,3 +71,26 @@ describe("schemaFromUISpec with kept secrets", () => {
     expect(schema.safeParse(values).success).toBe(false);
   });
 });
+
+// Security review: an update to another version cannot keep a Secret, so the
+// form empties it. An optional Secret left empty would otherwise go out as
+// nothing, or as the ui-spec default, over the running Secret without a word.
+describe("schemaFromUISpec with secrets to enter again", () => {
+  const optional: UISpec = {
+    fields: [
+      { path: "Secret[app].stringData.PASSWORD", label: "Password", type: "string", default: "changeme" },
+    ],
+  };
+  const path = "Secret[app].stringData.PASSWORD";
+
+  it("requires the field even though the ui-spec does not", () => {
+    const schema = schemaFromUISpec(optional, { reenterSecrets: new Set([path]) });
+    expect(schema.safeParse({}).success).toBe(false);
+    expect(schema.safeParse({ [path]: "" }).success).toBe(false);
+    expect(schema.safeParse({ [path]: "s3cret" }).success).toBe(true);
+  });
+
+  it("leaves the field optional otherwise", () => {
+    expect(schemaFromUISpec(optional).safeParse({}).success).toBe(true);
+  });
+});

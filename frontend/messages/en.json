@@ -67,6 +67,7 @@
     "retryLogin": "Sign in again"
   },
   "form": {
+    "secretReenter": "Secret values are not carried to another version. Please enter them again.",
     "validation": {
       "required": "This field is required.",
       "tooSmall": "Must be at least {min}.",

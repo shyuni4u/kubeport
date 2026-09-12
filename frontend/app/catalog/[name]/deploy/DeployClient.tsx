@@ -31,6 +31,8 @@ type Props = {
   spec: UISpec;
   updateReleaseId?: string;
   initialValues?: Record<string, unknown>;
+  /** Secret paths to enter again on a move to another version (#196). */
+  reenterSecrets?: string[];
   /**
    * Pre-filled release name. Computed on the server (demo accounts get a
    * random suffix) so SSR and the first client render agree — deriving it
@@ -97,6 +99,7 @@ export function DeployClient({
   spec,
   updateReleaseId,
   initialValues,
+  reenterSecrets,
   defaultName = "",
   demoNamespace,
 }: Props) {
@@ -532,6 +535,7 @@ export function DeployClient({
         <DynamicForm
           spec={spec}
           initialValues={initialValues}
+          reenterSecrets={reenterSecrets}
           submitLabel={
             submitting
               ? t("submitting")

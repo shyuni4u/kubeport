@@ -44,6 +44,7 @@ export default async function VersionPinnedDeployPage({
   // Non-blocking: if the fetch fails (404/403/etc.) we render the form blank
   // rather than failing the whole page. The user can always re-enter values.
   let initialValues: Record<string, unknown> | undefined;
+  let reenterSecrets: string[] | undefined;
   if (updateReleaseId) {
     const relRes = await apiFetch(`/v1/releases/${updateReleaseId}`);
     if (relRes.ok) {
@@ -53,13 +54,15 @@ export default async function VersionPinnedDeployPage({
       };
       initialValues = rel.values_json;
       // A Secret reads back redacted (#196), and only an update on the same
-      // version can keep it: moving version needs it entered again. Leave
-      // those fields empty rather than starting them from the placeholder.
+      // version can keep it: moving version needs it entered again. Those
+      // fields start empty — not from the placeholder, nor from a ui-spec
+      // default the form would otherwise fill in — and must be filled.
       if (initialValues && rel.template?.version !== version) {
         const kept = keptSecretPaths(initialValues);
         initialValues = Object.fromEntries(
           Object.entries(initialValues).filter(([path]) => !kept.has(path)),
         );
+        reenterSecrets = [...kept];
       }
     }
   }
@@ -80,6 +83,7 @@ export default async function VersionPinnedDeployPage({
       spec={spec}
       updateReleaseId={updateReleaseId}
       initialValues={initialValues}
+      reenterSecrets={reenterSecrets}
       defaultName={defaultName}
     />
   );
