@@ -324,6 +324,21 @@ paths:
 
         The cluster's own status codes are **not** passed through, apart from
         404 — see the `{gv}` route for the mapping, which is shared.
+
+        **What a caller reads depends on who they are** (#124, #283), on this
+        route and on `{gv}` alike:
+
+        - a kubeport admin on a non-demo account, or an editor of at least one
+          team — the callers who can author templates — reads the cluster's
+          whole surface, installed CRDs included;
+        - a demo-domain account reads only what the demo RBAC grants: `v1`,
+          `apps/v1`, `batch/v1`, `authorization.k8s.io/v1`;
+        - any other signed-in caller reads only the built-in workload
+          group/versions: `v1`, `apps/v1`, `batch/v1`, `networking.k8s.io/v1`.
+
+        The index lists only what the caller may read. A group/version they may
+        not read answers exactly like one the cluster does not have
+        (`404 k8s-error` with the fixed detail), and the cluster is not asked.
       parameters:
         - $ref: "#/components/parameters/ClusterName"
       responses:

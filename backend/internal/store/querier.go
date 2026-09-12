@@ -61,6 +61,10 @@ type Querier interface {
 	InsertTemplateV2(ctx context.Context, arg InsertTemplateV2Params) (Template, error)
 	InsertTemplateVersion(ctx context.Context, arg InsertTemplateVersionParams) (TemplateVersion, error)
 	InsertTemplateVersionV2(ctx context.Context, arg InsertTemplateVersionV2Params) (TemplateVersion, error)
+	// Whether the user behind an OIDC subject is an editor of at least one team,
+	// the role that may author that team's templates (ensureTeamEditor). A subject
+	// with no users row yet is not.
+	IsTeamEditorBySubject(ctx context.Context, oidcSubject string) (bool, error)
 	ListAllReleases(ctx context.Context, arg ListAllReleasesParams) ([]ListAllReleasesRow, error)
 	ListClusters(ctx context.Context) ([]Cluster, error)
 	// Releases created by any user whose email is in the demo domain ($1, e.g.

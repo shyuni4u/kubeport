@@ -32,8 +32,8 @@ const sampleOpenAPIIndex = `{
   "extra": "kept"
 }`
 
-func TestFilterOpenAPIIndexForDemo_KeepsOnlyDemoGroupVersions(t *testing.T) {
-	out, err := filterOpenAPIIndexForDemo([]byte(sampleOpenAPIIndex))
+func TestFilterOpenAPIIndex_DemoKeepsOnlyDemoGroupVersions(t *testing.T) {
+	out, err := filterOpenAPIIndex([]byte(sampleOpenAPIIndex), openapiViewDemo.groupVersions())
 	require.NoError(t, err)
 
 	var doc struct {
@@ -57,9 +57,36 @@ func TestFilterOpenAPIIndexForDemo_KeepsOnlyDemoGroupVersions(t *testing.T) {
 	require.NotContains(t, string(out), "rbac.authorization.k8s.io")
 }
 
-func TestFilterOpenAPIIndexForDemo_RefusesWhatIsNotAnIndex(t *testing.T) {
+// #283: a signed-in caller who cannot author templates reads the built-in
+// workload group/versions — no CRDs, no RBAC or authorization groups.
+func TestFilterOpenAPIIndex_BuiltinKeepsOnlyWorkloadGroupVersions(t *testing.T) {
+	index := strings.Replace(sampleOpenAPIIndex,
+		`"apis/batch/v1"`,
+		`"apis/networking.k8s.io/v1": {"serverRelativeURL": "/openapi/v3/apis/networking.k8s.io/v1?hash=N"},
+    "apis/batch/v1"`, 1)
+	out, err := filterOpenAPIIndex([]byte(index), openapiViewBuiltin.groupVersions())
+	require.NoError(t, err)
+
+	var doc struct {
+		Paths map[string]json.RawMessage `json:"paths"`
+	}
+	require.NoError(t, json.Unmarshal(out, &doc))
+	keys := make([]string, 0, len(doc.Paths))
+	for k := range doc.Paths {
+		keys = append(keys, k)
+	}
+	require.ElementsMatch(t, []string{"api/v1", "apis/apps/v1", "apis/batch/v1", "apis/networking.k8s.io/v1"}, keys)
+}
+
+func TestOpenAPIView_FullHidesNothing(t *testing.T) {
+	require.Nil(t, openapiViewFull.groupVersions())
+	require.NotNil(t, openapiViewBuiltin.groupVersions())
+	require.NotNil(t, openapiViewDemo.groupVersions())
+}
+
+func TestFilterOpenAPIIndex_RefusesWhatIsNotAnIndex(t *testing.T) {
 	for _, body := range []string{`not json`, `{"openapi":"3.0.0"}`, `{"paths":[]}`, `[]`} {
-		_, err := filterOpenAPIIndexForDemo([]byte(body))
+		_, err := filterOpenAPIIndex([]byte(body), demoOpenAPIGroupVersions)
 		require.Error(t, err, body)
 	}
 }

@@ -146,6 +146,24 @@ func (q *Queries) InsertTeamMembership(ctx context.Context, arg InsertTeamMember
 	return i, err
 }
 
+const isTeamEditorBySubject = `-- name: IsTeamEditorBySubject :one
+SELECT EXISTS (
+  SELECT 1 FROM team_memberships m
+    JOIN users u ON u.id = m.user_id
+   WHERE u.oidc_subject = $1 AND m.role = 'editor'
+)
+`
+
+// Whether the user behind an OIDC subject is an editor of at least one team,
+// the role that may author that team's templates (ensureTeamEditor). A subject
+// with no users row yet is not.
+func (q *Queries) IsTeamEditorBySubject(ctx context.Context, oidcSubject string) (bool, error) {
+	row := q.db.QueryRow(ctx, isTeamEditorBySubject, oidcSubject)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listTeamMembers = `-- name: ListTeamMembers :many
 SELECT tm.user_id, tm.team_id, tm.role, tm.created_at, u.email, u.display_name AS user_display_name
   FROM team_memberships tm

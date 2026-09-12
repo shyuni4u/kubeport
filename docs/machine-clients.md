@@ -319,6 +319,14 @@ AlreadyExists/Conflict/Unauthorized). "User x cannot create deployments" 는 배
 | 그 외 4xx (429 포함) | `502 k8s-error` | 상황에 따라 |
 | 5xx | `502 k8s-error` | ○ 대개 일시적 |
 
+**무엇이 보이는지는 호출자에 따라 다르다** ([#124](https://github.com/shyuni4u/kubeport/issues/124),
+[#283](https://github.com/shyuni4u/kubeport/issues/283)). 템플릿을 저작할 수 있는 호출자 — 데모가 아닌
+kubeport 관리자, 또는 팀 하나 이상의 editor — 는 CRD 를 포함한 전체를 읽는다. 데모 계정은 데모 RBAC 이
+주는 `v1`·`apps/v1`·`batch/v1`·`authorization.k8s.io/v1` 만, 그 밖의 로그인 사용자는 내장 워크로드
+`v1`·`apps/v1`·`batch/v1`·`networking.k8s.io/v1` 만 읽는다. 인덱스에는 읽을 수 있는 것만 나오고, 읽을
+수 없는 group/version 은 클러스터에 묻지 않고 **없는 것과 똑같이** `404 k8s-error`(고정 문장)로 답한다
+— 그래서 404 만으로는 "클러스터에 없다"와 "나에게 안 보인다"를 가를 수 없다.
+
 401 을 접는 게 핵심이다. 그대로 흘리면 "**kubeport** 세션이 잘못됐다"로 읽혀서 클라이언트가 재로그인
 → 똑같이 거부되는 토큰 획득 → 무한 반복이 된다. `cluster-auth-denied` 는 "kubeport 은 나를 알지만
 **클러스터가** 나를 거부했다"는 뜻이고, 재로그인으로는 절대 풀리지 않는다. 업스트림 429 를 접는

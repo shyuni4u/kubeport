@@ -50,12 +50,12 @@ func indexPathGroupVersion(p string) (string, bool) {
 	}
 }
 
-// filterOpenAPIIndexForDemo keeps only the index entries a demo caller may
-// read. Every other top-level field and each kept entry's value
+// filterOpenAPIIndex keeps only the index entries whose group/version is in
+// allow. Every other top-level field and each kept entry's value
 // (serverRelativeURL) pass through untouched. A body that is not an index —
 // no "paths" object — is an error rather than something to pass through
 // unfiltered.
-func filterOpenAPIIndexForDemo(body []byte) ([]byte, error) {
+func filterOpenAPIIndex(body []byte, allow map[string]bool) ([]byte, error) {
 	var doc map[string]json.RawMessage
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return nil, err
@@ -64,9 +64,9 @@ func filterOpenAPIIndexForDemo(body []byte) ([]byte, error) {
 	if err := json.Unmarshal(doc["paths"], &paths); err != nil || paths == nil {
 		return nil, errOpenAPIIndexShape
 	}
-	kept := make(map[string]json.RawMessage, len(demoOpenAPIGroupVersions))
+	kept := make(map[string]json.RawMessage, len(allow))
 	for p, v := range paths {
-		if gv, ok := indexPathGroupVersion(p); ok && demoAllowsGroupVersion(gv) {
+		if gv, ok := indexPathGroupVersion(p); ok && allow[gv] {
 			kept[p] = v
 		}
 	}

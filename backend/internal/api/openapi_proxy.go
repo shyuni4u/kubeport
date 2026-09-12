@@ -23,11 +23,11 @@ type openapiCacheKey struct {
 	cluster string
 	user    string // oidc subject
 	gv      string // "" for the index, "apps/v1" etc. otherwise
-	// restricted is whether the caller got the demo-filtered view (#124). It is
+	// view is how much of the surface the caller was shown (#124, #283). It is
 	// in the key, not inferred from the subject, so an entry can never be served
-	// across that boundary even if the same subject's demo status changed within
-	// the TTL.
-	restricted bool
+	// across that boundary when the same subject's demo status or team role
+	// changed within the TTL.
+	view openapiView
 }
 
 type openapiCacheEntry struct {
@@ -121,20 +121,26 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 		return
 	}
 
-	// A demo caller reads only the group/versions the demo RBAC covers (#124).
-	// Anything else answers exactly like a group/version the cluster does not
-	// have — the same status, kind and detail as the upstream-404 branch in
-	// writeUpstreamOpenAPIError gives a non-admin — and without asking the
-	// cluster, so the response cannot tell "hidden" from "absent".
-	demo := h.isDemoCaller(c)
-	if demo && gv != "" && !demoAllowsGroupVersion(gv) {
+	// A caller who cannot author templates reads only an allowlist (#124, #283,
+	// openapi_view.go). Anything else answers exactly like a group/version the
+	// cluster does not have — the same status, kind and detail as the
+	// upstream-404 branch in writeUpstreamOpenAPIError gives a non-admin — and
+	// without asking the cluster, so the response cannot tell "hidden" from
+	// "absent".
+	view, err := h.openapiViewFor(c)
+	if err != nil {
+		internalError(c, "proxyOpenAPI: resolve the caller's view", err)
+		return
+	}
+	allow := view.groupVersions()
+	if allow != nil && gv != "" && !allow[gv] {
 		writeError(c, http.StatusNotFound, "k8s-error", "this cluster has no such group/version")
 		return
 	}
 
-	// The key carries the caller's subject, so a demo caller's filtered index
-	// is never served to anyone else, nor anyone else's full one to them.
-	key := openapiCacheKey{cluster: name, user: u.Subject, gv: gv, restricted: demo}
+	// The key carries the caller's subject, so a filtered index is never served
+	// to anyone else, nor anyone else's full one to them.
+	key := openapiCacheKey{cluster: name, user: u.Subject, gv: gv, view: view}
 	if e, ok := h.openapi.cache.Get(key); ok && time.Since(e.storedAt) < openapiTTL {
 		c.Data(http.StatusOK, e.contentTy, e.body)
 		return
@@ -217,13 +223,14 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 		ct = "application/json"
 	}
 	// The index names every group/version the cluster serves, installed CRDs
-	// included. A demo caller gets only the demo ones (#124), filtered before
-	// caching so the cached copy under their subject is the filtered one. An
-	// index this cannot parse is refused, not passed through whole.
-	if demo && gv == "" {
-		filtered, err := filterOpenAPIIndexForDemo(body)
+	// included. A restricted view gets only its allowlist (#124, #283),
+	// filtered before caching so the cached copy under their subject is the
+	// filtered one. An index this cannot parse is refused, not passed through
+	// whole.
+	if allow != nil && gv == "" {
+		filtered, err := filterOpenAPIIndex(body, allow)
 		if err != nil {
-			logWithheld(c, "proxyOpenAPI: filter index for demo caller, cluster "+name, err)
+			logWithheld(c, "proxyOpenAPI: filter index for a restricted caller, cluster "+name, err)
 			writeError(c, http.StatusBadGateway, "k8s-error", "the cluster's OpenAPI index could not be read")
 			return
 		}

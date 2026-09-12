@@ -40,5 +40,15 @@ DELETE FROM team_memberships WHERE team_id = $1 AND user_id = $2;
 -- name: GetTeamMembership :one
 SELECT * FROM team_memberships WHERE team_id = $1 AND user_id = $2;
 
+-- name: IsTeamEditorBySubject :one
+-- Whether the user behind an OIDC subject is an editor of at least one team,
+-- the role that may author that team's templates (ensureTeamEditor). A subject
+-- with no users row yet is not.
+SELECT EXISTS (
+  SELECT 1 FROM team_memberships m
+    JOIN users u ON u.id = m.user_id
+   WHERE u.oidc_subject = $1 AND m.role = 'editor'
+);
+
 -- name: CountTemplatesForTeam :one
 SELECT COUNT(*) FROM templates WHERE owning_team_id = $1;
