@@ -47,12 +47,20 @@ fields:
   - path: Secret[app-secret].stringData.API_KEY
     label: "API key"
     type: string
+    pattern: "^sk-[a-z-]+$"
     required: true
 `
 
 const apiKey = "sk-live-do-not-leak"
 
 func seedSecretRelease(t *testing.T) (http.Handler, *fakeK8sApplier, string) {
+	t.Helper()
+	r, applier, id, _ := seedSecretReleaseOf(t)
+	return r, applier, id
+}
+
+// seedSecretReleaseOf is seedSecretRelease that also returns the template name.
+func seedSecretReleaseOf(t *testing.T) (http.Handler, *fakeK8sApplier, string, string) {
 	t.Helper()
 	r, applier := newTestRouterWithK8s(t)
 	clusterName := seedCluster(t, r)
@@ -76,7 +84,7 @@ func seedSecretRelease(t *testing.T) (http.Handler, *fakeK8sApplier, string) {
 	require.Contains(t, string(applier.applied[len(applier.applied)-1]), apiKey, "the cluster gets the real value")
 	var created map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
-	return r, applier, created["id"].(string)
+	return r, applier, created["id"].(string), tpl
 }
 
 func readRelease(t *testing.T, r http.Handler, id string) map[string]any {
@@ -120,11 +128,48 @@ func TestUpdateRelease_TheRedactedPlaceholderKeepsTheSecret(t *testing.T) {
 	require.Contains(t, applied, "replicas: 3")
 	readRelease(t, r, id)
 
-	values["Secret[app-secret].stringData.API_KEY"] = "rotated"
+	values["Secret[app-secret].stringData.API_KEY"] = "sk-rotated"
 	body, _ = json.Marshal(map[string]any{"version": 1, "values": values})
 	w = do(t, r, http.MethodPut, "/v1/releases/"+id, bytes.NewReader(body))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	applied = string(applier.applied[len(applier.applied)-1])
-	require.Contains(t, applied, "rotated")
+	require.Contains(t, applied, "sk-rotated")
 	require.NotContains(t, applied, apiKey)
+}
+
+// codex review: the update form previews as the user edits, sending the same
+// placeholder. A Secret whose constraints the placeholder does not meet — here
+// a pattern — made every preview 400, and with it the permission check built
+// from the preview. Naming the release renders the stored value instead, and
+// the preview comes back redacted.
+func TestPreviewRender_ForAReleaseKeepsItsSecretAndRedactsTheOutput(t *testing.T) {
+	r, _, id, tpl := seedSecretReleaseOf(t)
+	values := readRelease(t, r, id)["values_json"].(map[string]any)
+	path := "/v1/templates/" + tpl + "/render?version=1"
+
+	body, _ := json.Marshal(map[string]any{"values": values})
+	w := do(t, r, http.MethodPost, path, bytes.NewReader(body))
+	require.Equal(t, http.StatusBadRequest, w.Code, "without the release the placeholder fails the pattern: %s", w.Body.String())
+
+	body, _ = json.Marshal(map[string]any{"values": values, "release_id": id})
+	w = do(t, r, http.MethodPost, path, bytes.NewReader(body))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NotContains(t, w.Body.String(), apiKey, "the preview must not show what the read hid")
+	var preview struct {
+		RenderedYAML string `json:"rendered_yaml"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &preview))
+	require.Contains(t, preview.RenderedYAML, "API_KEY: <redacted>")
+}
+
+// Putting stored values back takes the same access as reading them.
+func TestPreviewRender_ForSomeoneElsesReleaseIsRefused(t *testing.T) {
+	r, _, id, tpl := seedSecretReleaseOf(t)
+	values := readRelease(t, r, id)["values_json"].(map[string]any)
+	outsider := newPlainUserRouter(t, testStore(t), randSuffix())
+
+	body, _ := json.Marshal(map[string]any{"values": values, "release_id": id})
+	w := do(t, outsider, http.MethodPost, "/v1/templates/"+tpl+"/render?version=1", bytes.NewReader(body))
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	require.NotContains(t, w.Body.String(), apiKey)
 }

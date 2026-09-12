@@ -641,6 +641,15 @@ paths:
                 values:
                   type: object
                   additionalProperties: true
+                release_id:
+                  type: string
+                  format: uuid
+                  description: |
+                    The release an update is previewing (#196). A path into a
+                    Secret sent as `"<redacted>"` renders with that release's
+                    stored value, and the response's `rendered_yaml` has every
+                    Secret value redacted. Requires the same access as reading
+                    the release, and the release must be of this template.
       responses:
         "200":
           description: OK

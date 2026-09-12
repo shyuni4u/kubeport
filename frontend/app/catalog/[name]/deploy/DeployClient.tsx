@@ -280,7 +280,10 @@ export function DeployClient({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ values }),
+            // An update names its release, so a Secret it left as the redacted
+            // placeholder previews with the stored value, redacted again in
+            // the response (#196).
+            body: JSON.stringify(updateReleaseId ? { values, release_id: updateReleaseId } : { values }),
           },
         );
         if (!res.ok) {
