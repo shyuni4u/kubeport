@@ -143,7 +143,11 @@ describe("patternProblem", () => {
     expect(patternProblem("^[\uDE00]$")).toBe("dialect");
   });
 
-  // The analysis runs on every keystroke in the editor preview too.
+  // The analysis runs on every keystroke in the editor preview too. It stops at
+  // a fixed step budget, so it cannot grow without bound, and a growth ratio
+  // would not separate anything; this only catches the budgeted work itself
+  // becoming slow. Best of three against a generous limit, so a loaded runner
+  // does not fail it (#297).
   it.each([
     "(?:[a-z]-)*".repeat(18),
     "[a-z]*".repeat(33),
@@ -152,9 +156,13 @@ describe("patternProblem", () => {
     "(?:(?:(?:(?:a|b|c|d|e|f|g|h|i|j)*)*)*)*".repeat(4),
     "[\\w.-]".repeat(28),
   ])("decides %s quickly", (pattern) => {
-    const started = performance.now();
-    patternProblem(pattern);
-    expect(performance.now() - started).toBeLessThan(200);
+    let best = Infinity;
+    for (let k = 0; k < 3 && best >= 50; k++) {
+      const started = performance.now();
+      patternProblem(pattern);
+      best = Math.min(best, performance.now() - started);
+    }
+    expect(best).toBeLessThan(2000);
   });
 });
 
@@ -188,6 +196,31 @@ function adversarialInputs(pattern: string): string[] {
   return out;
 }
 
+// A wall-clock budget per input flaked on a loaded runner (#297). Judge each
+// input by how much slower matching gets from a quarter of its length to all of
+// it instead: linear matching grows about 4x, catastrophic backtracking by
+// orders of magnitude. The floor keeps timer noise on sub-millisecond runs from
+// failing the test: it sits ten times above the slowest accepted pattern
+// measured (~15ms, an image reference at 256 characters), and still below a
+// keystroke stall worth refusing — `^(a|a)*$` at 24 characters takes ~200ms and
+// fails it. Small and large runs alternate, best of three, so load lands on
+// both; a run already under 5ms is not repeated.
+const GROWTH_LIMIT = 10;
+const FLOOR_MS = 150;
+function matchGrowth(re: RegExp, small: string, large: string): { small: number; large: number } {
+  let s = Infinity;
+  let l = Infinity;
+  for (let k = 0; k < 3 && l >= 5; k++) {
+    let started = performance.now();
+    re.test(small);
+    s = Math.min(s, performance.now() - started);
+    started = performance.now();
+    re.test(large);
+    l = Math.min(l, performance.now() - started);
+  }
+  return { small: s, large: l };
+}
+
 // The rule is judged by what the browser does, not by the shape it looks for:
 // everything the table accepts has to stay fast on inputs chosen to make it
 // backtrack, at the longest value the form checks (#187).
@@ -203,13 +236,13 @@ describe("patterns patternProblem accepts run quickly in the browser's engine", 
       // Not valid in Unicode mode: the form leaves such values to the API.
     }
     for (const re of regexes) for (const input of adversarialInputs(pattern)) {
-      let best = Infinity;
-      for (let k = 0; k < 3 && best >= 5; k++) {
-        const started = performance.now();
-        re.test(input);
-        best = Math.min(best, performance.now() - started);
-      }
-      expect(best, JSON.stringify(input.slice(0, 6))).toBeLessThan(50);
+      // The same input at a quarter of its length, ending in the same breaking character.
+      const quarter = input.slice(0, Math.floor((input.length - 1) / 4)) + input.slice(-1);
+      const { small, large } = matchGrowth(re, quarter, input);
+      expect(
+        large,
+        `${JSON.stringify(input.slice(0, 6))}: ${large.toFixed(2)}ms vs ${small.toFixed(2)}ms at a quarter of the length`,
+      ).toBeLessThan(Math.max(small * GROWTH_LIMIT, FLOOR_MS));
     }
   });
 });

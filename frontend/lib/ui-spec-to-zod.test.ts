@@ -760,10 +760,11 @@ describe("normalizeUISpec", () => {
     const { spec, problems } = normalizeUISpec(raw);
     expect((spec.fields[0] as { pattern?: string }).pattern).toBeUndefined();
     expect(problems).toEqual(["fields[0].pattern"]);
-    // Defence in depth for a caller that skips normalizeUISpec.
-    const started = Date.now();
+    // Defence in depth for a caller that skips normalizeUISpec. The value does
+    // not match `^(a+)+$`, so success proves the pattern was never applied; had
+    // it been, this call would backtrack for longer than vitest's timeout. No
+    // wall-clock budget: those flake on a loaded runner (#297).
     expect(schemaFromUISpec(raw).safeParse({ a: "a".repeat(40) + "!" }).success).toBe(true);
-    expect(Date.now() - started).toBeLessThan(1000);
   });
 
   it("sets aside a pattern longer than 200 characters", () => {
