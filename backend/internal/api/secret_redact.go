@@ -127,6 +127,22 @@ func redactSecretValues(values json.RawMessage) json.RawMessage {
 	return out
 }
 
+// sendsRedactedSecret reports whether values carry the redacted placeholder
+// for any Secret path. Values that are not a JSON object carry none.
+func sendsRedactedSecret(values json.RawMessage) bool {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(values, &m); err != nil {
+		return false
+	}
+	for k, v := range m {
+		var s string
+		if isSecretPath(k) && json.Unmarshal(v, &s) == nil && s == redactedSecret {
+			return true
+		}
+	}
+	return false
+}
+
 // restoreRedactedSecrets puts back the stored value of every Secret path that
 // next sends as redactedSecret — a form filled from the release's own
 // redacted read, submitted without touching that field — so an update does

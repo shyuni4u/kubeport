@@ -211,20 +211,39 @@ func TestPreviewRender_AnotherVersionDoesNotCheckTheStoredSecret(t *testing.T) {
 	require.Equal(t, problemShape(t, without.Body.String()), problemShape(t, with.Body.String()))
 }
 
-// Security review: an update to another version checks a kept Secret against
-// that version's rules. When it does not fit, the refusal says to enter the
-// Secret again — not which rule the stored value broke.
-func TestUpdateRelease_AKeptSecretThatDoesNotFitANewVersionSaysOnlyThat(t *testing.T) {
-	r, _, id, tpl := seedSecretReleaseOf(t)
-	values := readRelease(t, r, id)["values_json"].(map[string]any)
-	addSecretVersion(t, r, tpl, "^x", true)
+// codex and security review: an update to another version must not check a
+// stored Secret against that version's rules — fail or apply would say whether
+// it fits a pattern an editor chose. The placeholder is refused outright on a
+// version change, the same answer whether the stored value fits or not.
+func TestUpdateRelease_MovingVersionRefusesAKeptSecretWhateverItsValue(t *testing.T) {
+	answers := map[string]problem{}
+	for name, pattern := range map[string]string{
+		"a pattern the stored value fits":   "^sk-live",
+		"a pattern the stored value misses": "^x",
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, applier, id, tpl := seedSecretReleaseOf(t)
+			values := readRelease(t, r, id)["values_json"].(map[string]any)
+			addSecretVersion(t, r, tpl, pattern, true)
+			applied := len(applier.applied)
 
-	body, _ := json.Marshal(map[string]any{"version": 2, "values": values})
-	w := do(t, r, http.MethodPut, "/v1/releases/"+id, bytes.NewReader(body))
+			body, _ := json.Marshal(map[string]any{"version": 2, "values": values})
+			w := do(t, r, http.MethodPut, "/v1/releases/"+id, bytes.NewReader(body))
 
-	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-	p := problemShape(t, w.Body.String())
-	require.NotContains(t, p.Detail, "pattern")
-	require.NotContains(t, p.Detail, "^x")
-	require.Contains(t, p.Detail, "enter the Secret values again")
+			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+			require.Equal(t, applied, len(applier.applied), "nothing may be applied")
+			p := problemShape(t, w.Body.String())
+			require.Contains(t, p.Detail, "Secret values entered again")
+			answers[name] = p
+		})
+	}
+	require.Len(t, answers, 2)
+	var first *problem
+	for _, p := range answers {
+		if first == nil {
+			first = &p
+			continue
+		}
+		require.Equal(t, *first, p, "the answer must not depend on the stored value")
+	}
 }

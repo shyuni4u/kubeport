@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import YAML from "yaml";
 
 import { DeployClient } from "../../../deploy/DeployClient";
-import type { UISpec } from "@/lib/ui-spec-to-zod";
+import { keptSecretPaths, type UISpec } from "@/lib/ui-spec-to-zod";
 
 // Version-pinned deploy route.
 // Used by the UpdateAvailableBadge on the release detail page to re-deploy
@@ -49,8 +49,18 @@ export default async function VersionPinnedDeployPage({
     if (relRes.ok) {
       const rel = (await relRes.json()) as {
         values_json?: Record<string, unknown>;
+        template?: { version?: number };
       };
       initialValues = rel.values_json;
+      // A Secret reads back redacted (#196), and only an update on the same
+      // version can keep it: moving version needs it entered again. Leave
+      // those fields empty rather than starting them from the placeholder.
+      if (initialValues && rel.template?.version !== version) {
+        const kept = keptSecretPaths(initialValues);
+        initialValues = Object.fromEntries(
+          Object.entries(initialValues).filter(([path]) => !kept.has(path)),
+        );
+      }
     }
   }
 

@@ -1121,10 +1121,11 @@ paths:
         A release is read back with its Secret values redacted (#196). A path
         into a Secret sent as `"<redacted>"` keeps the value the release
         already has — so values read from `GET /v1/releases/{id}` can be sent
-        back as they are. Any other value replaces it. Moving to another
-        version checks a kept value against that version's rules; if the
-        values do not fit, the 400 asks for the Secret values again rather than
-        naming the rule, since the caller was never shown the value.
+        back as they are, on the release's current `version`. Any other value
+        replaces it. Moving to another `version` cannot carry a Secret over:
+        `"<redacted>"` with a different version is refused with 400 before any
+        validation — checking the stored value against another version's rules
+        would say whether it fits them — so enter the Secret values again.
       parameters: [{ $ref: "#/components/parameters/ReleaseID" }]
       requestBody:
         required: true
@@ -2296,8 +2297,10 @@ components:
           additionalProperties: true
           description: |
             The values the release was deployed with. The value of every path
-            into a Secret (`Secret[name].…`, `Secret[0].…` or `Secret.…`) reads
-            as `"<redacted>"` (#196) — see ReleaseDetail.
+            into a Secret's `data` or `stringData` (`Secret[name].data.…`,
+            `Secret.stringData.…`, any spelling) reads as `"<redacted>"` (#196);
+            other paths into a Secret, such as its metadata, read as stored —
+            see ReleaseDetail.
         rendered_yaml:
           type: string
           description: |
@@ -2340,8 +2343,10 @@ components:
           additionalProperties: true
           description: |
             The values the release was deployed with. The value of every path
-            into a Secret (`Secret[name].…`, `Secret[0].…` or `Secret.…`) reads
-            as `"<redacted>"` (#196): the cluster's RBAC decides who
+            into a Secret's `data` or `stringData` (`Secret[name].data.…`,
+            `Secret.stringData.…`, any spelling) reads as `"<redacted>"` (#196);
+            other paths into a Secret, such as its metadata, read as stored.
+            The cluster's RBAC decides who
             reads a Secret, and a caller may be allowed to write one and not read
             it back. Send `"<redacted>"` back on `PUT /v1/releases/{id}` to keep a
             Secret's value.
