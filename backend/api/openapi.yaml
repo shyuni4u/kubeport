@@ -409,6 +409,11 @@ paths:
             Either kubeport has no such cluster (`not-found`) or the cluster
             has no such group/version (`k8s-error`). Branch on `title`.
 
+            `k8s-error` also answers a group/version the caller may not read
+            (#124, #283) — see the index route for who reads what. The cluster
+            is not asked, and the response is identical to an absent one, so a
+            404 does not say which of the two it was.
+
             The apiserver's own words appear in `detail` only for a kubeport
             admin on a non-demo account — the same rule the SSAR `reason`
             follows, and for the same reason: these two routes carry no admin
