@@ -1,4 +1,15 @@
 {{- if .Values.dex.enabled -}}
+{{- /*
+The chart's Dex exists for the demo login, and demo mode is what scopes its
+accounts. The backend trusts Dex-issued tokens whenever dex.enabled is on
+(KBP_OIDC_ISSUERS) and the landing page offers the demo buttons and prints
+demo.passwordHint, but KBP_DEMO_EMAIL_DOMAIN is rendered only with
+demo.enabled. So dex without demo is a public-password login with no demo
+scoping at all (#253). The reverse is refused in demo-namespace.yaml.
+*/ -}}
+{{- if not .Values.demo.enabled -}}
+{{- fail "dex.enabled=true requires demo.enabled=true (#253): the chart's Dex is only the demo login, and without demo mode its accounts are ordinary users with no demo scoping. Either set dex.enabled=false, or set demo.enabled=true with the values in the chart README \"Demo mode (Dex)\". To use Dex as your main IdP, run it outside this chart and point oidc.issuer at it. (This check is in templates/dex-configmap.yaml.)" -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:

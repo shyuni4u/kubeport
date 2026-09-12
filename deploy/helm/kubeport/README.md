@@ -299,6 +299,32 @@ The pod is `<release>-postgres-0`, or `<release>-kubeport-postgres-0` when the
 release name does not contain `kubeport`. With `postgres.embedded=false`, point
 your own `psql` at `postgres.externalUrl`.
 
+### Behaviour changes when upgrading past #253
+
+`dex.enabled=true` with `demo.enabled=false` no longer renders. A
+`helm upgrade --reuse-values` of such a release stops at render with
+`dex.enabled=true requires demo.enabled=true`, and the running release stays
+on its previous revision. Check your release first:
+
+```bash
+helm get values kubeport -n kubeport --all | grep -A1 -E '^(dex|demo):'
+```
+
+Then add one of these to the upgrade command:
+
+- **You do not use the demo login:** `--set dex.enabled=false`. The Dex
+  Deployment, Service, Ingress and Certificate are removed, the backend stops
+  accepting Dex-issued tokens, and the landing page drops the demo buttons. A
+  `DEMO_OIDC_CLIENT_SECRET` key in an external Secret is no longer read.
+- **You want the public demo:** `--set demo.enabled=true` plus the values in
+  [Demo mode (Dex)](#demo-mode-dex): `demo.adminPassword`, `demo.userPassword`,
+  and `demo.adminEmail`/`demo.userEmail` matching `dex.staticPasswords[].email`
+  under `demo.emailDomain`. This also creates the `demo` namespace, its RBAC and
+  the reset CronJob.
+- **You used the chart's Dex as your own login IdP:** its accounts were never
+  demo-scoped, and the landing page printed `demo.passwordHint` for them. Run
+  Dex outside this chart and point `oidc.issuer` at it.
+
 ### Behaviour changes when upgrading past #161
 
 kubeport now checks, before applying anything, whether a release's objects
@@ -610,6 +636,12 @@ kubectl auth can-i delete resourcequota --as=dex:demo-admin@demo.kubeport -n dem
 `demo.enabled=true` requires `dex.enabled=true` (the chart fails the render
 otherwise) — the demo RBAC subjects are Dex-issued usernames.
 
+The reverse holds too: `dex.enabled=true` requires `demo.enabled=true`. The
+chart's Dex is the demo login, and the backend trusts its tokens whenever it is
+on, but demo scoping is switched on only by `demo.enabled` — so Dex without demo
+mode would be a login whose password the landing page prints, for accounts that
+are ordinary users (#253).
+
 `dex.enabled=true` renders a `ClusterIP` Service + Deployment for Dex, plus
 an `Ingress`/`Certificate` on `dex.host` (mirrors the main chart's
 `ingress.className` / `tls.certManager.*`).
@@ -626,8 +658,8 @@ its own DNS record pointing at the cluster ingress, separate from the main
 | `backend-{deployment,service,configmap}.yaml` | always |
 | `frontend-{deployment,service,configmap}.yaml` | always |
 | `secret.yaml` | `auth.create=true` |
-| `dex-{configmap,secret,deployment,service,ingress,certificate}.yaml` | `dex.enabled=true` (certificate also requires `tls.enabled` + `tls.certManager.enabled`) |
-| `demo-namespace.yaml`, `demo-rbac.yaml`, `demo-reset-cronjob.yaml` | `demo.enabled=true` |
+| `dex-{configmap,secret,deployment,service,ingress,certificate}.yaml` | `dex.enabled=true`, which requires `demo.enabled=true` — the render fails otherwise (#253). Certificate also requires `tls.enabled` + `tls.certManager.enabled` |
+| `demo-namespace.yaml`, `demo-rbac.yaml`, `demo-reset-cronjob.yaml` | `demo.enabled=true`, which requires `dex.enabled=true` |
 | `postgres-{statefulset,service,secret}.yaml` | `postgres.embedded=true` |
 | `ingress.yaml` | `ingress.enabled=true` |
 | `certificate.yaml` | `tls.enabled=true` AND `tls.certManager.enabled=true` |

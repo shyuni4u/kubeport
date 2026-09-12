@@ -57,6 +57,18 @@ personal addresses.
 {{- fail (printf "%s (%s) must match one of dex.staticPasswords[].email exactly (Dex has %d account(s), %d without an email; under the demo domain: %s): the landing page tells visitors to sign in with it. A --set of only dex.staticPasswords[N].hash replaces the whole entry and drops its email — set email, username, userID and hash together" $key $email (len $dexEmails) $dexWithoutEmail (default "none" (join ", " $dexInDomain))) -}}
 {{- end -}}
 {{- end -}}
+{{- /*
+Every other Dex account too, not only the two above. The backend trusts any
+token the chart's Dex issues (KBP_OIDC_ISSUERS) and scopes it by the email's
+domain alone, so a third static account outside the domain is a login through
+the public Dex with no demo scoping — and the reset docs give every account the
+same hash, the password the landing page prints. Counted, not named: this
+error lands in the public Actions log (see above).
+*/ -}}
+{{- $dexOutside := sub (len $dexEmails) (add (len $dexInDomain) $dexWithoutEmail) -}}
+{{- if gt $dexOutside 0 -}}
+{{- fail (printf "every dex.staticPasswords[].email must end in %s: %d account(s) outside the demo domain would sign in through the public Dex with no demo scoping (the chart's Dex is only the demo login; run any other IdP outside this chart)" $suffix $dexOutside) -}}
+{{- end -}}
 apiVersion: v1
 kind: Namespace
 metadata:
