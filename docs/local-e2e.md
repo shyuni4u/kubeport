@@ -142,6 +142,16 @@ start the stack with `KBP_DEX_BIND=0.0.0.0 scripts/compose.sh up -d` there
 (CI's playwright job does the same). Check what you got with
 `docker ps --format '{{.Names}}\t{{.Ports}}' | grep dex`.
 
+`0.0.0.0` opens dex to your LAN again, with passwords anyone can read in this
+repo — block inbound 5556 with the host firewall while it is set. It is also
+not enough on its own: native Linux has no `host.docker.internal` for the
+apiserver to resolve, so the kind cluster in §5 needs the hostAliases patch
+from playwright.yml's "Expose host.docker.internal to kube-apiserver" step.
+Pass the variable on the command line, not from a shell profile or
+`deploy/docker/.env`: the stack is shared, so whichever session last ran
+`up -d` decides the binding for everyone. `scripts/compose.sh` prints a warning
+when the binding is not loopback.
+
 ### 5. Create kind cluster with OIDC trust for dex
 
 Save as `/tmp/kind-cluster.yaml` (adjust the `hostPath` to your repo):
