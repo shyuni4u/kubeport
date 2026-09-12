@@ -220,6 +220,20 @@ func stringifyStringMaps(doc map[string]any) {
 	}
 }
 
+// MaxObjects is how many objects one template may hold, and so how many one
+// release applies (#281).
+//
+// A release's ownership check and apply run under the namespace apply lock,
+// which cuts them off after applyLockHold (60s), and client-go's default rate
+// limit (burst 10, then 5 requests a second) lets through about 310 requests
+// in that time. An update spends up to three per object — the ownership GET,
+// the apply PATCH and stamping what the new version leaves behind — so a few
+// more than 100 objects could never finish, and an update cut off halfway
+// leaves the cluster on part of the new version and the database on the old.
+// 50 keeps the worst case near half the budget, which also leaves room for a
+// slow apiserver.
+const MaxObjects = 50
+
 func parseMultiDoc(src string) ([]map[string]any, error) {
 	var docs []map[string]any
 	dec := yaml.NewDecoder(bytes.NewReader([]byte(src)))
@@ -233,6 +247,11 @@ func parseMultiDoc(src string) ([]map[string]any, error) {
 		}
 		if len(m) > 0 {
 			docs = append(docs, m)
+		}
+		if len(docs) > MaxObjects {
+			// Checked while decoding, so an oversized template is not parsed
+			// in full just to be refused.
+			return nil, fmt.Errorf("resources hold more than %d objects; a release applies at most %d, so split the template", MaxObjects, MaxObjects)
 		}
 	}
 	return docs, nil
