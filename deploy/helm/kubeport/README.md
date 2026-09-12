@@ -113,6 +113,66 @@ helm install kubeport deploy/helm/kubeport \
   --set postgres.password=$PG_PASS
 ```
 
+### Keeping secrets off the command line
+
+The three secret `--set` values above (`auth.appEncryptionKeyB64`,
+`auth.oidcClientSecret`, `postgres.password`) land in your shell history, and
+while `helm` runs any other user on the machine can read them with `ps` (#64).
+That is fine for a throwaway cluster. For one you keep, write each secret to a
+file and pass the file:
+
+```bash
+umask 077   # the files below are readable by you only
+# No trailing newline: --set-file and kubectl --from-file both keep the file's
+# bytes exactly, so a newline would become part of the key or password.
+openssl rand -base64 32 | tr -d '\n' > enc_key
+openssl rand -hex 24    | tr -d '\n' > pg_pass
+# Paste the Google OAuth client secret at the silent prompt — not in history, not in ps
+read -rs S && printf '%s' "$S" > oidc_client_secret && unset S
+```
+
+**Chart-managed Secret, values from files.** Replace the last three lines of the
+install command with:
+
+```bash
+  --set-file auth.appEncryptionKeyB64=enc_key \
+  --set-file auth.oidcClientSecret=oidc_client_secret \
+  --set-file postgres.password=pg_pass
+```
+
+This keeps them out of history and `ps`, but helm still stores them in the
+release: `helm get values kubeport -n kubeport` prints them to anyone who can
+read Secrets in the namespace.
+
+**External Secret — the auth values never enter the release.** Create the
+Secret first, then install with a reference to it ([Secret modes](#secret-modes)):
+
+```bash
+# DATABASE_URL with the embedded Postgres: the same password, the chart's Service
+# name (<release>-postgres, or <release>-kubeport-postgres when the release name
+# does not contain "kubeport"). With an external Postgres, write your own URL.
+printf 'postgres://kubeport:%s@kubeport-postgres:5432/kubeport?sslmode=disable' "$(cat pg_pass)" > database_url
+
+kubectl create namespace kubeport
+kubectl -n kubeport create secret generic kubeport-auth \
+  --from-file=APP_ENCRYPTION_KEY_B64=enc_key \
+  --from-file=OIDC_CLIENT_SECRET=oidc_client_secret \
+  --from-file=DATABASE_URL=database_url
+kubectl -n kubeport describe secret kubeport-auth   # key names and byte counts, never values
+
+helm install kubeport deploy/helm/kubeport --namespace kubeport \
+  --set auth.create=false --set auth.existingSecret=kubeport-auth \
+  --set-file postgres.password=pg_pass \
+  ...   # host, ingress, oidc.*, auth.devAdminEmails as above — none of those are secrets
+```
+
+The embedded Postgres still takes its own password from `postgres.password`, so
+that one value stays in the release; with `postgres.embedded=false` drop that
+line and nothing secret is left in it. `--from-literal` would put the values
+back into history and `ps`. With `dex.enabled=true` the Secret needs a fourth
+key, `DEMO_OIDC_CLIENT_SECRET` — see [Secret modes](#secret-modes). Delete the
+files once the install is done.
+
 This installs the `latest` tag, which is not a version — see the warning helm
 prints after install. Add `--set images.backend.tag=sha-<7>
 --set images.frontend.tag=sha-<7>` to pin the commit you meant. That is what
@@ -587,7 +647,7 @@ kubectl --namespace kubeport delete pvc -l app.kubernetes.io/instance=kubeport
 | Mode | Set | Where |
 |---|---|---|
 | Chart-managed (dev / Phase 1) | `auth.create=true`, plus `auth.appEncryptionKeyB64` / `auth.oidcClientSecret` / `postgres.password` via `--set` | Chart writes a `<release>-auth` Secret with `DATABASE_URL`, `APP_ENCRYPTION_KEY_B64`, `OIDC_CLIENT_SECRET` — plus `DEMO_OIDC_CLIENT_SECRET` when `dex.enabled=true` |
-| External (recommended for prod) | `auth.create=false`, `auth.existingSecret=<name>` | You provide a Secret named `<name>` with the same keys; e.g. via `sealed-secrets` or `external-secrets` |
+| External (recommended for prod) | `auth.create=false`, `auth.existingSecret=<name>` | You provide a Secret named `<name>` with the same keys; e.g. via `sealed-secrets` or `external-secrets`, or by hand as in [Keeping secrets off the command line](#keeping-secrets-off-the-command-line) |
 
 **With `dex.enabled=true`, the external Secret needs a fourth key:
 `DEMO_OIDC_CLIENT_SECRET`, holding the same value as `dex.clientSecret`.**
