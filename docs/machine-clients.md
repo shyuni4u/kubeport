@@ -250,7 +250,7 @@ helm upgrade kubeport deploy/helm/kubeport --reuse-values \
 읽는 문장이라 바뀔 수 있다.
 
 **409 는 `title` 로 셋이 갈린다.** `conflict` 는 같은 이름의 릴리스가 이미 있다는 뜻이라 다른 이름으로
-풀린다. 같은 `conflict` 라도 `detail: version not published` 는 이름으로 안 풀린다. `resource-conflict` 는
+풀린다. 같은 `conflict` 라도 `detail: version not published` 는 이름으로 안 풀린다(이 응답은 템플릿을 볼 수 있는 호출자만 받는다 — 게시된 적 없고 초안을 읽을 수 없는 템플릿은 없는 버전과 같은 404 다, [#252](https://github.com/shyuni4u/kubeport/issues/252)). `resource-conflict` 는
 **템플릿이 만드는 오브젝트를 같은 네임스페이스의 다른 릴리스가 이미 쥐고 있다**는 뜻이라, 역시 이름을
 바꿔도 안 풀린다([#161](https://github.com/shyuni4u/kubeport/issues/161)). 다른 네임스페이스에 배포하거나
 그 릴리스를 먼저 지워야 한다. 이 kind 만 확장 필드 `conflicts[]`(`kind`·`name`·`namespace`·`owner`)를
