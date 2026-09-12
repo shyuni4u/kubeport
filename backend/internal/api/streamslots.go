@@ -1,8 +1,13 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"net/http"
 	"sync"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 // defaultLogStreamLifetime is how long one log stream may stay open before the
@@ -37,6 +42,29 @@ func logStreamLifetime(d time.Duration) time.Duration {
 // ceiling's scale: its two Dex accounts are shared by every visitor, so for the
 // demo this is close to a global cap on concurrent log viewers per role.
 const defaultLogStreamsPerCaller = 16
+
+// demoLogStreamsPerLogin is how many log streams one sign-in to a demo account
+// may hold open (#200). The per-caller cap above is, for a demo account, one
+// pool for every visitor, and a single visitor holding all of it — a script
+// opening sixteen streams, say — left the log tab refusing everyone else.
+// Four is more than one reader's tabs need.
+const demoLogStreamsPerLogin = 4
+
+// loginKey names one sign-in by the id token it presented. A digest, not the
+// token: the token is a credential, and the key sits in a map for as long as
+// the stream lives.
+func loginKey(idToken string) string {
+	sum := sha256.Sum256([]byte(idToken))
+	return hex.EncodeToString(sum[:16])
+}
+
+// refuseStream answers a log stream past a cap on streams held open: the
+// caller's (#169), or one sign-in's to a demo account (#200).
+func refuseStream(c *gin.Context) {
+	c.Header("Retry-After", "10")
+	writeError(c, http.StatusTooManyRequests, "too-many-streams",
+		"too many log streams open for this caller; close one and retry")
+}
 
 // streamSlots caps how many log streams each caller holds open at once.
 //

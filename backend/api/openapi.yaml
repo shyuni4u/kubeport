@@ -1654,7 +1654,8 @@ components:
         backoff hint rather than a prediction, and the `X-RateLimit-*` pair is
         **not** — it describes the per-minute budget and would be wrong about a
         count of open streams. The cap is per caller, so the demo's shared
-        accounts share it too.
+        accounts share it too — and each sign-in to a demo account also has a
+        cap of 4 of its own (#200), so one visitor cannot hold the whole pool.
       headers:
         Retry-After:
           description: Seconds to wait before retrying. Always present on a 429.

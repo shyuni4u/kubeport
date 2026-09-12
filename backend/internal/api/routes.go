@@ -70,6 +70,9 @@ type Handlers struct {
 	// per-minute budget on that route prices opening one and nothing after, so
 	// on its own it bounds the rate and not the count (#169).
 	streams *streamSlots
+	// demoStreams caps, per sign-in, the streams a demo account holds, so one
+	// visitor cannot take the pool that account shares with every other (#200).
+	demoStreams *streamSlots
 
 	// streamLifetime is how long a log stream stays open before the server
 	// ends it and the client reconnects through a fresh authorization (#169).
@@ -111,6 +114,7 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 		deps:           deps,
 		openapi:        newOpenAPIProxy(cfg.OpenAPICacheMax),
 		streams:        newStreamSlots(cfg.LogStreamsPerCaller),
+		demoStreams:    newStreamSlots(demoLogStreamsPerLogin),
 		streamLifetime: logStreamLifetime(cfg.LogStreamMaxLifetime),
 		releaseWrite:   newRateLimiter(30, 4096),
 	}

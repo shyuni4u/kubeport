@@ -106,10 +106,23 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	// response promises it on every 429 — as a backoff hint, not a prediction.
 	// The X-RateLimit-* pair is left off: it is documented as requests per
 	// minute, and this is a count of open streams.
+	//
+	// A demo account is one identity for every visitor, so its cap is one pool
+	// for all of them, and a visitor holding the whole pool left the log tab
+	// refusing everyone else (#200). Each sign-in to a demo account has a
+	// smaller cap of its own as well, taken first, so a sign-in at its cap is
+	// refused without touching the pool. Signing in again brings a new token and
+	// a fresh cap: this raises what taking the pool costs, it does not end it.
+	if auth.IsDemoEmail(u.Email, h.deps.DemoEmailDomain) {
+		login := loginKey(u.IDToken)
+		if !h.demoStreams.tryAcquire(login) {
+			refuseStream(c)
+			return
+		}
+		defer h.demoStreams.release(login)
+	}
 	if !h.streams.tryAcquire(u.Subject) {
-		c.Header("Retry-After", "10")
-		writeError(c, http.StatusTooManyRequests, "too-many-streams",
-			"too many log streams open for this caller; close one and retry")
+		refuseStream(c)
 		return
 	}
 	defer h.streams.release(u.Subject)
