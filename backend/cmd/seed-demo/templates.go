@@ -115,27 +115,29 @@ func (t *templateSeeder) repair(ctx context.Context, tpl store.GetTemplateByName
 		return err
 	}
 
-	deployable := false
-	var firstDraft *store.TemplateVersion
+	var current, firstDraft *store.TemplateVersion
 	for i, v := range versions {
-		if v.ID == tpl.CurrentVersionID && v.Status == "published" {
-			deployable = true
+		if v.ID == tpl.CurrentVersionID {
+			current = &versions[i]
 		}
 		if v.Status == "draft" && firstDraft == nil {
 			firstDraft = &versions[i]
 		}
 	}
 
-	if !deployable {
-		// Publishing consumes a draft, so remember whether one was spent here.
-		if firstDraft != nil {
-			if err := t.st.WithTx(ctx, func(q *store.Queries) error {
-				return publish(ctx, q, firstDraft.ID, tpl.ID)
+	if current == nil || current.Status != "published" {
+		// Never publish a draft that is already there. Demo visitors can rewrite
+		// any draft, and publishing is what puts content in front of every other
+		// visitor: a draft published here would bypass the gate on the publish
+		// route (#294). What goes back into the catalog comes from something
+		// that was already published — immutable since — or from the fixture.
+		if current != nil && current.Status == "deprecated" {
+			if _, err := t.st.SetTemplateVersionStatus(ctx, store.SetTemplateVersionStatusParams{
+				ID: current.ID, Status: "published",
 			}); err != nil {
 				return err
 			}
-			log.Printf("template %s v%d published", f.Name, firstDraft.Version)
-			firstDraft = nil
+			log.Printf("template %s v%d undeprecated", f.Name, current.Version)
 		} else if err := t.st.WithTx(ctx, func(q *store.Queries) error {
 			next, err := q.NextTemplateVersion(ctx, tpl.ID)
 			if err != nil {
@@ -180,24 +182,24 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
+// publishNewVersion writes the fixture as a published version and points the
+// template at it. The row goes in as published rather than as a draft that is
+// then published: the one draft a template may have can be a visitor's, and
+// the fixture is the only content published from here.
 func (t *templateSeeder) publishNewVersion(ctx context.Context, q *store.Queries, templateID pgtype.UUID, version int32, f fixtures.Template) error {
-	ver, err := t.insertVersion(ctx, q, templateID, version, "draft", f)
+	ver, err := t.insertVersion(ctx, q, templateID, version, "published", f)
 	if err != nil {
 		return err
 	}
-	return publish(ctx, q, ver.ID, templateID)
-}
-
-// publish mirrors PublishVersion in the API: flip the version to published and
-// point the template at it, in the same transaction.
-func publish(ctx context.Context, q *store.Queries, versionID, templateID pgtype.UUID) error {
-	pub, err := q.PublishTemplateVersion(ctx, versionID)
-	if err != nil {
+	// Stamps published_at, as PublishVersion in the API does.
+	if _, err := q.SetTemplateVersionStatus(ctx, store.SetTemplateVersionStatusParams{
+		ID: ver.ID, Status: "published",
+	}); err != nil {
 		return err
 	}
 	return q.UpdateTemplateCurrentVersion(ctx, store.UpdateTemplateCurrentVersionParams{
 		ID:               templateID,
-		CurrentVersionID: pub.ID,
+		CurrentVersionID: ver.ID,
 	})
 }
 
@@ -211,7 +213,7 @@ func (t *templateSeeder) insertVersion(ctx context.Context, q *store.Queries, te
 		CreatedByUserID: t.owner.ID,
 		AuthoringMode:   "yaml",
 	}
-	if version > 1 {
+	if status == "draft" {
 		params.Notes = store.PgText(draftNotes)
 	}
 	return q.InsertTemplateVersionV2(ctx, params)

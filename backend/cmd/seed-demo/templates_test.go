@@ -200,6 +200,89 @@ func TestTemplateSeeder_RepairsTemplateWithNoVersions(t *testing.T) {
 	require.Equal(t, 1, drafts, "and demo-admin still needs something to edit")
 }
 
+// visitorYAML stands in for what a demo visitor writes into a draft: anything,
+// including a Deployment that prints another visitor's Secret.
+const visitorYAML = "apiVersion: v1\nkind: ConfigMap\nmetadata: { name: written-by-a-visitor }\n"
+
+// rewriteDraft does what PATCH /v1/templates/:name/versions/:v lets any demo
+// account do, and returns the draft's id.
+func rewriteDraft(t *testing.T, s *templateSeeder, ctx context.Context, conn *pgx.Conn, name string) store.TemplateVersion {
+	t.Helper()
+	for _, v := range versionsOf(t, s, ctx, name) {
+		if v.Status == "draft" {
+			_, err := conn.Exec(ctx, `UPDATE template_versions SET resources_yaml = $2 WHERE id = $1`, v.ID, visitorYAML)
+			require.NoError(t, err)
+			return v
+		}
+	}
+	t.Fatalf("%s has no draft", name)
+	return store.TemplateVersion{}
+}
+
+// requireCatalogIsTheFixture asserts the version the catalog deploys carries
+// the fixture's content and the visitor's draft is still only a draft.
+func requireCatalogIsTheFixture(t *testing.T, s *templateSeeder, ctx context.Context, f fixtures.Template, draft store.TemplateVersion) {
+	t.Helper()
+	require.True(t, deployable(t, s, ctx, f.Name))
+	tpl, err := s.st.GetTemplateByName(ctx, f.Name)
+	require.NoError(t, err)
+	for _, v := range versionsOf(t, s, ctx, f.Name) {
+		if v.ID == tpl.CurrentVersionID {
+			require.Equal(t, f.ResourcesYAML, v.ResourcesYaml, "the catalog must deploy the fixture, not the visitor's draft")
+			require.True(t, v.PublishedAt.Valid)
+		}
+		if v.ID == draft.ID {
+			require.Equal(t, "draft", v.Status, "the visitor's draft must not be published")
+		}
+	}
+}
+
+// Security review of #294: with the publish route gated, the reset must not
+// publish for the visitor. Deprecating v1 used to make repair publish the
+// first draft, whatever a visitor had written into it.
+func TestTemplateSeeder_RepairDoesNotPublishAVisitorsDraft(t *testing.T) {
+	s, ctx := newTestSeeder(t)
+	require.NoError(t, s.Run(ctx))
+	f := fixtures.All()[0]
+	conn, err := pgx.Connect(ctx, testDSN())
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+
+	draft := rewriteDraft(t, s, ctx, conn, f.Name)
+	tpl, err := s.st.GetTemplateByName(ctx, f.Name)
+	require.NoError(t, err)
+	_, err = s.st.SetTemplateVersionStatus(ctx, store.SetTemplateVersionStatusParams{
+		ID: tpl.CurrentVersionID, Status: "deprecated",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, s.Run(ctx))
+	requireCatalogIsTheFixture(t, s, ctx, f, draft)
+}
+
+// The same with nothing published left to bring back: the fixture goes in as a
+// new published version beside the visitor's draft, which holds the template's
+// one draft slot.
+func TestTemplateSeeder_RepairWithoutAPublishedVersionUsesTheFixture(t *testing.T) {
+	s, ctx := newTestSeeder(t)
+	require.NoError(t, s.Run(ctx))
+	f := fixtures.All()[0]
+	conn, err := pgx.Connect(ctx, testDSN())
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+
+	draft := rewriteDraft(t, s, ctx, conn, f.Name)
+	tpl, err := s.st.GetTemplateByName(ctx, f.Name)
+	require.NoError(t, err)
+	_, err = conn.Exec(ctx, `UPDATE templates SET current_version_id = NULL WHERE id = $1`, tpl.ID)
+	require.NoError(t, err)
+	_, err = conn.Exec(ctx, `DELETE FROM template_versions WHERE template_id = $1 AND status <> 'draft'`, tpl.ID)
+	require.NoError(t, err)
+
+	require.NoError(t, s.Run(ctx))
+	requireCatalogIsTheFixture(t, s, ctx, f, draft)
+}
+
 func TestTemplateSeeder_RefusesAnotherOwnersTemplate(t *testing.T) {
 	s, ctx := newTestSeeder(t)
 	require.NoError(t, s.Run(ctx))
