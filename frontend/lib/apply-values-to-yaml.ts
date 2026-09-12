@@ -29,7 +29,9 @@ function findDoc(docs: Document[], kind: string, selector: string): Document | n
 export function applyValuesToYaml(resourcesYaml: string, values: Record<string, unknown>): string {
   const docs = parseAllDocuments(resourcesYaml);
   for (const [p, v] of Object.entries(values)) {
-    if (v === undefined) continue;
+    // null is how the form holds "no value" (#316 #327). The deploy path
+    // leaves such a key out, so the template keeps its own value here too.
+    if (v === undefined || v === null) continue;
     const parsed = parseTemplatePath(p);
     if (!parsed || parsed.keys.length === 0) continue;
     const doc = findDoc(docs, parsed.kind, parsed.selector);

@@ -62,4 +62,75 @@ describe("LandingCompare", () => {
     expect(changed).toHaveLength(1);
     expect(changed[0].textContent).toContain("value:");
   });
+
+  // #325 #326 — an optional enum clears to null (the toggle since #327, the
+  // Select's "not set" option now). A deploy leaves that key out and render
+  // fills it from the ui-spec default, so the pitch must show the default, not
+  // `null`.
+  describe("an optional field cleared to no value", () => {
+    // The pane's text runs each line number into its line ("128Mi72"), so read
+    // the lines one by one.
+    const yamlLines = () =>
+      Array.from(screen.getByTestId("landing-yaml").children).map((row) =>
+        (row.lastElementChild?.textContent ?? "").trim(),
+      );
+    const expectNoNull = () =>
+      expect(yamlLines().filter((l) => /:\s*null$/.test(l))).toEqual([]);
+    const memoryLimit = () => {
+      const lines = yamlLines();
+      return lines.slice(lines.indexOf("limits:")).find((l) => l.startsWith("memory:"));
+    };
+
+    it("shows the default memory limit, not null, after un-pressing the picked toggle", async () => {
+      const user = userEvent.setup();
+      renderCompare();
+      await user.click(screen.getByRole("button", { name: "256Mi" }));
+      expect(memoryLimit()).toBe("memory: 256Mi");
+
+      await user.click(screen.getByRole("button", { name: "256Mi" }));
+      expect(screen.getByRole("button", { name: "256Mi" })).toHaveAttribute("aria-pressed", "false");
+      expectNoNull();
+      expect(memoryLimit()).toBe("memory: 128Mi");
+    });
+
+    it("shows the default image, not null, after picking 'not set' in the image Select", async () => {
+      const user = userEvent.setup();
+      renderCompare();
+      const trigger = screen.getByRole("combobox", { name: /웹 서버 버전/ });
+      await user.click(trigger);
+      await user.click(await screen.findByRole("option", { name: "ghcr.io/nginx/nginx-unprivileged:1.26-alpine" }));
+      expect(yamlLines()).toContain("image: ghcr.io/nginx/nginx-unprivileged:1.26-alpine");
+
+      await user.click(trigger);
+      await user.click(await screen.findByRole("option", { name: ko.form.enumUnset.useDefault }));
+      expectNoNull();
+      expect(yamlLines()).toContain("image: ghcr.io/nginx/nginx-unprivileged:1.27-alpine");
+    });
+
+    // The showcase's literals happen to equal its defaults, which would let a
+    // fix that only skips the key pass. Here they differ.
+    it("applies the ui-spec default rather than the template's literal, as render does", async () => {
+      const user = userEvent.setup();
+      const resources = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app\ndata:\n  MODE: literal\n";
+      const spec = [
+        "fields:",
+        "  - path: ConfigMap[app].data.MODE",
+        "    label: Mode",
+        "    type: enum",
+        '    values: ["fast", "safe"]',
+        '    default: "fast"',
+      ].join("\n");
+      render(
+        <NextIntlClientProvider locale="ko" messages={ko}>
+          <LandingCompare resourcesYaml={resources} uiSpecYaml={spec} />
+        </NextIntlClientProvider>,
+      );
+      expect(yamlLines()).toContain("MODE: fast");
+      await user.click(screen.getByRole("button", { name: "safe" }));
+      expect(yamlLines()).toContain("MODE: safe");
+      await user.click(screen.getByRole("button", { name: "safe" }));
+      expectNoNull();
+      expect(yamlLines()).toContain("MODE: fast");
+    });
+  });
 });
