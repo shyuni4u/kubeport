@@ -136,8 +136,7 @@ func parsePagination(c *gin.Context) (limit, offset int32) {
 
 func (h *Handlers) CreateRelease(c *gin.Context) {
 	var r createReleaseReq
-	if err := c.ShouldBindJSON(&r); err != nil {
-		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+	if !bindJSON(c, &r) {
 		return
 	}
 	if problem := releaseTargetProblem(r.Namespace, r.Name); problem != "" {

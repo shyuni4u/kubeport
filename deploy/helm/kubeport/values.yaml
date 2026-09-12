@@ -160,6 +160,9 @@ postgres:
 ingress:
   enabled: true
   className: traefik         # k3s default; GKE = "gce", nginx = "nginx"
+  # kubeport accepts request bodies up to 4 MiB. ingress-nginx caps them at 1m
+  # by default and answers its own HTML 413 first; with className=nginx set:
+  #   nginx.ingress.kubernetes.io/proxy-body-size: "4m"
   annotations: {}
   # tls handled by .Values.tls below
 

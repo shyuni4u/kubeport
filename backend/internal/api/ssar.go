@@ -77,8 +77,7 @@ type ssarReq struct {
 // Response shape: {"allowed": bool, "denied": bool, "reason": string}.
 func (h *Handlers) CheckSelfSubjectAccess(c *gin.Context) {
 	var req ssarReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+	if !bindJSON(c, &req) {
 		return
 	}
 	if req.Cluster == "" || req.Verb == "" || req.Resource == "" {

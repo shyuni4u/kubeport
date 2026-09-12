@@ -389,6 +389,7 @@
         "invalid": "Validation failed: {detail}",
         "generic": "Save failed (HTTP {status}). {detail}",
         "rateLimited": "Too many requests just now, so this one was refused. Your edits are still here — try saving again in a few seconds.",
+        "payloadTooLarge": "This template is over the 4 MiB request limit, so it was not saved. Your edits are still here. Saving the same content again will be refused — trim the resources or split the template, then save.",
         "metaSave": "Failed to save template metadata (HTTP {status}). {detail}",
         "missingLabel": "Exposed field {path} has no label. This label is what users see in the deploy form.",
         "preview": "Could not build the preview: {detail}",

@@ -37,6 +37,12 @@ export async function saveErrorMessage(
       return t("errors.forbidden");
     case 400:
       return t("errors.invalid", { detail });
+    case 413:
+      // `payload-too-large` (#128). Not a validation failure: the same save
+      // sent again is refused again, so the author has to make the template
+      // smaller. Used to arrive as a 400 whose detail was Go's
+      // "http: request body too large", which named no way out.
+      return t("errors.payloadTooLarge");
     case 429:
       // The authoring routes are rate limited (issue #135), so this is
       // reachable on a real save. Without a case here it fell through to

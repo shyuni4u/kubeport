@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"math"
 	"net/http"
 	"strconv"
@@ -81,17 +82,69 @@ func (rl *rateLimiter) allow(key string, now time.Time) (bool, time.Duration) {
 // maxRequestBody caps what any handler will read. The rate limiter bounds how
 // often a caller can ask, not how large the ask is: 60 requests carrying
 // hundreds of megabytes each would still exhaust a single-node backend, and
-// every write handler reads the whole body into memory via ShouldBindJSON.
+// every write handler reads the whole body into memory via bindJSON.
 // Sized for a template's resources.yaml with room to spare.
 const maxRequestBody = 4 << 20 // 4 MiB
 
+// payloadTooLargeDetail names the cap in the words the spec uses. Keep it in
+// step with maxRequestBody.
+const payloadTooLargeDetail = "request body exceeds 4 MiB"
+
+// limitBodySize enforces maxRequestBody in two places, because a body's size
+// is known up front only sometimes.
+//
+// A declared Content-Length over the cap is refused here, before routing, auth
+// or any handler, on every method — a GET that announces a 5 MiB body gets 413
+// too, even though no GET handler reads one. The request asked to send more
+// than any request may carry; answering it on its merits would mean holding
+// the connection for bytes kubeport has already decided not to read. It tells
+// an unauthenticated caller nothing: the cap is the same on every path and is
+// published in the spec. The cost is attribution: auth has not run, so the
+// access log records such a 413 with user="-" even when the request carried a
+// valid token. Nothing ran, so nothing is hidden — join it to the BFF's line by
+// request_id.
+//
+// A body of unknown length (chunked) cannot be judged until it is read, so it
+// is wrapped in a MaxBytesReader and the overflow surfaces at the read, where
+// bindJSON turns it into the same 413.
 func limitBodySize(max int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if c.Request.ContentLength > max {
+			writePayloadTooLarge(c)
+			return
+		}
 		if c.Request.Body != nil {
 			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, max)
 		}
 		c.Next()
 	}
+}
+
+// bindJSON is the one way a handler reads a request body. On failure it has
+// already answered and the handler must return.
+//
+// An oversized body is `413 payload-too-large`, not the `400 validation-error`
+// every other bind failure is (#128). The two call for opposite client
+// responses — fix the body and resend, versus split it or give up, because
+// resending it unchanged can never succeed — and before this the only
+// difference between them was Go's own English in `detail`, which the contract
+// says may change.
+func bindJSON(c *gin.Context, dst any) bool {
+	err := c.ShouldBindJSON(dst)
+	if err == nil {
+		return true
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writePayloadTooLarge(c)
+		return false
+	}
+	writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+	return false
+}
+
+func writePayloadTooLarge(c *gin.Context) {
+	writeError(c, http.StatusRequestEntityTooLarge, "payload-too-large", payloadTooLargeDetail)
 }
 
 // rateLimit refuses a caller that is over budget with 429. Keyed by OIDC

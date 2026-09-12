@@ -499,6 +499,12 @@ away from printing your encryption key into a terminal or a CI log.
 | nginx-ingress (any) | `nginx` | varies |
 | kind / minikube (CI smoke) | `nginx` (or disable) | `standard` |
 
+kubeport accepts request bodies up to 4 MiB and answers anything larger with a
+JSON `413 payload-too-large`. An Ingress controller with a lower default limit
+answers first with its own non-JSON 413. ingress-nginx defaults to 1m — set
+`ingress.annotations."nginx.ingress.kubernetes.io/proxy-body-size": "4m"`.
+Traefik (k3s) has no default limit.
+
 ### Backend tuning (optional)
 
 Every one of these may be left empty; the backend then uses the default shown.

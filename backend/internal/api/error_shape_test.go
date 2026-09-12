@@ -90,7 +90,12 @@ var allowedErrorKinds = map[string]bool{
 	// closes, so a sentence or a retry policy written for one is wrong for the
 	// other.
 	"too-many-streams": true,
-	"internal":         true,
+	// 413 when the request body is over the 4 MiB cap (#128). Was folded into
+	// validation-error with Go's "http: request body too large" as the detail,
+	// but the client response is the opposite: a validation error is fixed by
+	// correcting the body, this one only by sending less of it.
+	"payload-too-large": true,
+	"internal":          true,
 }
 
 func TestErrorKinds_AllowlistOnly(t *testing.T) {

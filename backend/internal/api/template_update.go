@@ -34,8 +34,7 @@ func (h *Handlers) UpdateTemplate(c *gin.Context) {
 	}
 
 	var r updateTemplateReq
-	if err := c.ShouldBindJSON(&r); err != nil {
-		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+	if !bindJSON(c, &r) {
 		return
 	}
 	if r.DisplayName == nil && r.Description == nil && r.Tags == nil {

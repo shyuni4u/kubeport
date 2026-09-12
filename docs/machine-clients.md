@@ -476,7 +476,24 @@ dry-run·apply 나 종류마다 DeleteCollection 을 부르는 가장 비싼 경
 이후 호출자를 **다시 확인하지 않는다.** 그래서 권한이 회수되거나 세션이 만료돼도 탭이 열려 있는 동안은
 로그가 계속 흘렀다. 재연결은 새로 갱신된 토큰으로 인가를 다시 거친다.
 
-**요청 바디는 4 MiB 까지다.** 넘으면 읽는 쪽에서 끊긴다.
+**요청 바디는 4 MiB 까지다.** 넘으면 **`413 payload-too-large`** 다([#128](https://github.com/shyuni4u/kubeport/issues/128)).
+예전에는 읽다가 끊긴 오류가 `400 validation-error` 로 접혀, `detail` 의 Go 영어 문장(`http: request body too large`)으로만
+구분됐다.
+
+- **`validation-error` 와 처방이 반대다.** 그쪽은 본문을 고쳐 다시 보내면 풀리지만, 이쪽은 **같은 요청을 그대로 재시도하면
+  영원히 거절된다.** 크기를 줄여야 한다 — 템플릿이면 리소스를 덜어내거나 여러 템플릿으로 나눈다.
+- **BFF(`https://<host>/api/v1/*`) — 외부 호출자가 붙는 곳.** 세션부터 확인하므로 세션 없는 호출은 바디 크기와 상관없이
+  `401 unauthenticated` 다. 세션이 있으면 BFF 가 같은 4 MiB 에서 같은 `413 payload-too-large` 를 직접 답한다 —
+  `Content-Length` 가 넘으면 읽기 전에, 길이를 모르는 바디는 읽다가 한도를 넘는 순간. `GET`·`HEAD` 의 바디는 버려지므로
+  413 이 나지 않는다.
+- **Go API 에 직접 붙을 때(port-forward).** `Content-Length` 가 한도를 넘으면 **라우팅·인증보다 먼저** 413 이다.
+  메서드를 가리지 않고(바디를 읽지 않는 `GET` 이라도 그 길이를 선언했으면), 세션 없는 호출도 401 이 아니라 413 을 받는다.
+  길이를 미리 알 수 없는 chunked 바디는 핸들러가 읽다가 한도에서 끊고 같은 413 을 준다.
+- 어느 쪽이든 서버는 넘친 바디를 끝까지 받지 않고 응답한다. 전송이 끝나기 전에 연결이 끊겨 응답 본문을 못 읽는
+  클라이언트도 있으니, **보내기 전에 크기를 재는 쪽**이 확실하다.
+- **앞단 인그레스의 한도가 더 낮으면 그쪽이 먼저 자른다.** ingress-nginx 기본값은 1m 이고, 이때 413 은 Problem 이 아닌
+  HTML 이다. `Content-Type` 이 `application/json` 인 413 만 `payload-too-large` 로 읽는다. 자가호스팅 운영자는 차트 README
+  "Cloud-specific values" 의 `proxy-body-size` 설정을 본다. 라이브(`kubeport.enzo.kr`, k3s Traefik)는 인그레스 한도가 없다.
 
 **비인증 호출은 JSON 401 이다 — 단, [#24](https://github.com/shyuni4u/kubeport/issues/24) 수정이 배포된
 리비전부터.** 그 이전 리비전의 BFF 는 `/api/auth/login` 으로 **307** 을 보낸다.
@@ -526,8 +543,8 @@ k8s authorizer 는 `RBAC: allowed by ClusterRoleBinding "..." of ClusterRole "..
 **목록은 페이지네이션 메타가 없다.** `total` 도 `next` 도 없어서 "다음 페이지가 있나"는 한 페이지가 꽉
 찼는지로 추측해야 한다. 템플릿 목록은 아예 페이지네이션이 없다(#58).
 
-**BFF 가 직접 답하는 응답 6가지.** `/api/v1/*` 로 붙는 경우(§1 의 B 경로), 아래는 Go API 까지 가지 않고
-Next.js Route Handler 가 만든다. 499 를 뺀 다섯은 같은 `Problem` 스키마다.
+**BFF 가 직접 답하는 응답 7가지.** `/api/v1/*` 로 붙는 경우(§1 의 B 경로), 아래는 Go API 까지 가지 않고
+Next.js Route Handler 가 만든다. 499 를 뺀 여섯은 같은 `Problem` 스키마다.
 
 | 상태 | `title` | 언제 |
 |---|---|---|
@@ -535,6 +552,7 @@ Next.js Route Handler 가 만든다. 499 를 뺀 다섯은 같은 `Problem` 스�
 | 500 | `internal` | 세션 테이블(Postgres)을 못 읽음 |
 | 502 | `internal` | Go API 가 안 뜸 — 연결 거부·DNS·타임아웃. 예전엔 Next 기본 500(HTML, `X-Request-Id` 없음)이었다 |
 | 400 | `validation-error` | 경로가 이상함(`detail: malformed request path`). 세그먼트에 `/`·`..`·제어문자가 있거나, 조립된 URL 이 `/<base>/v1/` 밖으로 나가면 업스트림에 보내지 않는다 ([#51](https://github.com/shyuni4u/kubeport/issues/51)) |
+| 413 | `payload-too-large` | 세션은 있는데 바디가 4 MiB 를 넘음 — `Content-Length` 가 넘으면 읽기 전에, 모르면 읽다가 넘는 순간. Go API 와 같은 `detail` 이다. 예전엔 BFF 가 크기와 상관없이 전부 메모리에 읽었다 ([#128](https://github.com/shyuni4u/kubeport/issues/128)) |
 | 404 | `not-found` | `/api/v1` 자체를 찌른 경우. 세션 검사도 안 한다 — 누가 묻든 여긴 아무 데도 안 이어지고, 401 을 먼저 주면 "뭔가 있긴 하다"는 뜻이 된다 (#81) |
 | 499 | — | 클라이언트가 먼저 끊음(nginx 관례). **본문이 없으므로** id 는 `X-Request-Id` 헤더로만 온다 |
 

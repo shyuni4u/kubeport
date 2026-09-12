@@ -262,6 +262,7 @@ var statusNames = map[string]string{
 	"StatusOK": "200", "StatusCreated": "201", "StatusNoContent": "204",
 	"StatusBadRequest": "400", "StatusUnauthorized": "401", "StatusForbidden": "403",
 	"StatusNotFound": "404", "StatusMethodNotAllowed": "405", "StatusConflict": "409",
+	"StatusRequestEntityTooLarge": "413",
 	"StatusInternalServerError": "500", "StatusBadGateway": "502",
 }
 
