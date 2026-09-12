@@ -10,6 +10,8 @@
 | 파일 | 수정 | 이유 |
 |---|---|---|
 | `slider.tsx` | Track `bg-muted` → `bg-slider-track`, 두께 `h-1` → `h-1.5` | [#43](https://github.com/shyuni4u/kubeport/issues/43). `globals.css` 의 `--muted` 가 `--background` 와 **같은 oklch 값**이라 기본 `bg-muted` 트랙이 페이지 배경에 묻혀 보이지 않았습니다. `--border` 도 배경 대비 약 1.2:1 이라 부족해, WCAG 1.4.11(비텍스트 UI 3:1)용 전용 토큰 `--slider-track` 을 뒀습니다. |
+| `toggle-group.tsx` | 아이템 클래스를 상수 `toggleGroupItemClassName` 으로 뽑고, shadcn 에 없는 `ToggleRadioGroup` / `ToggleRadioGroupItem` 추가 (Base UI `RadioGroup`·`Radio`) | [#325](https://github.com/shyuni4u/kubeport/issues/325). 필수 enum 은 선택 해제가 안 되는데(#323) 토글 버튼(`aria-pressed`)은 "다시 누르면 풀린다" 고 읽힙니다. 라디오 의미(`radiogroup`·`radio`·`aria-checked`, 화살표 이동, 탭 한 번)로 바꾸되 모양은 토글 그룹과 같게 — 같은 클래스 상수를 쓰고, 눌린 모양만 `aria-checked:` 로 겁니다. `DynamicForm.test.tsx` 가 클래스 동일성을 고정합니다. |
+| `form.tsx` | `useFormField` 에 `formLabelId`, `FormLabel` 에 그 `id` | #325. `<label for>` 는 `<div role="radiogroup">` 의 이름이 되지 못해, 그룹이 `aria-labelledby` 로 라벨을 가리킵니다. |
 
 ## 근본 원인 메모 — 해결됨 ([#71](https://github.com/shyuni4u/kubeport/issues/71))
 

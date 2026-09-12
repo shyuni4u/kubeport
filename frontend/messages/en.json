@@ -75,6 +75,10 @@
       "keep": "Keep the current value",
       "keepAria": "{label}: keep the current value"
     },
+    "enumUnset": {
+      "none": "Not set",
+      "useDefault": "Not set (use default)"
+    },
     "validation": {
       "required": "This field is required.",
       "tooSmall": "Must be at least {min}.",
