@@ -324,8 +324,9 @@ export function schemaFromUISpec(
       case "string":
       case "autocomplete": {
         let s = z.string();
-        // A Secret to enter again needs a value, not an emptied box.
-        if (opts.reenterSecrets?.has(f.path)) s = s.min(1);
+        // A Secret to enter again, or one replacing a kept value, needs a
+        // value, not an emptied box.
+        if (opts.reenterSecrets?.has(f.path) || opts.keptSecrets?.has(f.path)) s = s.min(1);
         if (f.minLength !== undefined) s = s.min(f.minLength);
         if (f.maxLength !== undefined) s = s.max(f.maxLength);
         // Defence in depth — normalizeUISpec drops an unusable pattern before
@@ -381,7 +382,13 @@ export function schemaFromUISpec(
     // Moving a release to another version cannot carry a Secret over (#196).
     // Its field starts empty and has to be filled, required or not, or the
     // update would replace the running Secret with a default without a word.
-    const required = f.required || opts.reenterSecrets?.has(f.path);
+    //
+    // A kept Secret is required for the same reason (#288). It starts from the
+    // placeholder, so leaving it alone passes; but "enter a new value" empties
+    // it, and an optional one sent empty would reach the backend as missing
+    // and be filled from the ui-spec default.
+    const required =
+      f.required || opts.reenterSecrets?.has(f.path) || opts.keptSecrets?.has(f.path);
     shape[f.path] = required ? zs : zs.optional();
   }
   return z.object(shape);

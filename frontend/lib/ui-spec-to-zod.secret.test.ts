@@ -65,6 +65,34 @@ describe("schemaFromUISpec with kept secrets", () => {
     expect(schema.safeParse(redacted).success).toBe(false);
   });
 
+  // #288: "enter a new value" empties a kept field. Sent empty, an optional one
+  // would reach the backend as missing and be filled from the ui-spec default,
+  // over the running Secret. A kept Secret therefore always needs a value: the
+  // placeholder it started with, or a real one.
+  it("refuses an emptied kept Secret even where the ui-spec makes it optional", () => {
+    const optional: UISpec = {
+      fields: [
+        { path: "Secret[app].stringData.PASSWORD", label: "Password", type: "string", default: "changeme" },
+        { path: "Secret[app].stringData.PORT", label: "Port", type: "integer", default: 80 },
+        { path: "Secret[app].stringData.DEBUG", label: "Debug", type: "boolean", default: true },
+      ],
+    };
+    const start: Record<string, unknown> = {
+      "Secret[app].stringData.PASSWORD": REDACTED_SECRET,
+      "Secret[app].stringData.PORT": REDACTED_SECRET,
+      "Secret[app].stringData.DEBUG": REDACTED_SECRET,
+    };
+    const schema = schemaFromUISpec(optional, { keptSecrets: keptSecretPaths(start) });
+    expect(schema.safeParse(start).success).toBe(true);
+    expect(schema.safeParse({ ...start, "Secret[app].stringData.PASSWORD": "" }).success).toBe(false);
+    for (const path of Object.keys(start)) {
+      const { [path]: _gone, ...rest } = start;
+      void _gone;
+      expect(schema.safeParse(rest).success).toBe(false);
+    }
+    expect(schema.safeParse({ ...start, "Secret[app].stringData.DEBUG": false }).success).toBe(true);
+  });
+
   it("does not accept the placeholder for a field outside a Secret", () => {
     const values = { ...redacted, "Deployment[web].spec.replicas": REDACTED_SECRET };
     const schema = schemaFromUISpec(spec, { keptSecrets: keptSecretPaths(values) });
