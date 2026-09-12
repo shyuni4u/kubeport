@@ -14,8 +14,11 @@
 #    out of an Always Free 200 GB pool, so storage is cheap and we won't have
 #    to resize for a long while.
 #
-# Replace the <PLACEHOLDER> values before installing. Secrets MUST come in
-# via --set or a separate values file that is NOT committed to git:
+# Replace the <PLACEHOLDER> values before installing. Secrets MUST NOT be
+# committed, and should not go on the command line either: a --set value is in
+# helm's arguments (ps) while it runs, and a typed one stays in shell history.
+# Write them to files and pass the files — deploy/oci/README.md §4 has the full
+# steps, and the chart README "Keeping secrets off the command line" the why:
 #
 #   helm install kubeport deploy/helm/kubeport \
 #     -f deploy/helm/kubeport/values-oci-phase2.yaml \
@@ -24,9 +27,9 @@
 #     --set oidc.clientId=$GOOGLE_OAUTH_CLIENT_ID \
 #     --set oidc.audience=$GOOGLE_OAUTH_CLIENT_ID \
 #     --set-string auth.devAdminEmails=$YOUR_EMAIL \
-#     --set auth.appEncryptionKeyB64=$(openssl rand -base64 32) \
-#     --set auth.oidcClientSecret=$GOOGLE_OAUTH_CLIENT_SECRET \
-#     --set postgres.password=$(openssl rand -hex 24)
+#     --set-file auth.appEncryptionKeyB64="$d/enc_key" \
+#     --set-file auth.oidcClientSecret="$d/oidc_client_secret" \
+#     --set-file postgres.password="$d/pg_pass"
 
 host: <your-domain.example>     # required — set via --set on install
 
@@ -112,7 +115,7 @@ images:
 dex:
   enabled: false
   host: dex.kubeport.enzo.kr
-  clientSecret: ""             # --set dex.clientSecret=$(openssl rand -hex 24)
+  clientSecret: ""             # --set-file dex.clientSecret=<file> (deploy/oci/README.md §7.6)
   staticPasswords:             # hashes via: htpasswd -bnBC 10 "" "$DEMO_PW" | tr -d ':\n'
     - { email: demo-admin@demo.kubeport, username: demo-admin, userID: demo-admin-000, hash: "" }
     - { email: demo-user@demo.kubeport,  username: demo-user,  userID: demo-user-000,  hash: "" }

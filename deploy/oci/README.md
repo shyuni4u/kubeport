@@ -374,10 +374,13 @@ sudo GOOGLE_CLIENT_ID=<google-client-id> bash deploy/oci/k3s-auth-config.sh
 **검증** — Dex 토큰으로 로그인해 RBAC 스코프 확인:
 
 ```bash
-# client secret 은 §7.6 의 파일에서 읽는다 — `-d client_secret=…` 로 쓰면 curl 인자(ps)에 보인다.
-# 그 파일을 이미 지웠다면 릴리스 값에서 다시 만든다:
-#   sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm -n kubeport get values kubeport -o json | jq -j .dex.clientSecret > "$d/dex_client_secret"
+# 새 ssh 셸이라 §7.6 의 $d·$DEMO_PW 는 없다 — 둘 다 릴리스 값에서 다시 받는다.
+# client secret 은 파일로만 받는다: 화면에 찍거나 `-d client_secret=…` 로 쓰면 스크롤백·curl 인자(ps)에 남는다.
+d="$(mktemp -d)" && chmod 700 "$d"
+sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm -n kubeport get values kubeport -o json | jq -j .dex.clientSecret > "$d/dex_client_secret"
+DEMO_PW=$(sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm -n kubeport get values kubeport -o json | jq -r .demo.passwordHint)   # 랜딩에 공개되는 값
 TOKEN=$(curl -s -X POST https://dex.kubeport.enzo.kr/token -d grant_type=password -d client_id=kubeport-demo --data-urlencode "client_secret@$d/dex_client_secret" -d username=demo-user@demo.kubeport -d password=$DEMO_PW -d scope='openid email' | jq -r .id_token)
+rm -rf "$d"
 kubectl --token="$TOKEN" auth whoami          # → dex:demo-user@demo.kubeport
 kubectl --token="$TOKEN" -n demo auth can-i create deployments   # yes
 kubectl --token="$TOKEN" -n default auth can-i create deployments # no

@@ -870,7 +870,7 @@ Enable with:
 dex:
   enabled: true
   host: dex.example.com          # required — needs its own DNS A record
-  clientSecret: <random>          # --set dex.clientSecret=$(openssl rand -hex 24)
+  clientSecret: <random>          # --set-file dex.clientSecret=<file> — see "Keeping secrets off the command line"
   staticPasswords:
     - email: demo-admin@demo.kubeport
       username: demo-admin
