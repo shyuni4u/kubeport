@@ -113,6 +113,102 @@ helm install kubeport deploy/helm/kubeport \
   --set postgres.password=$PG_PASS
 ```
 
+### Keeping secrets off the command line
+
+While `helm` runs, the three secret `--set` values above
+(`auth.appEncryptionKeyB64`, `auth.oidcClientSecret`, `postgres.password`) are
+in its arguments, which any other user on the machine can read with `ps` (#64),
+and a secret you typed into a command line — the Google client secret, say —
+stays in your shell history. That is fine for a throwaway cluster. For one you
+keep, skip step 1's `ENC_KEY`/`PG_PASS`, write each secret to a file outside the
+repository, and pass the file:
+
+```bash
+# Outside the checkout, so a later `git add -A` cannot pick the files up
+d="$(mktemp -d)" && chmod 700 "$d"
+# No line ending: --set-file and kubectl --from-file keep a file's bytes exactly,
+# and Git Bash's openssl ends its output with CRLF
+openssl rand -base64 32 | tr -d '\r\n' > "$d/enc_key"
+openssl rand -hex 24    | tr -d '\r\n' > "$d/pg_pass"
+# Paste the Google OAuth client secret at the silent prompt — not in history, not in ps
+read -rs S && printf '%s' "$S" > "$d/oidc_client_secret" && unset S
+```
+
+On Linux, macOS and WSL `chmod 700` makes the directory yours alone. Git Bash
+on Windows does not change NTFS permissions: the directory keeps whatever its
+parent grants (`icacls "$(cygpath -w "$d")"` shows who), so on a Windows machine
+other people use, run these steps in WSL.
+
+**Chart-managed Secret, values from files.** Replace the last three lines of the
+install command with:
+
+```bash
+  --set-file auth.appEncryptionKeyB64="$d/enc_key" \
+  --set-file auth.oidcClientSecret="$d/oidc_client_secret" \
+  --set-file postgres.password="$d/pg_pass"
+```
+
+This keeps them out of history and `ps`, but helm stores them in every release
+revision (`helm get values kubeport -n kubeport --revision N`). A key you later
+rotate stays readable in older revisions until they age out (`helm upgrade
+--history-max`, 10 by default), to anyone who can read Secrets in the namespace
+— or ConfigMaps, with `HELM_DRIVER=configmap`.
+
+**External Secret — the auth values never enter the release.** Create the
+Secret first, then install with a reference to it ([Secret modes](#secret-modes)):
+
+```bash
+# DATABASE_URL for the embedded Postgres: the same password, and the chart's
+# Service name — <release>-postgres, or <release>-kubeport-postgres when the
+# release name does not contain "kubeport". With an external Postgres, write
+# your own URL to the file instead.
+printf 'postgres://kubeport:%s@kubeport-postgres:5432/kubeport?sslmode=disable' "$(cat "$d/pg_pass")" > "$d/database_url"
+
+kubectl create namespace kubeport
+kubectl -n kubeport create secret generic kubeport-auth \
+  --from-file=APP_ENCRYPTION_KEY_B64="$d/enc_key" \
+  --from-file=OIDC_CLIENT_SECRET="$d/oidc_client_secret" \
+  --from-file=DATABASE_URL="$d/database_url"
+kubectl -n kubeport describe secret kubeport-auth   # key names and byte counts, never values
+
+helm install kubeport deploy/helm/kubeport --namespace kubeport \
+  --set auth.create=false --set auth.existingSecret=kubeport-auth \
+  --set-file postgres.password="$d/pg_pass" \
+  --set host=demo.kubeport.example \
+  --set ingress.className=traefik \
+  --set postgres.storage.storageClassName=local-path \
+  --set oidc.issuer=https://accounts.google.com \
+  --set oidc.clientId=$GOOGLE_OAUTH_CLIENT_ID \
+  --set oidc.audience=$GOOGLE_OAUTH_CLIENT_ID \
+  --set-string auth.devAdminEmails=$YOUR_EMAIL
+```
+
+The non-secret flags are the Quick install's — substitute your values the same
+way, and add the image tag pins below. `auth.appEncryptionKeyB64` and
+`auth.oidcClientSecret` are left out: with `auth.create=false` the chart does
+not read them. The embedded Postgres still takes its own password from
+`postgres.password`, so that one value stays in the release; with an external
+Postgres set `postgres.embedded=false` and drop that line. `--from-literal` would
+put the values back into history and `ps`.
+
+**With `dex.enabled=true`** the Secret needs a fourth key, and Dex and the demo
+reset Job read their own secrets from the release, not from your Secret — so
+those stay in it, passed as files:
+
+```bash
+openssl rand -hex 24 | tr -d '\r\n' > "$d/dex_client_secret"
+# kubectl create secret:  --from-file=DEMO_OIDC_CLIENT_SECRET="$d/dex_client_secret"
+# helm install:           --set-file dex.clientSecret="$d/dex_client_secret"
+#                         --set-file demo.adminPassword=<file> --set-file demo.userPassword=<file>
+```
+
+See [Demo mode](#demo-mode-dex) for what the demo passwords must match.
+
+Once the install is done, copy `enc_key` (and `pg_pass`) into your password
+manager, then `rm -rf "$d"`. Losing `APP_ENCRYPTION_KEY_B64` makes every stored
+session undecryptable, and with an external Secret the cluster holds the only
+other copy.
+
 This installs the `latest` tag, which is not a version — see the warning helm
 prints after install. Add `--set images.backend.tag=sha-<7>
 --set images.frontend.tag=sha-<7>` to pin the commit you meant. That is what
@@ -587,7 +683,7 @@ kubectl --namespace kubeport delete pvc -l app.kubernetes.io/instance=kubeport
 | Mode | Set | Where |
 |---|---|---|
 | Chart-managed (dev / Phase 1) | `auth.create=true`, plus `auth.appEncryptionKeyB64` / `auth.oidcClientSecret` / `postgres.password` via `--set` | Chart writes a `<release>-auth` Secret with `DATABASE_URL`, `APP_ENCRYPTION_KEY_B64`, `OIDC_CLIENT_SECRET` — plus `DEMO_OIDC_CLIENT_SECRET` when `dex.enabled=true` |
-| External (recommended for prod) | `auth.create=false`, `auth.existingSecret=<name>` | You provide a Secret named `<name>` with the same keys; e.g. via `sealed-secrets` or `external-secrets` |
+| External (recommended for prod) | `auth.create=false`, `auth.existingSecret=<name>` | You provide a Secret named `<name>` with the same keys; e.g. via `sealed-secrets` or `external-secrets`, or by hand as in [Keeping secrets off the command line](#keeping-secrets-off-the-command-line) |
 
 **With `dex.enabled=true`, the external Secret needs a fourth key:
 `DEMO_OIDC_CLIENT_SECRET`, holding the same value as `dex.clientSecret`.**
