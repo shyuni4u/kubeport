@@ -920,6 +920,166 @@ describe("DynamicForm stored null in optional fields", () => {
   });
 });
 
+// #321 — clearing a number box stored `undefined`, and react-hook-form reads an
+// undefined field back from its default values. The ui-spec default came back
+// into the box the moment it was emptied, so typing appended to it: default 3,
+// clear, type 5, and the form held 35 — deployable, if 35 was in range.
+describe("DynamicForm clearing a number box that has a default", () => {
+  const port = "Deployment[web].spec.template.spec.containers[0].ports[0].containerPort";
+  const specWith = (required: boolean): UISpec => ({
+    fields: [
+      { path: "metadata.name", label: "Name", type: "string", default: "web" },
+      { path: port, label: "Port", type: "integer", default: 3, required },
+    ],
+  });
+  const box = () => screen.getByRole("spinbutton", { name: /Port/ }) as HTMLInputElement;
+
+  it("starts a new deploy on the default", () => {
+    renderWithIntl(<DynamicForm spec={specWith(true)} onSubmit={() => {}} />);
+    expect(box()).toHaveValue(3);
+  });
+
+  it("stays empty once cleared, and sends what is typed next instead of appending to the default", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const ui = <DynamicForm spec={specWith(true)} onSubmit={onSubmit} />;
+    const { rerender } = renderWithIntl(ui);
+
+    await user.clear(box());
+    expect(box()).toHaveValue(null);
+    expect(box().value).toBe("");
+    // Neither a re-render nor leaving the box brings the default back.
+    rerender(
+      <NextIntlClientProvider locale="ko" messages={ko}>
+        {ui}
+      </NextIntlClientProvider>,
+    );
+    await user.tab();
+    expect(box()).toHaveValue(null);
+
+    await user.type(box(), "5");
+    expect(box()).toHaveValue(5);
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ "metadata.name": "web", [port]: 5 }));
+  });
+
+  it("refuses a required box left empty, and the preview hears it does not parse", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const onParsedChange = vi.fn();
+    renderWithIntl(
+      <DynamicForm spec={specWith(true)} onSubmit={onSubmit} onParsedChange={onParsedChange} />,
+    );
+    expect(onParsedChange).toHaveBeenLastCalledWith({
+      success: true,
+      values: { "metadata.name": "web", [port]: 3 },
+    });
+
+    await user.clear(box());
+    expect(onParsedChange).toHaveBeenLastCalledWith({ success: false });
+
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(screen.getByText(ko.form.validation.required)).toBeInTheDocument());
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(box()).toHaveValue(null);
+  });
+
+  it("leaves an optional box left empty out of the submit and the preview", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const onParsedChange = vi.fn();
+    renderWithIntl(
+      <DynamicForm spec={specWith(false)} onSubmit={onSubmit} onParsedChange={onParsedChange} />,
+    );
+    await user.clear(box());
+
+    const parsed = onParsedChange.mock.calls.at(-1)?.[0];
+    expect(parsed.success).toBe(true);
+    expect(JSON.parse(JSON.stringify(parsed.values))).toEqual({ "metadata.name": "web" });
+
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(ko.form.validation.required)).toBeNull();
+    const sent = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    expect(sent[port]).toBeUndefined();
+    expect(JSON.parse(JSON.stringify({ values: sent }))).toEqual({ values: { "metadata.name": "web" } });
+    expect(box()).toHaveValue(null);
+  });
+
+  it("keeps a typed 0 as 0", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(<DynamicForm spec={specWith(true)} onSubmit={onSubmit} />);
+    await user.clear(box());
+    await user.type(box(), "0");
+    expect(box()).toHaveValue(0);
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ "metadata.name": "web", [port]: 0 }));
+  });
+
+  it("takes a negative number typed into the cleared box", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(<DynamicForm spec={specWith(true)} onSubmit={onSubmit} />);
+    await user.clear(box());
+    await user.type(box(), "-5");
+    expect(box()).toHaveValue(-5);
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ "metadata.name": "web", [port]: -5 }));
+  });
+
+  it("starts an update on the release's value, and clears to empty, not to the default", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(
+      <DynamicForm
+        spec={specWith(true)}
+        initialValues={{ "metadata.name": "web", [port]: 8080 }}
+        submitLabel="업데이트"
+        onSubmit={onSubmit}
+      />,
+    );
+    expect(box()).toHaveValue(8080);
+    await user.clear(box());
+    expect(box()).toHaveValue(null);
+    await user.type(box(), "81");
+    expect(box()).toHaveValue(81);
+    await user.click(screen.getByRole("button", { name: "업데이트" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ "metadata.name": "web", [port]: 81 }));
+  });
+
+  it("behaves the same for a box with no default", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const noDefault: UISpec = { fields: [{ path: port, label: "Port", type: "integer", required: true }] };
+    renderWithIntl(<DynamicForm spec={noDefault} onSubmit={onSubmit} />);
+    expect(box()).toHaveValue(null);
+    await user.type(box(), "12");
+    await user.clear(box());
+    expect(box()).toHaveValue(null);
+    await user.type(box(), "5");
+    expect(box()).toHaveValue(5);
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ [port]: 5 }));
+  });
+
+  // A text box's empty is "", which react-hook-form keeps as a value.
+  it("keeps a cleared text box with a default empty too", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const text: UISpec = { fields: [{ path: "metadata.name", label: "Name", type: "string", default: "web" }] };
+    renderWithIntl(<DynamicForm spec={text} onSubmit={onSubmit} />);
+    const input = screen.getByRole("textbox", { name: /Name/ });
+    await user.clear(input);
+    await user.tab();
+    expect(input).toHaveValue("");
+    await user.type(input, "api");
+    expect(input).toHaveValue("api");
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ "metadata.name": "api" }));
+  });
+});
+
 // #31 — a second click before the parent re-renders used to fire a second
 // POST /v1/releases. The parent's `disabled` prop lands a render too late,
 // so the guard has to live inside the form.

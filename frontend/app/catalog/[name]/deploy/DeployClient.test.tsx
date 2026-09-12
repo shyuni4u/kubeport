@@ -770,11 +770,36 @@ describe("DeployClient preview payload", () => {
     );
   });
 
-  // No default: an emptied field would read back as its default in the box
-  // (react-hook-form), and typing would append to it.
+  // No default, so a new form starts with the required field empty.
   const portSpec: UISpec = {
     fields: [{ path: "spec.port", label: "포트", type: "integer", required: true }],
   };
+  // With one. Until #321 a cleared box read back as its default and typing
+  // appended to it, so the tests below that clear the box had to avoid one.
+  const defaultPortSpec: UISpec = {
+    fields: [{ path: "spec.port", label: "포트", type: "integer", default: 8080, required: true }],
+  };
+
+  it("previews what is typed into a cleared box, not the default it had", async () => {
+    const user = userEvent.setup();
+    const fetchMock = backendFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={defaultPortSpec} />);
+    await fillMeta(user);
+    expect(await screen.findByText(ALL_ALLOWED)).toBeInTheDocument();
+
+    const before = renderCalls(fetchMock).length;
+    await user.clear(screen.getByLabelText(/포트/));
+    await waitFor(() => expect(screen.getByText(INVALID)).toBeInTheDocument());
+    expect(screen.getByLabelText(/포트/)).toHaveValue(null);
+    await pastDebounce();
+    expect(renderCalls(fetchMock)).toHaveLength(before);
+
+    await user.type(screen.getByLabelText(/포트/), "80");
+    expect(screen.getByLabelText(/포트/)).toHaveValue(80);
+    expect(await screen.findByText(ALL_ALLOWED)).toBeInTheDocument();
+    expect(bodyOf(renderCalls(fetchMock).at(-1)!)).toEqual({ values: { "spec.port": 80 } });
+  });
 
   it("does not keep a permission verdict for values that no longer parse", async () => {
     const user = userEvent.setup();
@@ -822,9 +847,8 @@ describe("DeployClient preview payload", () => {
         : base(url, init),
     );
     vi.stubGlobal("fetch", fetchMock);
-    render(<DeployClient templateName="web-app" version={1} team={null} spec={portSpec} />);
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={defaultPortSpec} />);
     await fillMeta(user);
-    await user.type(screen.getByLabelText(/포트/), "8080");
     await waitFor(() => expect(pending.length).toBeGreaterThan(0));
 
     await user.clear(screen.getByLabelText(/포트/));
