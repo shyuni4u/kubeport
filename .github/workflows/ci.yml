@@ -90,12 +90,33 @@ jobs:
         # The tags are discovered, not listed. A list here would be one more
         # hand-kept allowlist drifting away from the code — the exact shape of
         # #121 — so a new tag is covered the day it is written.
+        #
+        # The scan reads only `//go:build <word>` and cannot understand an
+        # expression (`!windows`, `a || b`, `integration && linux`), so after
+        # vetting with what it found, check that nothing is still left out
+        # (#175). `go list ./...` cannot answer that: it drops a package whose
+        # files are all constrained out, even with -e (backend/e2e under default
+        # tags). Listing every directory that holds .go files by path does — a
+        # fully excluded package comes back with an error, a partly excluded one
+        # with IgnoredGoFiles. Anything still there fails the step and names it.
+        #
+        # A file constrained by GOOS/GOARCH (a `_windows.go`, `//go:build darwin`)
+        # would also show up here on this Linux runner. There is none today; if
+        # one appears, exclude it explicitly below rather than loosening the check.
         run: |
           cd backend
           go vet ./...
           TAGS=$(grep -rho '^//go:build [a-z0-9_]*' --include='*.go' . | awk '{print $2}' | sort -u | paste -sd,)
           echo "build tags found: ${TAGS:-none}"
           if [ -n "$TAGS" ]; then go vet -tags="$TAGS" ./...; fi
+          mapfile -t DIRS < <(find . -name '*.go' -not -path './vendor/*' -not -path '*/testdata/*' -printf '%h\n' | sort -u)
+          LEFT=$(go list -e -tags="$TAGS" -f '{{if or .IgnoredGoFiles .Error}}{{.ImportPath}} ignored={{.IgnoredGoFiles}} err={{.Error}}{{end}}' "${DIRS[@]}" | grep -v '^$' || true)
+          if [ -n "$LEFT" ]; then
+            echo "::error title=Go files left out of vet::these stay excluded even with the discovered tags (${TAGS:-none}); the tag scan did not understand their build constraint (#175):"
+            echo "$LEFT"
+            exit 1
+          fi
+          echo "every Go file under backend/ was vetted (tags: ${TAGS:-none})"
 
       - name: go test
         env:
