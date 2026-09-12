@@ -350,10 +350,21 @@ export function schemaFromUISpec(
         break;
       }
       case "integer": {
-        let n = z.coerce.number().int();
+        const mustBeGiven = opts.keptSecrets?.has(f.path) || opts.reenterSecrets?.has(f.path);
+        // `z.coerce.number()` reads null and "" as 0. For a Secret the user has
+        // to give, that let an emptied box through as 0 over the running
+        // Secret (codex review of #288), so empty is taken out before any
+        // number is made of it and fails as missing. Other integer fields keep
+        // the coercion they have always had.
+        let n = mustBeGiven ? z.number().int() : z.coerce.number().int();
         if (f.min !== undefined) n = n.min(f.min);
         if (f.max !== undefined) n = n.max(f.max);
-        zs = n;
+        zs = mustBeGiven
+          ? z.preprocess(
+              (v) => (v === null || v === undefined || v === "" ? undefined : Number(v)),
+              n,
+            )
+          : n;
         break;
       }
       case "boolean":

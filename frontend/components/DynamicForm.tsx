@@ -341,9 +341,11 @@ function autocompleteListId(path: string): string {
  * What "enter a new value" puts in place of the kept placeholder (#288).
  *
  * Never a ui-spec default: that is the value an unseen overwrite would have
- * sent. A Switch and a Slider cannot show "nothing", so they start at a value
- * they display — off, and the minimum — which is exactly what they submit.
- * The rest start empty and must be filled.
+ * sent. A Switch and a Slider have no empty state, so they start at a value
+ * they visibly show — off, and the minimum (a bound, printed by the readout
+ * beside the label) — which is exactly what they submit. Everything else starts
+ * empty and is refused until filled; an integer box never reads empty as 0
+ * (see schemaFromUISpec).
  *
  * Empty is `null`, not `undefined`: react-hook-form reads an undefined field
  * back as its default value, which here is the placeholder, so the field would
