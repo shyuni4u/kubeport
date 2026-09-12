@@ -1034,6 +1034,80 @@ describe("DynamicForm onChange", () => {
   });
 });
 
+// #319 — the deploy form previewed the raw values while submit sent the parsed
+// ones, so a stored null went to the render API, which refused it.
+describe("DynamicForm onParsedChange", () => {
+  const spec: UISpec = {
+    fields: [
+      { path: "metadata.name", label: "Name", type: "string", required: true },
+      { path: "metadata.labels.tier", label: "Tier", type: "string" },
+      { path: "Secret[app].stringData.password", label: "Password", type: "string" },
+    ],
+  };
+
+  it("leaves a stored null on an optional field out, as submit does", () => {
+    const onChange = vi.fn();
+    const onParsedChange = vi.fn();
+    renderWithIntl(
+      <DynamicForm
+        spec={spec}
+        initialValues={{ "metadata.name": "web", "metadata.labels.tier": null }}
+        onSubmit={() => {}}
+        onChange={onChange}
+        onParsedChange={onParsedChange}
+      />,
+    );
+    // The raw values still carry it; only the parsed ones drop it.
+    expect(onChange).toHaveBeenLastCalledWith({ "metadata.name": "web", "metadata.labels.tier": null });
+    const last = onParsedChange.mock.calls.at(-1)?.[0];
+    expect(last.success).toBe(true);
+    expect(JSON.stringify(last.values)).toBe(JSON.stringify({ "metadata.name": "web" }));
+  });
+
+  it("reports a stored null on a required field as not parsing, until it is filled", async () => {
+    const user = userEvent.setup();
+    const onParsedChange = vi.fn();
+    renderWithIntl(
+      <DynamicForm
+        spec={spec}
+        initialValues={{ "metadata.name": null }}
+        onSubmit={() => {}}
+        onParsedChange={onParsedChange}
+      />,
+    );
+    expect(onParsedChange).toHaveBeenLastCalledWith({ success: false });
+
+    await user.type(screen.getByLabelText(/Name/), "web");
+    expect(onParsedChange).toHaveBeenLastCalledWith({
+      success: true,
+      values: { "metadata.name": "web" },
+    });
+  });
+
+  it("parses a kept Secret's placeholder to exactly what submit sends", async () => {
+    const user = userEvent.setup();
+    const onParsedChange = vi.fn();
+    const onSubmit = vi.fn();
+    renderWithIntl(
+      <DynamicForm
+        spec={spec}
+        initialValues={{ "metadata.name": "web", "Secret[app].stringData.password": REDACTED_SECRET }}
+        onSubmit={onSubmit}
+        onParsedChange={onParsedChange}
+      />,
+    );
+    const parsed = onParsedChange.mock.calls.at(-1)?.[0];
+    expect(parsed).toEqual({
+      success: true,
+      values: { "metadata.name": "web", "Secret[app].stringData.password": REDACTED_SECRET },
+    });
+
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(JSON.stringify(onSubmit.mock.calls[0][0])).toBe(JSON.stringify(parsed.values));
+  });
+});
+
 // #43 — the track was `bg-muted`, which is byte-identical to `--background`,
 // so the slider read as a bare thumb floating on nothing. End labels give the
 // control a visible extent even before the track contrast lands.

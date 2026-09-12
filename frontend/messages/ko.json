@@ -298,8 +298,10 @@
       "heading": "만들어질 것",
       "rendering": "미리보기 준비 중…",
       "empty": "폼을 채우면 여기에 미리보기가 표시됩니다.",
+      "invalid": "필수 항목을 채우고 표시된 오류를 고치면 미리보기가 나옵니다.",
       "unnamed": "(이름 없음)"
     },
+    "rbacWaitsForForm": "미리보기가 나오면 만들 수 있는지 확인합니다.",
     "teamSuffix": "{team} 팀",
     "updateUnavailable": {
       "title": "릴리스 값을 불러오지 못했어요",

@@ -40,6 +40,12 @@ type Props = {
    * stable — wrap it in useCallback.
    */
   onResult?: (status: RbacStatus) => void;
+  /**
+   * Why there is nothing to check yet, when it is not the missing cluster or
+   * namespace the default hint names — e.g. the deploy form's values do not
+   * parse, so there is no preview to take kinds from (#319).
+   */
+  idleReason?: string;
 };
 
 type CheckResult = {
@@ -91,7 +97,7 @@ function statusFrom(results: CheckResult[]): RbacStatus {
   return "unknown";
 }
 
-export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
+export function RBACCheckPanel({ cluster, namespace, kinds, onResult, idleReason }: Props) {
   const t = useTranslations("templates.rbac");
   const [results, setResults] = useState<CheckResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -220,7 +226,7 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult }: Props) {
       <CardContent className="flex flex-col gap-1 text-xs">
         {checking && <span className="text-muted-foreground">{t("checking")}</span>}
         {showPlaceholder && (
-          <span className="text-muted-foreground">{t("hint")}</span>
+          <span className="text-muted-foreground">{idleReason ?? t("hint")}</span>
         )}
         {/*
           Icons are lucide, not emoji (#114). The panel used ❌/⚠ literals

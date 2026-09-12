@@ -7,7 +7,7 @@ import YAML from "yaml";
 import { useDebounce, useDebouncedCallback } from "use-debounce";
 
 import { CLUSTER_CHANGED_EVENT } from "@/components/ClusterPicker";
-import { DynamicForm } from "@/components/DynamicForm";
+import { DynamicForm, type ParsedFormValues } from "@/components/DynamicForm";
 import { HelpHint } from "@/components/HelpHint";
 import { PreviewErrorBoundary } from "@/components/PreviewErrorBoundary";
 import { RBACCheckPanel, type KindRef, type RbacStatus } from "@/components/RBACCheckPanel";
@@ -272,12 +272,24 @@ export function DeployClient({
     return () => window.removeEventListener(CLUSTER_CHANGED_EVENT, onChanged);
   }, [isUpdate, clusters, selectCluster]);
 
+  // Set while the form's values do not parse, so no preview is asked for.
+  const [formInvalid, setFormInvalid] = useState(false);
+  // The preview request still out, if any. A newer request or values that
+  // stopped parsing make its answer stale: it is aborted, and its handler
+  // checks it is still the current one before touching state — a slow answer
+  // for old values must not bring back a preview, and with it a permission
+  // verdict, for values the form no longer holds.
+  const inflight = useRef<AbortController | null>(null);
+
   // Debounced preview render. 300ms matches the ResourcesPreview ergonomics —
   // fast enough to feel live while a user is typing but not spamming the
-  // backend. Errors (400 from missing-required etc.) clear the preview; the
-  // form's own validation surfaces the actual problem inline.
+  // backend. `values` are what submit would send (see handleValuesChange);
+  // errors the API still finds (a pattern only it checks) clear the preview.
   const preview = useDebouncedCallback(
     async (values: Record<string, unknown>) => {
+      inflight.current?.abort();
+      const ctrl = new AbortController();
+      inflight.current = ctrl;
       setPending(true);
       try {
         const res = await fetch(
@@ -289,21 +301,35 @@ export function DeployClient({
             // placeholder previews with the stored value, redacted again in
             // the response (#196).
             body: JSON.stringify(updateReleaseId ? { values, release_id: updateReleaseId } : { values }),
+            signal: ctrl.signal,
           },
         );
+        if (inflight.current !== ctrl) return;
         if (!res.ok) {
           setRendered(null);
           return;
         }
         const body = (await res.json()) as { rendered_yaml: string };
+        if (inflight.current !== ctrl) return;
         setRendered(body.rendered_yaml);
       } catch {
-        setRendered(null);
+        if (inflight.current === ctrl) setRendered(null);
       } finally {
-        setPending(false);
+        if (inflight.current === ctrl) {
+          inflight.current = null;
+          setPending(false);
+        }
       }
     },
     300,
+  );
+
+  useEffect(
+    () => () => {
+      preview.cancel();
+      inflight.current?.abort();
+    },
+    [preview],
   );
 
   // Kinds extracted from the rendered YAML for RBAC preflight. Deriving from
@@ -331,11 +357,32 @@ export function DeployClient({
 
   // Every keystroke in the form both refreshes the preview and invalidates
   // any standing failure notice. Stable identity matters: DynamicForm
-  // re-subscribes its RHF watcher whenever onChange changes.
+  // re-subscribes its RHF watcher whenever the callback changes.
+  //
+  // The preview gets the values parsed by the schema submit uses, not the raw
+  // ones (#319): a stored null on an optional field is left out, as submit
+  // leaves it out, instead of reaching the API as a null it refuses.
+  //
+  // Values that do not parse are values submit refuses, and the API would
+  // refuse them too. Nothing is sent and the preview is cleared rather than
+  // kept as stale: the permission check takes its kinds from the preview, so
+  // a kept one would go on saying "allowed" or "denied" — and gating the
+  // button — for values the form no longer holds. Clearing is where a refused
+  // render already left the form; what is new is saying why.
   const handleValuesChange = useCallback(
-    (values: Record<string, unknown>) => {
+    (parsed: ParsedFormValues) => {
       clearErr();
-      preview(values);
+      if (parsed.success) {
+        setFormInvalid(false);
+        preview(parsed.values);
+        return;
+      }
+      preview.cancel();
+      inflight.current?.abort();
+      inflight.current = null;
+      setFormInvalid(true);
+      setRendered(null);
+      setPending(false);
     },
     [clearErr, preview],
   );
@@ -573,7 +620,7 @@ export function DeployClient({
               // The namespace can now start empty (#179), and the API requires one.
               (!isUpdate && (!meta.cluster || nameProblem !== null || !meta.namespace.trim()))
             }
-            onChange={handleValuesChange}
+            onParsedChange={handleValuesChange}
             onSubmit={submit}
           />
         </PreviewErrorBoundary>
@@ -605,13 +652,14 @@ export function DeployClient({
         )}
       </div>
       <aside className="flex flex-col gap-3">
-        <ResourcesPreview renderedYaml={rendered} pending={pending} />
+        <ResourcesPreview renderedYaml={rendered} pending={pending} paused={formInvalid} />
         {rbacPanelVisible && (
           <RBACCheckPanel
             cluster={meta.cluster}
             namespace={debouncedNamespace}
             kinds={kinds}
             onResult={handleRbacResult}
+            idleReason={formInvalid ? t("rbacWaitsForForm") : undefined}
           />
         )}
       </aside>

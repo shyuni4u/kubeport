@@ -298,8 +298,10 @@
       "heading": "What will be created",
       "rendering": "Preparing preview…",
       "empty": "Fill in the form and a preview will appear here.",
+      "invalid": "Fill in the required fields and fix any errors shown, and the preview appears here.",
       "unnamed": "(unnamed)"
     },
+    "rbacWaitsForForm": "Once the preview is ready, this checks you can create it.",
     "teamSuffix": "{team} team",
     "updateUnavailable": {
       "title": "Couldn't load this release's values",
