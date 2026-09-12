@@ -1,8 +1,17 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
+
+	"github.com/gin-gonic/gin"
 )
 
 // defaultLogStreamLifetime is how long one log stream may stay open before the
@@ -37,6 +46,76 @@ func logStreamLifetime(d time.Duration) time.Duration {
 // ceiling's scale: its two Dex accounts are shared by every visitor, so for the
 // demo this is close to a global cap on concurrent log viewers per role.
 const defaultLogStreamsPerCaller = 16
+
+// demoLogStreamsPerLogin is how many log streams one sign-in to a demo account
+// may hold open (#200). The per-caller cap above is, for a demo account, one
+// pool for every visitor, and a single visitor holding all of it — a script
+// opening sixteen streams, say — left the log tab refusing everyone else.
+// Eight is half the pool, and more than one reader's tabs need: a stream whose
+// connection dropped without closing holds its slot until a write to it fails,
+// which can take minutes, while the browser reconnects under the same sign-in —
+// so a reader on a flaky connection needs room above their open tabs, or they
+// lock themselves out (security review).
+const demoLogStreamsPerLogin = 8
+
+// loginKey names one sign-in by the id token it presented. A digest, not the
+// token: the token is a credential, and the key sits in a map for as long as
+// the stream lives.
+//
+// Digested as the verifier reads it, not as the text sent: one signed token has
+// many spellings that all verify, and hashing the text gave each spelling its
+// own cap — one sign-in the whole pool again. The verifier (go-jose) strips
+// whitespace anywhere in the token, decodes each segment with a lenient
+// base64url decoder that ignores a segment's spare trailing bits, and rebuilds
+// the signed input from the decoded header and payload (codex and security
+// review). So the key is taken over the three segments decoded, after the same
+// whitespace is removed, each prefixed with its length.
+//
+// A token that does not split and decode that way could not have verified,
+// and never reaches a handler; it is hashed as sent.
+func loginKey(idToken string) string {
+	token := strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, idToken)
+	h := sha256.New()
+	if segments, ok := decodeJWS(token); ok {
+		for _, seg := range segments {
+			fmt.Fprintf(h, "%d:", len(seg))
+			h.Write(seg)
+		}
+	} else {
+		h.Write([]byte(token))
+	}
+	return hex.EncodeToString(h.Sum(nil)[:16])
+}
+
+// decodeJWS decodes the three segments of a compact JWS.
+func decodeJWS(token string) ([][]byte, bool) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return nil, false
+	}
+	out := make([][]byte, 0, 3)
+	for _, p := range parts {
+		b, err := base64.RawURLEncoding.DecodeString(p)
+		if err != nil {
+			return nil, false
+		}
+		out = append(out, b)
+	}
+	return out, true
+}
+
+// refuseStream answers a log stream past a cap on streams held open: the
+// caller's (#169), or one sign-in's to a demo account (#200).
+func refuseStream(c *gin.Context) {
+	c.Header("Retry-After", "10")
+	writeError(c, http.StatusTooManyRequests, "too-many-streams",
+		"too many log streams open for this caller; close one and retry")
+}
 
 // streamSlots caps how many log streams each caller holds open at once.
 //
