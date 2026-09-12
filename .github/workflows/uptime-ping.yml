@@ -29,7 +29,12 @@ jobs:
         env:
           URL: https://kubeport.enzo.kr/
         run: |
-          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 --retry 2 "$URL" || echo 000)
+          # On a connection failure curl already prints 000 for %{http_code} and
+          # exits non-zero, so `|| echo 000` made it "000000" and the check below
+          # never fired. Take what it printed and normalise anything that is not
+          # a three-digit status.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 --retry 2 "$URL") || true
+          [[ $code =~ ^[0-9]{3}$ ]] || code=000
           echo "GET $URL -> $code"
           # Any HTTP response (even a redirect/401) proves the ingress + app are
           # serving and generates the network/CPU we need. Only a connection
@@ -62,7 +67,9 @@ jobs:
             echo "::error::No body from $URL — the health endpoint itself is down"
             exit 1
           fi
-          if ! printf '%s' "$body" | jq -e 'type == "object"' >/dev/null 2>&1; then
+          # -s and length == 1: plain -e judges only the LAST document, so
+          # `"junk" {}` or a valid object followed by `{"status":""}` passed.
+          if ! printf '%s' "$body" | jq -e -s 'length == 1 and (.[0] | type == "object")' >/dev/null 2>&1; then
             echo "::error::$URL did not return a JSON object — an ingress or proxy page, not the API."
             exit 1
           fi
