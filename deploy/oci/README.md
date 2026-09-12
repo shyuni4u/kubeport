@@ -96,14 +96,21 @@ cd kubeport
 
 값 생성 + install:
 
-```bash
-# 한 번 생성하고 password manager 에 저장 — 절대 분실 금지
-ENC_KEY=$(openssl rand -base64 32)
-PG_PASS=$(openssl rand -hex 24)
+시크릿 3종은 셸 변수·`--set` 이 아니라 **파일로** 넘긴다. `--set` 값은 helm 이 도는 동안 `ps` 에
+보이고, 직접 입력한 `GOCSPX-…` 줄은 셸 history 에 남는다 (#303). 방법과 이유는 차트 README
+[Keeping secrets off the command line](../helm/kubeport/README.md#keeping-secrets-off-the-command-line) 와 같다.
 
-HOST=kubeport.example.com               # 사용한 도메인
-GOOGLE_CLIENT_ID=...apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=GOCSPX-...
+```bash
+# 체크아웃 밖 임시 디렉터리 — 나중에 git add 에 걸리지 않는다
+d="$(mktemp -d)" && chmod 700 "$d"
+# 끝 줄바꿈 없이: --set-file 은 파일 바이트를 그대로 값으로 넣는다
+openssl rand -base64 32 | tr -d '\r\n' > "$d/enc_key"
+openssl rand -hex 24    | tr -d '\r\n' > "$d/pg_pass"
+# Google Client secret(GOCSPX-…)을 보이지 않는 프롬프트에 붙여넣는다 — history·ps 에 안 남는다
+read -rs S && printf '%s' "$S" > "$d/oidc_client_secret" && unset S
+
+HOST=kubeport.example.com                        # 사용한 도메인
+GOOGLE_CLIENT_ID=...apps.googleusercontent.com   # 공개값
 
 helm install kubeport deploy/helm/kubeport \
   -f deploy/helm/kubeport/values-oci-phase2.yaml \
@@ -111,11 +118,18 @@ helm install kubeport deploy/helm/kubeport \
   --set host="$HOST" \
   --set oidc.clientId="$GOOGLE_CLIENT_ID" \
   --set oidc.audience="$GOOGLE_CLIENT_ID" \
-  --set auth.appEncryptionKeyB64="$ENC_KEY" \
-  --set auth.oidcClientSecret="$GOOGLE_CLIENT_SECRET" \
-  --set postgres.password="$PG_PASS" \
+  --set-file auth.appEncryptionKeyB64="$d/enc_key" \
+  --set-file auth.oidcClientSecret="$d/oidc_client_secret" \
+  --set-file postgres.password="$d/pg_pass" \
   --set-string auth.devAdminEmails="you@gmail.com"
+
+# enc_key·pg_pass 를 password manager 에 옮긴 뒤 — 절대 분실 금지 (APP_ENCRYPTION_KEY_B64 를 잃으면 세션 복호화 불가)
+rm -rf "$d"
 ```
+
+값은 여전히 릴리스에 저장된다(`helm get values`, 리비전마다). 이후 업그레이드는
+`--reset-then-reuse-values` 가 그 값을 유지하므로 파일이 다시 필요 없다(아래 Upgrade). 시크릿을
+릴리스 밖에 두려면 차트 README 의 외부 Secret(`auth.create=false`) 경로를 쓴다.
 
 > **Google OIDC 특이사항 (실서버에서 걸린 함정)**
 > - `oidc.audience` 는 반드시 **Google Client ID** 로 둔다. Google `id_token` 의 `aud` 는
@@ -296,15 +310,18 @@ admin UI 에 클러스터 등록 화면이 아직 없으므로, admin 토큰으�
   ```bash
   # 화면에 띄워 놓고 사람이 읽어 옮겨 적는 값이라 혼동 문자를 뺀다 (0 O 1 l I).
   # base64 는 l·I·1·O·0 을 그대로 뱉어서 못 쓴다 (#132). 32글자 × 10자 = 50비트.
+  # 데모 비밀번호는 랜딩 화면에 그대로 표시되는 공개값이라 --set 으로 둔다.
   DEMO_PW=$(LC_ALL=C tr -dc '23456789ABCDEFGHJKLMNPQRSTUVWXYZ' < /dev/urandom | head -c 10)
-  DEX_SECRET=$(openssl rand -hex 24)                             # 비밀번호 관리자에 저장
+  # Dex client secret 은 비공개 — §4 와 같이 파일로 넘긴다 (#303). 비밀번호 관리자에 저장한 뒤 rm -rf "$d"
+  d="$(mktemp -d)" && chmod 700 "$d"
+  openssl rand -hex 24 | tr -d '\r\n' > "$d/dex_client_secret"
   HASH=$(htpasswd -bnBC 10 "" "$DEMO_PW" | tr -d ':\n')
   # 자동 배포와 같은 락을 잡는다. 이미지 태그는 여기서 올리지 않는다 — 태그는 kubeport-deploy 만 올린다.
   flock -w 600 /run/lock/kubeport-deploy.lock \
   helm upgrade kubeport ~/kubeport-chart/kubeport \
     --namespace kubeport --reset-then-reuse-values \
     --set dex.enabled=true --set dex.host=dex.kubeport.enzo.kr \
-    --set dex.clientSecret="$DEX_SECRET" \
+    --set-file dex.clientSecret="$d/dex_client_secret" \
     --set "dex.staticPasswords[0].email=demo-admin@demo.kubeport,dex.staticPasswords[0].username=demo-admin,dex.staticPasswords[0].userID=demo-admin-000,dex.staticPasswords[0].hash=$HASH" \
     --set "dex.staticPasswords[1].email=demo-user@demo.kubeport,dex.staticPasswords[1].username=demo-user,dex.staticPasswords[1].userID=demo-user-000,dex.staticPasswords[1].hash=$HASH" \
     --set demo.enabled=true \
@@ -357,7 +374,10 @@ sudo GOOGLE_CLIENT_ID=<google-client-id> bash deploy/oci/k3s-auth-config.sh
 **검증** — Dex 토큰으로 로그인해 RBAC 스코프 확인:
 
 ```bash
-TOKEN=$(curl -s -X POST https://dex.kubeport.enzo.kr/token -d grant_type=password -d client_id=kubeport-demo -d client_secret=$DEX_SECRET -d username=demo-user@demo.kubeport -d password=$DEMO_PW -d scope='openid email' | jq -r .id_token)
+# client secret 은 §7.6 의 파일에서 읽는다 — `-d client_secret=…` 로 쓰면 curl 인자(ps)에 보인다.
+# 그 파일을 이미 지웠다면 릴리스 값에서 다시 만든다:
+#   sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm -n kubeport get values kubeport -o json | jq -j .dex.clientSecret > "$d/dex_client_secret"
+TOKEN=$(curl -s -X POST https://dex.kubeport.enzo.kr/token -d grant_type=password -d client_id=kubeport-demo --data-urlencode "client_secret@$d/dex_client_secret" -d username=demo-user@demo.kubeport -d password=$DEMO_PW -d scope='openid email' | jq -r .id_token)
 kubectl --token="$TOKEN" auth whoami          # → dex:demo-user@demo.kubeport
 kubectl --token="$TOKEN" -n demo auth can-i create deployments   # yes
 kubectl --token="$TOKEN" -n default auth can-i create deployments # no
