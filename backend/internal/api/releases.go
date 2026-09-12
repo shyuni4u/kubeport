@@ -287,6 +287,15 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 	// Never NameOnly: an object without an id cannot belong to a release that
 	// did not exist until now.
 	ref := k8s.ReleaseRef{Namespace: r.Namespace, Name: r.Name, UID: uid}
+	// The check and the apply below must not interleave with another
+	// request's for this namespace (#191).
+	unlock, err := h.lockApply(ctx, cluster.ApiUrl, r.Namespace)
+	if err != nil {
+		dropRow()
+		internalError(c, "CreateRelease: apply lock", err)
+		return
+	}
+	defer unlock()
 	if !h.checkOwnership(c, cli, "CreateRelease", ref, rendered) {
 		// checkOwnership has answered.
 		dropRow()

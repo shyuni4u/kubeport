@@ -145,6 +145,14 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 	// NameOnly from what was last applied: a release from before #195 still
 	// owns its unstamped objects on this update, which stamps them.
 	ref := releaseRef(rel)
+	// Held through the apply and the rollback, so no other request's check
+	// for this namespace runs in between (#191).
+	unlock, err := h.lockApply(ctx, rel.ClusterApiUrl, rel.Namespace)
+	if err != nil {
+		internalError(c, "UpdateRelease: apply lock", err)
+		return
+	}
+	defer unlock()
 	if !h.checkOwnership(c, cli, "UpdateRelease", ref, rendered) {
 		return
 	}
