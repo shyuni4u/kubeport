@@ -68,6 +68,13 @@
   },
   "form": {
     "secretReenter": "Secret values are not carried to another version. Please enter them again.",
+    "secretKept": {
+      "status": "Keeping the current value. It is not shown, for security.",
+      "replace": "Enter a new value",
+      "replaceAria": "{label}: enter a new value",
+      "keep": "Keep the current value",
+      "keepAria": "{label}: keep the current value"
+    },
     "validation": {
       "required": "This field is required.",
       "tooSmall": "Must be at least {min}.",
@@ -293,7 +300,13 @@
       "empty": "Fill in the form and a preview will appear here.",
       "unnamed": "(unnamed)"
     },
-    "teamSuffix": "{team} team"
+    "teamSuffix": "{team} team",
+    "updateUnavailable": {
+      "title": "Couldn't load this release's values",
+      "body": "Updating without its current values could reset things like passwords to their defaults, so the form was not opened. Try again in a moment; if it keeps happening, contact an admin.",
+      "retry": "Try again",
+      "backToRelease": "Back to the release"
+    }
   },
   "logs": {
     "autoscroll": "Auto-scroll",

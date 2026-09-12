@@ -68,6 +68,13 @@
   },
   "form": {
     "secretReenter": "버전을 바꾸면 Secret 값은 옮겨지지 않아요. 다시 입력해 주세요.",
+    "secretKept": {
+      "status": "기존 값을 유지합니다. 보안상 값은 보여 주지 않아요.",
+      "replace": "새 값 입력",
+      "replaceAria": "{label}: 새 값 입력",
+      "keep": "기존 값 유지",
+      "keepAria": "{label}: 기존 값 유지"
+    },
     "validation": {
       "required": "필수 항목입니다.",
       "tooSmall": "{min} 이상이어야 합니다.",
@@ -293,7 +300,13 @@
       "empty": "폼을 채우면 여기에 미리보기가 표시됩니다.",
       "unnamed": "(이름 없음)"
     },
-    "teamSuffix": "{team} 팀"
+    "teamSuffix": "{team} 팀",
+    "updateUnavailable": {
+      "title": "릴리스 값을 불러오지 못했어요",
+      "body": "지금 값을 모르는 채로 업데이트하면 비밀번호 같은 값이 기본값으로 바뀔 수 있어 폼을 열지 않았어요. 잠시 후 다시 시도해 주세요. 계속되면 관리자에게 문의하세요.",
+      "retry": "다시 시도",
+      "backToRelease": "릴리스로 돌아가기"
+    }
   },
   "logs": {
     "autoscroll": "자동 스크롤",

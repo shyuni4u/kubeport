@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NextIntlClientProvider } from "next-intl";
 import { DynamicForm } from "./DynamicForm";
-import type { UISpec } from "@/lib/ui-spec-to-zod";
+import { REDACTED_SECRET, type UISpec } from "@/lib/ui-spec-to-zod";
 import ko from "@/messages/ko.json";
 
 // DynamicForm translates zod issues via next-intl, so every render needs a
@@ -496,6 +496,243 @@ describe("DynamicForm secrets to enter again", () => {
     renderWithIntl(<DynamicForm spec={spec} onSubmit={() => {}} />);
     expect((screen.getByLabelText(/Password/) as HTMLInputElement).value).toBe("changeme");
     expect(screen.queryByText(ko.form.secretReenter)).toBeNull();
+  });
+});
+
+// #288 — an update on the same version starts every Secret field from the
+// redacted placeholder. Fed to the typed widget, a Slider showed NaN, a number
+// box showed nothing, a Switch showed "on" for a stored false and an enum had
+// nothing selected: the value was kept, but nothing said so, and touching the
+// widget quietly replaced it.
+describe("DynamicForm kept Secrets", () => {
+  const S = {
+    slots: "Secret[app].stringData.SLOTS",
+    port: "Secret[app].stringData.PORT",
+    debug: "Secret[app].stringData.DEBUG",
+    mode: "Secret[app].stringData.MODE",
+    token: "Secret[app].stringData.TOKEN",
+  };
+  const spec: UISpec = {
+    fields: [
+      { path: "metadata.name", label: "Name", type: "string", default: "web" },
+      { path: S.slots, label: "Slots", type: "integer", min: 1, max: 10, default: 3 },
+      { path: S.port, label: "Port", type: "integer", default: 80 },
+      { path: S.debug, label: "Debug", type: "boolean", default: true },
+      { path: S.mode, label: "Mode", type: "enum", values: ["fast", "safe"], default: "fast" },
+      { path: S.token, label: "Token", type: "string", default: "changeme" },
+    ],
+  };
+  const kept = {
+    "metadata.name": "web",
+    [S.slots]: REDACTED_SECRET,
+    [S.port]: REDACTED_SECRET,
+    [S.debug]: REDACTED_SECRET,
+    [S.mode]: REDACTED_SECRET,
+    [S.token]: REDACTED_SECRET,
+  };
+  const t = ko.form.secretKept;
+
+  it("shows every kept Secret as kept instead of a widget guessing at the placeholder", () => {
+    const { container } = renderWithIntl(
+      <DynamicForm spec={spec} initialValues={kept} onSubmit={() => {}} />,
+    );
+    expect(screen.getAllByText(t.status)).toHaveLength(5);
+    expect(container.querySelector('[data-slot="slider"]')).toBeNull();
+    expect(screen.queryByTestId("slider-value")).toBeNull();
+    expect(screen.queryByText("NaN")).toBeNull();
+    expect(screen.queryByRole("spinbutton")).toBeNull();
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.queryByRole("button", { name: "fast" })).toBeNull();
+    expect(screen.queryByDisplayValue(REDACTED_SECRET)).toBeNull();
+    for (const label of ["Slots", "Port", "Debug", "Mode", "Token"]) {
+      expect(
+        screen.getByRole("button", { name: t.replaceAria.replace("{label}", label) }),
+      ).toBeInTheDocument();
+    }
+    // The non-Secret field is untouched.
+    expect((screen.getByLabelText(/Name/) as HTMLInputElement).value).toBe("web");
+  });
+
+  it("describes the replace button with the kept state", () => {
+    renderWithIntl(<DynamicForm spec={spec} initialValues={kept} onSubmit={() => {}} />);
+    const button = screen.getByRole("button", { name: t.replaceAria.replace("{label}", "Port") });
+    expect(button).toHaveAccessibleDescription(expect.stringContaining(t.status));
+  });
+
+  it("submits the placeholder for every Secret left alone", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(<DynamicForm spec={spec} initialValues={kept} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(kept));
+  });
+
+  it("swaps in an empty number box on request, focused, and submits what is typed", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(<DynamicForm spec={spec} initialValues={kept} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole("button", { name: t.replaceAria.replace("{label}", "Port") }));
+
+    const input = screen.getByRole("spinbutton") as HTMLInputElement;
+    expect(input.value).toBe("");
+    expect(input).toHaveFocus();
+    expect(screen.getAllByText(t.status)).toHaveLength(4);
+
+    await user.type(input, "8080");
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ ...kept, [S.port]: 8080 }));
+  });
+
+  // codex review: the number box's empty is null for a kept field, and
+  // `z.coerce.number()` read null as 0 — an untouched or cleared replacement
+  // went out as 0 over the running Secret.
+  it("refuses an untouched or cleared number box instead of sending 0", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(<DynamicForm spec={spec} initialValues={kept} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole("button", { name: t.replaceAria.replace("{label}", "Port") }));
+
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(screen.getByText(ko.form.validation.required)).toBeInTheDocument());
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    const input = screen.getByRole("spinbutton");
+    await user.type(input, "5");
+    await user.clear(input);
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(screen.getByText(ko.form.validation.required)).toBeInTheDocument());
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole("spinbutton")).toHaveValue(null);
+  });
+
+  // A Slider has no empty state, so it starts at its minimum — a bound, not the
+  // ui-spec default — and the readout on the label row prints that exact number
+  // before anything is sent. It can never be cleared.
+  it("starts a replaced Slider at its minimum, shows it, and sends exactly that", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(<DynamicForm spec={spec} initialValues={kept} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole("button", { name: t.replaceAria.replace("{label}", "Slots") }));
+    expect(screen.getByTestId("slider-value")).toHaveTextContent("1");
+    expect(screen.queryByText("NaN")).toBeNull();
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ ...kept, [S.slots]: 1 }));
+  });
+
+  // A Switch has no empty state either. It starts off, focused, and off is
+  // what it sends — the visibly shown value, not a ui-spec default (the spec
+  // here defaults to true). Security review judged that acceptable.
+  it("starts a replaced Switch off, shows it, and sends exactly that", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(<DynamicForm spec={spec} initialValues={kept} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole("button", { name: t.replaceAria.replace("{label}", "Debug") }));
+    const sw = screen.getByRole("switch");
+    expect(sw).toHaveAttribute("aria-checked", "false");
+    expect(sw).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ ...kept, [S.debug]: false }));
+  });
+
+  it("sends true once a replaced Switch is turned on", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(<DynamicForm spec={spec} initialValues={kept} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole("button", { name: t.replaceAria.replace("{label}", "Debug") }));
+    await user.click(screen.getByRole("switch"));
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ ...kept, [S.debug]: true }));
+  });
+
+  it("refuses an enum replacement that was picked and then unpicked", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(<DynamicForm spec={spec} initialValues={kept} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole("button", { name: t.replaceAria.replace("{label}", "Mode") }));
+    const safe = screen.getByRole("button", { name: "safe" });
+    await user.click(safe);
+    await user.click(safe);
+    expect(safe).toHaveAttribute("aria-pressed", "false");
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(screen.getByText(ko.form.validation.required)).toBeInTheDocument());
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("refuses a string replacement that was typed and then cleared", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(<DynamicForm spec={spec} initialValues={kept} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole("button", { name: t.replaceAria.replace("{label}", "Token") }));
+    const input = screen.getByRole("textbox", { name: /^Token/ });
+    await user.type(input, "abc");
+    await user.clear(input);
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(screen.getByText(ko.form.validation.required)).toBeInTheDocument());
+    expect(onSubmit).not.toHaveBeenCalled();
+    // Cleared stays a replacement; going back to kept is the explicit button.
+    expect(screen.getByRole("textbox", { name: /^Token/ })).toBeInTheDocument();
+  });
+
+  it("requires a choice for a replaced enum instead of falling back to a default", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(<DynamicForm spec={spec} initialValues={kept} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole("button", { name: t.replaceAria.replace("{label}", "Mode") }));
+    expect(screen.getByRole("button", { name: "fast" })).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText(ko.form.validation.required)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "safe" }));
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ ...kept, [S.mode]: "safe" }));
+  });
+
+  // Emptying the box does not flip it back to "kept": that would yank the
+  // input away mid-edit. An empty replacement is refused instead — sent, it
+  // would reach the backend as a missing value and be filled from the ui-spec
+  // default — and going back is an explicit button.
+  it("refuses an emptied replacement, and goes back to kept only when asked", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(<DynamicForm spec={spec} initialValues={kept} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole("button", { name: t.replaceAria.replace("{label}", "Token") }));
+
+    const input = screen.getByRole("textbox", { name: /^Token/ }) as HTMLInputElement;
+    expect(input.value).toBe("");
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText(ko.form.validation.required)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /^Token/ })).toBeInTheDocument();
+
+    const keep = screen.getByRole("button", { name: t.keepAria.replace("{label}", "Token") });
+    await user.click(keep);
+    expect(screen.getAllByText(t.status)).toHaveLength(5);
+    expect(
+      screen.getByRole("button", { name: t.replaceAria.replace("{label}", "Token") }),
+    ).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(kept));
+  });
+
+  it("leaves a placeholder outside a Secret to its ordinary widget", () => {
+    renderWithIntl(
+      <DynamicForm
+        spec={spec}
+        initialValues={{ ...kept, "metadata.name": REDACTED_SECRET }}
+        onSubmit={() => {}}
+      />,
+    );
+    expect((screen.getByLabelText(/Name/) as HTMLInputElement).value).toBe(REDACTED_SECRET);
+  });
+
+  it("does not show the kept state on a form that did not start from a release", () => {
+    renderWithIntl(<DynamicForm spec={spec} onSubmit={() => {}} />);
+    expect(screen.queryByText(t.status)).toBeNull();
+    expect(screen.getByRole("switch")).toBeInTheDocument();
+    expect(screen.getByTestId("slider-value")).toHaveTextContent("3");
   });
 });
 

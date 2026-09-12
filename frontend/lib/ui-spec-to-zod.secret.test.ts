@@ -65,6 +65,75 @@ describe("schemaFromUISpec with kept secrets", () => {
     expect(schema.safeParse(redacted).success).toBe(false);
   });
 
+  // #288: "enter a new value" empties a kept field. Sent empty, an optional one
+  // would reach the backend as missing and be filled from the ui-spec default,
+  // over the running Secret. A kept Secret therefore always needs a value: the
+  // placeholder it started with, or a real one.
+  it("refuses an emptied kept Secret even where the ui-spec makes it optional", () => {
+    const optional: UISpec = {
+      fields: [
+        { path: "Secret[app].stringData.PASSWORD", label: "Password", type: "string", default: "changeme" },
+        { path: "Secret[app].stringData.PORT", label: "Port", type: "integer", default: 80 },
+        { path: "Secret[app].stringData.DEBUG", label: "Debug", type: "boolean", default: true },
+      ],
+    };
+    const start: Record<string, unknown> = {
+      "Secret[app].stringData.PASSWORD": REDACTED_SECRET,
+      "Secret[app].stringData.PORT": REDACTED_SECRET,
+      "Secret[app].stringData.DEBUG": REDACTED_SECRET,
+    };
+    const schema = schemaFromUISpec(optional, { keptSecrets: keptSecretPaths(start) });
+    expect(schema.safeParse(start).success).toBe(true);
+    expect(schema.safeParse({ ...start, "Secret[app].stringData.PASSWORD": "" }).success).toBe(false);
+    for (const path of Object.keys(start)) {
+      const { [path]: _gone, ...rest } = start;
+      void _gone;
+      expect(schema.safeParse(rest).success).toBe(false);
+    }
+    expect(schema.safeParse({ ...start, "Secret[app].stringData.DEBUG": false }).success).toBe(true);
+  });
+
+  // codex review of #288: `z.coerce.number()` reads null and "" as 0, so an
+  // emptied kept integer passed wherever the bounds allow zero — and replaced
+  // the running Secret with 0.
+  it("refuses an empty kept integer instead of reading it as 0", () => {
+    const ints: UISpec = {
+      fields: [
+        { path: "Secret[app].stringData.PORT", label: "Port", type: "integer" },
+        { path: "Secret[app].stringData.SLOTS", label: "Slots", type: "integer", min: 0, max: 5 },
+      ],
+    };
+    const start: Record<string, unknown> = {
+      "Secret[app].stringData.PORT": REDACTED_SECRET,
+      "Secret[app].stringData.SLOTS": REDACTED_SECRET,
+    };
+    const schema = schemaFromUISpec(ints, { keptSecrets: keptSecretPaths(start) });
+    for (const path of Object.keys(start)) {
+      for (const empty of [null, "", undefined]) {
+        expect(schema.safeParse({ ...start, [path]: empty }).success).toBe(false);
+      }
+      const zero = schema.safeParse({ ...start, [path]: 0 });
+      expect(zero.success).toBe(true);
+      expect(zero.data?.[path]).toBe(0);
+    }
+    expect(schema.safeParse({ ...start, "Secret[app].stringData.PORT": "8080" }).data).toMatchObject({
+      "Secret[app].stringData.PORT": 8080,
+    });
+    expect(schema.safeParse({ ...start, "Secret[app].stringData.PORT": "abc" }).success).toBe(false);
+  });
+
+  it("refuses an empty integer to enter again instead of reading it as 0", () => {
+    const path = "Secret[app].stringData.PORT";
+    const schema = schemaFromUISpec(
+      { fields: [{ path, label: "Port", type: "integer" }] },
+      { reenterSecrets: new Set([path]) },
+    );
+    for (const empty of [null, "", undefined]) {
+      expect(schema.safeParse({ [path]: empty }).success).toBe(false);
+    }
+    expect(schema.safeParse({ [path]: 0 }).success).toBe(true);
+  });
+
   it("does not accept the placeholder for a field outside a Secret", () => {
     const values = { ...redacted, "Deployment[web].spec.replicas": REDACTED_SECRET };
     const schema = schemaFromUISpec(spec, { keptSecrets: keptSecretPaths(values) });

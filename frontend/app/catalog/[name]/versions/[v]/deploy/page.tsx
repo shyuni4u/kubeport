@@ -1,10 +1,12 @@
 import { apiFetch } from "@/lib/api-server";
 import { isDemoEmail, withDemoSuffix } from "@/lib/demo";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import YAML from "yaml";
 
 import { DeployClient } from "../../../deploy/DeployClient";
+import { UpdateValuesUnavailable } from "@/components/UpdateValuesUnavailable";
 import { keptSecretPaths, type UISpec } from "@/lib/ui-spec-to-zod";
+import { decodeRouteParam, readReleaseForUpdate, updateDeployPath } from "@/lib/update-release";
 
 // Version-pinned deploy route.
 // Used by the UpdateAvailableBadge on the release detail page to re-deploy
@@ -40,30 +42,35 @@ export default async function VersionPinnedDeployPage({
     fields: [],
   };
 
-  // Fetch existing release values when re-deploying on a new version.
-  // Non-blocking: if the fetch fails (404/403/etc.) we render the form blank
-  // rather than failing the whole page. The user can always re-enter values.
+  // An update starts from the release's values, or does not start (#296).
+  // This read used to be "non-blocking": on a failure the page rendered the
+  // form from ui-spec defaults, still as an update, and submitting it
+  // overwrote the running Secrets with those defaults. 403/404 were refused by
+  // the PUT anyway, so the real trigger was a transient 5xx on this GET.
   let initialValues: Record<string, unknown> | undefined;
   let reenterSecrets: string[] | undefined;
-  if (updateReleaseId) {
-    const relRes = await apiFetch(`/v1/releases/${updateReleaseId}`);
-    if (relRes.ok) {
-      const rel = (await relRes.json()) as {
-        values_json?: Record<string, unknown>;
-        template?: { version?: number };
-      };
-      initialValues = rel.values_json;
-      // A Secret reads back redacted (#196), and only an update on the same
-      // version can keep it: moving version needs it entered again. Those
-      // fields start empty — not from the placeholder, nor from a ui-spec
-      // default the form would otherwise fill in — and must be filled.
-      if (initialValues && rel.template?.version !== version) {
-        const kept = keptSecretPaths(initialValues);
-        initialValues = Object.fromEntries(
-          Object.entries(initialValues).filter(([path]) => !kept.has(path)),
-        );
-        reenterSecrets = [...kept];
-      }
+  if (updateReleaseId !== undefined) {
+    const read = await readReleaseForUpdate(apiFetch, updateReleaseId, name);
+    if (read.kind === "not-found") notFound();
+    if (read.kind === "sign-in") {
+      redirect(
+        `/?next=${encodeURIComponent(updateDeployPath(decodeRouteParam(name), version, updateReleaseId))}`,
+      );
+    }
+    if (read.kind === "unavailable") {
+      return <UpdateValuesUnavailable releaseId={updateReleaseId} />;
+    }
+    initialValues = read.values;
+    // A Secret reads back redacted (#196), and only an update on the same
+    // version can keep it: moving version needs it entered again. Those
+    // fields start empty — not from the placeholder, nor from a ui-spec
+    // default the form would otherwise fill in — and must be filled.
+    if (read.version !== version) {
+      const kept = keptSecretPaths(initialValues);
+      initialValues = Object.fromEntries(
+        Object.entries(initialValues).filter(([path]) => !kept.has(path)),
+      );
+      reenterSecrets = [...kept];
     }
   }
 

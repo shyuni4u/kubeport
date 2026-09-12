@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
+import { Lock } from "lucide-react";
 import type { ZodIssue } from "zod";
 import {
   useForm,
+  useWatch,
   type Control,
   type ControllerRenderProps,
   type FieldValues,
@@ -21,6 +23,7 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
+  useFormField,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import {
@@ -35,6 +38,7 @@ import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 import {
+  REDACTED_SECRET,
   keptSecretPaths,
   schemaFromUISpec,
   defaultsFromUISpec,
@@ -224,6 +228,14 @@ export function DynamicForm({
           return tv("pattern");
         case "invalid_enum_value":
           return tv("enum");
+        case "invalid_union": {
+          // Only a kept Secret's schema is a union: the placeholder, or the
+          // field's own type (#196). Once it is not the placeholder, the
+          // field's own complaint is the one worth saying — "required" for an
+          // emptied replacement rather than a generic "check this value".
+          const own = issue.unionErrors.at(-1)?.issues[0];
+          return own ? messageFor(own) : tv("invalid");
+        }
         default:
           return tv("invalid");
       }
@@ -296,6 +308,7 @@ export function DynamicForm({
             field={field}
             control={form.control}
             reenter={reenter.has(field.path)}
+            kept={keptSecrets.has(field.path)}
           />
         ))}
         <div className="flex justify-end">
@@ -324,22 +337,114 @@ function autocompleteListId(path: string): string {
   return `dyn-suggest-${path.replace(/[^A-Za-z0-9]/g, "-")}`;
 }
 
+/**
+ * What "enter a new value" puts in place of the kept placeholder (#288).
+ *
+ * Never a ui-spec default: that is the value an unseen overwrite would have
+ * sent. A Switch and a Slider have no empty state, so they start at a value
+ * they visibly show — off, and the minimum (a bound, printed by the readout
+ * beside the label) — which is exactly what they submit. Everything else starts
+ * empty and is refused until filled; an integer box never reads empty as 0
+ * (see schemaFromUISpec).
+ *
+ * Empty is `null`, not `undefined`: react-hook-form reads an undefined field
+ * back as its default value, which here is the placeholder, so the field would
+ * snap back to "kept" the moment it was emptied.
+ */
+function replacementValue(field: UISpecField): unknown {
+  switch (field.type) {
+    case "boolean":
+      return false;
+    case "integer":
+      return isRangedInteger(field) ? field.min : null;
+    case "enum":
+      return null;
+    default:
+      return "";
+  }
+}
+
+/** The first thing in a field's control area a keyboard can land on. */
+const FOCUSABLE =
+  'input:not([type="hidden"]):not([tabindex="-1"]):not([aria-hidden="true"]), button:not([tabindex="-1"]), [role="switch"], [role="slider"], [tabindex="0"]';
+
+/**
+ * A Secret the update keeps as it is (#288). It replaces the typed widget,
+ * which could only misrepresent the placeholder: NaN on a Slider, "on" for a
+ * stored false, nothing selected in an enum.
+ *
+ * The button is not given the field's id, so clicking the label does not
+ * activate it — replacing a Secret should take a deliberate press.
+ */
+function KeptSecret({ label, onReplace }: { label: string; onReplace: () => void }) {
+  const tf = useTranslations("form");
+  const { formItemId, formDescriptionId } = useFormField();
+  const statusId = `${formItemId}-kept`;
+  return (
+    <div
+      data-slot="kept-secret"
+      className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted px-3 py-2"
+    >
+      <Lock aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+      <span id={statusId} className="min-w-0 flex-1 text-sm text-muted-foreground">
+        {tf("secretKept.status")}
+      </span>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        aria-label={tf("secretKept.replaceAria", { label })}
+        aria-describedby={`${statusId} ${formDescriptionId}`}
+        onClick={onReplace}
+      >
+        {tf("secretKept.replace")}
+      </Button>
+    </div>
+  );
+}
+
 function FieldRow({
   field,
   control,
   reenter = false,
+  kept = false,
 }: {
   field: UISpecField;
   control: Control<FormShape>;
   reenter?: boolean;
+  /** A Secret the release came back redacted for (#196). */
+  kept?: boolean;
 }) {
   const tv = useTranslations("form.validation");
   const tf = useTranslations("form");
+  const name = encodeKey(field.path);
+  // Kept until someone asks to replace it; back to kept when they ask again.
+  // Emptying a replacement does not return here — pulling the input out from
+  // under someone mid-edit would be worse — and an empty replacement is
+  // refused on submit instead (see schemaFromUISpec).
+  const current = useWatch({ control, name });
+  const keeping = kept && current === REDACTED_SECRET;
+
+  // Either swap removes the button that was just pressed, so focus would
+  // fall to <body>. Move it to what took the button's place.
+  const area = useRef<HTMLDivElement>(null);
+  const focusAfterSwap = useRef(false);
+  useEffect(() => {
+    if (!focusAfterSwap.current) return;
+    focusAfterSwap.current = false;
+    area.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+  }, [keeping]);
+
   return (
     <FormField
       control={control}
-      name={encodeKey(field.path)}
-      render={({ field: rhf }) => (
+      name={name}
+      render={({ field: rawRhf }) => {
+        // See replacementValue: an emptied kept field is null, never undefined.
+        const rhf = kept
+          ? { ...rawRhf, onChange: (v: unknown) => rawRhf.onChange(v === undefined ? null : v) }
+          : rawRhf;
+        return (
         <FormItem>
           {/*
             HelpHint sits beside the label, not inside it: a <button> inside
@@ -349,7 +454,7 @@ function FieldRow({
           <div className="flex items-center gap-1">
             <FormLabel>
               {field.label}
-              {field.required || reenter ? (
+              {field.required || reenter || (kept && !keeping) ? (
                 <span className="ml-1 text-destructive">*</span>
               ) : null}
             </FormLabel>
@@ -365,8 +470,10 @@ function FieldRow({
               A sibling of <FormLabel>, never a child — it must not join the
               control's accessible name. Screen readers already get the value
               from the thumb's <input type="range">.
+
+              Not while a Secret is kept: there is no value to read out (#288).
             */}
-            {isRangedInteger(field) ? (
+            {isRangedInteger(field) && !keeping ? (
               <span
                 data-testid="slider-value"
                 aria-hidden="true"
@@ -376,7 +483,19 @@ function FieldRow({
               </span>
             ) : null}
           </div>
-          <FormControl>{renderWidget(field, rhf)}</FormControl>
+          <div ref={area}>
+            {keeping ? (
+              <KeptSecret
+                label={field.label}
+                onReplace={() => {
+                  focusAfterSwap.current = true;
+                  rhf.onChange(replacementValue(field));
+                }}
+              />
+            ) : (
+              <FormControl>{renderWidget(field, rhf)}</FormControl>
+            )}
+          </div>
           {/*
             Autocomplete renders an <Input list="..."> via renderWidget. The
             matching <datalist> must be a sibling (not a child of the Input)
@@ -409,9 +528,28 @@ function FieldRow({
           {reenter ? (
             <p className="text-xs text-muted-foreground">{tf("secretReenter")}</p>
           ) : null}
+          {kept && !keeping ? (
+            <div>
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="h-auto px-0"
+                aria-label={tf("secretKept.keepAria", { label: field.label })}
+                onClick={() => {
+                  focusAfterSwap.current = true;
+                  rhf.onChange(REDACTED_SECRET);
+                }}
+              >
+                <Lock aria-hidden="true" />
+                {tf("secretKept.keep")}
+              </Button>
+            </div>
+          ) : null}
           <FormMessage />
         </FormItem>
-      )}
+        );
+      }}
     />
   );
 }
