@@ -54,10 +54,10 @@ export function stableStringify(value: unknown): string {
 }
 
 /**
- * Settles `dirty` against what the editor started from, so undoing an edit
- * clears it (#274). Before, every edit handler set dirty and nothing ever
- * compared the text with the loaded one: type a line, delete it, and the
- * "저장하지 않은 변경 사항이 있습니다" mark and the leave prompt both stayed.
+ * Settles `dirty` against what the server holds, so undoing an edit clears it
+ * (#274). Before, every edit handler set dirty and nothing ever compared the
+ * text with the loaded one: type a line, delete it, and the "저장하지 않은 변경
+ * 사항이 있습니다" mark and the leave prompt both stayed.
  *
  * `snapshot` is a string of everything a save would send (build it with
  * stableStringify), or null until the editor has what it loaded — all of it,
@@ -67,17 +67,19 @@ export function stableStringify(value: unknown): string {
  * including when a handler fired without changing anything (re-picking the
  * same team).
  *
- * Returns `markSaved`: call it where a save succeeds, instead of onDirty(false).
- * The callback from the render the save started in holds what was sent; it
- * becomes the baseline, and dirty is set from whatever the editor holds now —
- * an edit, or an undo, made while the request was out still counts. A mode
- * switch remounts the editor, which starts a new baseline on its own.
+ * Returns `markSaved(saved?)`: call it where a save lands, instead of
+ * onDirty(false). The baseline becomes `saved` — or, without it, the snapshot
+ * of the render the save started in, which is what was sent — and dirty is set
+ * from whatever the editor holds now, so an edit or an undo made while the
+ * request was out still counts. Pass `saved` when only part of a save landed,
+ * as the snapshot of what the server holds now. A mode switch remounts the
+ * editor, which starts a new baseline on its own.
  */
 export function useDirtyAgainstBaseline(
   snapshot: string | null,
   dirty: boolean,
   onDirty: (dirty: boolean) => void,
-): () => void {
+): (saved?: string) => void {
   const baseline = useRef<string | null>(null);
   const latest = useRef<string | null>(snapshot);
   useEffect(() => {
@@ -87,14 +89,18 @@ export function useDirtyAgainstBaseline(
     const differs = snapshot !== baseline.current;
     if (differs !== dirty) onDirty(differs);
   }, [snapshot, dirty, onDirty]);
-  return useCallback(() => {
-    if (snapshot === null) {
-      onDirty(false);
-      return;
-    }
-    baseline.current = snapshot;
-    onDirty(latest.current !== null && latest.current !== snapshot);
-  }, [snapshot, onDirty]);
+  return useCallback(
+    (saved?: string) => {
+      const next = saved ?? snapshot;
+      if (next === null) {
+        onDirty(false);
+        return;
+      }
+      baseline.current = next;
+      onDirty(latest.current !== null && latest.current !== next);
+    },
+    [snapshot, onDirty],
+  );
 }
 
 // Returns the ui-spec path of the first exposed field whose label is blank,

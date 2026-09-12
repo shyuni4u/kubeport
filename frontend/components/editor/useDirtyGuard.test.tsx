@@ -7,7 +7,8 @@ import { stableStringify, useDirtyAgainstBaseline } from "./useDirtyGuard";
 // flag, and each button is an edit handler — setting the text and marking
 // dirty at once, the way the editor pages do. "start save" keeps the
 // markSaved of that render, as an async save() does, and "save succeeds"
-// calls it later.
+// calls it later. "part stored as loaded" is a save of which only a part
+// landed, leaving the server holding "loaded".
 function Editor({ initial }: { initial: string | null }) {
   const [text, setText] = useState<string | null>(initial);
   const [dirty, setDirty] = useState(false);
@@ -26,9 +27,10 @@ function Editor({ initial }: { initial: string | null }) {
       <button onClick={edit("loaded")}>set loaded</button>
       <button onClick={edit("loaded + edit")}>set loaded + edit</button>
       <button onClick={() => setDirty(true)}>touch only</button>
-      <button onClick={markSaved}>saved</button>
-      <button onClick={() => { pending.current = markSaved; }}>start save</button>
+      <button onClick={() => markSaved()}>saved</button>
+      <button onClick={() => { const m = markSaved; pending.current = () => m(); }}>start save</button>
       <button onClick={() => pending.current?.()}>save succeeds</button>
+      <button onClick={() => markSaved("loaded")}>part stored as loaded</button>
     </>
   );
 }
@@ -98,6 +100,20 @@ describe("useDirtyAgainstBaseline", () => {
     press("set loaded");
     press("save succeeds");
     expect(dirty()).toBe("true");
+  });
+
+  // Only part of a save landed: the baseline is what the server holds now, so
+  // the editor is clean exactly when it matches that — not the original load,
+  // and not "unsaved until a whole save succeeds".
+  it("measures against what a partly-landed save left on the server", () => {
+    render(<Editor initial="a" />);
+    press("set loaded");
+    press("part stored as loaded");
+    expect(dirty()).toBe("false");
+    press("set a");
+    expect(dirty()).toBe("true");
+    press("set loaded");
+    expect(dirty()).toBe("false");
   });
 });
 

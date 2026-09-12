@@ -118,6 +118,11 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
   const [meta, setMeta] = useState<TemplateMeta>({ name: name ?? "", tags: [] });
   // Snapshot of meta loaded from the server, used to detect what to PATCH on save.
   const [initialMeta, setInitialMeta] = useState<TemplateMeta | null>(null);
+  // The version as loaded: what the server holds until a version write lands.
+  // A save stores the metadata first and the version second; when only the
+  // first half lands, the dirty baseline becomes this plus the stored metadata —
+  // exactly what the server holds, whichever way the fields move afterwards (#274).
+  const [initialState, setInitialState] = useState<UIModeTemplate | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -148,6 +153,7 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
         setSourceAuthoringMode(ver.authoring_mode);
         if (ver.authoring_mode === "ui") {
           setState(ver.ui_state_json);
+          setInitialState(ver.ui_state_json);
         } else {
           // YAML-authored source: best-effort parse resources + ui-spec back
           // into the UI editor's state. Warnings surface anything the
@@ -160,6 +166,9 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
           // means the user will need to delete the yaml draft separately).
           const { uiState, warnings } = yamlToUIState(ver.resources_yaml ?? "", ver.ui_spec_yaml ?? "");
           setState(uiState as UIModeTemplate);
+          // The converted state stands in for the stored version: it is what
+          // the editor compares against until a version write lands (#274).
+          setInitialState(uiState as UIModeTemplate);
           setConvertWarnings(warnings);
         }
 
@@ -225,22 +234,15 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
   // template's metadata arrives, and a baseline taken in between would count
   // the loaded metadata as an edit.
   const [loadDone, setLoadDone] = useState(false);
-  // Set once a save has stored the metadata. The version write comes after it
-  // and can still fail, and from then on the server's metadata is no longer the
-  // loaded one: putting the fields back in the editor would read as "nothing to
-  // save" while a save would still have to change them back. Part of the
-  // snapshot, so the editor stays unsaved until a whole save succeeds.
-  const [metaStored, setMetaStored] = useState(false);
   const snapshot = useMemo(
     () =>
       state && loadDone
         ? stableStringify({
             state,
             meta: { name: meta.name, display_name: meta.display_name ?? "", tags: meta.tags },
-            metaStored,
           })
         : null,
-    [state, loadDone, meta, metaStored],
+    [state, loadDone, meta],
   );
   const markSaved = useDirtyAgainstBaseline(snapshot, dirty, onDirty);
 
@@ -303,10 +305,18 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
         }
         // Stored, whatever the version write below does. A retry now compares
         // against what the server holds, so putting a field back sends it back
-        // instead of skipping the PATCH, and the editor stays unsaved until the
-        // whole save goes through (#274).
+        // instead of skipping the PATCH; and the dirty baseline becomes the
+        // stored metadata on the loaded version, which is the server's state if
+        // the version write fails (#274).
         setInitialMeta(meta);
-        setMetaStored(true);
+        if (initialState) {
+          markSaved(
+            stableStringify({
+              state: initialState,
+              meta: { name: meta.name, display_name: meta.display_name ?? "", tags: meta.tags },
+            }),
+          );
+        }
       }
 
       // 2) Either PATCH the draft in place or POST a new version.
