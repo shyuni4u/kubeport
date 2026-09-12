@@ -98,6 +98,12 @@ type fakeK8sApplier struct {
 	// PresenceUnknown.
 	presence    k8s.Presence
 	presenceErr error
+
+	// applyErr makes ApplyAll fail after recording the YAML. deleteStall makes
+	// DeleteByRelease hang until its context ends, like a cluster that stopped
+	// answering between the apply and the cleanup (#282).
+	applyErr    error
+	deleteStall bool
 }
 
 func (f *fakeK8sApplier) ReleasePresence(context.Context, k8s.ReleaseRef, []byte) (k8s.Presence, error) {
@@ -126,7 +132,7 @@ type stampCall struct {
 
 func (f *fakeK8sApplier) ApplyAll(_ context.Context, _ string, y []byte) error {
 	f.applied = append(f.applied, y)
-	return nil
+	return f.applyErr
 }
 
 type deleteCall struct {
@@ -134,8 +140,12 @@ type deleteCall struct {
 	NameOnly bool
 }
 
-func (f *fakeK8sApplier) DeleteByRelease(_ context.Context, ref k8s.ReleaseRef) error {
+func (f *fakeK8sApplier) DeleteByRelease(ctx context.Context, ref k8s.ReleaseRef) error {
 	f.deleteCalls = append(f.deleteCalls, deleteCall{UID: ref.UID, NameOnly: ref.NameOnly})
+	if f.deleteStall {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	if f.deleteErr != nil {
 		return f.deleteErr
 	}

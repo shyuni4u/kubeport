@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
@@ -272,13 +271,7 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 	}
 	// dropRow removes the row of a create that stops before anything was
 	// applied, so no release is left claiming objects it never had.
-	dropRow := func() {
-		rollbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if delErr := h.deps.Store.DeleteRelease(rollbackCtx, rel.ID); delErr != nil {
-			log.Printf("rollback: failed to delete release %s from DB: %v", rel.Name, delErr)
-		}
-	}
+	dropRow := func() { h.dropReleaseRow(rel.ID, rel.Name) }
 
 	// The release's identity from here on is its id, not its name (#195): a
 	// name frees up when a release is deleted, while objects it could not
@@ -324,14 +317,13 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		// and a timeout so cleanup doesn't hang indefinitely. Only objects with
 		// this release's id (ref is not NameOnly): an unstamped object with the
 		// same name is an earlier release's.
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), releaseCleanupK8sTimeout)
 		if delErr := cli.DeleteByRelease(cleanupCtx, ref); delErr != nil {
 			log.Printf("rollback: failed to delete k8s resources for release %s: %v", r.Name, delErr)
 		}
-		if delErr := h.deps.Store.DeleteRelease(cleanupCtx, rel.ID); delErr != nil {
-			log.Printf("rollback: failed to delete release %s from DB: %v", rel.Name, delErr)
-		}
+		cancel()
+		// Its own budget, whatever the cluster cleanup used (#282).
+		dropRow()
 		// The apply failing is usually the cluster's authorizer saying no. That
 		// is the event an operator needs to be able to look up later — "who
 		// tried to deploy what, where, and was refused" — and it used to leave
