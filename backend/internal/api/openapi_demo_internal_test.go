@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"sigs.k8s.io/yaml"
 )
 
 // A real apiserver index has many more entries (these are from a k3s 1.36
@@ -77,26 +80,85 @@ func TestIndexPathGroupVersion(t *testing.T) {
 	}
 }
 
-// The allowlist mirrors the demo RBAC. If demo-rbac.yaml grants a new API
-// group, a demo account could deploy that kind but the editor would not
-// autocomplete it — fail here so the two move together.
-func TestDemoOpenAPIGroupVersions_CoverDemoRBAC(t *testing.T) {
+// inlineTemplate matches a Helm expression inside a line, e.g.
+// `namespace: {{ .Values.demo.namespace }}`, which YAML would read as a map key.
+var inlineTemplate = regexp.MustCompile(`\{\{[^}]*\}\}`)
+
+// demoRBACGroups reads every rules[].apiGroups entry of the Roles in the demo
+// RBAC chart template. Whole-line template directives are dropped, inline ones
+// become a placeholder string, and each document is parsed as YAML — so flow
+// (`[a, b]`) and block (`- a`) lists read alike, where a regex over the text
+// would silently skip a block-style rule.
+func demoRBACGroups(t *testing.T) (groups map[string]bool, entries int) {
+	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "deploy", "helm", "kubeport", "templates", "demo-rbac.yaml"))
 	require.NoError(t, err)
 
-	groups := map[string]bool{}
-	for _, m := range regexp.MustCompile(`apiGroups:\s*\[([^\]]*)\]`).FindAllStringSubmatch(string(raw), -1) {
-		for _, g := range strings.Split(m[1], ",") {
-			groups[strings.Trim(strings.TrimSpace(g), `"'`)] = true
+	var cleaned bytes.Buffer
+	sc := bufio.NewScanner(bytes.NewReader(raw))
+	for sc.Scan() {
+		line := sc.Text()
+		if strings.HasPrefix(strings.TrimSpace(line), "{{") {
+			continue
+		}
+		// Inline values (names, labels, namespaces) are never inside rules, so
+		// replacing them does not change what is read below.
+		// Unquoted: an expression is often joined to more text
+		// (`name: {{ include ... }}-demo-admin`), and `"tmpl"-demo-admin` is not
+		// valid YAML while `tmpl-demo-admin` is.
+		cleaned.WriteString(inlineTemplate.ReplaceAllString(line, "tmpl"))
+		cleaned.WriteByte('\n')
+	}
+	require.NoError(t, sc.Err())
+
+	groups = map[string]bool{}
+	for _, docText := range strings.Split(cleaned.String(), "\n---") {
+		if strings.TrimSpace(docText) == "" {
+			continue
+		}
+		var doc struct {
+			Kind  string `json:"kind"`
+			Rules []struct {
+				APIGroups []string `json:"apiGroups"`
+			} `json:"rules"`
+		}
+		if err := yaml.Unmarshal([]byte(docText), &doc); err != nil {
+			t.Fatalf("a demo-rbac.yaml document does not parse once template expressions are removed: %v\n%s", err, docText)
+		}
+		if doc.Kind != "Role" && doc.Kind != "ClusterRole" {
+			continue
+		}
+		for _, r := range doc.Rules {
+			for _, g := range r.APIGroups {
+				groups[g] = true
+				entries++
+			}
 		}
 	}
-	require.NotEmpty(t, groups, "no apiGroups parsed from demo-rbac.yaml")
+	return groups, entries
+}
+
+// The allowlist mirrors the demo RBAC in both directions. RBAC ⊆ allowlist: a
+// group a demo account can deploy must autocomplete in the editor. allowlist ⊆
+// RBAC: a wider allowlist would show demo visitors groups they cannot use,
+// which is the disclosure #124 closed.
+func TestDemoOpenAPIGroupVersions_MatchDemoRBAC(t *testing.T) {
+	groups, entries := demoRBACGroups(t)
+	require.NotZero(t, entries, "no rules[].apiGroups read from demo-rbac.yaml")
 
 	for g := range groups {
 		gv := "v1"
 		if g != "" {
 			gv = g + "/v1"
 		}
-		require.True(t, demoAllowsGroupVersion(gv), "demo-rbac.yaml grants %q but the demo OpenAPI allowlist has no %q", g, gv)
+		require.True(t, demoAllowsGroupVersion(gv),
+			"demo-rbac.yaml grants %q but the demo OpenAPI allowlist has no %q (a group served only at another version needs its real version listed)", g, gv)
+	}
+	for gv := range demoOpenAPIGroupVersions {
+		g := ""
+		if i := strings.LastIndex(gv, "/"); i >= 0 {
+			g = gv[:i]
+		}
+		require.True(t, groups[g], "the demo OpenAPI allowlist has %q but demo-rbac.yaml grants no group %q", gv, g)
 	}
 }

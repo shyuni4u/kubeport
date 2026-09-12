@@ -23,6 +23,11 @@ type openapiCacheKey struct {
 	cluster string
 	user    string // oidc subject
 	gv      string // "" for the index, "apps/v1" etc. otherwise
+	// restricted is whether the caller got the demo-filtered view (#124). It is
+	// in the key, not inferred from the subject, so an entry can never be served
+	// across that boundary even if the same subject's demo status changed within
+	// the TTL.
+	restricted bool
 }
 
 type openapiCacheEntry struct {
@@ -129,7 +134,7 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 
 	// The key carries the caller's subject, so a demo caller's filtered index
 	// is never served to anyone else, nor anyone else's full one to them.
-	key := openapiCacheKey{cluster: name, user: u.Subject, gv: gv}
+	key := openapiCacheKey{cluster: name, user: u.Subject, gv: gv, restricted: demo}
 	if e, ok := h.openapi.cache.Get(key); ok && time.Since(e.storedAt) < openapiTTL {
 		c.Data(http.StatusOK, e.contentTy, e.body)
 		return
