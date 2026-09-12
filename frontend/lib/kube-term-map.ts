@@ -20,6 +20,10 @@ const KUBE = {
   namespace: "Namespace",
   // The logs tab's instance picker (#260).
   allInstances: "All Pods",
+  // No `cluster` on purpose: "oci-a1" is the name kubeport registered the
+  // cluster under, not a kubeconfig context or any k8s field, so "클러스터"
+  // stays even with raw terms on — here, in the release header's meta line,
+  // and in the deploy form's cluster label alike (#259 review).
 } as const;
 
 export type TermKey = keyof typeof KUBE;

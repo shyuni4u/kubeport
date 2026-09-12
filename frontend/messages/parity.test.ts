@@ -17,7 +17,59 @@ function leafKeys(value: unknown, prefix = ""): string[] {
   );
 }
 
+/**
+ * Argument names in an ICU message. A select's branch bodies are text, not
+ * arguments — in `{kube, select, true {This pod} other {…}}` there is no
+ * placeholder named "This" — so walk the message rather than match every
+ * brace, which took a Latin branch's first word for one (#260 review).
+ */
+function placeholders(s: string): string[] {
+  const names: string[] = [];
+  let i = 0;
+  // Text up to the `}` that closes the enclosing branch, or the end.
+  const text = (): void => {
+    while (i < s.length && s[i] !== "}") {
+      if (s[i] === "{") argument();
+      else i++;
+    }
+  };
+  const argument = (): void => {
+    i++; // {
+    const head = /^\s*(\w+)\s*(?:,\s*(\w+)\s*)?/.exec(s.slice(i));
+    if (head) {
+      names.push(head[1]);
+      i += head[0].length;
+    }
+    if (head && ["select", "plural", "selectordinal"].includes(head[2] ?? "")) {
+      i++; // the comma before the branches
+      for (;;) {
+        const branch = /^\s*(?:offset:\d+\s*)?=?\w+\s*\{/.exec(s.slice(i));
+        if (!branch) break;
+        i += branch[0].length;
+        text();
+        i++; // } closing the branch
+      }
+      while (i < s.length && s[i] !== "}") i++;
+    } else {
+      // `{name}` or `{n, number, style}`: nothing nested to read.
+      while (i < s.length && s[i] !== "}") i++;
+    }
+    i++; // } closing the argument
+  };
+  while (i < s.length) {
+    text();
+    i++; // a stray } at the top level
+  }
+  return names.sort();
+}
+
 describe("messages", () => {
+  it("reads a select's branches as text, and arguments inside them as arguments", () => {
+    expect(placeholders("{kube, select, true {This pod} other {This instance}} ended")).toEqual(["kube"]);
+    expect(placeholders("{n, plural, one {# item} other {{n} items in {where}}}")).toEqual(["n", "n", "where"]);
+    expect(placeholders("{count}개 중 {total}, {n, number, integer}")).toEqual(["count", "n", "total"]);
+  });
+
   it("ko 와 en 의 키 집합이 같다", () => {
     const koKeys = leafKeys(ko).sort();
     const enKeys = leafKeys(en).sort();
@@ -45,8 +97,6 @@ describe("messages", () => {
   // Interpolations are part of the contract: `{count}` in one locale and
   // `{total}` in the other silently renders the placeholder.
   it("양쪽 로케일이 같은 플레이스홀더를 쓴다", () => {
-    const placeholders = (s: string) =>
-      [...s.matchAll(/\{(\w+)[^}]*\}/g)].map((m) => m[1]).sort();
     const read = (bundle: unknown, path: string): unknown =>
       path
         .split(".")
