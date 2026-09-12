@@ -225,15 +225,22 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
   // template's metadata arrives, and a baseline taken in between would count
   // the loaded metadata as an edit.
   const [loadDone, setLoadDone] = useState(false);
+  // Set once a save has stored the metadata. The version write comes after it
+  // and can still fail, and from then on the server's metadata is no longer the
+  // loaded one: putting the fields back in the editor would read as "nothing to
+  // save" while a save would still have to change them back. Part of the
+  // snapshot, so the editor stays unsaved until a whole save succeeds.
+  const [metaStored, setMetaStored] = useState(false);
   const snapshot = useMemo(
     () =>
       state && loadDone
         ? stableStringify({
             state,
             meta: { name: meta.name, display_name: meta.display_name ?? "", tags: meta.tags },
+            metaStored,
           })
         : null,
-    [state, loadDone, meta],
+    [state, loadDone, meta, metaStored],
   );
   const markSaved = useDirtyAgainstBaseline(snapshot, dirty, onDirty);
 
@@ -294,6 +301,12 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
           setErr(t("errors.metaSave", { status: patchRes.status, detail: (await patchRes.text()).trim() }));
           return;
         }
+        // Stored, whatever the version write below does. A retry now compares
+        // against what the server holds, so putting a field back sends it back
+        // instead of skipping the PATCH, and the editor stays unsaved until the
+        // whole save goes through (#274).
+        setInitialMeta(meta);
+        setMetaStored(true);
       }
 
       // 2) Either PATCH the draft in place or POST a new version.
