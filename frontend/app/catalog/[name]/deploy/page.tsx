@@ -1,7 +1,5 @@
 import { apiFetch } from "@/lib/api-server";
 import { demoNamespaceFor, isDemoEmail, withDemoSuffix } from "@/lib/demo";
-import { roleFromGroups } from "@/lib/role";
-import { KubeTermsDefault } from "@/components/KubeTermsDefault";
 import { notFound } from "next/navigation";
 import YAML from "yaml";
 
@@ -50,19 +48,17 @@ export default async function DeployPage({
   // Only a new release has a namespace field; an update cannot move one.
   const demoNamespace = updateReleaseId ? undefined : demoNamespaceFor(me?.email);
 
+  // The terms switch's starting value comes from KubeTermsProvider in the
+  // root shell (#39, #247).
   return (
-    <>
-      {/* Admins start with raw k8s terms, users with plain words (#39). */}
-      <KubeTermsDefault isAdmin={roleFromGroups(me?.groups ?? null) === "admin"} />
-      <DeployClient
-        templateName={name}
-        version={t.current_version}
-        team={t.owning_team_name}
-        spec={spec}
-        updateReleaseId={updateReleaseId}
-        defaultName={defaultName}
-        demoNamespace={demoNamespace}
-      />
-    </>
+    <DeployClient
+      templateName={name}
+      version={t.current_version}
+      team={t.owning_team_name}
+      spec={spec}
+      updateReleaseId={updateReleaseId}
+      defaultName={defaultName}
+      demoNamespace={demoNamespace}
+    />
   );
 }

@@ -457,7 +457,11 @@ useEffect(() => {
   ```
 - ON: 라벨 `인스턴스` → `Pods`, `외부 주소` → `External Address`, `재시작` → `Restart Count`, `구역` → `Namespace` (#250), `전체 인스턴스` → `All Pods` (#260)
 - 번역 맵은 `lib/kube-term-map.ts` 로 분리
-- 시작값은 역할로 정한다 (#39): 서버 컴포넌트가 `roleFromGroups(me.groups)` 로 판정해 `KubeTermsDefault` 에 넘기고, admin 은 ON·user 는 OFF. 사용자가 토글을 한 번 누르면(`touched`) 그 뒤로는 기본값을 적용하지 않는다.
+- 시작값은 역할로 정한다 (#39). admin 은 ON, user 는 OFF.
+  - 루트 셸 `AppShell` 이 `roleFromGroups(me.groups)` 로 역할을 판정해 `KubeTermsProvider` 에 넘긴다.
+  - `KubeTermsProvider` 는 렌더 트리마다 스토어를 하나씩 **그 값으로 만든다**(`createKubeTermsStore`). 그래서 서버 HTML 과 새로고침 직후 첫 페인트가 이미 역할에 맞는 말로 그려진다. 예전에는 모듈 전역 스토어를 하이드레이션 뒤에 바꿨고, 그 사이에 쉬운 말이 원본 용어로 바뀌는 게 보였다(#247).
+  - 서버에서 모듈 전역 상태는 요청끼리 공유되므로 앱은 전역 스토어를 쓰지 않는다. 컴포넌트 하나만 렌더하는 단위 테스트는 provider 밖의 대체 스토어를 `useKubeTermsStore.setState` 로 다룬다.
+  - 루트 셸은 페이지를 옮겨도 유지되므로, 사용자가 토글을 한 번 누르면(`touched`) 그 선택이 다른 페이지에서도 유지되고 기본값은 다시 적용되지 않는다.
 - 적용 화면: 릴리스 상세 헤더(메타 줄의 구역 이름표 포함, #259)·인스턴스 소제목, 로그 탭의 인스턴스 선택(#260), 배포 폼의 구역 라벨·리소스 미리보기·권한 확인 패널. 릴리스 목록의 구역 컬럼은 토글이 없는 화면이라 쉬운 말로 고정한다(#250). kind 이름은 `messages/*.json` 의 `kinds.*` 로 번역하고(`lib/kube-kinds.ts`), 목록 밖 kind 는 원문 그대로 둔다.
 
 ### 6.6 업데이트 플로우
