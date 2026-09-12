@@ -14,8 +14,7 @@ type previewReq struct {
 
 func (h *Handlers) PreviewTemplate(c *gin.Context) {
 	var r previewReq
-	if err := c.ShouldBindJSON(&r); err != nil {
-		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+	if !bindJSON(c, &r) {
 		return
 	}
 	resources, uispec, err := template.SerializeUIMode(r.UIState)

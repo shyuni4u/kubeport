@@ -22,8 +22,7 @@ type createTeamReq struct {
 
 func (h *Handlers) CreateTeam(c *gin.Context) {
 	var r createTeamReq
-	if err := c.ShouldBindJSON(&r); err != nil {
-		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+	if !bindJSON(c, &r) {
 		return
 	}
 	team, err := h.deps.Store.InsertTeam(c, store.InsertTeamParams{
@@ -147,8 +146,7 @@ func (h *Handlers) AddTeamMember(c *gin.Context) {
 		return
 	}
 	var r addMemberReq
-	if err := c.ShouldBindJSON(&r); err != nil {
-		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+	if !bindJSON(c, &r) {
 		return
 	}
 	target, err := h.deps.Store.GetUserByEmail(c, store.PgText(r.Email))

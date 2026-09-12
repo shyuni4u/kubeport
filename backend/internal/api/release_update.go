@@ -58,8 +58,7 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 	}
 
 	var req updateReleaseReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+	if !bindJSON(c, &req) {
 		return
 	}
 

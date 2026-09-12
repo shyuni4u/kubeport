@@ -38,8 +38,7 @@ type createTemplateReq struct {
 
 func (h *Handlers) CreateTemplate(c *gin.Context) {
 	var r createTemplateReq
-	if err := c.ShouldBindJSON(&r); err != nil {
-		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+	if !bindJSON(c, &r) {
 		return
 	}
 
@@ -541,8 +540,7 @@ func (h *Handlers) CreateTemplateVersion(c *gin.Context) {
 	}
 
 	var r createVersionReq
-	if err := c.ShouldBindJSON(&r); err != nil {
-		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+	if !bindJSON(c, &r) {
 		return
 	}
 
@@ -691,8 +689,7 @@ func (h *Handlers) UpdateTemplateVersion(c *gin.Context) {
 	}
 
 	var r updateVersionReq
-	if err := c.ShouldBindJSON(&r); err != nil {
-		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+	if !bindJSON(c, &r) {
 		return
 	}
 

@@ -115,8 +115,7 @@ func normalizeAPIURL(raw string) string {
 
 func (h *Handlers) CreateCluster(c *gin.Context) {
 	var r createClusterReq
-	if err := c.ShouldBindJSON(&r); err != nil {
-		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+	if !bindJSON(c, &r) {
 		return
 	}
 	// Refuse here rather than at deploy time. Without a CA the k8s factory now

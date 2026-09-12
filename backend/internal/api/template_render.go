@@ -41,8 +41,7 @@ type previewRenderReq struct {
 //     (surfaced verbatim so the UI can highlight the offending field)
 func (h *Handlers) PreviewRender(c *gin.Context) {
 	var r previewRenderReq
-	if err := c.ShouldBindJSON(&r); err != nil {
-		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+	if !bindJSON(c, &r) {
 		return
 	}
 	if len(r.Values) == 0 {

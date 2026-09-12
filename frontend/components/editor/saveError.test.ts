@@ -93,6 +93,19 @@ describe("saveErrorMessage", () => {
     expect(msg).not.toContain("rate-limited");
   });
 
+  it("tells the author to shrink the template on 413, not to retry", async () => {
+    // #128: an oversized body used to be a 400 whose detail was Go's
+    // "http: request body too large". Its own case says what fixes it — the
+    // same save sent again is refused again.
+    const msg = await saveErrorMessage(
+      t,
+      res(413, '{"title":"payload-too-large","status":413,"detail":"request body exceeds 4 MiB"}'),
+    );
+    expect(msg).toBe(ko.templates.editor.errors.payloadTooLarge);
+    expect(msg).not.toContain("payload-too-large");
+    expect(msg).not.toContain("HTTP 413");
+  });
+
   it("falls back to a generic message with status + detail", async () => {
     expect(await saveErrorMessage(t, res(500, "boom"))).toBe("저장에 실패했습니다 (HTTP 500). boom");
   });

@@ -292,6 +292,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Cluster" }
         "400": { $ref: "#/components/responses/ValidationError" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409":
@@ -487,6 +488,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404":
           description: No cluster is registered under that name.
@@ -547,6 +549,7 @@ paths:
                   resources_yaml: { type: string }
                   ui_spec_yaml: { type: string }
         "400": { $ref: "#/components/responses/ValidationError" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409":
@@ -597,6 +600,7 @@ paths:
                   resources_yaml: { type: string }
                   ui_spec_yaml: { type: string }
         "400": { $ref: "#/components/responses/ValidationError" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
@@ -649,6 +653,7 @@ paths:
                   version: { type: integer }
                   rendered_yaml: { type: string }
         "400": { $ref: "#/components/responses/ValidationError" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -711,6 +716,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Template" }
         "400": { $ref: "#/components/responses/ValidationError" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -759,6 +765,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/TemplateVersion" }
         "400": { $ref: "#/components/responses/ValidationError" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -824,6 +831,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/TemplateVersion" }
         "400": { $ref: "#/components/responses/ValidationError" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1009,6 +1017,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404":
           description: |
@@ -1124,6 +1133,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1387,6 +1397,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Team" }
         "400": { $ref: "#/components/responses/ValidationError" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409":
@@ -1444,6 +1455,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/TeamMember" }
         "400": { $ref: "#/components/responses/ValidationError" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404":
@@ -1577,6 +1589,37 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Problem" }
+    PayloadTooLarge:
+      description: |
+        The request body is over the 4 MiB cap (`payload-too-large`, #128).
+        Until #128 this was a `400 validation-error` whose `detail` was Go's
+        `http: request body too large`; it has its own kind because the
+        response is the opposite one — a validation error is fixed by
+        correcting the body, this one only by sending less of it. **Do not
+        retry the same request.** Shrink it, or split a template into several.
+
+        A `Content-Length` over the cap is refused before routing and
+        authentication, on every operation and method — so an unauthenticated
+        caller sees 413 rather than 401, and a GET that declares such a length
+        is refused even though no GET reads a body. A body of unknown length
+        (chunked) is cut off at the cap while the handler reads it, with the
+        same response. Only operations that take a request body list this
+        response, since those are the ones a well-formed client can reach it on.
+
+        The server does not drain the rest of an oversized body and closes the
+        connection after answering, so a client still uploading may see the
+        connection drop before it reads this. Measure before sending.
+      headers:
+        X-Request-Id: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Problem" }
+          example:
+            type: https://kubeport.io/errors/payload-too-large
+            title: payload-too-large
+            status: 413
+            detail: request body exceeds 4 MiB
+            request_id: 4d3f0a2c-7c1e-4a6b-9f10-2f5f1f0b8e21
     RateLimited:
       description: |
         Over the per-caller budget (`rate-limited`). The budget is a token
@@ -1842,6 +1885,10 @@ components:
                             # holds them. A different release name does not fix
                             # it: deploy into another namespace, or remove the
                             # holder first.
+        - payload-too-large # 413 — the request body is over the 4 MiB cap
+                            # (#128). Not validation-error: resending the same
+                            # body can never succeed, so shrink or split it.
+                            # Refused before auth when Content-Length says so.
         - rate-limited      # 429 — over a per-caller budget: SSAR, cluster-openapi
                             # and log-stream opens share one; release writes
                             # (create/update/delete) share one; release reads,
