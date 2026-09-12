@@ -173,7 +173,11 @@ ingress:
   # Rendered only with className "traefik" and TLS on, as a Traefik
   # `traefik.io/v1alpha1` Middleware (k3s ships the CRD). Other ingress classes
   # need their own mechanism (nginx: ssl-redirect is on by default with TLS).
-  # Set false on a Traefik without the traefik.io CRDs (older than v2.10), when
+  # Set false on a Traefik without the traefik.io CRDs (older than v2.10, or
+  # installed with --skip-crds) — the install fails with no matches for kind
+  # "Middleware" — or with its kubernetesCRD provider off, where the install
+  # succeeds but the Ingress routers cannot resolve the Middleware and both hosts
+  # answer 404, https included. Also set false when
   # something in front already redirects, or when something in front terminates
   # TLS and forwards plain http to Traefik (Cloudflare "Flexible" SSL, an L7 load
   # balancer with an http backend): Traefik does not trust that proxy's

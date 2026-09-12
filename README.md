@@ -90,9 +90,12 @@ helm install kubeport deploy/helm/kubeport --namespace kubeport --create-namespa
 ```
 
 Set `ingress.className` to your cluster's class — GKE `gce`, EKS `alb`,
-nginx-ingress `nginx`, k3s `traefik`. The chart's default is `traefik`, and on a
-cluster without it the Ingress is created and then simply never picked up by any
-controller. Nothing errors; the address stays empty.
+nginx-ingress `nginx`, k3s `traefik`. The chart's default is `traefik`. On a
+cluster without Traefik that default fails the install with
+`no matches for kind "Middleware"` — the chart's http→https redirect is a
+Traefik object (#268) — and if you also turned TLS off, nothing errors at all:
+the Ingress is created, no controller picks it up, and the address stays empty.
+Either way the fix is the class, not the CRD.
 
 On ingress-nginx, also pass
 `--set-string 'ingress.annotations.nginx\.ingress\.kubernetes\.io/proxy-body-size=4m'`

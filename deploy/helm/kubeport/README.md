@@ -124,6 +124,16 @@ values — substitute your cluster's from the "Cloud-specific values" table belo
 (GKE `gce`/`standard-rwo`, EKS `alb`/`gp3`, …). Leaving the k3s values on a
 managed cluster leaves the PVC `Pending` and the Ingress unassigned.
 
+With `ingress.className=traefik` and TLS on, the chart also creates a Traefik
+`Middleware` (`traefik.io/v1alpha1`) that redirects http to https, and each
+Ingress serving TLS references it (#268). k3s ships everything this needs. On a
+Traefik you installed yourself, check both `kubectl get crd middlewares.traefik.io`
+and that its Kubernetes CRD provider is enabled: without the CRD `helm install`
+fails with `no matches for kind "Middleware"`; without the provider the install
+succeeds but every request to the host answers 404. If either is missing — or
+something in front already redirects, or terminates TLS and forwards plain
+http — add `--set ingress.httpsRedirect=false`.
+
 `oidc.audience` must equal your client ID, and `auth.devAdminEmails` is what
 makes you an admin — see "After install" step 0 for why both matter.
 
@@ -302,9 +312,12 @@ your own `psql` at `postgres.externalUrl`.
 ### Behaviour changes when upgrading past #268
 
 With `ingress.className=traefik` and `tls.enabled=true`, plain http now
-redirects to https (301) on the app host and the Dex host. The chart renders a
-Traefik `Middleware` (`traefik.io/v1alpha1`) named `<release>-https-redirect`
-and references it from each Ingress that serves TLS, through
+redirects to https (301 for GET, 308 for other methods such as `curl -I`'s
+HEAD) on the app host and the Dex host. The chart renders a Traefik
+`Middleware` (`traefik.io/v1alpha1`) named `<release>-https-redirect` — or
+`<release>-kubeport-https-redirect` when the release name does not contain
+`kubeport`, the same rule as the Postgres pod above — and references it from
+each Ingress that serves TLS, through
 `traefik.ingress.kubernetes.io/router.middlewares`. Middlewares you already list
 in that annotation are kept, after the redirect.
 
@@ -329,10 +342,11 @@ in that annotation are kept, after the redirect.
 Verify after the upgrade:
 
 ```bash
-curl -sI http://<host>/ | head -3        # 301 with Location: https://<host>/
-curl -sI https://<host>/ | head -1       # the usual answer, not a redirect
-# Through whatever the browser really goes through: more than one 301 is a loop
-curl -sIL --max-redirs 3 http://<host>/ | grep -c '^HTTP/.* 301'   # 1
+# GET, not curl -I: Traefik answers a HEAD with 308 rather than 301
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://<host>/   # 301 https://<host>/
+curl -s -o /dev/null -w '%{http_code}\n' https://<host>/                  # the usual answer, not 301/308
+# Through whatever the browser really goes through: more than one hop is a loop
+curl -sL --max-redirs 3 -o /dev/null -w '%{num_redirects}\n' http://<host>/   # 1
 ```
 
 ### Behaviour changes when upgrading past #253
@@ -543,9 +557,19 @@ Traefik (k3s) has no default limit.
 
 http → https: with `traefik` and `tls.enabled=true` the chart redirects http
 itself (`ingress.httpsRedirect`, default true; see "upgrading past #268"). Other
-classes use their controller's own switch — nginx-ingress redirects by default
-when the Ingress has TLS; GKE needs a `FrontendConfig` with `redirectToHttps`;
-ALB a `listen-ports` + `ssl-redirect` annotation pair.
+classes need their controller's own switch, and without it http serves the whole
+app. Anything below goes in `ingress.annotations`, which the Dex Ingress shares:
+
+- **nginx-ingress:** nothing to set — it redirects (308) whenever the Ingress
+  has TLS.
+- **GKE (`gce`):** create a `FrontendConfig` (`apiVersion:
+  networking.gke.io/v1beta1`, `spec.redirectToHttps.enabled: true`) in the
+  release namespace and set
+  `ingress.annotations."networking.gke.io/v1beta1.FrontendConfig"=<its name>`.
+- **EKS (`alb`):** `alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80},
+  {"HTTPS": 443}]'` and `alb.ingress.kubernetes.io/ssl-redirect: '443'`.
+- **AKS (`azure-application-gateway`):**
+  `appgw.ingress.kubernetes.io/ssl-redirect: "true"` — it defaults to false.
 
 ### Backend tuning (optional)
 
@@ -746,7 +770,7 @@ its own DNS record pointing at the cluster ingress, separate from the main
 | `demo-namespace.yaml`, `demo-rbac.yaml`, `demo-reset-cronjob.yaml` | `demo.enabled=true`, which requires `dex.enabled=true` |
 | `postgres-{statefulset,service,secret}.yaml` | `postgres.embedded=true` |
 | `ingress.yaml` | `ingress.enabled=true` |
-| `https-redirect-middleware.yaml` (Traefik `Middleware`, http → https) | `ingress.httpsRedirect=true` (default) AND `ingress.className=traefik` AND `tls.enabled=true`, with `ingress.enabled` or `dex.enabled` — each Ingress references it only when it serves TLS (#268) |
+| `https-redirect-middleware.yaml` (Traefik `Middleware`, http → https) | `ingress.httpsRedirect=true` (default) AND `ingress.className=traefik` AND `tls.enabled=true`, AND an Ingress that serves TLS — `ingress.enabled` with cert-manager or `tls.existingSecret`, or `dex.enabled` with cert-manager. Each such Ingress references it (#268) |
 | `certificate.yaml` | `tls.enabled=true` AND `tls.certManager.enabled=true` |
 | `migration-configmap.yaml` (schema.hcl + atlas.hcl) | `migration.enabled=true` (default true) — mounted by the backend Pod's `migrate` initContainer |
 

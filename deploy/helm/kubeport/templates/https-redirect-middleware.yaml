@@ -1,4 +1,7 @@
-{{- if and (eq (include "kubeport.httpsRedirect.enabled" .) "true") (or .Values.ingress.enabled .Values.dex.enabled) -}}
+{{- /* Only when some Ingress references it: an unreferenced Middleware still fails the install on a cluster without the CRD. The conditions mirror ingress.yaml's TLS secret and dex-ingress.yaml's tls block. */ -}}
+{{- $appTLS := and .Values.ingress.enabled (or .Values.tls.certManager.enabled .Values.tls.existingSecret) -}}
+{{- $dexTLS := and .Values.dex.enabled .Values.tls.certManager.enabled -}}
+{{- if and (eq (include "kubeport.httpsRedirect.enabled" .) "true") (or $appTLS $dexTLS) -}}
 {{- /*
 http -> https for the app and Dex Ingresses (#268). Both reference it through
 the router.middlewares annotation (kubeport.ingressAnnotations). Traefik's
