@@ -949,7 +949,11 @@ paths:
       tags: [templates]
       operationId: deprecateTemplateVersion
       summary: Deprecate a published version
-      description: Hides it from the catalog. Running releases are untouched.
+      description: |
+        Hides it from the catalog. Running releases are untouched.
+
+        Demo accounts get 403 `demo-restricted` for any template unless the
+        install set demo.allowTemplateCreate — the publish gate (#294).
       parameters:
         - $ref: "#/components/parameters/TemplateName"
         - $ref: "#/components/parameters/VersionNumber"
@@ -980,7 +984,7 @@ paths:
       description: |
         Publishes the version again. Demo accounts get 403 `demo-restricted` for
         any template unless the install set demo.allowTemplateCreate — the
-        publish gate (#294); deprecating stays open to them.
+        publish gate (#294), which covers deprecating as well.
       parameters:
         - $ref: "#/components/parameters/TemplateName"
         - $ref: "#/components/parameters/VersionNumber"
@@ -1654,7 +1658,8 @@ components:
       description: |
         `title` says who refused: `rbac-denied` is kubeport's own check or the
         cluster's RBAC; `demo-restricted` is the demo gate — a management write
-        demo accounts never get, template creation or version publishing on an
+        demo accounts never get, template creation or a version's publish,
+        deprecate or undeprecate on an
         install without demo.allowTemplateCreate, or a read or change of a release that no demo
         account owns. A template on the other side of the demo line is not a
         403: reading, changing or deploying it answers 404 like a missing one

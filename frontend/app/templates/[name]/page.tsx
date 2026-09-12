@@ -25,11 +25,11 @@ async function actionError(what: string, res: Response): Promise<ActionState> {
   console.error(`[templates] ${what} failed: ${res.status} ${body}`);
   // A demo admin acting on a template the demo did not create is refused as
   // `demo-restricted`, not for lacking the admin group it does have (#180).
-  // Publishing — and undeprecating, which publishes a version again — is
-  // refused to demo accounts on any template (#294).
+  // Publishing a version and switching a published one on or off are refused
+  // to demo accounts on any template (#294).
   if (res.status === 403) {
     if (problemTitle(body) !== "demo-restricted") return { error: te("forbidden") };
-    const publishing = what === "publish" || what === "undeprecate";
+    const publishing = what === "publish" || what === "deprecate" || what === "undeprecate";
     return { error: publishing ? te("demoPublishRestricted") : te("demoRestricted") };
   }
   if (res.status === 409) return { error: te("conflict") };
