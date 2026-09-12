@@ -397,7 +397,7 @@ reseeding — useful after fixture or schema changes, or a dirty local DB.
 | `03-deprecate-flow` | admin | publish → deprecate → hidden from catalog → undeprecate (confirm dialogs auto-accepted) |
 | `04-demo-user` | demo user / demo admin | demo banner, seeded catalog, demo-restricted 403, landing entry buttons |
 | `05-user-deploy` | demo user | deploy form: empty-name guard, Korean validation sentence, RBAC denial sentence for `kube-system`, deploy to `default`, delete own release |
-| `06-admin-draft-save` | demo admin | seeded `web-app` draft: unsaved-edits guard on tab switch, display-name PATCH save, restore |
+| `06-admin-draft-save` | demo admin | seeded `web-app` draft in YAML mode: append a `# e2e-touched` comment to ui-spec.yaml, a declined leave prompt on the UI-mode tab keeps the edit, PATCH save lands on the detail page, reopening shows the comment. The template's display name is not touched, and nothing is restored — the comment stays on the seeded draft until you reseed (§9b) |
 | `07-error-pages` | demo user | unknown template / release / team → localized not-found page with a way back |
 
 All specs assume the seed from §9b (templates `web-app`, `nightly-job`, `app-with-config` + a `web-app` draft) and the demo RBAC bindings from §6 (`demo-user` has `edit` in `default`). Anything that pops `window.confirm` needs `autoAcceptDialogs(page)` from `fixtures.ts` — Playwright dismisses dialogs by default, which cancels the action.
