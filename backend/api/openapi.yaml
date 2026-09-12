@@ -1030,6 +1030,10 @@ paths:
             non-admin real user cannot deploy the demo's — the same split the
             template list draws. It answers like a missing version so the
             deploy path does not add a way to probe template names.
+
+            On any install, a template that was never published, whose drafts
+            the caller may not read, answers the same `template version` 404
+            (#252) — it is not in the caller's catalog either.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
