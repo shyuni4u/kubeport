@@ -944,14 +944,19 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
   reading, changing or deploying it answers 404, as if it did not exist, and
   the line holds the other way too: to a real user who is not an admin a demo
   template does not exist either. A real operator
-  (admin, not demo) still can — and that release keeps the demo reset from
-  deleting the demo catalog until it is removed. Releases a non-admin created
-  from a demo template before this check existed block it the same way. When
-  that happens the reset Job still succeeds, but its `seed` container logs
-  `WARN: reset: … skipped — referenced by non-demo releases`; delete that
-  release (from its detail page or `DELETE /v1/releases/:id`) and the next
-  reset clears the demo catalog again — re-running the reset before that
-  changes nothing. Creating *new* templates and publishing, deprecating or
+  (admin, not demo) still can — and the demo reset then keeps the template
+  versions that release points at, and their templates, until it is removed;
+  the rest of the demo catalog is still deleted (#306). Releases a non-admin
+  created from a demo template before this check existed are kept the same
+  way. The reset Job still succeeds, and its `seed` container logs
+  `WARN: reset: kept N demo template versions referenced by non-demo releases`;
+  the seeder deprecates any kept version of a seeded template that is not
+  fixture content, so nothing new deploys from it, and the release holding it
+  can no longer be updated in place (moving it to the current version needs its
+  Secret values entered again). A template a demo visitor created
+  (`demo.allowTemplateCreate=true`) is kept as it is. Delete that release (from its detail page or
+  `DELETE /v1/releases/:id`) and the next reset removes the kept versions too —
+  re-running the reset before that changes nothing. Creating *new* templates and publishing, deprecating or
   undeprecating versions are also
   refused unless you set `demo.allowTemplateCreate=true`
   (`KBP_DEMO_ALLOW_TEMPLATE_CREATE`); leave it off for a public demo, since
@@ -963,8 +968,8 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
   templates) and `catalog.last_seed` (UTC, the oldest of their `created_at`).
   Alert when `templates` is 0 (a reset wiped and failed to re-seed) or
   `last_seed` is older than your `demo.resetSchedule` interval plus about 2h
-  (a reset did not run, or skipped the catalog because a non-demo release
-  references a demo template). Leave it off unless the install is a public
+  (a reset did not run, or kept a demo template because a non-demo release
+  references one of its versions). Leave it off unless the install is a public
   demo — it tells anyone the catalog's size.
 
 Both demo `Role`s enumerate workload resources explicitly — neither can touch

@@ -98,11 +98,10 @@ func (g *catalogGauge) count(st *store.Store, demoDomain string) (demoCatalog, e
 // when the catalog was last seeded. Oldest rather than newest: a template
 // published after the seed — a demo visitor's, where authoring is opted in —
 // would otherwise make a catalog that has not been re-seeded in days look
-// fresh. The error it can make is the safe one: seed-demo's reset deletes the
-// demo catalog one statement at a time and tolerates a foreign-key refusal, so
-// a single non-demo release referencing any demo template version makes it
-// skip the whole catalog. last_seed then stays old even though the Job
-// succeeded — a state someone has to clear by hand anyway.
+// fresh. The error it can make is the safe one: seed-demo's reset keeps a demo
+// template whose version a non-demo release still references (#306). last_seed
+// then stays old even though the Job succeeded — a state someone has to clear
+// by hand anyway, by deleting that release.
 func demoVisibleTemplates(ctx context.Context, st *store.Store, demoDomain string) (demoCatalog, error) {
 	// Without a demo domain there is no "demo-owned" to filter on, and the
 	// count would be the size of the operator's own catalog. The chart happens

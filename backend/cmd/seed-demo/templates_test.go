@@ -311,6 +311,54 @@ func TestTemplateSeeder_RepairDoesNotUndeprecateAVisitorsVersion(t *testing.T) {
 	}
 }
 
+// Issue #306. A version a visitor published before the #294 gate can still be
+// published after a reset that kept it (a non-demo release points at it), and
+// any published version can be deployed, current or not. The seeder
+// deprecates every published version that is not the fixture: here one that is
+// current and one that is not.
+func TestTemplateSeeder_RepairDeprecatesPublishedVersionsThatAreNotTheFixture(t *testing.T) {
+	s, ctx := newTestSeeder(t)
+	require.NoError(t, s.Run(ctx))
+	f := fixtures.All()[0]
+	conn, err := pgx.Connect(ctx, testDSN())
+	require.NoError(t, err)
+	defer conn.Close(ctx)
+
+	tpl, err := s.st.GetTemplateByName(ctx, f.Name)
+	require.NoError(t, err)
+	current := tpl.CurrentVersionID
+	_, err = conn.Exec(ctx, `UPDATE template_versions SET resources_yaml = $2 WHERE id = $1`, current, visitorYAML)
+	require.NoError(t, err)
+	var other store.TemplateVersion
+	require.NoError(t, s.st.WithTx(ctx, func(q *store.Queries) error {
+		next, err := q.NextTemplateVersion(ctx, tpl.ID)
+		if err != nil {
+			return err
+		}
+		other, err = q.InsertTemplateVersionV2(ctx, store.InsertTemplateVersionV2Params{
+			TemplateID: tpl.ID, Version: next, ResourcesYaml: visitorYAML, UiSpecYaml: f.UISpecYAML,
+			Status: "published", CreatedByUserID: s.owner.ID, AuthoringMode: "yaml",
+		})
+		return err
+	}))
+
+	require.NoError(t, s.Run(ctx))
+
+	requireCatalogIsTheFixture(t, s, ctx, f, store.TemplateVersion{})
+	for _, v := range versionsOf(t, s, ctx, f.Name) {
+		if v.ID == current || v.ID == other.ID {
+			require.Equalf(t, "deprecated", v.Status, "v%d holds a visitor's content and must not stay deployable", v.Version)
+		}
+		if v.Status == "published" {
+			require.Equal(t, f.ResourcesYAML, v.ResourcesYaml, "every published version must be the fixture")
+		}
+	}
+
+	before := len(versionsOf(t, s, ctx, f.Name))
+	require.NoError(t, s.Run(ctx))
+	require.Len(t, versionsOf(t, s, ctx, f.Name), before, "a repaired template needs no more writes")
+}
+
 func TestTemplateSeeder_RefusesAnotherOwnersTemplate(t *testing.T) {
 	s, ctx := newTestSeeder(t)
 	require.NoError(t, s.Run(ctx))
