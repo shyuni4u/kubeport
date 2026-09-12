@@ -25,6 +25,7 @@ describe("isSecretPath", () => {
   it("recognises a Secret by selector or by kind alone", () => {
     expect(isSecretPath("Secret[app].stringData.PORT")).toBe(true);
     expect(isSecretPath("Secret.stringData.TOKEN")).toBe(true);
+    expect(isSecretPath("Secret_x.y")).toBe(true);
     expect(isSecretPath("SecretStore[vault].spec.provider")).toBe(false);
     expect(isSecretPath("Deployment[web].spec.replicas")).toBe(false);
   });

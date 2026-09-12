@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"kubeport/internal/template"
 )
 
 // redactedSecret stands in for a Secret's value wherever a release is read
@@ -18,17 +20,13 @@ import (
 const redactedSecret = "<redacted>"
 
 // isSecretPath reports whether a ui-spec path points into a Secret, whose value
-// is the Secret's content. The path's head is its kind, then either a selector
-// in brackets or nothing at all — `Secret.stringData.KEY` names the template's
-// only Secret (template.parseHead) — so the kind has to end at "[", "." or the
-// end of the path; `SecretStore[x]` is another kind (codex review).
+// is the Secret's content. Asked of the path grammar itself: a selector is
+// optional — `Secret.stringData.KEY` names the template's only Secret (codex
+// review) — and `SecretStore[x]` is another kind. A hand-written copy of that
+// grammar would miss the next spelling it gains (security review).
 func isSecretPath(path string) bool {
-	const kind = "Secret"
-	if !strings.HasPrefix(path, kind) {
-		return false
-	}
-	rest := path[len(kind):]
-	return rest == "" || rest[0] == '[' || rest[0] == '.'
+	kind, ok := template.PathKind(path)
+	return ok && kind == "Secret"
 }
 
 // redactRenderedSecrets returns rendered with every value under a Secret's

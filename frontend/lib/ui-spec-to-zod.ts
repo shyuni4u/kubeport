@@ -318,11 +318,13 @@ export function schemaFromUISpec(
 export const REDACTED_SECRET = "<redacted>";
 
 /**
- * Whether a ui-spec path points into a Secret: its kind is exactly `Secret`,
- * followed by a selector in brackets, a dot, or nothing.
+ * Whether a ui-spec path points into a Secret. Mirrors the backend's
+ * `template.PathKind`, whose head grammar reads the kind as the longest run of
+ * letters (`^[A-Z][A-Za-z]+`): the kind is `Secret` when no letter follows it
+ * (`SecretStore` is another kind). Change both together.
  */
 export function isSecretPath(path: string): boolean {
-  return /^Secret(?:[[.]|$)/.test(path);
+  return /^Secret(?![A-Za-z])/.test(path);
 }
 
 /** The Secret paths whose starting value is the redacted placeholder. */

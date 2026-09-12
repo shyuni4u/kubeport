@@ -16,6 +16,8 @@ func TestIsSecretPath(t *testing.T) {
 		"Secret[0].data.TOKEN":                  true,
 		"Secret.stringData.API_KEY":             true,
 		`Secret["stringData"]`:                  true,
+		"Secret_x.y":                            true,  // kind Secret by the grammar; over-redacting is safe
+		"secret[app].stringData.KEY":            false, // the grammar refuses a lowercase kind
 		"SecretStore[vault].spec.provider":      false,
 		"Deployment[web].spec.replicas":         false,
 		"ConfigMap.data.Secret":                 false,

@@ -42,6 +42,15 @@ func parseHead(p string) (string, string, string, error) {
 	return m[1], m[2], strings.TrimPrefix(m[3], "."), nil
 }
 
+// PathKind is the kind a ui-spec path points into, read by the same grammar
+// that applies the path, and false for a path that grammar refuses. Callers
+// that act on a path's kind — redacting what points into a Secret (#196) —
+// ask it rather than re-parsing, so they follow the grammar when it changes.
+func PathKind(p string) (string, bool) {
+	kind, _, _, err := parseHead(p)
+	return kind, err == nil
+}
+
 func findDoc(docs []map[string]any, kind, selector string) (map[string]any, error) {
 	var matches []map[string]any
 	for _, d := range docs {
