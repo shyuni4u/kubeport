@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
-import { BottomBar } from "./BottomBar";
+import { BottomBar, UnsavedChangesStatus } from "./BottomBar";
 import ko from "@/messages/ko.json";
 
 function renderBar(props: Partial<React.ComponentProps<typeof BottomBar>> = {}) {
@@ -49,6 +49,29 @@ describe("BottomBar", () => {
     expect(screen.getByRole("status")).toBeEmptyDOMElement();
   });
 
+  // A live region announces changes to its content, not its arrival: one that
+  // mounted with the text, or was swapped for a new node, would say nothing.
+  it("keeps one status region while edits start and a save clears them", () => {
+    const bar = (dirty: boolean) => (
+      <NextIntlClientProvider locale="ko" messages={ko}>
+        <BottomBar canSave canPublish={false} dirty={dirty} onSave={() => {}} onPublish={() => {}} />
+      </NextIntlClientProvider>
+    );
+    const { rerender } = render(bar(false));
+    const region = screen.getByRole("status");
+    const save = screen.getByRole("button", { name: "Draft 저장" });
+
+    rerender(bar(true));
+    expect(screen.getByRole("status")).toBe(region);
+    expect(region).toHaveTextContent("저장하지 않은 변경 사항이 있습니다");
+    expect(save).toHaveAttribute("data-variant", "default");
+
+    rerender(bar(false));
+    expect(screen.getByRole("status")).toBe(region);
+    expect(region).toBeEmptyDOMElement();
+    expect(save).toHaveAttribute("data-variant", "outline");
+  });
+
   it("gives Save the primary look only while dirty, and keeps it enabled either way", () => {
     renderBar({ dirty: false });
     const idle = screen.getByRole("button", { name: "Draft 저장" });
@@ -59,5 +82,23 @@ describe("BottomBar", () => {
   it("switches Save to the primary look when edits are pending", () => {
     renderBar({ dirty: true });
     expect(screen.getByRole("button", { name: "Draft 저장" })).toHaveAttribute("data-variant", "default");
+  });
+});
+
+// The YAML version editor keeps its own "save as new version" button and uses
+// the status on its own.
+describe("UnsavedChangesStatus", () => {
+  it("fills and empties the same region as the dirty flag changes", () => {
+    const status = (dirty: boolean) => (
+      <NextIntlClientProvider locale="ko" messages={ko}>
+        <UnsavedChangesStatus dirty={dirty} />
+      </NextIntlClientProvider>
+    );
+    const { rerender } = render(status(true));
+    const region = screen.getByRole("status");
+    expect(region).toHaveTextContent("저장하지 않은 변경 사항이 있습니다");
+    rerender(status(false));
+    expect(screen.getByRole("status")).toBe(region);
+    expect(region).toBeEmptyDOMElement();
   });
 });
