@@ -1,4 +1,7 @@
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, it, expect } from "vitest";
+import { parse as parseYaml } from "yaml";
 import {
   schemaFromUISpec,
   uiSpecProblems,
@@ -723,6 +726,78 @@ describe("normalizeUISpec", () => {
     const schema = schemaFromUISpec(spec);
     expect(schema.safeParse({ a: "abc" }).success).toBe(true);
     expect(schema.safeParse({ a: "ABC" }).success).toBe(false);
+  });
+
+  // #189: `\A` compiles here too, but as a literal "A" — so the form enforced
+  // a rule the API does not have. The API now refuses it on save; the preview
+  // says so first rather than running the wrong rule.
+  it("sets aside a pattern Go and the browser read differently", () => {
+    const raw: UISpec = {
+      fields: [{ path: "a", label: "A", type: "string", pattern: String.raw`\Aabc` }],
+    };
+    const { spec, problems } = normalizeUISpec(raw);
+    expect((spec.fields[0] as { pattern?: string }).pattern).toBeUndefined();
+    expect(problems).toEqual(["fields[0].pattern"]);
+  });
+
+  // #187: this compiles, and the form runs it on every keystroke.
+  it("sets aside a pattern that can backtrack catastrophically", () => {
+    const raw: UISpec = {
+      fields: [{ path: "a", label: "A", type: "autocomplete", values: [], pattern: "^(a+)+$" }],
+    };
+    const { spec, problems } = normalizeUISpec(raw);
+    expect((spec.fields[0] as { pattern?: string }).pattern).toBeUndefined();
+    expect(problems).toEqual(["fields[0].pattern"]);
+    // Defence in depth for a caller that skips normalizeUISpec.
+    const started = Date.now();
+    expect(schemaFromUISpec(raw).safeParse({ a: "a".repeat(40) + "!" }).success).toBe(true);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it("sets aside a pattern longer than 200 characters", () => {
+    const raw: UISpec = {
+      fields: [{ path: "a", label: "A", type: "string", pattern: "a".repeat(201) }],
+    };
+    expect(normalizeUISpec(raw).problems).toEqual(["fields[0].pattern"]);
+  });
+
+  // zod runs every check, so `.max()` does not keep a long value away from
+  // the pattern. The bound has to sit in front of the pattern itself.
+  it("does not run the pattern on a value longer than the input bound", () => {
+    const spec: UISpec = {
+      fields: [{ path: "a", label: "A", type: "string", pattern: "^[a-z]+$", maxLength: 10 }],
+    };
+    const schema = schemaFromUISpec(spec);
+    const issues = (v: string) => {
+      const r = schema.safeParse({ a: v });
+      return r.success ? [] : r.error.issues.map((i) => i.code);
+    };
+    // Within the bound the pattern still reports, with the code DynamicForm
+    // turns into its "not an allowed format" message.
+    expect(issues("A".repeat(256))).toEqual(["too_big", "invalid_string"]);
+    // Past it only the length check reports; the API still checks the pattern.
+    expect(issues("A".repeat(257))).toEqual(["too_big"]);
+  });
+
+  // The live demo reseeds from these files daily. A rule that sets their
+  // patterns aside would leave the demo's deploy form without them.
+  it("keeps every pattern in the demo seed fixtures", () => {
+    const dir = path.resolve(__dirname, "../../backend/cmd/seed-demo/fixtures");
+    const files = readdirSync(dir).filter((f) => f.endsWith(".ui-spec.yaml"));
+    expect(files.length).toBeGreaterThan(0);
+    let seen = 0;
+    for (const file of files) {
+      const spec = parseYaml(readFileSync(path.join(dir, file), "utf8")) as UISpec;
+      const { problems, spec: normalized } = normalizeUISpec(spec);
+      expect(problems, file).toEqual([]);
+      spec.fields.forEach((f, i) => {
+        if ("pattern" in f && f.pattern) {
+          seen++;
+          expect((normalized.fields[i] as { pattern?: string }).pattern, file).toBe(f.pattern);
+        }
+      });
+    }
+    expect(seen).toBeGreaterThan(0);
   });
 
   // `values` is advisory for autocomplete, but the renderer spreads it into a

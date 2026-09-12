@@ -1,5 +1,7 @@
 import { z, type ZodTypeAny } from "zod";
 
+import { patternProblem } from "./ui-spec-pattern";
+
 /**
  * A single field in a template's ui-spec overlay. Discriminated by `type`.
  *
@@ -82,24 +84,42 @@ const KNOWN_TYPES = [
 ] as const;
 
 /**
- * A RegExp, or null while the pattern is still being typed.
+ * A RegExp, or null when the form should not run this pattern.
  *
  * `new RegExp("[")` throws, and a lone `[` is one keystroke on the way to
  * every character class anyone has ever written (#164).
  *
- * "safe" here means *it compiles*, and nothing more. A pattern that compiles
- * but backtracks catastrophically (`^(a+)+$`) passes, and the deploy form
- * validates on every keystroke — so an admin can still freeze a user's tab
- * with one. Out of reach for demo visitors, who cannot author templates at
- * all, but not a guarantee this function makes.
+ * It is also null for what `patternProblem` names, even when it compiles:
+ * RE2-only syntax, which here either throws or means something else, so the
+ * form would run a rule the API does not have (#189); a pattern over 200
+ * characters; and a repeated group holding an unlimited repeat (`^(a+)+$`),
+ * which the form would run on every keystroke until the tab froze (#187). The
+ * API refuses all of these on save, so only a version saved before that
+ * reaches the form with one — and the API still checks it on deploy.
+ *
+ * The nested-repeat rule is a heuristic; `(a|aa)*` still passes. The input
+ * bound in schemaFromUISpec is what limits the rest.
  */
 function safeRegExp(pattern: string): RegExp | null {
+  if (patternProblem(pattern) !== null) return null;
   try {
     return new RegExp(pattern);
   } catch {
     return null;
   }
 }
+
+/**
+ * The longest value the form runs a pattern against. The API has no such
+ * bound and checks every value on deploy, so a longer one is left to it rather
+ * than refused here.
+ *
+ * With nested repeats refused, what is left backtracks polynomially at worst —
+ * `^\w*\w*\w*!$` takes ~5 ms at 256 characters in V8, ~36 ms at 512 and
+ * ~280 ms at 1024, on every keystroke. 256 covers the longest name-shaped
+ * value Kubernetes has (a DNS subdomain, 253) while keeping that under a frame.
+ */
+const MAX_PATTERN_INPUT = 256;
 
 /**
  * One thing wrong with a ui-spec field. `dropped` means the field is left out
@@ -266,14 +286,20 @@ export function schemaFromUISpec(spec: UISpec): z.ZodObject<Record<string, ZodTy
         let s = z.string();
         if (f.minLength !== undefined) s = s.min(f.minLength);
         if (f.maxLength !== undefined) s = s.max(f.maxLength);
-        // Defence in depth — normalizeUISpec drops an uncompilable pattern
-        // before it reaches here, but this function must not throw for a
+        // Defence in depth — normalizeUISpec drops an unusable pattern before
+        // it reaches here, but this function must not throw or hang for a
         // caller that skipped it.
-        if (f.pattern) {
-          const re = safeRegExp(f.pattern);
-          if (re) s = s.regex(re);
-        }
-        zs = s;
+        const re = f.pattern ? safeRegExp(f.pattern) : null;
+        // Not `.regex(re)` behind `.max()`: zod runs every check, so a value
+        // over maxLength still reached the pattern. The bound has to sit in
+        // front of `re.test` itself. The issue keeps `.regex`'s code, which
+        // DynamicForm turns into its "not an allowed format" message.
+        zs = re
+          ? s.superRefine((v, ctx) => {
+              if (v.length > MAX_PATTERN_INPUT || re.test(v)) return;
+              ctx.addIssue({ code: z.ZodIssueCode.invalid_string, validation: "regex", message: "Invalid" });
+            })
+          : s;
         break;
       }
       case "integer": {

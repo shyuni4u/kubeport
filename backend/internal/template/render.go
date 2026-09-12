@@ -66,6 +66,16 @@ func ValidateSpec(resourcesYAML, uiSpecYAML string) error {
 			// something the author cannot paste back.
 			return fmt.Errorf("fields[%d] (label %q) has an unusable path `%s`: %w", i, f.Label, f.Path, err)
 		}
+		if (f.Type == TypeString || f.Type == TypeAutocomplete) && f.Pattern != "" {
+			// The deploy form runs the pattern in the browser as the user
+			// types, so a pattern the two engines read differently, or one
+			// that can hang the browser, is refused while the author can still
+			// fix it (#187 #189). Only here: Render keeps honouring a version
+			// saved before, with Go's own engine.
+			if prob := checkPattern(f.Pattern); prob != nil {
+				return fmt.Errorf("fields[%d] (path `%s`) has an unusable pattern: it %s", i, f.Path, prob.reason)
+			}
+		}
 	}
 	return nil
 }

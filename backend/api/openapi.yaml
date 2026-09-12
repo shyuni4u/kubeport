@@ -2226,7 +2226,19 @@ components:
               max: { type: integer }
               pattern:
                 type: string
-                description: Go RE2 syntax.
+                description: |
+                  For `string` and `autocomplete`. Checked with Go RE2 on
+                  deploy, and by the deploy form in the browser as a
+                  JavaScript RegExp (no flags) while the user types, so it
+                  must be written in the subset both read the same way. Saving
+                  a template refuses anything else with 400 `validation-error`:
+                  RE2-only syntax such as `(?i)`, `(?s)`, `(?P<name>...)`,
+                  `\A`, `\z`, `\Q...\E`, `\pL` or `[[:alpha:]]` (use
+                  `(?:...)` and `(?<name>...)` for groups); a pattern longer
+                  than 200 characters; and a repeated group that itself holds
+                  an unlimited repeat, as in `(a+)+`, which can freeze the
+                  browser — unless every repetition opens with a literal the
+                  inner repeat cannot match, as in `(-[a-z]+)*`.
               values:
                 type: array
                 items: { type: string }
