@@ -9,6 +9,7 @@ import { useDebounce, useDebouncedCallback } from "use-debounce";
 import { CLUSTER_CHANGED_EVENT } from "@/components/ClusterPicker";
 import { DynamicForm } from "@/components/DynamicForm";
 import { HelpHint } from "@/components/HelpHint";
+import { PreviewErrorBoundary } from "@/components/PreviewErrorBoundary";
 import { RBACCheckPanel, type KindRef, type RbacStatus } from "@/components/RBACCheckPanel";
 import { groupOf } from "@/lib/kube-kinds";
 import { ResourcesPreview } from "@/components/ResourcesPreview";
@@ -536,26 +537,46 @@ export function DeployClient({
             {t("noClusterWarning")}
           </div>
         )}
-        <DynamicForm
-          spec={spec}
-          initialValues={initialValues}
-          reenterSecrets={reenterSecrets}
-          submitLabel={
-            submitting
-              ? t("submitting")
-              : isUpdate
-                ? t("titleUpdate", { version })
-                : t("submit")
-          }
-          disabled={
-            submitting ||
-            rbacBlocked ||
-            // The namespace can now start empty (#179), and the API requires one.
-            (!isUpdate && (!meta.cluster || nameProblem !== null || !meta.namespace.trim()))
-          }
-          onChange={handleValuesChange}
-          onSubmit={submit}
-        />
+        {/*
+          A form nobody predicted would throw turned the one screen a user
+          deploys from into a blank page (#188). The sentence names no
+          internals: this is not the admin's editor, whose fallback shows the
+          detail (#108). Keyed on the spec, not the children: this component
+          re-renders on every value change and permission check, and resetting
+          on that would throw again, in a loop.
+        */}
+        <PreviewErrorBoundary
+          resetKey={spec}
+          fallback={() => (
+            <p
+              role="alert"
+              className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+            >
+              {t("formCrashed")}
+            </p>
+          )}
+        >
+          <DynamicForm
+            spec={spec}
+            initialValues={initialValues}
+            reenterSecrets={reenterSecrets}
+            submitLabel={
+              submitting
+                ? t("submitting")
+                : isUpdate
+                  ? t("titleUpdate", { version })
+                  : t("submit")
+            }
+            disabled={
+              submitting ||
+              rbacBlocked ||
+              // The namespace can now start empty (#179), and the API requires one.
+              (!isUpdate && (!meta.cluster || nameProblem !== null || !meta.namespace.trim()))
+            }
+            onChange={handleValuesChange}
+            onSubmit={submit}
+          />
+        </PreviewErrorBoundary>
         {rbacBlocked && (
           // Right-aligned under the button it explains (#112). The submit sits
           // at the right edge of the form (`justify-end` in DynamicForm) while

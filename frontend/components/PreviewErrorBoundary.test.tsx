@@ -63,4 +63,30 @@ describe("PreviewErrorBoundary", () => {
     );
     expect(screen.getByText(/fallback: kaboom/)).toBeInTheDocument();
   });
+
+  // #188 — the deploy form re-renders on every value change, recreating its
+  // children each time. Resetting on that would throw again, over and over.
+  describe("with resetKey", () => {
+    const keyed = (blow: boolean, resetKey: unknown) => (
+      <PreviewErrorBoundary resetKey={resetKey} fallback={(m) => <div>fallback: {m}</div>}>
+        <Boom blow={blow} />
+      </PreviewErrorBoundary>
+    );
+
+    it("keeps the fallback when only the children are recreated", () => {
+      const spec = { fields: [] };
+      const { rerender } = render(keyed(true, spec));
+      expect(screen.getByText(/fallback: kaboom/)).toBeInTheDocument();
+      // Same key, new child element (and even a child that would now render).
+      rerender(keyed(false, spec));
+      expect(screen.getByText(/fallback: kaboom/)).toBeInTheDocument();
+    });
+
+    it("tries again when the key changes", () => {
+      const { rerender } = render(keyed(true, { fields: [] }));
+      rerender(keyed(false, { fields: [{ path: "x" }] }));
+      expect(screen.getByText("preview")).toBeInTheDocument();
+      expect(screen.queryByText(/fallback:/)).toBeNull();
+    });
+  });
 });
