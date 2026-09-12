@@ -28,7 +28,7 @@ type Instance struct {
 
 // ListInstances returns pod status for the release's pods (#195): pods with
 // its name and id, pods with its name and no id when it is a NameOnly release,
-// and pods of a Job that is the release's (see podBelongs).
+// and pods whose controller is the release's (see podBelongs).
 func (c *Client) ListInstances(ctx context.Context, ref ReleaseRef) ([]Instance, error) {
 	gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 	list, err := c.dyn.Resource(gvr).Namespace(ref.Namespace).List(ctx, metav1.ListOptions{
@@ -38,10 +38,14 @@ func (c *Client) ListInstances(ctx context.Context, ref ReleaseRef) ([]Instance,
 		return nil, err
 	}
 	out := make([]Instance, 0, len(list.Items))
-	jobs := map[string]bool{}
+	owners := map[string]bool{}
 	for i := range list.Items {
 		p := list.Items[i]
-		if !c.podBelongs(ctx, &p, ref, jobs) {
+		own, err := c.podBelongs(ctx, &p, ref, owners)
+		if err != nil {
+			return nil, err
+		}
+		if !own {
 			continue
 		}
 		ins := Instance{Name: p.GetName()}
@@ -58,38 +62,82 @@ func (c *Client) ListInstances(ctx context.Context, ref ReleaseRef) ([]Instance,
 	return out, nil
 }
 
-// podBelongs is belongsTo for a pod. A Job's pod carries no id, because a
-// Job's pod template is immutable (the Job carries it instead), so such a pod
-// counts when the Job that owns it is ref's. Otherwise a Job pod left by an
-// earlier release of the same name — or one under another registration of the
-// cluster — would show up in this release's status and logs.
+// podControllers are the kinds that create a release's pods, and
+// replicaSetControllers the one that creates its ReplicaSets.
+var (
+	podControllers = map[string]schema.GroupVersionResource{
+		"Job":         {Group: "batch", Version: "v1", Resource: "jobs"},
+		"StatefulSet": {Group: "apps", Version: "v1", Resource: "statefulsets"},
+		"DaemonSet":   {Group: "apps", Version: "v1", Resource: "daemonsets"},
+		"ReplicaSet":  {Group: "apps", Version: "v1", Resource: "replicasets"},
+	}
+	replicaSetControllers = map[string]schema.GroupVersionResource{
+		"Deployment": {Group: "apps", Version: "v1", Resource: "deployments"},
+	}
+)
+
+// podBelongs is belongsTo for a pod. A pod with ref's name and no id still
+// counts when its controller is ref's by id. A Job's pods never carry the id,
+// because a Job's pod template is immutable (the Job carries it instead). And
+// the first update of a release from before the id does not replace every pod
+// it runs: a StatefulSet or DaemonSet updating OnDelete keeps its pods, and a
+// Deployment mid-rollout keeps the old ReplicaSet's (codex review). Otherwise
+// a pod left by an earlier release of the same name — or one under another
+// registration of the cluster — would show up in this release's status and
+// logs.
 //
-// The Job is matched by uid, not only by name: a pod orphaned from an earlier
-// Job still names it, and a new release may since have created a Job of that
-// name (codex review). jobs caches the verdict per owner uid.
-func (c *Client) podBelongs(ctx context.Context, p *unstructured.Unstructured, ref ReleaseRef, jobs map[string]bool) bool {
+// The controller is matched by uid, not only by name: a pod orphaned from an
+// earlier Job still names it, and a new release may since have created a Job
+// of that name (codex review). A ReplicaSet without the id counts through its
+// Deployment. owners caches the verdict per controller uid.
+//
+// A controller that is gone is not ref's. One that cannot be read is an error:
+// counting its pods out would report a release with no pods where the cluster
+// refused an answer (codex review).
+func (c *Client) podBelongs(ctx context.Context, p *unstructured.Unstructured, ref ReleaseRef, owners map[string]bool) (bool, error) {
 	labels := p.GetLabels()
 	if belongsTo(labels, ref) {
-		return true
+		return true, nil
 	}
 	if labels[ReleaseLabel] != ref.Name || labels[ReleaseUIDLabel] != "" {
-		return false
+		return false, nil
 	}
-	for _, owner := range p.GetOwnerReferences() {
-		if owner.Kind != "Job" {
+	return c.controlledBy(ctx, p, ref, podControllers, owners)
+}
+
+// controlledBy reports whether obj's controller, of one of the kinds, is ref's.
+func (c *Client) controlledBy(ctx context.Context, obj *unstructured.Unstructured, ref ReleaseRef,
+	kinds map[string]schema.GroupVersionResource, owners map[string]bool) (bool, error) {
+	for _, owner := range obj.GetOwnerReferences() {
+		gvr, ok := kinds[owner.Kind]
+		if !ok || owner.UID == "" {
 			continue
 		}
 		key := string(owner.UID)
-		own, seen := jobs[key]
-		if !seen {
-			job, err := c.dyn.Resource(schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "jobs"}).
-				Namespace(ref.Namespace).Get(ctx, owner.Name, metav1.GetOptions{})
-			own = err == nil && owner.UID != "" && job.GetUID() == owner.UID && belongsTo(job.GetLabels(), ref)
-			jobs[key] = own
+		if own, seen := owners[key]; seen {
+			return own, nil
 		}
-		return own
+		ctrl, err := c.dyn.Resource(gvr).Namespace(ref.Namespace).Get(ctx, owner.Name, metav1.GetOptions{})
+		switch {
+		case apierrors.IsNotFound(err):
+			owners[key] = false
+			return false, nil
+		case err != nil:
+			return false, fmt.Errorf("get %s/%s: %w", owner.Kind, owner.Name, err)
+		}
+		own := false
+		if ctrl.GetUID() == owner.UID {
+			own = belongsTo(ctrl.GetLabels(), ref)
+			if !own && owner.Kind == "ReplicaSet" {
+				if own, err = c.controlledBy(ctx, ctrl, ref, replicaSetControllers, owners); err != nil {
+					return false, err
+				}
+			}
+		}
+		owners[key] = own
+		return own, nil
 	}
-	return false
+	return false, nil
 }
 
 // allContainersReady returns true if every container in the pod reports ready.

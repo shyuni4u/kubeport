@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -75,7 +76,7 @@ func (c *Client) StampLeftBehind(ctx context.Context, ref ReleaseRef, previous, 
 		_, err := c.dyn.Resource(gvr).Namespace(ref.Namespace).
 			Patch(ctx, name, types.JSONPatchType, guarded, metav1.PatchOptions{FieldManager: "kubeport"})
 		switch {
-		case err == nil, apierrors.IsNotFound(err), apierrors.IsInvalid(err):
+		case err == nil, apierrors.IsNotFound(err), refusedByTest(err):
 			// Stamped; gone; or not this release's by name alone.
 		default:
 			return fmt.Errorf("stamp %s/%s: %w", gvr.Resource, name, err)
@@ -128,6 +129,23 @@ func (c *Client) StampLeftBehind(ctx context.Context, ref ReleaseRef, previous, 
 		}
 	}
 	return nil
+}
+
+// refusedByTest reports whether a patch was refused because it could not be
+// applied — for the guarded patch, whose ops are fixed, because a test op
+// failed. The apiserver answers that 422 with no details and a generic message
+// (checked against v1.35, for a failed test and a missing path alike). A 422
+// that names the object or its causes is something else — the patched object
+// failing validation, or an admission policy — and is not a verdict that the
+// object is another release's: skipping it would leave the object unstamped
+// (security review).
+func refusedByTest(err error) bool {
+	var status apierrors.APIStatus
+	if !apierrors.IsInvalid(err) || !errors.As(err, &status) {
+		return false
+	}
+	d := status.Status().Details
+	return d == nil || (d.Name == "" && d.Kind == "" && len(d.Causes) == 0)
 }
 
 // labelPointer is the JSON pointer to a label key: "~" and "/" are escaped as

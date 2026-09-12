@@ -72,10 +72,19 @@ func migrationCluster(objs ...runtime.Object) *dynamicfake.FakeDynamicClient {
 		}, objs...)
 }
 
+// patchRefused is the apiserver's answer to a JSON patch it could not apply,
+// as a v1.35 apiserver sent it for a failed test op: 422, no details.
+var patchRefused = &apierrors.StatusError{ErrStatus: metav1.Status{
+	Status:  metav1.StatusFailure,
+	Code:    422,
+	Reason:  metav1.StatusReasonInvalid,
+	Message: "the server rejected our request due to an error in our request",
+}}
+
 // asAPIServer answers patches as an apiserver does, and records each one
 // applied as resource/name. The fake tracker applies a JSON patch with the
 // same json-patch library, but returns a failed test op as a bare error where
-// the apiserver answers 422 (checked against v1.35).
+// the apiserver answers patchRefused.
 func asAPIServer(dyn *dynamicfake.FakeDynamicClient) *[]string {
 	var applied []string
 	tracker := clientgotesting.ObjectReaction(dyn.Tracker())
@@ -83,8 +92,7 @@ func asAPIServer(dyn *dynamicfake.FakeDynamicClient) *[]string {
 		handled, obj, err := tracker(a)
 		var status apierrors.APIStatus
 		if err != nil && !errors.As(err, &status) {
-			pa := a.(clientgotesting.PatchActionImpl)
-			err = apierrors.NewInvalid(schema.GroupKind{Kind: pa.Resource.Resource}, pa.Name, nil)
+			err = patchRefused
 		}
 		if err == nil {
 			applied = append(applied, a.GetResource().Resource+"/"+a.(clientgotesting.PatchActionImpl).Name)
@@ -196,6 +204,15 @@ func TestStampLeftBehind_SurfacesOtherErrors(t *testing.T) {
 				return true, nil, errors.New("connection reset")
 			})
 		},
+		// Security review: a 422 that is not a failed test op — the object
+		// failing validation, or an admission policy — names the object. It
+		// is not a verdict, and skipping it would leave the object unstamped.
+		"an invalid object": func(dyn *dynamicfake.FakeDynamicClient) {
+			forbidList(dyn, "configmaps")
+			dyn.PrependReactor("patch", "configmaps", func(clientgotesting.Action) (bool, runtime.Object, error) {
+				return true, nil, apierrors.NewInvalid(schema.GroupKind{Kind: "ConfigMap"}, "dropped", nil)
+			})
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dyn := migrationCluster(existing("v1", "ConfigMap", "demo", "dropped", "web-app"))
@@ -204,7 +221,7 @@ func TestStampLeftBehind_SurfacesOtherErrors(t *testing.T) {
 
 			err := k8s.NewForTest(dyn).StampLeftBehind(context.Background(), ref, []byte(previousManifest), []byte(nextManifest))
 
-			require.ErrorContains(t, err, "connection reset")
+			require.ErrorContains(t, err, "configmaps")
 		})
 	}
 }

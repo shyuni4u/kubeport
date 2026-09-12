@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	clientgotesting "k8s.io/client-go/testing"
 
 	"kubeport/internal/k8s"
@@ -223,6 +224,63 @@ func TestListInstances_CountsAJobsPodsThroughTheJob(t *testing.T) {
 	)).ListInstances(context.Background(), relRef("rel"))
 
 	require.ElementsMatch(t, []string{"once-abcde"}, instanceNames(t, got, err))
+}
+
+// ownedBy returns u as created by the controller of this kind, name and uid.
+func ownedBy(u *unstructured.Unstructured, apiVersion, kind, name, uid string) *unstructured.Unstructured {
+	u.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: apiVersion, Kind: kind, Name: name, UID: types.UID(uid)}})
+	return u
+}
+
+// codex review, round 5: the first update of a release from before the id
+// stamps its workloads, but not every pod they run is replaced — a StatefulSet
+// or DaemonSet updating OnDelete keeps its pods, and a Deployment whose rollout
+// has not finished keeps the old ReplicaSet's. Those count through their
+// controller, by uid: the StatefulSet, or the ReplicaSet's Deployment.
+func TestListInstances_CountsUnstampedPodsThroughTheirWorkload(t *testing.T) {
+	running := map[string]any{"phase": "Running"}
+	db := withObjectUID(stamped("apps/v1", "StatefulSet", "demo", "db", "rel", uidMine), "sts-db")
+	theirs := withObjectUID(stamped("apps/v1", "StatefulSet", "demo", "cache", "rel", uidOther), "sts-cache")
+	web := withObjectUID(stamped("apps/v1", "Deployment", "demo", "web", "rel", uidMine), "deploy-web")
+	oldRS := withObjectUID(ownedBy(existing("apps/v1", "ReplicaSet", "demo", "web-old", "rel"),
+		"apps/v1", "Deployment", "web", "deploy-web"), "rs-web-old")
+
+	got, err := k8s.NewForTest(cluster(
+		db, theirs, web, oldRS,
+		ownedBy(pod("db-0", "rel", running), "apps/v1", "StatefulSet", "db", "sts-db"),
+		ownedBy(pod("cache-0", "rel", running), "apps/v1", "StatefulSet", "cache", "sts-cache"),
+		ownedBy(pod("web-old-abcde", "rel", running), "apps/v1", "ReplicaSet", "web-old", "rs-web-old"),
+		ownedBy(pod("web-gone-fghij", "rel", running), "apps/v1", "ReplicaSet", "web-gone", "rs-web-gone"),
+	)).ListInstances(context.Background(), relRef("rel"))
+
+	require.ElementsMatch(t, []string{"db-0", "web-old-abcde"}, instanceNames(t, got, err))
+}
+
+// codex review, round 5: a controller that could not be read is not one that
+// is someone else's. The error surfaces as it does for the pod list itself,
+// instead of the release showing no pods.
+func TestListInstances_SurfacesAControllerThatCannotBeRead(t *testing.T) {
+	running := map[string]any{"phase": "Running"}
+	for name, fail := range map[string]func(*dynamicfake.FakeDynamicClient){
+		"forbidden": func(dyn *dynamicfake.FakeDynamicClient) { forbidGet(dyn, "jobs") },
+		"unreachable": func(dyn *dynamicfake.FakeDynamicClient) {
+			dyn.PrependReactor("get", "jobs", func(clientgotesting.Action) (bool, runtime.Object, error) {
+				return true, nil, errors.New("connection reset")
+			})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dyn := cluster(
+				withObjectUID(stamped("batch/v1", "Job", "demo", "once", "rel", uidMine), "job-once"),
+				ownedByJob(pod("once-abcde", "rel", running), "once", "job-once"),
+			)
+			fail(dyn)
+
+			_, err := k8s.NewForTest(dyn).ListInstances(context.Background(), relRef("rel"))
+
+			require.Error(t, err)
+		})
+	}
 }
 
 const nightly = `apiVersion: batch/v1
