@@ -70,7 +70,8 @@ export type UISpec = { fields: UISpecField[] };
 
 /**
  * Build a Zod schema from a ui-spec. Keys are flat dotted paths; optional
- * fields accept a missing key (undefined); required fields reject it.
+ * fields accept a missing key, undefined or null as no value (see
+ * optionalInput); required fields reject all three.
  *
  * Integer fields accept number strings ("3") while still validating
  * `min`/`max`, and read null or "" as missing rather than 0 (see integerInput).
@@ -310,6 +311,19 @@ function integerInput(v: unknown): unknown {
 }
 
 /**
+ * A stored null, made ready to check on an optional field of any type (#316).
+ *
+ * null is no value: `undefined`, which the optional lets through and the
+ * payload leaves out, so the backend fills the ui-spec default rather than
+ * refusing a null it cannot validate. It is the integer rule above without the
+ * blank string: a string field takes "" as a value, and boolean and enum have
+ * always refused it as not one of theirs, which the form never sends anyway.
+ */
+function optionalInput(v: unknown): unknown {
+  return v === null ? undefined : v;
+}
+
+/**
  * Never throws. A field it cannot describe is left out of the schema instead.
  *
  * It used to do neither. `let zs: ZodTypeAny;` had no initialiser and the
@@ -414,7 +428,14 @@ export function schemaFromUISpec(
     if (opts.keptSecrets?.has(f.path)) {
       zs = z.union([z.literal(REDACTED_SECRET), zs]);
     }
-    shape[f.path] = required ? zs : zs.optional();
+    // A stored null on an optional field is no value, like a missing key
+    // (#316). An update form starts from the release's stored values, and a
+    // bare `.optional()` lets only undefined through: null reached the type
+    // check, which the form shows as "required", and the update could not be
+    // sent although nobody touched it. As for integers, the optional sits
+    // inside the preprocess. A required field is left as it was — kept and
+    // re-entered Secrets among them — so null is still refused as missing.
+    shape[f.path] = required ? zs : z.preprocess(optionalInput, zs.optional());
   }
   return z.object(shape);
 }

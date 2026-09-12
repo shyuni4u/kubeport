@@ -817,6 +817,109 @@ describe("DynamicForm stored empty integers", () => {
   });
 });
 
+// #316 — the same stored-values path for the other types. A null stored for an
+// optional string, autocomplete, boolean or enum failed `.optional()`, which
+// lets only undefined through, and the form said "required" on a field that is
+// not: the update could not be sent although nobody touched it.
+describe("DynamicForm stored null in optional fields", () => {
+  const team = "Deployment[web].metadata.labels.team";
+  const image = "Deployment[web].spec.template.spec.containers[0].image";
+  const debug = "ConfigMap[app].data.DEBUG";
+  const mode = "ConfigMap[app].data.MODE";
+  const tier = "ConfigMap[app].data.TIER";
+  const spec: UISpec = {
+    fields: [
+      { path: "metadata.name", label: "Name", type: "string", required: true },
+      { path: team, label: "Team", type: "string", default: "core" },
+      { path: image, label: "Image", type: "autocomplete", values: ["nginx:1.27"] },
+      { path: debug, label: "Debug", type: "boolean", default: true },
+      // Two values: a ToggleGroup. Five: a Select.
+      { path: mode, label: "Mode", type: "enum", values: ["fast", "safe"] },
+      { path: tier, label: "Tier", type: "enum", values: ["a", "b", "c", "d", "e"] },
+    ],
+  };
+  const stored = {
+    "metadata.name": "web",
+    [team]: null,
+    [image]: null,
+    [debug]: null,
+    [mode]: null,
+    [tier]: null,
+  };
+
+  it("shows each stored null as empty and sends the update without those keys", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(
+      <DynamicForm spec={spec} initialValues={stored} submitLabel="업데이트" onSubmit={onSubmit} />,
+    );
+    // Empty, not the ui-spec default: the default is not what the release
+    // holds, and showing it would claim a value nobody picked.
+    expect(screen.getByLabelText(/Team/)).toHaveValue("");
+    expect(screen.getByLabelText(/Image/)).toHaveValue("");
+    expect(screen.getByRole("switch")).not.toBeChecked();
+    for (const v of ["fast", "safe"]) {
+      expect(screen.getByRole("button", { name: v })).toHaveAttribute("aria-pressed", "false");
+    }
+    // By label: the autocomplete's <input list> is a combobox too. The trigger
+    // holds a chevron icon, so look for a selected value, not for no text.
+    expect(screen.getByLabelText(/Tier/).textContent?.replace(/[^A-Za-z0-9]/g, "")).toBe("");
+
+    await user.click(screen.getByRole("button", { name: "업데이트" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(ko.form.validation.required)).toBeNull();
+    const sent = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    // Shown off is not sent as false: an untouched switch sends nothing.
+    for (const path of [team, image, debug, mode, tier]) {
+      expect(sent[path], path).toBeUndefined();
+    }
+    // What DeployClient puts on the wire: the keys are gone, not null.
+    expect(JSON.parse(JSON.stringify({ values: sent }))).toEqual({ values: { "metadata.name": "web" } });
+  });
+
+  it("sends what the user picks over a stored null", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(
+      <DynamicForm spec={spec} initialValues={stored} submitLabel="업데이트" onSubmit={onSubmit} />,
+    );
+    await user.click(screen.getByRole("switch"));
+    await user.click(screen.getByRole("button", { name: "safe" }));
+    await user.type(screen.getByLabelText(/Team/), "platform");
+    await user.click(screen.getByRole("button", { name: "업데이트" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(JSON.stringify(onSubmit.mock.calls[0][0]))).toEqual({
+      "metadata.name": "web",
+      [team]: "platform",
+      [debug]: true,
+      [mode]: "safe",
+    });
+  });
+
+  it("still refuses a required string, boolean and enum stored as null", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const required: UISpec = {
+      fields: [
+        { path: team, label: "Team", type: "string", required: true },
+        { path: debug, label: "Debug", type: "boolean", required: true },
+        { path: mode, label: "Mode", type: "enum", values: ["fast", "safe"], required: true },
+      ],
+    };
+    renderWithIntl(
+      <DynamicForm
+        spec={required}
+        initialValues={{ [team]: null, [debug]: null, [mode]: null }}
+        submitLabel="업데이트"
+        onSubmit={onSubmit}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "업데이트" }));
+    await waitFor(() => expect(screen.getAllByText(ko.form.validation.required)).toHaveLength(3));
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
 // #31 — a second click before the parent re-renders used to fire a second
 // POST /v1/releases. The parent's `disabled` prop lands a render too late,
 // so the guard has to live inside the form.
