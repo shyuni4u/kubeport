@@ -24,11 +24,12 @@ type Props = {
 export function LandingCompare({ resourcesYaml, uiSpecYaml }: Props) {
   const t = useTranslations("landing.compare");
   const spec = useMemo(() => parse(uiSpecYaml) as UISpec, [uiSpecYaml]);
+  const defaults = useMemo(() => defaultsFromUISpec(spec), [spec]);
   // Baseline goes through the same serializer as every later render so the
   // diff below only ever reflects value changes, never formatting.
   const baseline = useMemo(
-    () => applyValuesToYaml(resourcesYaml, defaultsFromUISpec(spec)),
-    [resourcesYaml, spec],
+    () => applyValuesToYaml(resourcesYaml, defaults),
+    [resourcesYaml, defaults],
   );
   const [current, setCurrent] = useState(baseline);
   const [changed, setChanged] = useState<[number, number] | null>(null);
@@ -36,13 +37,20 @@ export function LandingCompare({ resourcesYaml, uiSpecYaml }: Props) {
 
   const onChange = useCallback(
     (values: Record<string, unknown>) => {
-      const next = applyValuesToYaml(resourcesYaml, values);
+      // A field cleared to no value holds null (an optional enum, #325 #326).
+      // A deploy leaves that key out and render fills it from the ui-spec
+      // default, so show the default here too, never `null`. With no default,
+      // applyValuesToYaml skips the key and the template's own value stays.
+      const shown = Object.fromEntries(
+        Object.entries(values).map(([k, v]) => [k, v ?? defaults[k]]),
+      );
+      const next = applyValuesToYaml(resourcesYaml, shown);
       const range = changedLineRange(prevRef.current, next);
       prevRef.current = next;
       setCurrent(next);
       if (range) setChanged(range);
     },
-    [resourcesYaml],
+    [resourcesYaml, defaults],
   );
 
   const lines = useMemo(() => current.replace(/\n$/, "").split("\n"), [current]);

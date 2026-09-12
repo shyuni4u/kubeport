@@ -64,6 +64,18 @@ describe("applyValuesToYaml", () => {
     expect(out).toBe(base);
   });
 
+  // A form field with no value holds null (#316 #327). The deploy path leaves
+  // that key out, so the template keeps its own value rather than `null`.
+  it("leaves the template's value for a null value instead of writing null", () => {
+    const base = applyValuesToYaml(src, {});
+    const out = applyValuesToYaml(src, {
+      "Deployment[web].spec.replicas": null,
+      "Deployment[web].spec.template.spec.containers[0].image": null,
+    });
+    expect(out).toBe(base);
+    expect(out).not.toContain("null");
+  });
+
   it("selects the only document of a kind when no selector is given", () => {
     const out = applyValuesToYaml(src, { "Deployment.spec.replicas": 5 });
     expect(out).toContain("replicas: 5");

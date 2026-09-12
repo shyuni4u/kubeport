@@ -57,6 +57,9 @@ const useFormField = () => {
     id,
     name: fieldContext.name,
     formItemId: `${id}-form-item`,
+    // A control that is not a labelable element (a radio group <div>) is not
+    // named by <label for>, so it points aria-labelledby here instead.
+    formLabelId: `${id}-form-item-label`,
     formDescriptionId: `${id}-form-item-description`,
     formMessageId: `${id}-form-item-message`,
     ...fieldState,
@@ -88,10 +91,11 @@ function FormLabel({
   className,
   ...props
 }: React.ComponentProps<typeof Label>) {
-  const { error, formItemId } = useFormField();
+  const { error, formItemId, formLabelId } = useFormField();
   return (
     <Label
       data-slot="form-label"
+      id={formLabelId}
       data-error={!!error}
       className={cn("data-[error=true]:text-destructive", className)}
       htmlFor={formItemId}

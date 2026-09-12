@@ -35,7 +35,12 @@ import {
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+  ToggleRadioGroup,
+  ToggleRadioGroupItem,
+} from "@/components/ui/toggle-group";
 
 import {
   REDACTED_SECRET,
@@ -175,8 +180,10 @@ function rangedIntValue(field: IntegerField, value: unknown): number {
  * - boolean → Switch
  * - integer with both min and max → Slider (value shown on the label row)
  * - integer without full range → Input type="number"
- * - enum with ≤ 4 values → ToggleGroup (single-select)
- * - enum with > 4 values → Select
+ * - enum with ≤ 4 short values → required: ToggleRadioGroup (radios drawn as
+ *   toggles, #325); optional: ToggleGroup (single-select, un-pressable)
+ * - enum with > 4 or long values → Select, with a "not set" option when optional
+ *   (#326)
  * - autocomplete → Input + native HTML5 datalist (free input + suggestions)
  * - string → Input type="text" (with optional pattern hint)
  */
@@ -397,9 +404,16 @@ function replacementValue(field: UISpecField): unknown {
   }
 }
 
-/** The first thing in a field's control area a keyboard can land on. */
+/**
+ * The first thing in a field's control area a keyboard can land on.
+ *
+ * `[role="radio"]` by role, not by tabindex: a radio group hands out its one
+ * tab stop (roving tabindex) after this runs, so right after the swap every
+ * radio still reads tabindex -1. A replaced enum has nothing checked, and the
+ * first radio is where Tab would land (#325). Focusing it checks nothing.
+ */
 const FOCUSABLE =
-  'input:not([type="hidden"]):not([tabindex="-1"]):not([aria-hidden="true"]), button:not([tabindex="-1"]), [role="switch"], [role="slider"], [tabindex="0"]';
+  'input:not([type="hidden"]):not([tabindex="-1"]):not([aria-hidden="true"]), button:not([tabindex="-1"]), [role="switch"], [role="slider"], [role="radio"], [tabindex="0"]';
 
 /**
  * A Secret the update keeps as it is (#288). It replaces the typed widget,
@@ -590,6 +604,123 @@ function FieldRow({
   );
 }
 
+/**
+ * What FormControl clones onto its child: the id the <label for> points at,
+ * the description and message ids, and the invalid flag. The enum widgets
+ * below are components (they need hooks), so they pass these on themselves.
+ */
+type ControlProps = {
+  id?: string;
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean;
+  "data-slot"?: string;
+};
+
+/**
+ * A required enum's short values, as radios drawn as toggle buttons (#325).
+ *
+ * A stored null checks nothing; nothing is un-checkable once checked, which is
+ * what a radio group says. The group is a <div>, which <label for> does not
+ * name, so it is labelled by the field label's id instead. aria-required, not
+ * Base UI's `required`: that would make the hidden radio inputs required too,
+ * and the browser's own validation would stop the submit before the form
+ * could say "required" itself.
+ */
+function EnumRadios({
+  values,
+  value,
+  onPick,
+  ...control
+}: ControlProps & {
+  values: string[];
+  value: string | null;
+  onPick: (value: string) => void;
+}) {
+  const { formLabelId } = useFormField();
+  return (
+    <ToggleRadioGroup
+      {...control}
+      aria-labelledby={formLabelId}
+      aria-required
+      // null, not undefined, for nothing checked: undefined would make the
+      // group uncontrolled.
+      value={value}
+      onValueChange={(v: unknown) => {
+        if (typeof v === "string") onPick(v);
+      }}
+    >
+      {values.map((v) => (
+        <ToggleRadioGroupItem key={v} value={v}>
+          {v}
+        </ToggleRadioGroupItem>
+      ))}
+    </ToggleRadioGroup>
+  );
+}
+
+/**
+ * An enum with many or long values.
+ *
+ * Picking the picked option again picks it again, so an optional one had no
+ * way back to no value once picked (#326): a deploy could not leave it unset
+ * and an update could not drop a stored value. An optional Select therefore
+ * lists a "not set" option first. It is an ordinary option in the list — the
+ * keyboard reaches it with the arrows and a screen reader reads it with the
+ * others — rather than a clear button beside the trigger, which would add a
+ * tab stop and a control that exists only once something is picked. Its label
+ * doubles as the trigger's placeholder, so the trigger says the same thing the
+ * option did. When the ui-spec has a default the wording says it applies:
+ * render fills an omitted key from the ui-spec default.
+ *
+ * null, not undefined, for no value: Base UI reads an undefined value as
+ * uncontrolled and would then show its own last pick instead of what the form
+ * holds.
+ */
+function EnumSelect({
+  values,
+  value,
+  onPick,
+  clearable,
+  hasDefault,
+  ...control
+}: ControlProps & {
+  values: string[];
+  value: string | null;
+  onPick: (value: string | null) => void;
+  clearable: boolean;
+  hasDefault: boolean;
+}) {
+  const tu = useTranslations("form.enumUnset");
+  const unset = clearable ? tu(hasDefault ? "useDefault" : "none") : undefined;
+  return (
+    <Select
+      {...control}
+      value={value}
+      onValueChange={(v: unknown) => {
+        if (typeof v === "string") {
+          onPick(v);
+          return;
+        }
+        // Only the "not set" option reports no value, and only an optional
+        // Select has one. Required never stores null from here (#323).
+        if (clearable) onPick(null);
+      }}
+    >
+      <SelectTrigger className="w-full">
+        <SelectValue placeholder={unset} />
+      </SelectTrigger>
+      <SelectContent>
+        {clearable ? <SelectItem value={null}>{unset}</SelectItem> : null}
+        {values.map((v) => (
+          <SelectItem key={v} value={v}>
+            {v}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 function renderWidget(
   field: UISpecField,
   rhf: ControllerRenderProps<FieldValues, string>,
@@ -670,34 +801,29 @@ function renderWidget(
 
     case "enum": {
       const values = field.values;
+      const picked = typeof rhf.value === "string" && rhf.value !== "" ? rhf.value : null;
       // Toggle buttons only when every option fits on one row; long values
       // (image refs, URLs) overflow the form, so they get a Select instead.
       if (values.length <= 4 && values.every((v) => v.length <= TOGGLE_MAX_LEN)) {
-        const current =
-          typeof rhf.value === "string" && rhf.value !== "" ? [rhf.value] : [];
+        // Required can't be un-picked (#323), so it is a radio group (#325): a
+        // toggle button announces "pressed" and promises a second press
+        // un-presses it. It looks the same as the toggle group below.
+        if (required) {
+          return <EnumRadios values={values} value={picked} onPick={rhf.onChange} />;
+        }
+        const current = picked === null ? [] : [picked];
         return (
           <ToggleGroup
             value={current}
-            onValueChange={(next: string[], details) => {
+            onValueChange={(next: string[]) => {
               // Pressing the picked item again is the only way to an empty
               // group (#323). It used to store undefined, and react-hook-form
               // reads an undefined field back from its default values: the
               // ui-spec default still looked pressed while the form held
-              // nothing, the same root as the number box in #321.
-              if (next.length === 0) {
-                // Required works like radio buttons. Base UI's toggle group
-                // has no "no deselect" option in single mode, so the press is
-                // cancelled; the controlled value keeps the item pressed.
-                if (required) {
-                  details.cancel();
-                  return;
-                }
-                // Optional clears to null, which react-hook-form keeps and the
-                // schema reads as no value: nothing pressed, key left out.
-                rhf.onChange(null);
-                return;
-              }
-              rhf.onChange(next[next.length - 1]);
+              // nothing, the same root as the number box in #321. Optional
+              // clears to null, which react-hook-form keeps and the schema
+              // reads as no value: nothing pressed, key left out.
+              rhf.onChange(next.length === 0 ? null : next[next.length - 1]);
             }}
           >
             {values.map((v) => (
@@ -709,33 +835,13 @@ function renderWidget(
         );
       }
       return (
-        <Select
-          // null, not undefined, for no value: Base UI reads an undefined
-          // value as uncontrolled and would then show its own last pick
-          // instead of what the form holds.
-          value={typeof rhf.value === "string" && rhf.value !== "" ? rhf.value : null}
-          onValueChange={(v) => {
-            // Picking the picked option again picks it again; a single Select
-            // has no un-pick from the list. Should it ever report no value,
-            // the same rule as the toggle group applies (#323).
-            if (v === null) {
-              if (!required) rhf.onChange(null);
-              return;
-            }
-            rhf.onChange(v);
-          }}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {values.map((v) => (
-              <SelectItem key={v} value={v}>
-                {v}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <EnumSelect
+          values={values}
+          value={picked}
+          onPick={rhf.onChange}
+          clearable={!required}
+          hasDefault={field.default !== undefined}
+        />
       );
     }
 

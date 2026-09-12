@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NextIntlClientProvider } from "next-intl";
 import { DynamicForm } from "./DynamicForm";
@@ -145,7 +145,7 @@ describe("DynamicForm widget mapping", () => {
       ],
     };
     renderWithIntl(<DynamicForm spec={spec} onSubmit={() => {}} />);
-    // ToggleGroupItem renders a <button> with aria-pressed. Use getByText.
+    // Required, so a radio group of toggle-styled radios (#325). Use getByText.
     expect(screen.getByText("ClusterIP")).toBeInTheDocument();
     expect(screen.getByText("NodePort")).toBeInTheDocument();
     expect(screen.getByText("LoadBalancer")).toBeInTheDocument();
@@ -503,10 +503,12 @@ describe("DynamicForm secrets to enter again", () => {
       fields: [{ path: mode, label: "Mode", type: "enum", values: ["fast", "safe"], default: "fast" }],
     };
     renderWithIntl(<DynamicForm spec={enumSpec} reenterSecrets={[mode]} onSubmit={onSubmit} />);
-    const fast = screen.getByRole("button", { name: "fast" });
-    const safe = screen.getByRole("button", { name: "safe" });
-    expect(fast).toHaveAttribute("aria-pressed", "false");
-    expect(safe).toHaveAttribute("aria-pressed", "false");
+    // Required once it has to be entered again, so radios (#325).
+    expect(screen.getByRole("radiogroup", { name: /Mode/ })).toBeInTheDocument();
+    const fast = screen.getByRole("radio", { name: "fast" });
+    const safe = screen.getByRole("radio", { name: "safe" });
+    expect(fast).toHaveAttribute("aria-checked", "false");
+    expect(safe).toHaveAttribute("aria-checked", "false");
 
     await user.click(screen.getByRole("button", { name: /배포하기/ }));
     await waitFor(() => expect(screen.getByText(ko.form.validation.required)).toBeInTheDocument());
@@ -514,8 +516,8 @@ describe("DynamicForm secrets to enter again", () => {
 
     await user.click(safe);
     await user.click(safe);
-    expect(safe).toHaveAttribute("aria-pressed", "true");
-    expect(fast).toHaveAttribute("aria-pressed", "false");
+    expect(safe).toHaveAttribute("aria-checked", "true");
+    expect(fast).toHaveAttribute("aria-checked", "false");
     await user.click(screen.getByRole("button", { name: /배포하기/ }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ [mode]: "safe" }));
   });
@@ -571,6 +573,7 @@ describe("DynamicForm kept Secrets", () => {
     expect(screen.queryByRole("spinbutton")).toBeNull();
     expect(screen.queryByRole("switch")).toBeNull();
     expect(screen.queryByRole("button", { name: "fast" })).toBeNull();
+    expect(screen.queryByRole("radio", { name: "fast" })).toBeNull();
     expect(screen.queryByDisplayValue(REDACTED_SECRET)).toBeNull();
     for (const label of ["Slots", "Port", "Debug", "Mode", "Token"]) {
       expect(
@@ -680,11 +683,11 @@ describe("DynamicForm kept Secrets", () => {
     const onSubmit = vi.fn();
     renderWithIntl(<DynamicForm spec={spec} initialValues={kept} onSubmit={onSubmit} />);
     await user.click(screen.getByRole("button", { name: t.replaceAria.replace("{label}", "Mode") }));
-    const safe = screen.getByRole("button", { name: "safe" });
+    const safe = screen.getByRole("radio", { name: "safe" });
     await user.click(safe);
     await user.click(safe);
-    expect(safe).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "fast" })).toHaveAttribute("aria-pressed", "false");
+    expect(safe).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "fast" })).toHaveAttribute("aria-checked", "false");
     await user.click(screen.getByRole("button", { name: /배포하기/ }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ ...kept, [S.mode]: "safe" }));
   });
@@ -709,13 +712,17 @@ describe("DynamicForm kept Secrets", () => {
     const onSubmit = vi.fn();
     renderWithIntl(<DynamicForm spec={spec} initialValues={kept} onSubmit={onSubmit} />);
     await user.click(screen.getByRole("button", { name: t.replaceAria.replace("{label}", "Mode") }));
-    expect(screen.getByRole("button", { name: "fast" })).toHaveAttribute("aria-pressed", "false");
+    // Focus lands on the group's one tab stop, and landing there picks nothing.
+    const fast = screen.getByRole("radio", { name: "fast" });
+    expect(fast).toHaveFocus();
+    expect(fast).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("radio", { name: "safe" })).toHaveAttribute("aria-checked", "false");
 
     await user.click(screen.getByRole("button", { name: /배포하기/ }));
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByText(ko.form.validation.required)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "safe" }));
+    await user.click(screen.getByRole("radio", { name: "safe" }));
     await user.click(screen.getByRole("button", { name: /배포하기/ }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ ...kept, [S.mode]: "safe" }));
   });
@@ -724,6 +731,19 @@ describe("DynamicForm kept Secrets", () => {
   // input away mid-edit. An empty replacement is refused instead — sent, it
   // would reach the backend as a missing value and be filled from the ui-spec
   // default — and going back is an explicit button.
+  it("goes back to kept from a replaced enum's radios, and submits the placeholder", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(<DynamicForm spec={spec} initialValues={kept} onSubmit={onSubmit} />);
+    await user.click(screen.getByRole("button", { name: t.replaceAria.replace("{label}", "Mode") }));
+    await user.click(screen.getByRole("radio", { name: "safe" }));
+    await user.click(screen.getByRole("button", { name: t.keepAria.replace("{label}", "Mode") }));
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect(screen.getAllByText(t.status)).toHaveLength(5);
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(kept));
+  });
+
   it("refuses an emptied replacement, and goes back to kept only when asked", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
@@ -1125,14 +1145,25 @@ describe("DynamicForm pressing a picked enum item again", () => {
       { path: mode, label: "Mode", type: "enum", values, required, default: def },
     ],
   });
-  const item = (v: string) => screen.getByRole("button", { name: v });
-  // aria-pressed is what a screen reader hears, data-pressed is what the
-  // pressed style keys on. Both have to agree with what the form holds.
+  // A required enum is a radio group (#325), an optional one a toggle group.
+  const item = (v: string) =>
+    screen.queryByRole("radio", { name: v }) ?? screen.getByRole("button", { name: v });
+  // aria-pressed / aria-checked is what a screen reader hears, and the picked
+  // style keys on the same attribute. Both have to agree with what the form
+  // holds.
   const expectPressed = (picked: string | null) => {
     for (const v of values) {
-      expect(item(v), v).toHaveAttribute("aria-pressed", String(v === picked));
-      if (v === picked) expect(item(v), v).toHaveAttribute("data-pressed");
-      else expect(item(v), v).not.toHaveAttribute("data-pressed");
+      const el = item(v);
+      if (el.getAttribute("role") === "radio") {
+        expect(el, v).toHaveAttribute("aria-checked", String(v === picked));
+        expect(el, v).not.toHaveAttribute("aria-pressed");
+        if (v === picked) expect(el, v).toHaveAttribute("data-checked");
+        else expect(el, v).not.toHaveAttribute("data-checked");
+      } else {
+        expect(el, v).toHaveAttribute("aria-pressed", String(v === picked));
+        if (v === picked) expect(el, v).toHaveAttribute("data-pressed");
+        else expect(el, v).not.toHaveAttribute("data-pressed");
+      }
     }
   };
   const wire = (v: unknown) => JSON.parse(JSON.stringify(v));
@@ -1317,6 +1348,265 @@ describe("DynamicForm pressing a picked enum item again", () => {
       await user.click(screen.getByRole("button", { name: /배포하기/ }));
       await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ [tier]: "a" }));
     });
+  });
+});
+
+// #325 — since #323 a required enum refuses to be un-picked, but its items were
+// still toggle buttons with aria-pressed: a screen reader announced "pressed",
+// which promises that a second press un-presses it. A radio group says what the
+// control does.
+describe("DynamicForm required enum as a radio group", () => {
+  const mode = "ConfigMap[app].data.MODE";
+  const specWith = (required: boolean, def?: string): UISpec => ({
+    fields: [
+      { path: "metadata.name", label: "Name", type: "string", default: "web" },
+      { path: mode, label: "Mode", type: "enum", values: ["A", "B", "C"], required, default: def },
+    ],
+  });
+  const radio = (v: string) => screen.getByRole("radio", { name: v });
+  const checked = () =>
+    screen
+      .getAllByRole("radio")
+      .filter((r) => r.getAttribute("aria-checked") === "true")
+      .map((r) => r.textContent);
+  const submit = () => screen.getByRole("button", { name: /배포하기/ });
+
+  it("is a radio group named by the field label, with radios and no toggle buttons", () => {
+    renderWithIntl(<DynamicForm spec={specWith(true, "A")} onSubmit={() => {}} />);
+    const group = screen.getByRole("radiogroup", { name: /Mode/ });
+    expect(group).toHaveAttribute("aria-required", "true");
+    const radios = within(group).getAllByRole("radio");
+    expect(radios.map((r) => r.textContent)).toEqual(["A", "B", "C"]);
+    for (const r of radios) expect(r).not.toHaveAttribute("aria-pressed");
+    expect(screen.queryByRole("button", { name: "A" })).toBeNull();
+    expect(checked()).toEqual(["A"]);
+  });
+
+  it("checks a clicked radio, and keeps the checked one when it is clicked again", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(<DynamicForm spec={specWith(true)} onSubmit={onSubmit} />);
+    expect(checked()).toEqual([]);
+    await user.click(radio("B"));
+    expect(checked()).toEqual(["B"]);
+    await user.click(radio("B"));
+    expect(checked()).toEqual(["B"]);
+    await user.click(radio("C"));
+    expect(checked()).toEqual(["C"]);
+    await user.click(submit());
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ "metadata.name": "web", [mode]: "C" }));
+  });
+
+  it("moves and checks with the arrow keys, and is a single tab stop", async () => {
+    const user = userEvent.setup();
+    const onParsedChange = vi.fn();
+    renderWithIntl(
+      <DynamicForm spec={specWith(true, "A")} onSubmit={() => {}} onParsedChange={onParsedChange} />,
+    );
+    await user.click(screen.getByLabelText(/Name/));
+    await user.tab();
+    expect(radio("A")).toHaveFocus();
+
+    await user.keyboard("{ArrowRight}");
+    expect(radio("B")).toHaveFocus();
+    expect(checked()).toEqual(["B"]);
+    expect(onParsedChange).toHaveBeenLastCalledWith({
+      success: true,
+      values: { "metadata.name": "web", [mode]: "B" },
+    });
+    await user.keyboard("{ArrowRight}");
+    expect(radio("C")).toHaveFocus();
+    expect(checked()).toEqual(["C"]);
+    await user.keyboard("{ArrowLeft}");
+    expect(radio("B")).toHaveFocus();
+    expect(checked()).toEqual(["B"]);
+
+    // One stop: Tab leaves the group, and Shift+Tab comes back to the checked
+    // radio rather than the first.
+    await user.tab();
+    expect(submit()).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(radio("B")).toHaveFocus();
+    expect(checked()).toEqual(["B"]);
+  });
+
+  for (const [name, key] of [
+    ["Space", " "],
+    ["Enter", "{Enter}"],
+  ] as const) {
+    it(`checks the focused radio with ${name}, and tabbing in checks nothing`, async () => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn();
+      renderWithIntl(<DynamicForm spec={specWith(true)} onSubmit={onSubmit} />);
+      await user.click(screen.getByLabelText(/Name/));
+      await user.tab();
+      expect(radio("A")).toHaveFocus();
+      expect(checked()).toEqual([]);
+
+      await user.keyboard(key);
+      expect(checked()).toEqual(["A"]);
+      // Pressed again, it stays checked; and the key does not submit the form.
+      await user.keyboard(key);
+      expect(checked()).toEqual(["A"]);
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+  }
+
+  // Visual parity: the radios take every class a toggle item has, and add only
+  // the checked look keyed on aria-checked (the toggle's is on aria-pressed).
+  it("draws its radios exactly like an optional enum's toggle items", () => {
+    const spec: UISpec = {
+      fields: [
+        { path: mode, label: "Mode", type: "enum", values: ["A", "B"], required: true },
+        { path: "ConfigMap[app].data.SIZE", label: "Size", type: "enum", values: ["x", "y"] },
+      ],
+    };
+    renderWithIntl(<DynamicForm spec={spec} onSubmit={() => {}} />);
+    // The optional enum is still a toggle group.
+    expect(screen.getAllByRole("radiogroup")).toHaveLength(1);
+    const toggle = screen.getByRole("button", { name: "x" });
+    const item = radio("A");
+    const classes = (el: Element) => new Set(el.className.split(/\s+/).filter(Boolean));
+    const t = classes(toggle);
+    const r = classes(item);
+    expect([...t].filter((c) => !r.has(c))).toEqual([]);
+    expect([...r].filter((c) => !t.has(c)).sort()).toEqual(
+      [
+        "aria-checked:bg-selected",
+        "aria-checked:border-primary",
+        "aria-checked:text-selected-foreground",
+        "select-none",
+      ].sort(),
+    );
+    for (const attr of ["data-variant", "data-size", "data-spacing"]) {
+      expect(item.getAttribute(attr), attr).toBe(toggle.getAttribute(attr));
+    }
+    // Both roots carry data-slot="form-control" (FormControl sets it), so by parent.
+    const toggleRoot = toggle.parentElement!;
+    const radioRoot = screen.getByRole("radiogroup");
+    expect(radioRoot.className).toBe(toggleRoot.className);
+    for (const attr of ["data-spacing", "data-orientation", "style"]) {
+      expect(radioRoot.getAttribute(attr), attr).toBe(toggleRoot.getAttribute(attr));
+    }
+  });
+});
+
+// #326 — an optional enum drawn as a Select had no way back to no value once
+// picked: picking the picked option picks it again. A deploy could not leave
+// it unset, and an update could not drop a stored value back to the default.
+describe("DynamicForm clearing an optional Select enum", () => {
+  const tier = "ConfigMap[app].data.TIER";
+  const many = ["a", "b", "c", "d", "e"];
+  const u = ko.form.enumUnset;
+  const specWith = (required: boolean, def?: string): UISpec => ({
+    fields: [
+      { path: "metadata.name", label: "Name", type: "string", default: "web" },
+      { path: tier, label: "Tier", type: "enum", values: many, required, default: def },
+    ],
+  });
+  const trigger = () => screen.getByRole("combobox", { name: /Tier/ });
+  // The text the trigger shows, without its chevron icon.
+  const shown = () => trigger().querySelector('[data-slot="select-value"]')?.textContent;
+  const options = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(trigger());
+    return (await screen.findAllByRole("option")).map((o) => o.textContent);
+  };
+  const pick = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
+    await user.click(trigger());
+    await user.click(await screen.findByRole("option", { name }));
+  };
+  const wire = (v: unknown) => JSON.parse(JSON.stringify(v));
+
+  it("lists the clear option first, worded for the default that will apply", async () => {
+    const user = userEvent.setup();
+    renderWithIntl(<DynamicForm spec={specWith(false, "a")} onSubmit={() => {}} />);
+    expect(await options(user)).toEqual([u.useDefault, ...many]);
+  });
+
+  it("says only 'not set' when there is no default", async () => {
+    const user = userEvent.setup();
+    renderWithIntl(<DynamicForm spec={specWith(false)} onSubmit={() => {}} />);
+    expect(trigger()).toHaveTextContent(u.none);
+    expect(await options(user)).toEqual([u.none, ...many]);
+  });
+
+  it("offers no clear option on a required Select", async () => {
+    const user = userEvent.setup();
+    renderWithIntl(<DynamicForm spec={specWith(true, "a")} onSubmit={() => {}} />);
+    expect(await options(user)).toEqual(many);
+  });
+
+  it("clears a pick back to no value: placeholder shown, key left out of the preview and the submit", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const onParsedChange = vi.fn();
+    renderWithIntl(
+      <DynamicForm spec={specWith(false)} onSubmit={onSubmit} onParsedChange={onParsedChange} />,
+    );
+    expect(trigger()).toHaveAttribute("data-placeholder");
+
+    await pick(user, "b");
+    await waitFor(() => expect(shown()).toBe("b"));
+    expect(trigger()).not.toHaveAttribute("data-placeholder");
+
+    await pick(user, u.none);
+    await waitFor(() => expect(shown()).toBe(u.none));
+    expect(trigger()).toHaveAttribute("data-placeholder");
+    const parsed = onParsedChange.mock.calls.at(-1)?.[0];
+    expect(parsed.success).toBe(true);
+    expect(wire(parsed.values)).toEqual({ "metadata.name": "web" });
+
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(ko.form.validation.required)).toBeNull();
+    const sent = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    expect(sent[tier]).toBeUndefined();
+    expect(wire({ values: sent })).toEqual({ values: { "metadata.name": "web" } });
+  });
+
+  it("clears a stored value on an update, so the default applies", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(
+      <DynamicForm
+        spec={specWith(false, "a")}
+        initialValues={{ "metadata.name": "web", [tier]: "c" }}
+        submitLabel="업데이트"
+        onSubmit={onSubmit}
+      />,
+    );
+    expect(shown()).toBe("c");
+    await pick(user, u.useDefault);
+    await waitFor(() => expect(shown()).toBe(u.useDefault));
+    await user.click(screen.getByRole("button", { name: "업데이트" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(wire({ values: onSubmit.mock.calls[0][0] })).toEqual({ values: { "metadata.name": "web" } });
+  });
+
+  it("reaches the clear option from the keyboard", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderWithIntl(
+      <DynamicForm
+        spec={specWith(false)}
+        initialValues={{ "metadata.name": "web", [tier]: "a" }}
+        onSubmit={onSubmit}
+      />,
+    );
+    await user.click(screen.getByLabelText(/Name/));
+    await user.tab();
+    expect(trigger()).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    const clear = await screen.findByRole("option", { name: u.none });
+    // Opened on the picked option; one step up is the clear option.
+    await waitFor(() => expect(screen.getByRole("option", { name: "a" })).toHaveFocus());
+    await user.keyboard("{ArrowUp}");
+    await waitFor(() => expect(clear).toHaveFocus());
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(shown()).toBe(u.none));
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(wire({ values: onSubmit.mock.calls[0][0] })).toEqual({ values: { "metadata.name": "web" } });
   });
 });
 

@@ -75,6 +75,10 @@
       "keep": "기존 값 유지",
       "keepAria": "{label}: 기존 값 유지"
     },
+    "enumUnset": {
+      "none": "선택 안 함",
+      "useDefault": "선택 안 함 (기본값 사용)"
+    },
     "validation": {
       "required": "필수 항목입니다.",
       "tooSmall": "{min} 이상이어야 합니다.",
