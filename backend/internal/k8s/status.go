@@ -110,10 +110,13 @@ func (c *Client) controlledBy(ctx context.Context, obj *unstructured.Unstructure
 	kinds map[string]schema.GroupVersionResource, owners map[string]bool) (bool, error) {
 	for _, owner := range obj.GetOwnerReferences() {
 		gvr, ok := kinds[owner.Kind]
-		if !ok || owner.UID == "" {
+		if !ok || owner.UID == "" || owner.Controller == nil || !*owner.Controller {
 			continue
 		}
-		key := string(owner.UID)
+		// The whole reference is the key: a pod naming one controller with
+		// another's uid must not settle the verdict for the real one's pods
+		// (security review).
+		key := owner.Kind + "/" + owner.Name + "/" + string(owner.UID)
 		if own, seen := owners[key]; seen {
 			return own, nil
 		}

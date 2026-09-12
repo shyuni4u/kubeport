@@ -213,6 +213,18 @@ func TestStampLeftBehind_SurfacesOtherErrors(t *testing.T) {
 				return true, nil, apierrors.NewInvalid(schema.GroupKind{Kind: "ConfigMap"}, "dropped", nil)
 			})
 		},
+		// Security review: an admission webhook's 422 carries no details.
+		"a webhook's refusal": func(dyn *dynamicfake.FakeDynamicClient) {
+			forbidList(dyn, "configmaps")
+			dyn.PrependReactor("patch", "configmaps", func(clientgotesting.Action) (bool, runtime.Object, error) {
+				return true, nil, &apierrors.StatusError{ErrStatus: metav1.Status{
+					Status:  metav1.StatusFailure,
+					Code:    422,
+					Reason:  metav1.StatusReasonInvalid,
+					Message: `admission webhook "labels.example.com" denied the request: no`,
+				}}
+			})
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dyn := migrationCluster(existing("v1", "ConfigMap", "demo", "dropped", "web-app"))

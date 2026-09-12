@@ -165,8 +165,7 @@ func withUID(p *unstructured.Unstructured, uid string) *unstructured.Unstructure
 
 // ownedByJob returns p as a pod created by the Job with this name and uid.
 func ownedByJob(p *unstructured.Unstructured, job, jobUID string) *unstructured.Unstructured {
-	p.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job, UID: types.UID(jobUID)}})
-	return p
+	return ownedBy(p, "batch/v1", "Job", job, jobUID)
 }
 
 // withObjectUID sets the object's own metadata.uid, as the apiserver would.
@@ -228,8 +227,29 @@ func TestListInstances_CountsAJobsPodsThroughTheJob(t *testing.T) {
 
 // ownedBy returns u as created by the controller of this kind, name and uid.
 func ownedBy(u *unstructured.Unstructured, apiVersion, kind, name, uid string) *unstructured.Unstructured {
-	u.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: apiVersion, Kind: kind, Name: name, UID: types.UID(uid)}})
+	controller := true
+	u.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: apiVersion, Kind: kind, Name: name, UID: types.UID(uid), Controller: &controller}})
 	return u
+}
+
+// Security review: a pod naming another controller with this release's
+// controller's uid is not counted, and does not keep that controller's real
+// pods out either. A reference that is not the controller does not count.
+func TestListInstances_JudgesEachControllerReferenceWhole(t *testing.T) {
+	running := map[string]any{"phase": "Running"}
+	db := withObjectUID(stamped("apps/v1", "StatefulSet", "demo", "db", "rel", uidMine), "sts-db")
+	cache := withObjectUID(stamped("apps/v1", "StatefulSet", "demo", "cache", "rel", uidOther), "sts-cache")
+	notController := pod("b-owner-only", "rel", running)
+	notController.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "StatefulSet", Name: "db", UID: "sts-db"}})
+
+	got, err := k8s.NewForTest(cluster(
+		db, cache,
+		ownedBy(pod("a-forged", "rel", running), "apps/v1", "StatefulSet", "cache", "sts-db"),
+		notController,
+		ownedBy(pod("db-0", "rel", running), "apps/v1", "StatefulSet", "db", "sts-db"),
+	)).ListInstances(context.Background(), relRef("rel"))
+
+	require.ElementsMatch(t, []string{"db-0"}, instanceNames(t, got, err))
 }
 
 // codex review, round 5: the first update of a release from before the id

@@ -138,10 +138,14 @@ func (c *Client) StampLeftBehind(ctx context.Context, ref ReleaseRef, previous, 
 // that names the object or its causes is something else — the patched object
 // failing validation, or an admission policy — and is not a verdict that the
 // object is another release's: skipping it would leave the object unstamped
-// (security review).
+// (security review). So is an admission webhook's refusal, which keeps the
+// webhook's code and reason but gets no details, only a message prefix.
 func refusedByTest(err error) bool {
 	var status apierrors.APIStatus
 	if !apierrors.IsInvalid(err) || !errors.As(err, &status) {
+		return false
+	}
+	if strings.HasPrefix(status.Status().Message, "admission webhook ") {
 		return false
 	}
 	d := status.Status().Details
