@@ -12,31 +12,51 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// codex review of #200: a JWS signature's base64url text has spare trailing
-// bits the verifier ignores, so one signed token has several spellings that all
-// verify. Each must name the same sign-in, or one sign-in gets a cap per
-// spelling.
-func TestLoginKey_EverySpellingOfOneSignatureIsOneSignIn(t *testing.T) {
+// respellSpareBits sets the spare trailing bits of a base64url segment, which a
+// lenient decoder ignores. It fails the test if the segment has none.
+func respellSpareBits(t *testing.T, seg string) string {
+	t.Helper()
 	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-	sig := bytes.Repeat([]byte{0xa5}, 256) // an RS256 signature is 256 bytes
-	canonical := base64.RawURLEncoding.EncodeToString(sig)
+	decoded, err := base64.RawURLEncoding.DecodeString(seg)
+	require.NoError(t, err)
+	spare := len(seg)*6 - len(decoded)*8
+	require.Positive(t, spare, "segment %q has no spare bits to respell", seg)
+	last := strings.IndexByte(alphabet, seg[len(seg)-1])
+	variant := seg[:len(seg)-1] + string(alphabet[last|1])
+	again, err := base64.RawURLEncoding.DecodeString(variant)
+	require.NoError(t, err, "the lenient decoder the verifier uses accepts the respelling")
+	require.Equal(t, decoded, again, "the respelling decodes to the same bytes")
+	require.NotEqual(t, seg, variant)
+	return variant
+}
 
-	// 256 bytes is 2048 bits in 342 characters of 6: the last carries 4 spare.
-	last := strings.IndexByte(alphabet, canonical[len(canonical)-1])
-	require.Zero(t, last&0x0f, "a canonical encoding leaves the spare bits clear")
-	variant := canonical[:len(canonical)-1] + string(alphabet[last|0x05])
-	decoded, err := base64.RawURLEncoding.DecodeString(variant)
-	require.NoError(t, err, "the lenient decoder the verifier uses accepts the variant")
-	require.Equal(t, sig, decoded, "the variant is the same signature")
+// codex and security review of #200: the verifier strips whitespace from a
+// token and decodes each segment leniently, ignoring spare trailing bits, and
+// rebuilds the signed input from the decoded header and payload. So one signed
+// token has many spellings that all verify. Each must name the same sign-in, or
+// one sign-in gets a cap per spelling.
+func TestLoginKey_EverySpellingOfOneTokenIsOneSignIn(t *testing.T) {
+	header := "eyJhbGciOiJSUzI1NiJ9"                                             // {"alg":"RS256"}
+	payload := "eyJzdWIiOiJkZW1vIn0"                                             // {"sub":"demo"}: 14 bytes, 2 spare bits
+	sig := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0xa5}, 256)) // RS256: 4 spare bits
+	token := header + "." + payload + "." + sig
+	key := loginKey(token)
 
-	token := "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJkZW1vIn0." + canonical
-	respelled := "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJkZW1vIn0." + variant
-	require.NotEqual(t, token, respelled)
-	require.Equal(t, loginKey(token), loginKey(respelled))
+	for name, respelled := range map[string]string{
+		"spare bits in the signature": header + "." + payload + "." + respellSpareBits(t, sig),
+		"spare bits in the payload":   header + "." + respellSpareBits(t, payload) + "." + sig,
+		"a space in the signature":    header + "." + payload + "." + sig[:100] + " " + sig[100:],
+		"a tab in the header":         header[:5] + "\t" + header[5:] + "." + payload + "." + sig,
+		"a newline at the end":        token + "\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.NotEqual(t, token, respelled)
+			require.Equal(t, key, loginKey(respelled))
+		})
+	}
 
-	other := "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJkZW1vIn0." +
-		base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x5a}, 256))
-	require.NotEqual(t, loginKey(token), loginKey(other), "another sign-in's signature is another key")
+	other := header + "." + payload + "." + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x5a}, 256))
+	require.NotEqual(t, key, loginKey(other), "another sign-in's signature is another key")
 }
 
 // A log stream costs one rate-limit token to open and nothing after that, so

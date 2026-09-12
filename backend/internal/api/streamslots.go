@@ -4,10 +4,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 )
@@ -60,22 +62,51 @@ const demoLogStreamsPerLogin = 8
 // token: the token is a credential, and the key sits in a map for as long as
 // the stream lives.
 //
-// Digested with its signature decoded, not as the text sent. The verifier
-// decodes a JWS signature leniently, so its base64url text has spare trailing
-// bits that can be flipped without the token failing to verify — sixteen
-// spellings of one 2048-bit RSA signature. Hashing the text gave each spelling
-// its own cap, and one sign-in the whole pool again (codex review). The header
-// and payload stay as sent: they are what the signature covers, so changing
-// their spelling does fail verification.
+// Digested as the verifier reads it, not as the text sent: one signed token has
+// many spellings that all verify, and hashing the text gave each spelling its
+// own cap — one sign-in the whole pool again. The verifier (go-jose) strips
+// whitespace anywhere in the token, decodes each segment with a lenient
+// base64url decoder that ignores a segment's spare trailing bits, and rebuilds
+// the signed input from the decoded header and payload (codex and security
+// review). So the key is taken over the three segments decoded, after the same
+// whitespace is removed, each prefixed with its length.
+//
+// A token that does not split and decode that way could not have verified,
+// and never reaches a handler; it is hashed as sent.
 func loginKey(idToken string) string {
-	signed := idToken
-	if i := strings.LastIndexByte(idToken, '.'); i >= 0 {
-		if sig, err := base64.RawURLEncoding.DecodeString(idToken[i+1:]); err == nil {
-			signed = idToken[:i+1] + string(sig)
+	token := strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
 		}
+		return r
+	}, idToken)
+	h := sha256.New()
+	if segments, ok := decodeJWS(token); ok {
+		for _, seg := range segments {
+			fmt.Fprintf(h, "%d:", len(seg))
+			h.Write(seg)
+		}
+	} else {
+		h.Write([]byte(token))
 	}
-	sum := sha256.Sum256([]byte(signed))
-	return hex.EncodeToString(sum[:16])
+	return hex.EncodeToString(h.Sum(nil)[:16])
+}
+
+// decodeJWS decodes the three segments of a compact JWS.
+func decodeJWS(token string) ([][]byte, bool) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return nil, false
+	}
+	out := make([][]byte, 0, 3)
+	for _, p := range parts {
+		b, err := base64.RawURLEncoding.DecodeString(p)
+		if err != nil {
+			return nil, false
+		}
+		out = append(out, b)
+	}
+	return out, true
 }
 
 // refuseStream answers a log stream past a cap on streams held open: the
