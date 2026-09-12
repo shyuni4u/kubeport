@@ -15,9 +15,10 @@ import (
 // a gap.
 const maxCursorPods = 8
 
-// noCursorID is the id of a stamped log frame on an `all` stream past
-// maxCursorPods. It is deliberately not a cursor, so handing it back starts the
-// stream over (with a `replay` frame) instead of resuming from an older cursor
+// noCursorID is the id of a `replay` frame and of a stamped log frame on an
+// `all` stream past maxCursorPods. It is deliberately not a cursor or an
+// instant, so handing it back — as Last-Event-ID or as `?since=` — starts the
+// stream over (with a `replay` frame) instead of resuming from an older point
 // the browser would otherwise still hold.
 const noCursorID = "-"
 

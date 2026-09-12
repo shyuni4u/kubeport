@@ -1302,7 +1302,7 @@ paths:
         | `ping`  | unix seconds, every 15s to keep the connection open |
         | `error` | a `Problem`, same schema and same `ErrorKind` vocabulary as any other error. `title` is `rbac-denied` (403, the caller may read the release but not its pods' logs — permanent), `cluster-auth-denied` (502, the cluster refused the forwarded token — permanent), or `k8s-error` (502, transport or anything else — retryable) |
         | `end`   | `{"reason": "all pods stopped emitting"}` — a fixed string. The stream is over; the server closes immediately after. Always the last frame a client receives |
-        | `replay` | `{}`. The request carried a resume point (`Last-Event-ID` or `since`) that this stream does not apply — an unreadable id, or a cursor on an `instance=all` stream past its pod bound — so the logs follow from the beginning. Discard what was received before it. Sent first, before any `log` frame, and only then (#172) |
+        | `replay` | `{}`. The request carried a resume point (`Last-Event-ID` or `since`) that this stream does not apply — an unreadable id, or a cursor on an `instance=all` stream past its pod bound — so the logs follow from the beginning. Discard what was received before it. Sent first, before any `log` frame, and only then (#172). Its SSE `id:` is `-`, which replaces the resume point the client held; sent back (as `Last-Event-ID` or `since`) it starts over again rather than resuming |
 
         Authentication failures before the stream opens are ordinary JSON
         Problems; once it is open, failures arrive as `error` events — and
@@ -1439,6 +1439,10 @@ paths:
             A browser does not need this — its `EventSource` sends
             `Last-Event-ID` by itself. This parameter is for callers that do
             not, and it takes precedence over that header when both are given.
+
+            `-` — the id of a `replay` frame, and of an `instance=all` stream
+            past its pod bound — is accepted on either view and starts the
+            stream over, with a `replay` frame.
 
             A plain instant with `instance=all` is `400 validation-error`
             rather than silently applied to every pod: that is the resume that

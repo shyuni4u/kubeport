@@ -76,11 +76,18 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 			// working resume while every reconnect duplicated. That includes a
 			// plain timestamp: on `all` it is exactly the one-instant resume point
 			// that loses lines.
+			//
+			// noCursorID is the exception: it is an id this stream hands out
+			// (on `replay`, and past the pod bound), so a caller sending it back
+			// is doing as told. It carries no position, so the stream starts
+			// over — and says so.
 			var ok bool
-			if cursor, ok = parseLogCursor(since); !ok {
-				writeError(c, http.StatusBadRequest, "validation-error",
-					"since on instance=all must be a per-pod cursor (pod@RFC3339,...), the id of a log frame")
-				return
+			if since != noCursorID {
+				if cursor, ok = parseLogCursor(since); !ok {
+					writeError(c, http.StatusBadRequest, "validation-error",
+						"since on instance=all must be a per-pod cursor (pod@RFC3339,...), the id of a log frame")
+					return
+				}
 			}
 		} else {
 			// Nobody wrote this one, so a value that is not a cursor starts the
@@ -90,11 +97,15 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 			cursor, _ = parseLogCursor(c.GetHeader("Last-Event-ID"))
 		}
 	} else {
-		resumeFrom, err = parseResumePoint(c.Query("since"), c.GetHeader("Last-Event-ID"))
-		if err != nil {
-			writeError(c, http.StatusBadRequest, "validation-error",
-				"since must be an RFC3339 timestamp")
-			return
+		// A `replay` frame's id sent back as `?since=` starts over, like on
+		// `all`; it wins over the header as any explicit `since` does.
+		if c.Query("since") != noCursorID {
+			resumeFrom, err = parseResumePoint(c.Query("since"), c.GetHeader("Last-Event-ID"))
+			if err != nil {
+				writeError(c, http.StatusBadRequest, "validation-error",
+					"since must be an RFC3339 timestamp")
+				return
+			}
 		}
 	}
 
@@ -280,7 +291,12 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	}
 
 	if replay {
-		c.SSEvent("replay", `{}`)
+		// With an id of its own: the frame empties the reader's pane, so the
+		// resume point the browser still holds has to go with it. Otherwise a
+		// drop before the first stamped line would send that old point back —
+		// back under the pod bound it would be applied, and resume past lines
+		// the emptied pane no longer has.
+		c.Render(-1, sse.Event{Event: "replay", Id: noCursorID, Data: "{}"})
 		c.Writer.Flush()
 	}
 

@@ -489,6 +489,57 @@ func TestStreamReleaseLogs_AllBackUnderTheBoundStartsOverFromThePlaceholder(t *t
 	require.Contains(t, body, "id:"+cursor("web-1", at)+"\n", "back under the bound, the cursor did not return")
 }
 
+// The `replay` frame carries the placeholder id itself. It empties the pane, so
+// the resume point the browser still holds must go at the same moment: a drop
+// before the first stamped line would otherwise send the old cursor back, and
+// once the release is under the bound again that cursor would be applied —
+// resuming past lines the emptied pane no longer has.
+func TestStreamReleaseLogs_TheReplayFrameReplacesTheBrowsersResumePoint(t *testing.T) {
+	var instances []k8s.Instance
+	for i := 0; i < maxPodsInTest; i++ {
+		instances = append(instances, k8s.Instance{Name: fmt.Sprintf("web-%d", i)})
+	}
+	applier := &fakeK8sApplier{instances: instances, logLines: []string{"unstamped"}, logLineAts: []time.Time{{}}}
+
+	body := resumeRelease(t, applier, func(r *http.Request) {
+		r.Header.Set("Last-Event-ID", cursor("web-0", time.Date(2026, 9, 9, 7, 0, 0, 0, time.UTC)))
+	})
+
+	require.Contains(t, body, "id:-\nevent:replay\n", "the replay frame left the browser's old cursor standing — got: %s", body)
+}
+
+// maxPodsInTest is one past the cursor's pod bound, which the contract fixes
+// at 8.
+const maxPodsInTest = 9
+
+// `-` is an id the stream hands out, so a caller sending it back as `?since=`
+// — as the docs say to do with the last id — gets a fresh start with a
+// `replay` frame, not a 400, on either view.
+func TestStreamReleaseLogs_ThePlaceholderIdIsAcceptedAsSince(t *testing.T) {
+	at := time.Date(2026, 9, 9, 7, 36, 36, 0, time.UTC)
+	for name, query := range map[string]string{
+		"all":            "?since=-",
+		"named instance": "?instance=web-1&since=-",
+	} {
+		t.Run(name, func(t *testing.T) {
+			applier := &fakeK8sApplier{
+				instances: []k8s.Instance{{Name: "web-1"}},
+				logLines:  []string{"from the top"},
+				logLineAt: at,
+			}
+
+			body := resumeReleaseAt(t, applier, query, func(r *http.Request) {
+				// An explicit since wins over the header, placeholder or not.
+				r.Header.Set("Last-Event-ID", cursor("web-1", at.Add(time.Hour)))
+			})
+
+			require.Nil(t, applier.sinceSeen)
+			require.Contains(t, body, "event:replay")
+			require.Contains(t, body, "from the top")
+		})
+	}
+}
+
 // `replay` is only for a resume point that was sent and not applied. A first
 // open and a resume that worked say nothing, or a client would throw away the
 // very lines the resume kept.
