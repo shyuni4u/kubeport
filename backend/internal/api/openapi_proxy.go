@@ -116,6 +116,19 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 		return
 	}
 
+	// A demo caller reads only the group/versions the demo RBAC covers (#124).
+	// Anything else answers exactly like a group/version the cluster does not
+	// have — the same status, kind and detail as the upstream-404 branch in
+	// writeUpstreamOpenAPIError gives a non-admin — and without asking the
+	// cluster, so the response cannot tell "hidden" from "absent".
+	demo := h.isDemoCaller(c)
+	if demo && gv != "" && !demoAllowsGroupVersion(gv) {
+		writeError(c, http.StatusNotFound, "k8s-error", "this cluster has no such group/version")
+		return
+	}
+
+	// The key carries the caller's subject, so a demo caller's filtered index
+	// is never served to anyone else, nor anyone else's full one to them.
 	key := openapiCacheKey{cluster: name, user: u.Subject, gv: gv}
 	if e, ok := h.openapi.cache.Get(key); ok && time.Since(e.storedAt) < openapiTTL {
 		c.Data(http.StatusOK, e.contentTy, e.body)
@@ -197,6 +210,19 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 	ct := resp.Header.Get("Content-Type")
 	if ct == "" {
 		ct = "application/json"
+	}
+	// The index names every group/version the cluster serves, installed CRDs
+	// included. A demo caller gets only the demo ones (#124), filtered before
+	// caching so the cached copy under their subject is the filtered one. An
+	// index this cannot parse is refused, not passed through whole.
+	if demo && gv == "" {
+		filtered, err := filterOpenAPIIndexForDemo(body)
+		if err != nil {
+			logWithheld(c, "proxyOpenAPI: filter index for demo caller, cluster "+name, err)
+			writeError(c, http.StatusBadGateway, "k8s-error", "the cluster's OpenAPI index could not be read")
+			return
+		}
+		body = filtered
 	}
 	h.openapi.cache.Add(key, openapiCacheEntry{body: body, storedAt: time.Now(), contentTy: ct})
 	c.Data(http.StatusOK, ct, body)
