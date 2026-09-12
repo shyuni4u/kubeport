@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 
@@ -35,6 +36,8 @@ type Props = {
   publishing?: boolean;
   onSave: () => void;
   onPublish: () => void;
+  /** Why save is off, shown beside the button (#181). */
+  blockedReason?: string;
 };
 
 export function BottomBar({
@@ -45,11 +48,22 @@ export function BottomBar({
   publishing,
   onSave,
   onPublish,
+  blockedReason,
 }: Props) {
   const t = useTranslations("templates.editor");
+  const reasonId = useId();
   return (
     <div className="sticky bottom-0 flex flex-wrap items-center justify-end gap-3 border-t bg-white/90 px-4 py-3 backdrop-blur">
       <UnsavedChangesStatus dirty={dirty} />
+      {/*
+        A save button that is off for a reason says so beside it — otherwise
+        the admin is left guessing which of two editors is wrong.
+      */}
+      {blockedReason && (
+        <span id={reasonId} className="text-xs text-destructive">
+          {blockedReason}
+        </span>
+      )}
       {/*
         Publishing lives on the template detail page (a new version always
         starts as a draft). Rather than a permanently greyed-out button that
@@ -67,6 +81,7 @@ export function BottomBar({
         variant={dirty ? "default" : "outline"}
         onClick={onSave}
         disabled={!canSave || saving}
+        aria-describedby={blockedReason ? reasonId : undefined}
       >
         {saving ? t("saving") : t("saveDraft")}
       </Button>

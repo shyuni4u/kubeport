@@ -31,6 +31,18 @@ describe("BottomBar", () => {
     expect(onPublish).toHaveBeenCalledOnce();
   });
 
+  it("says why save is off, and ties the reason to the button", () => {
+    renderBar({ canSave: false, blockedReason: "오류 1건을 고쳐야 저장할 수 있습니다." });
+    const save = screen.getByRole("button", { name: "Draft 저장" });
+    expect(save).toBeDisabled();
+    expect(save).toHaveAccessibleDescription("오류 1건을 고쳐야 저장할 수 있습니다.");
+  });
+
+  it("shows no reason when none is given", () => {
+    renderBar();
+    expect(screen.getByRole("button", { name: "Draft 저장" })).not.toHaveAttribute("aria-describedby");
+  });
+
   it("shows busy labels and disables buttons while saving / publishing", () => {
     renderBar({ canPublish: true, saving: true, publishing: true });
     expect(screen.getByRole("button", { name: "저장 중…" })).toBeDisabled();
