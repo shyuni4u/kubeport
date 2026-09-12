@@ -15,7 +15,12 @@
  *   SECURITY_CSP_MODE       "enforce" (default), "report-only" or "off". Off
  *                           keeps frame-ancestors alone, as before #143.
  *   SECURITY_CSP            A whole policy replacing the default below
- *                           (frame-ancestors is still appended).
+ *                           (its own frame-ancestors is dropped and the
+ *                           configured one appended).
+ *
+ * Where they are set: proxy.ts for everything it matches, and
+ * `applySecurityHeaders` in the route handlers that answer API requests
+ * carrying a body — the proxy deliberately does not match those (see proxy.ts).
  *
  * Import-free on purpose: proxy.ts may not pull in anything heavy (see
  * lib/demo-config).
@@ -28,29 +33,39 @@ export const DEFAULT_HSTS = "max-age=63072000; includeSubDomains";
 // dynamically and each inline script tagged; until then Next's own inline
 // bootstrap scripts need 'unsafe-inline'.
 //
-// cdn.jsdelivr.net is Monaco: @monaco-editor/loader fetches the editor from
-// https://cdn.jsdelivr.net/npm/monaco-editor@<version>/min/vs at runtime —
-// its scripts, stylesheet and codicon font — and runs its language workers
-// from blob: URLs.
-const CDN = "https://cdn.jsdelivr.net";
+// Monaco: @monaco-editor/loader fetches the editor from exactly this path at
+// runtime — its scripts, stylesheet and codicon font — and runs its language
+// workers from blob: URLs. A path, not the whole host: cdn.jsdelivr.net serves
+// every npm package, and a host-wide allowlist would hand an attacker script
+// gadgets once 'unsafe-inline' goes. security-headers.test.ts fails when the
+// loader's own path moves, so an upgrade cannot silently break the editor.
+export const MONACO_CDN = "https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/";
 
 export function defaultCsp(dev: boolean): string {
   return [
     "default-src 'self'",
     // Dev only: React's dev build uses eval for error stacks (Next's CSP guide).
-    `script-src 'self' 'unsafe-inline' ${CDN}${dev ? " 'unsafe-eval'" : ""}`,
-    `style-src 'self' 'unsafe-inline' ${CDN}`,
-    `font-src 'self' data: ${CDN}`,
+    `script-src 'self' 'unsafe-inline' ${MONACO_CDN}${dev ? " 'unsafe-eval'" : ""}`,
+    `style-src 'self' 'unsafe-inline' ${MONACO_CDN}`,
+    `font-src 'self' data: ${MONACO_CDN}`,
     "img-src 'self' data: blob:",
     "worker-src 'self' blob:",
     // Dev only: the HMR socket.
     `connect-src 'self'${dev ? " ws: wss:" : ""}`,
+    // Does not fall back to default-src. The app's only forms post to itself:
+    // the logout confirmation and Server Actions.
+    "form-action 'self'",
     "object-src 'none'",
     "base-uri 'self'",
   ].join("; ");
 }
 
 type Env = Record<string, string | undefined>;
+
+// A header value may not contain CR, LF or NUL — Headers.set throws on them,
+// which in the proxy would turn every response into a 500. A policy written as
+// a YAML block in the chart values carries newlines; fold them into spaces.
+const clean = (v: string | undefined) => v?.replace(/[\s\0]+/g, " ").trim();
 
 export function securityHeaders(env: Env = process.env): [string, string][] {
   if (env.SECURITY_HEADERS === "off") return [];
@@ -61,15 +76,15 @@ export function securityHeaders(env: Env = process.env): [string, string][] {
   // decision. includeSubDomains suits the intended layout (the app plus Dex on
   // its own subdomain, both https) and is wrong on an apex domain with sibling
   // http services, which is what SECURITY_HSTS is for.
-  const hsts = env.SECURITY_HSTS ?? DEFAULT_HSTS;
-  if (hsts !== "") headers.push(["Strict-Transport-Security", hsts]);
+  const hsts = env.SECURITY_HSTS === undefined ? DEFAULT_HSTS : clean(env.SECURITY_HSTS);
+  if (hsts) headers.push(["Strict-Transport-Security", hsts]);
 
   headers.push(["X-Content-Type-Options", "nosniff"]);
   headers.push(["Referrer-Policy", "strict-origin-when-cross-origin"]);
 
   // frame-ancestors rather than X-Frame-Options: the CSP-era spelling. Keeps
   // the login screen and the demo buttons out of foreign iframes.
-  const frameAncestors = `frame-ancestors ${env.SECURITY_FRAME_ANCESTORS || "'none'"}`;
+  const frameAncestors = `frame-ancestors ${clean(env.SECURITY_FRAME_ANCESTORS) || "'none'"}`;
   const mode = env.SECURITY_CSP_MODE || "enforce";
   if (mode === "off") {
     headers.push(["Content-Security-Policy", frameAncestors]);
@@ -78,7 +93,10 @@ export function securityHeaders(env: Env = process.env): [string, string][] {
   // A browser honors the first frame-ancestors in a policy, so one inside a
   // custom SECURITY_CSP would silently win over SECURITY_FRAME_ANCESTORS.
   // Drop it: framing is decided by the dedicated value alone.
-  const base = (env.SECURITY_CSP || defaultCsp(env.NODE_ENV !== "production"))
+  //
+  // The relaxed policy only for `next dev` — anything else, NODE_ENV unset
+  // included, gets the production one.
+  const base = (clean(env.SECURITY_CSP) || defaultCsp(env.NODE_ENV === "development"))
     .split(";")
     .map((d) => d.trim())
     .filter((d) => d !== "" && !/^frame-ancestors(\s|$)/i.test(d))
@@ -93,4 +111,10 @@ export function securityHeaders(env: Env = process.env): [string, string][] {
     headers.push(["Content-Security-Policy", policy]);
   }
   return headers;
+}
+
+/** Sets the security headers on a response built by a route handler, and returns it. */
+export function applySecurityHeaders<T extends { headers: Headers }>(res: T, env: Env = process.env): T {
+  for (const [key, value] of securityHeaders(env)) res.headers.set(key, value);
+  return res;
 }

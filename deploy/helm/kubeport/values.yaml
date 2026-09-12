@@ -139,12 +139,13 @@ frontend:
     # CSP frame-ancestors sources. 'none' keeps the login screen and the demo
     # buttons out of every iframe; list a portal's origin to embed kubeport.
     frameAncestors: "'none'"
-    # enforce | report-only | off. The default policy stops scripts, styles,
+    # "enforce" | "report-only" | "off" — quoted: YAML reads a bare off as
+    # false, and the chart refuses anything else. The default policy stops scripts, styles,
     # fonts, frames and connections from foreign origins, allowing only
     # cdn.jsdelivr.net, where the YAML editor (Monaco) loads from. report-only
     # sends it as Content-Security-Policy-Report-Only (frame-ancestors still
     # enforced) to see what it would block; off sends only frame-ancestors.
-    cspMode: enforce
+    cspMode: "enforce"
     # A whole policy replacing the default; frame-ancestors is appended. Empty
     # uses the default in frontend/lib/security-headers.ts.
     contentSecurityPolicy: ""

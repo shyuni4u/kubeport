@@ -1,7 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-import { proxy } from "./proxy";
+import { config, proxy } from "./proxy";
+
+// Security review of #80: a Node proxy makes Next clone the request body and
+// wait for the whole upload before the route handler runs. The BFF's #128
+// (no body read before the session check) and #266 (4 MiB cap while
+// streaming) depend on /api requests with a body never being matched.
+describe("proxy matcher", () => {
+  it("matches /api only for requests without a body", () => {
+    const api = config.matcher.find((m) => typeof m === "object" && m.source === "/api/:path*");
+    expect(api).toBeDefined();
+    expect(api && typeof api === "object" ? api.missing : undefined).toEqual([
+      { type: "header", key: "content-length" },
+      { type: "header", key: "transfer-encoding" },
+    ]);
+    // And no other entry reaches /api unconditionally.
+    for (const m of config.matcher) {
+      if (typeof m === "string") expect(new RegExp(`^${m}$`).test("/api/v1/templates")).toBe(false);
+    }
+  });
+});
 
 // #80: the security headers moved from next.config.ts into the proxy, so the
 // proxy now has to put them on every response — including the ones it does

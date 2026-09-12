@@ -4,14 +4,34 @@ import type { NextRequest } from "next/server";
 // Import-free modules on purpose — see lib/demo-config.
 import { demoConfigured } from "@/lib/demo-config";
 import { SESSION_COOKIE } from "@/lib/cookie-names";
-import { securityHeaders } from "@/lib/security-headers";
+import { applySecurityHeaders } from "@/lib/security-headers";
 
-// Every request comes through here, because the security headers belong on
-// every response: pages, /_next/static, the /api BFF (healthz included), 404s
-// and redirects. They moved here from next.config.ts `headers()`, which is
-// baked at build time and so could not follow the chart's values (#80).
+// The security headers belong on every response, and they moved here from
+// next.config.ts `headers()`, which is baked at build time and so could not
+// follow the chart's values (#80). So this matches every path — pages,
+// /_next/static, 404s and its own redirects — with one exception.
+//
+// An /api request that carries a body is NOT matched. Before calling a Node
+// proxy, Next clones the request body (up to 10MB) and waits for the whole
+// upload before the route handler runs (next-server.js runMiddleware). The BFF
+// refuses a caller without a session before reading a byte of its body (#128)
+// and caps bodies at 4 MiB as they stream (#266); matching those requests here
+// would undo both. The matcher decides before any cloning, so a request with a
+// Content-Length or Transfer-Encoding never reaches the proxy. Those handlers
+// (the /api/v1 BFF, logout's POST) set the headers themselves with
+// applySecurityHeaders. Body-less /api requests — healthz, the log stream, the
+// login and callback redirects — still come through.
 export const config = {
-  matcher: ["/:path*"],
+  matcher: [
+    "/((?!api/).*)",
+    {
+      source: "/api/:path*",
+      missing: [
+        { type: "header", key: "content-length" },
+        { type: "header", key: "transfer-encoding" },
+      ],
+    },
+  ],
 };
 
 // Only pages redirect to login when there is no session cookie — the paths the
@@ -26,13 +46,8 @@ export const config = {
 // "/" (the landing page) and Next's own assets.
 const LOGIN_GUARDED = /^\/(?!api\/|_next|favicon\.ico|logout$|$)/;
 
-function withSecurityHeaders(res: NextResponse): NextResponse {
-  for (const [key, value] of securityHeaders()) res.headers.set(key, value);
-  return res;
-}
-
 export function proxy(req: NextRequest) {
-  return withSecurityHeaders(route(req));
+  return applySecurityHeaders(route(req));
 }
 
 function route(req: NextRequest): NextResponse {
