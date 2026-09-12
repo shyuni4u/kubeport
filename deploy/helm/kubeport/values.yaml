@@ -204,6 +204,8 @@ securityContext:
 # Static-password OIDC IdP for a public demo login, alongside the primary
 # oidc.* IdP (e.g. Google). Backend accepts tokens from both issuers
 # (KBP_OIDC_ISSUERS). See README "Demo mode (Dex)" for setup.
+# Requires demo.enabled=true: demo mode is what scopes these accounts, and the
+# chart refuses to render Dex without it (#253).
 dex:
   enabled: false
   host: ""                       # e.g. dex.kubeport.enzo.kr (required when enabled)

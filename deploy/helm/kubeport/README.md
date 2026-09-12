@@ -610,6 +610,12 @@ kubectl auth can-i delete resourcequota --as=dex:demo-admin@demo.kubeport -n dem
 `demo.enabled=true` requires `dex.enabled=true` (the chart fails the render
 otherwise) — the demo RBAC subjects are Dex-issued usernames.
 
+The reverse holds too: `dex.enabled=true` requires `demo.enabled=true`. The
+chart's Dex is the demo login, and the backend trusts its tokens whenever it is
+on, but demo scoping is switched on only by `demo.enabled` — so Dex without demo
+mode would be a login whose password the landing page prints, for accounts that
+are ordinary users (#253).
+
 `dex.enabled=true` renders a `ClusterIP` Service + Deployment for Dex, plus
 an `Ingress`/`Certificate` on `dex.host` (mirrors the main chart's
 `ingress.className` / `tls.certManager.*`).

@@ -50,6 +50,9 @@ helm-lint:
 	@helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
 		--set demo.emailDomain=DEMO.kubeport >/dev/null \
 		|| { echo "demo email guard: refused a demo.emailDomain that differs only in case"; exit 1; }
+	@helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
+		--set demo.enabled=false 2>&1 | grep -q "dex.enabled=true requires demo.enabled=true" \
+		|| { echo "demo email guard: dex rendered without demo mode (#253)"; exit 1; }
 	@echo "demo email guard: ok"
 
 # Diff the rendered chart against the checked-in golden snapshot. Fails
