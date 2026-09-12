@@ -1,22 +1,38 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
 
-import { config } from "./proxy";
+import { proxy } from "./proxy";
 
-// Next.js compiles each matcher string with path-to-regexp, not the RegExp
-// constructor, so this is an approximation — it pins the intent of the pattern,
-// not Next's exact matching. The real behaviour was checked by running the app:
-// GET /api/v1/templates returns a JSON 401 while GET /catalog still 307s to
-// /api/auth/login. Treat a change here as a prompt to re-check that by hand.
+// The proxy now runs on every path (#80 — it sets the security headers), so
+// which paths are login-guarded is decided inside it, not by the matcher.
+// These drive the real function with no session cookie and read whether it
+// answered with a redirect. The behaviour pinned is the same as when the
+// matcher itself excluded these paths.
 function intercepts(pathname: string): boolean {
-  return config.matcher.some((m) => new RegExp(`^${m}$`).test(pathname));
+  const res = proxy(new NextRequest(new URL(`https://kubeport.enzo.kr${pathname}`)));
+  return res.headers.get("location") !== null;
 }
 
-describe("middleware matcher", () => {
-  // #24: the middleware answers unauthenticated requests with a 307 to the
-  // login page. That is right for a browser hitting a page, and wrong for
-  // /api/v1/*, where a script or agent needs a JSON 401 it can branch on —
-  // following the redirect lands on Google's consent HTML with status 200,
-  // which naive clients read as success.
+let savedIssuer: string | undefined;
+
+beforeEach(() => {
+  // No demo IdP: an unauthenticated page goes straight to /api/auth/login.
+  savedIssuer = process.env.DEMO_OIDC_ISSUER;
+  delete process.env.DEMO_OIDC_ISSUER;
+});
+
+afterEach(() => {
+  if (savedIssuer === undefined) delete process.env.DEMO_OIDC_ISSUER;
+  else process.env.DEMO_OIDC_ISSUER = savedIssuer;
+  vi.unstubAllEnvs();
+});
+
+describe("proxy login guard", () => {
+  // #24: the proxy answers unauthenticated requests with a 307 to the login
+  // page. That is right for a browser hitting a page, and wrong for /api/v1/*,
+  // where a script or agent needs a JSON 401 it can branch on — following the
+  // redirect lands on Google's consent HTML with status 200, which naive
+  // clients read as success.
   it("leaves the JSON API to its route handler", () => {
     expect(intercepts("/api/v1/templates")).toBe(false);
     expect(intercepts("/api/v1/releases/abc/logs")).toBe(false);

@@ -19,6 +19,28 @@ data:
   OIDC_SCOPES: {{ . | quote }}
   {{- end }}
   GO_API_BASE_URL: {{ printf "http://%s:%v" (include "kubeport.backend.fullname" .) .Values.backend.service.port | quote }}
+  # Security headers, read by frontend/proxy.ts on every request (#80, #143).
+  # They are not in next.config.ts because that is baked at image build time.
+  {{- with .Values.frontend.securityHeaders }}
+  {{- /* An unquoted `off` in a values file is YAML false, which would fall back to
+  enforce without a word — refuse anything that is not one of the three. */}}
+  {{- if and (hasKey . "cspMode") (not (has (toString .cspMode) (list "enforce" "report-only" "off"))) }}
+  {{- fail (printf "frontend.securityHeaders.cspMode must be \"enforce\", \"report-only\" or \"off\" — quoted in a values file, where a bare off is YAML false (got %v)" .cspMode) }}
+  {{- end }}
+  SECURITY_HEADERS: {{ ternary "on" "off" (ne (toString .enabled) "false") | quote }}
+  {{- /* Only when the key is there. A release upgraded with --reuse-values from a
+  chart without these keys can end up with a partial map (one value --set); an
+  absent hsts must leave the frontend's default HSTS, not send "" = no HSTS. */}}
+  {{- if hasKey . "hsts" }}
+  # Empty = no HSTS header (a proxy in front already sends one).
+  SECURITY_HSTS: {{ .hsts | default "" | quote }}
+  {{- end }}
+  SECURITY_FRAME_ANCESTORS: {{ .frameAncestors | default "'none'" | quote }}
+  SECURITY_CSP_MODE: {{ .cspMode | default "enforce" | quote }}
+  {{- with .contentSecurityPolicy }}
+  SECURITY_CSP: {{ . | quote }}
+  {{- end }}
+  {{- end }}
   {{- if .Values.dex.enabled }}
   DEMO_OIDC_ISSUER: {{ include "kubeport.dex.issuer" . | quote }}
   DEMO_OIDC_CLIENT_ID: {{ .Values.dex.clientId | quote }}

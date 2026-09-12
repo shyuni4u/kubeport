@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { destroySession, getSession } from "@/lib/session";
 import { allowedOrigins, externalOrigin } from "@/lib/request-origin";
+import { applySecurityHeaders } from "@/lib/security-headers";
+
+// Set here, not only in proxy.ts: the logout POST from the user menu carries
+// Content-Length, and the proxy deliberately does not match /api requests with
+// a body (see proxy.ts). The GET is matched there too; setting them again is
+// harmless.
 
 /**
  * Typing the logout URL into the address bar, or opening a bookmarked one,
@@ -20,7 +26,7 @@ export async function GET(req: NextRequest) {
   const session = await getSession();
   const dest = session ? "/logout" : "/";
   // 303: whatever verb got here, follow it with a GET.
-  return NextResponse.redirect(new URL(dest, externalOrigin(req)), 303);
+  return applySecurityHeaders(NextResponse.redirect(new URL(dest, externalOrigin(req)), 303));
 }
 
 export async function POST(req: NextRequest) {
@@ -35,11 +41,11 @@ export async function POST(req: NextRequest) {
   const allowed = allowedOrigins();
   const acceptable = allowed.length > 0 ? allowed : [externalOrigin(req)];
   if (!origin || !acceptable.includes(origin)) {
-    return new NextResponse("cross-origin request rejected", { status: 403 });
+    return applySecurityHeaders(new NextResponse("cross-origin request rejected", { status: 403 }));
   }
   await destroySession();
   // 303 See Other so the browser follows the POST-logout with a GET to "/".
   // A default 307 would re-POST to "/", leaving the user on a re-submitted
   // home render with no visible navigation ("logout does nothing").
-  return NextResponse.redirect(new URL("/", externalOrigin(req)), 303);
+  return applySecurityHeaders(NextResponse.redirect(new URL("/", externalOrigin(req)), 303));
 }

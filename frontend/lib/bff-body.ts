@@ -6,8 +6,9 @@
  * whole body with `req.text()` before forwarding, so a body of hundreds of MB
  * was held in the frontend pod's memory (512Mi on the live demo, whose
  * password is on the landing page) before the backend ever saw a byte of it.
- * `proxy.ts` skips `api/`, so Next's own proxy body limit does not apply here
- * either.
+ * `proxy.ts` does not match an `api/` request that carries a body, so Next never
+ * clones one ahead of this handler and its own proxy body limit does not apply
+ * here either — the cap below, after the session check, is the only read.
  */
 export const MAX_REQUEST_BODY = 4 << 20;
 

@@ -285,12 +285,17 @@ see `frontend.publicOrigins` above.
 ```bash
 helm upgrade kubeport deploy/helm/kubeport \
   --namespace kubeport \
-  --reuse-values \
+  --reset-then-reuse-values \
   --set images.backend.tag=$NEW_SHA \
   --set images.frontend.tag=$NEW_SHA
 ```
 
-`--reuse-values` keeps the secrets you passed at install time. The
+`--reset-then-reuse-values` (Helm ≥ 3.14) keeps the values you passed at
+install time — secrets included — and fills keys a newer chart added with that
+chart's defaults. Plain `--reuse-values` also keeps your values but applies the
+*old* chart's defaults, so a key the new chart introduced is missing: it renders
+empty or fails (see `deploy/oci/README.md` §7.6). Use it only when you know the
+chart added no keys. The
 backend Pod's `migrate` initContainer runs `atlas schema apply` before the
 backend container starts; if migration fails the new Pod never reaches Ready
 and rolling upgrade pauses, so old Pods stay live serving traffic.
@@ -410,6 +415,19 @@ curl -s -o /dev/null -w '%{http_code}\n' https://<host>/                  # the 
 # Through whatever the browser really goes through: more than one hop is a loop
 curl -sL --max-redirs 3 -o /dev/null -w '%{num_redirects}\n' http://<host>/   # 1
 ```
+
+### Behaviour changes when upgrading past #143
+
+The frontend now sends an enforced Content-Security-Policy, not only
+`frame-ancestors 'none'`. Scripts, styles, fonts and connections from other
+origins are blocked, except Monaco's pinned path on `cdn.jsdelivr.net` for the
+YAML editor. If a proxy or Ingress in front injects its own scripts (analytics
+beacons, bot challenges), upgrade with
+`--set-string frontend.securityHeaders.cspMode=report-only`, open the app and
+read the violations in the browser console, then either set
+`frontend.securityHeaders.contentSecurityPolicy` or go back to `enforce`.
+HSTS, nosniff, Referrer-Policy and `frame-ancestors 'none'` are unchanged. See
+[Security headers](#security-headers).
 
 ### Behaviour changes when upgrading past #253
 
@@ -668,6 +686,56 @@ within seconds. A write refused before it reaches the cluster (a bad body, a
 release that is not yours) does not spend that budget, and the demo reset's
 seeder — which runs as the demo user — waits out a 429 rather than failing.
 Changing a budget needs a code change (`backend/internal/api/routes.go`).
+
+### Security headers
+
+The frontend sets these at request time, from `frontend.securityHeaders`
+(#80, #143), on every response the app produces — pages, `/_next/static`, the
+`/api` BFF, 404s and its own login redirect. They are not baked into the image,
+so each install can change them. Two kinds of response are answered by Next
+before the app and carry none: its internal trailing-slash 308 (e.g.
+`/catalog/` → `/catalog`), and its automatic 405 for a method an `/api` route
+does not define when the request has a body (such requests skip the proxy, so
+that uploads are not buffered before the BFF's own checks). Neither has an HTML
+body, and a browser has already received HSTS from any page by then.
+
+| Value | Default | What it does |
+|---|---|---|
+| `frontend.securityHeaders.enabled` | `true` | `false` sends none of them. For a proxy in front that sets its own. |
+| `frontend.securityHeaders.hsts` | `max-age=63072000; includeSubDomains` | `Strict-Transport-Security`. Empty sends no HSTS. |
+| `frontend.securityHeaders.frameAncestors` | `"'none'"` | CSP `frame-ancestors` sources. |
+| `frontend.securityHeaders.cspMode` | `"enforce"` | `"enforce"`, `"report-only"` (the policy goes out as `Content-Security-Policy-Report-Only`; `frame-ancestors` still enforces) or `"off"` (only `frame-ancestors`). Quote it in a values file — YAML reads a bare `off` as `false`, and the chart refuses anything but these three. |
+| `frontend.securityHeaders.contentSecurityPolicy` | `""` | A whole policy replacing the default. Any `frame-ancestors` in it is dropped and `frameAncestors` appended. |
+
+`X-Content-Type-Options: nosniff` and `Referrer-Policy:
+strict-origin-when-cross-origin` are always sent while `enabled` is true.
+Whitespace and line breaks inside a value are folded into single spaces, so a
+long policy can be written as a YAML block.
+
+The default policy allows scripts, styles, fonts, images, workers, form posts
+and connections from the app's own origin only, plus Monaco's pinned path,
+`https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/` — the YAML editor loads
+from there. Inline scripts and styles are still allowed (Next.js needs them
+without nonces). `object-src 'none'` and `base-uri 'self'` close the rest. The
+exact string is in `frontend/lib/security-headers.ts`.
+
+**CSP keywords keep their single quotes inside the value.** In a values file
+write `frameAncestors: "'self' https://portal.example.com"`; on the command
+line `--set-string "frontend.securityHeaders.frameAncestors='self' https://portal.example.com"`.
+A bare `self` or `none` is read as a host name, not a keyword.
+
+When to change them:
+
+- **A proxy in front already sends HSTS** — set `hsts=""` so the browser does
+  not see two, or `enabled=false` if it sends the whole set.
+- **Installed on an apex domain with sibling http services** — drop
+  `includeSubDomains` (`hsts="max-age=63072000"`). With it, visitors' browsers
+  force those siblings onto https for two years, and you cannot undo that.
+- **Embedding kubeport in a portal iframe** — list the portal's origin:
+  `--set-string "frontend.securityHeaders.frameAncestors=https://portal.example.com"`.
+- **A self-hosted editor, analytics or another CDN is blocked** — roll out with
+  `cspMode=report-only`, read the reports in the browser console, then set
+  `contentSecurityPolicy` to a policy that allows it and go back to `enforce`.
 
 ## Schema sync
 

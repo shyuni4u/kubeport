@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { PAYLOAD_TOO_LARGE_DETAIL, readBoundedBody } from "@/lib/bff-body";
 import { requestIdFor, upstreamUrl } from "@/lib/bff-path";
 import { bffProblem } from "@/lib/bff-problem";
+import { applySecurityHeaders } from "@/lib/security-headers";
 import { getSession, getValidToken } from "@/lib/session";
 
 const STRIPPED_RESPONSE_HEADERS = new Set([
@@ -125,4 +126,12 @@ async function proxy(
   });
 }
 
-export { proxy as GET, proxy as POST, proxy as PUT, proxy as PATCH, proxy as DELETE };
+// The security headers are set here as well as in proxy.ts: an /api request
+// with a body is deliberately not matched by the proxy (it would clone and
+// wait for the body before the session check below — see proxy.ts), so for
+// POST/PUT/PATCH/DELETE this is the only place they come from.
+async function handler(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+  return applySecurityHeaders(await proxy(req, ctx));
+}
+
+export { handler as GET, handler as POST, handler as PUT, handler as PATCH, handler as DELETE };
