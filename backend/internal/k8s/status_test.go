@@ -276,27 +276,71 @@ func TestListInstances_CountsUnstampedPodsThroughTheirWorkload(t *testing.T) {
 	require.ElementsMatch(t, []string{"db-0", "web-old-abcde"}, instanceNames(t, got, err))
 }
 
+// #256: a CronJob from before the id is stamped by its first update since, but
+// the Jobs it already created are not — and never carried a release label,
+// since a CronJob labels its pod template, not its job template's metadata.
+// Their pods count through the Job's CronJob, matched by uid.
+func TestListInstances_CountsACronJobsEarlierRunsThroughTheCronJob(t *testing.T) {
+	running := map[string]any{"phase": "Running"}
+	nightly := withObjectUID(stamped("batch/v1", "CronJob", "demo", "nightly", "rel", uidMine), "cj-nightly")
+	theirs := withObjectUID(stamped("batch/v1", "CronJob", "demo", "hourly", "rel", uidOther), "cj-hourly")
+	run := withObjectUID(ownedBy(existing("batch/v1", "Job", "demo", "nightly-100", ""),
+		"batch/v1", "CronJob", "nightly", "cj-nightly"), "job-nightly-100")
+	theirRun := withObjectUID(ownedBy(existing("batch/v1", "Job", "demo", "hourly-100", ""),
+		"batch/v1", "CronJob", "hourly", "cj-hourly"), "job-hourly-100")
+	// Created by an earlier CronJob that was also called "nightly".
+	olderRun := withObjectUID(ownedBy(existing("batch/v1", "Job", "demo", "nightly-050", ""),
+		"batch/v1", "CronJob", "nightly", "cj-nightly-before"), "job-nightly-050")
+
+	got, err := k8s.NewForTest(cluster(
+		nightly, theirs, run, theirRun, olderRun,
+		ownedByJob(pod("nightly-100-abcde", "rel", running), "nightly-100", "job-nightly-100"),
+		ownedByJob(pod("hourly-100-fghij", "rel", running), "hourly-100", "job-hourly-100"),
+		ownedByJob(pod("nightly-050-klmno", "rel", running), "nightly-050", "job-nightly-050"),
+	)).ListInstances(context.Background(), relRef("rel"))
+
+	require.ElementsMatch(t, []string{"nightly-100-abcde"}, instanceNames(t, got, err))
+}
+
 // codex review, round 5: a controller that could not be read is not one that
 // is someone else's. The error surfaces as it does for the pod list itself,
 // instead of the release showing no pods.
 func TestListInstances_SurfacesAControllerThatCannotBeRead(t *testing.T) {
 	running := map[string]any{"phase": "Running"}
-	for name, fail := range map[string]func(*dynamicfake.FakeDynamicClient){
-		"forbidden": func(dyn *dynamicfake.FakeDynamicClient) { forbidGet(dyn, "jobs") },
-		"unreachable": func(dyn *dynamicfake.FakeDynamicClient) {
+	aJobsPod := func() *dynamicfake.FakeDynamicClient {
+		return cluster(
+			withObjectUID(stamped("batch/v1", "Job", "demo", "once", "rel", uidMine), "job-once"),
+			ownedByJob(pod("once-abcde", "rel", running), "once", "job-once"),
+		)
+	}
+	for name, setup := range map[string]func() *dynamicfake.FakeDynamicClient{
+		"forbidden": func() *dynamicfake.FakeDynamicClient {
+			dyn := aJobsPod()
+			forbidGet(dyn, "jobs")
+			return dyn
+		},
+		"unreachable": func() *dynamicfake.FakeDynamicClient {
+			dyn := aJobsPod()
 			dyn.PrependReactor("get", "jobs", func(clientgotesting.Action) (bool, runtime.Object, error) {
 				return true, nil, errors.New("connection reset")
 			})
+			return dyn
+		},
+		// Security review of #256: the same holds one level up, for the
+		// CronJob behind a Job that carries no release label.
+		"cronjob forbidden": func() *dynamicfake.FakeDynamicClient {
+			dyn := cluster(
+				withObjectUID(stamped("batch/v1", "CronJob", "demo", "nightly", "rel", uidMine), "cj-nightly"),
+				withObjectUID(ownedBy(existing("batch/v1", "Job", "demo", "nightly-100", ""),
+					"batch/v1", "CronJob", "nightly", "cj-nightly"), "job-nightly-100"),
+				ownedByJob(pod("nightly-100-abcde", "rel", running), "nightly-100", "job-nightly-100"),
+			)
+			forbidGet(dyn, "cronjobs")
+			return dyn
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			dyn := cluster(
-				withObjectUID(stamped("batch/v1", "Job", "demo", "once", "rel", uidMine), "job-once"),
-				ownedByJob(pod("once-abcde", "rel", running), "once", "job-once"),
-			)
-			fail(dyn)
-
-			_, err := k8s.NewForTest(dyn).ListInstances(context.Background(), relRef("rel"))
+			_, err := k8s.NewForTest(setup()).ListInstances(context.Background(), relRef("rel"))
 
 			require.Error(t, err)
 		})

@@ -63,7 +63,7 @@ func (c *Client) ListInstances(ctx context.Context, ref ReleaseRef) ([]Instance,
 }
 
 // podControllers are the kinds that create a release's pods, and
-// replicaSetControllers the one that creates its ReplicaSets.
+// parentControllers, per kind, the one that creates those in turn.
 var (
 	podControllers = map[string]schema.GroupVersionResource{
 		"Job":         {Group: "batch", Version: "v1", Resource: "jobs"},
@@ -71,8 +71,11 @@ var (
 		"DaemonSet":   {Group: "apps", Version: "v1", Resource: "daemonsets"},
 		"ReplicaSet":  {Group: "apps", Version: "v1", Resource: "replicasets"},
 	}
-	replicaSetControllers = map[string]schema.GroupVersionResource{
-		"Deployment": {Group: "apps", Version: "v1", Resource: "deployments"},
+	parentControllers = map[string]map[string]schema.GroupVersionResource{
+		"ReplicaSet": {"Deployment": {Group: "apps", Version: "v1", Resource: "deployments"}},
+		// A CronJob stamps its pod template, not its job template's metadata,
+		// so the Jobs it creates carry no release label at all (#256).
+		"Job": {"CronJob": {Group: "batch", Version: "v1", Resource: "cronjobs"}},
 	}
 )
 
@@ -89,7 +92,9 @@ var (
 // The controller is matched by uid, not only by name: a pod orphaned from an
 // earlier Job still names it, and a new release may since have created a Job
 // of that name (codex review). A ReplicaSet without the id counts through its
-// Deployment. owners caches the verdict per controller uid.
+// Deployment, and a Job without it through its CronJob: the runs a CronJob
+// from before the id had already started (#256). owners caches the verdict
+// per controller reference.
 //
 // A controller that is gone is not ref's. One that cannot be read is an error:
 // counting its pods out would report a release with no pods where the cluster
@@ -131,8 +136,8 @@ func (c *Client) controlledBy(ctx context.Context, obj *unstructured.Unstructure
 		own := false
 		if ctrl.GetUID() == owner.UID {
 			own = belongsTo(ctrl.GetLabels(), ref)
-			if !own && owner.Kind == "ReplicaSet" {
-				if own, err = c.controlledBy(ctx, ctrl, ref, replicaSetControllers, owners); err != nil {
+			if parents, ok := parentControllers[owner.Kind]; ok && !own {
+				if own, err = c.controlledBy(ctx, ctrl, ref, parents, owners); err != nil {
 					return false, err
 				}
 			}
