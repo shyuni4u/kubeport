@@ -1106,6 +1106,11 @@ paths:
         /v1/releases` applies: a deprecated version is refused with 400, and a
         draft — one that was never published, or was published and rolled back —
         with 409.
+
+        A release is read back with its Secret values redacted (#196). A
+        `Secret[...]` path sent as `"<redacted>"` keeps the value the release
+        already has — so values read from `GET /v1/releases/{id}` can be sent
+        back as they are. Any other value replaces it.
       parameters: [{ $ref: "#/components/parameters/ReleaseID" }]
       requestBody:
         required: true
@@ -2275,7 +2280,14 @@ components:
         values_json:
           type: object
           additionalProperties: true
-        rendered_yaml: { type: string }
+          description: |
+            The values the release was deployed with. Every `Secret[...]` path's
+            value reads as `"<redacted>"` (#196) — see ReleaseDetail.
+        rendered_yaml:
+          type: string
+          description: |
+            What was applied, with every value under a Secret's `data` and
+            `stringData` reading as `<redacted>` (#196).
         created_by_user_id: { type: string, format: uuid }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -2311,7 +2323,17 @@ components:
         values_json:
           type: object
           additionalProperties: true
-        rendered_yaml: { type: string }
+          description: |
+            The values the release was deployed with. Every `Secret[...]` path's
+            value reads as `"<redacted>"` (#196): the cluster's RBAC decides who
+            reads a Secret, and a caller may be allowed to write one and not read
+            it back. Send `"<redacted>"` back on `PUT /v1/releases/{id}` to keep a
+            Secret's value.
+        rendered_yaml:
+          type: string
+          description: |
+            What was applied, with every value under a Secret's `data` and
+            `stringData` reading as `<redacted>` (#196).
         instances_total: { type: integer }
         instances_ready: { type: integer }
         instances:

@@ -90,6 +90,11 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 		return
 	}
 
+	// A release is read back with its Secret values redacted (#196), so a form
+	// filled from that read sends the placeholder for a Secret the caller did
+	// not change. That means "keep it", not "set it to <redacted>".
+	req.Values = restoreRedactedSecrets(req.Values, rel.ValuesJson)
+
 	// Resolve the target version FOR THIS release's template. Going through
 	// template name + version matches CreateRelease's pattern and ensures the
 	// caller can't sneak in a version from a different template.
