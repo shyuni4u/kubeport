@@ -32,7 +32,9 @@ hosts_file_ip() {
   return 0
 }
 
-# is_loopback_ip <ip>
-is_loopback_ip() {
-  [[ "$1" == 127.* || "$1" == ::1 ]]
+# reaches_dex_ip <ip> — whether a hosts entry with this address reaches dex's
+# default publish. Exactly 127.0.0.1: docker-compose.yml binds that address,
+# so neither ::1 nor another 127.x answers there.
+reaches_dex_ip() {
+  [[ "$1" == 127.0.0.1 ]]
 }

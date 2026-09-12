@@ -66,7 +66,7 @@ case "${1:-}" in
     # time out on it (#298). Warn only; the hosts file is the user's to edit.
     if [[ -z "$bind" || "$bind" == "127.0.0.1" ]]; then
       hdi="$(hosts_file_ip host.docker.internal "${HOSTS_FILES[@]}")"
-      if [[ -n "$hdi" ]] && ! is_loopback_ip "$hdi"; then
+      if [[ -n "$hdi" ]] && ! reaches_dex_ip "$hdi"; then
         say "WARNING: the hosts file maps host.docker.internal to $hdi, where dex on 127.0.0.1:5556 does not answer — set that entry to 127.0.0.1 (docs/local-e2e.md §1, #298)"
       fi
     fi
