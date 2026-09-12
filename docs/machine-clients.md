@@ -127,7 +127,8 @@ curl -ks -X POST https://host.docker.internal:5556/token \
 - `dex.clientSecret` 이 필요하다 — 클러스터 Secret 이라 `kubectl` 을 가진 사람만 얻는다.
 - 얻은 신원은 데모 도메인이라 다음에서 **403 `demo-restricted`** 다: 항상 막히는 관리 쓰기(`POST /v1/clusters`,
   `POST /v1/clusters/:name/openapi/refresh`, `POST /v1/teams`, 팀 멤버 추가·삭제, `DELETE /v1/releases/:id?force=true`),
-  설치가 `demo.allowTemplateCreate=true` 를 켜지 않았을 때의 `POST /v1/templates`, 그리고 데모 계정이 만들지 않은
+  설치가 `demo.allowTemplateCreate=true` 를 켜지 않았을 때의 `POST /v1/templates` 와 버전 게시
+  `POST /v1/templates/:name/versions/:v/publish`(템플릿과 무관하게 같은 403 — [#294](https://github.com/shyuni4u/kubeport/issues/294), 초안 작성은 열려 있다), 그리고 데모 계정이 만들지 않은
   릴리스의 읽기·변경.
 - 데모 계정이 만들지 않은 템플릿은 **읽기도 배포도 403 이 아니라 404 `not-found`** 다 — `GET /v1/templates/:name`·
   `/versions`·`/versions/:v`, `POST /v1/templates/:name/render`, `POST /v1/releases` 모두 없는 템플릿·버전과 같은

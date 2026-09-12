@@ -72,8 +72,10 @@ func writeProblem(t *testing.T, body, name string) problem {
 }
 
 // requireWritesLookMissing asserts every write to hidden answers exactly as the
-// same write to a name that does not exist.
-func requireWritesLookMissing(t *testing.T, r http.Handler, hidden string) {
+// same write to a name that does not exist. demoCaller is a demo account on an
+// install that did not opt in to demo authoring: publish refuses it before
+// looking the template up (#294), so there both answers are that 403.
+func requireWritesLookMissing(t *testing.T, r http.Handler, hidden string, demoCaller bool) {
 	t.Helper()
 	missing := "no-such-template-" + randSuffix()
 	for i, wr := range writesOf(hidden) {
@@ -81,7 +83,12 @@ func requireWritesLookMissing(t *testing.T, r http.Handler, hidden string) {
 		hiddenCode, hiddenBody := writeTemplate(t, r, wr)
 		missingCode, missingBody := writeTemplate(t, r, missingWr)
 
-		require.Equal(t, http.StatusNotFound, hiddenCode, "%s %s: %s", wr.method, wr.path, hiddenBody)
+		want := http.StatusNotFound
+		if demoCaller && strings.HasSuffix(wr.path, "/publish") {
+			want = http.StatusForbidden
+			require.Equal(t, "demo-restricted", problemShape(t, hiddenBody).Title, "%s %s", wr.method, wr.path)
+		}
+		require.Equal(t, want, hiddenCode, "%s %s: %s", wr.method, wr.path, hiddenBody)
 		require.Equal(t, missingCode, hiddenCode,
 			"%s %s: a hidden template answered %d, a missing one %d (%s)", wr.method, wr.path, hiddenCode, missingCode, missingBody)
 		require.Equal(t, writeProblem(t, missingBody, missing), writeProblem(t, hiddenBody, hidden),
@@ -95,11 +102,11 @@ func TestTemplateWrites_AcrossTheDemoLineLookExactlyLikeMissing(t *testing.T) {
 
 	t.Run("demo admin writing the operator's template", func(t *testing.T) {
 		operatorTpl := seedPublishedTemplate(t, adminRouter)
-		requireWritesLookMissing(t, demoScopeRouter(t, "demo-admin@"+demoDomain, true), operatorTpl)
+		requireWritesLookMissing(t, demoScopeRouter(t, "demo-admin@"+demoDomain, true), operatorTpl, true)
 	})
 	t.Run("real user writing a demo template", func(t *testing.T) {
 		demoTpl := seedDemoTemplate(t, s)
-		requireWritesLookMissing(t, demoScopeRouter(t, "real-"+randSuffix()+"@example.com", false), demoTpl)
+		requireWritesLookMissing(t, demoScopeRouter(t, "real-"+randSuffix()+"@example.com", false), demoTpl, false)
 	})
 	// Team roles do not carry across the line: an operator who adds a demo
 	// account to one of their teams has not handed the demo visitors that
@@ -123,7 +130,7 @@ func TestTemplateWrites_AcrossTheDemoLineLookExactlyLikeMissing(t *testing.T) {
 			Store:           s,
 			DemoEmailDomain: demoDomain,
 		})
-		requireWritesLookMissing(t, demoEditor, teamTpl)
+		requireWritesLookMissing(t, demoEditor, teamTpl, true)
 	})
 }
 
@@ -134,7 +141,7 @@ func TestTemplateWrites_NeverPublishedLookExactlyLikeMissing(t *testing.T) {
 	adminRouter := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: s})
 	hidden := seedGlobalTemplate(t, adminRouter)
 
-	requireWritesLookMissing(t, newPlainUserRouter(t, s, randSuffix()), hidden)
+	requireWritesLookMissing(t, newPlainUserRouter(t, s, randSuffix()), hidden, false)
 }
 
 // A published template is in everyone's catalog, so saying why a write is

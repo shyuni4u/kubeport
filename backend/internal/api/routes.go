@@ -47,11 +47,13 @@ type Deps struct {
 	Store           *store.Store
 	K8sFactory      K8sClientFactory
 	DemoEmailDomain string // "" = no demo restrictions
-	// DemoAllowTemplateCreate lets demo accounts author new templates. Off by
-	// default: demo accounts carry kubeport-admin so they can show the admin
-	// UX, and template creation is the one admin power whose output outlives
-	// the visit and reaches other people. Turn it on only where showing
-	// authoring is the point (docs/brainstorming-summary.md §14).
+	// DemoAllowTemplateCreate lets demo accounts author new templates and
+	// publish versions. Off by default: demo accounts carry kubeport-admin so
+	// they can show the admin UX, and these are the admin powers whose output
+	// outlives the visit and reaches other people — a published version runs
+	// whatever the visitor wrote against Secrets other visitors deployed
+	// (#294). Turn it on only where showing authoring is the point
+	// (docs/brainstorming-summary.md §14).
 	DemoAllowTemplateCreate bool
 	// HealthPublicCatalog lets the unauthenticated /healthz?verbose=1 report
 	// the catalog size. Off by default — see config.Config for why, and
@@ -209,7 +211,12 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	v.GET("/templates/:name/versions/:v", h.GetTemplateVersion)
 	v.PATCH("/templates/:name/versions/:v", rateLimit(authoring), h.UpdateTemplateVersion)
 	v.DELETE("/templates/:name/versions/:v", h.DeleteTemplateVersion)
-	v.POST("/templates/:name/versions/:v/publish", h.PublishVersion)
+	// Publishing is authoring too (#294). Demo accounts are shared and can read
+	// pod logs in the demo namespace, so a version a visitor publishes can echo
+	// the Secrets other visitors deployed; redacting release reads (#196) does
+	// not stop that. Drafts stay open — they cannot be deployed (#252) — so the
+	// editor tour is unchanged.
+	v.POST("/templates/:name/versions/:v/publish", noDemoAuthoring, h.PublishVersion)
 	v.POST("/templates/:name/versions/:v/deprecate", h.DeprecateVersion)
 	v.POST("/templates/:name/versions/:v/undeprecate", h.UndeprecateVersion)
 	v.GET("/releases", h.ListReleases)

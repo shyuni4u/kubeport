@@ -918,6 +918,10 @@ paths:
       description: |
         Makes this the template's current version. Existing releases stay pinned
         to the version they were deployed from.
+
+        Demo accounts get 403 `demo-restricted` for any template unless the
+        install set demo.allowTemplateCreate (#294) — the same gate as creating a
+        template. Drafts stay open to them.
       parameters:
         - $ref: "#/components/parameters/TemplateName"
         - $ref: "#/components/parameters/VersionNumber"
@@ -1646,8 +1650,8 @@ components:
       description: |
         `title` says who refused: `rbac-denied` is kubeport's own check or the
         cluster's RBAC; `demo-restricted` is the demo gate — a management write
-        demo accounts never get, template creation on an install without
-        demo.allowTemplateCreate, or a read or change of a release that no demo
+        demo accounts never get, template creation or version publishing on an
+        install without demo.allowTemplateCreate, or a read or change of a release that no demo
         account owns. A template on the other side of the demo line is not a
         403: reading, changing or deploying it answers 404 like a missing one
         (#238, #244).
