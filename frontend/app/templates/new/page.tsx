@@ -14,6 +14,9 @@ import { BottomBar } from "@/components/editor/BottomBar";
 import { saveErrorMessage } from "@/components/editor/saveError";
 import { findUnlabelledExposedField, useBeforeUnloadWhenDirty } from "@/components/editor/useDirtyGuard";
 import { YamlEditor } from "@/components/YamlEditor";
+import { useTemplateYamlValidation } from "@/components/editor/useTemplateYamlValidation";
+import { YamlIssueList, useSaveBlockedReason } from "@/components/editor/YamlIssues";
+import { validateTemplateYaml } from "@/lib/yaml-validation";
 import {
   Select,
   SelectContent,
@@ -410,11 +413,19 @@ function YamlModeNew({ dirty, onDirty }: ModeProps) {
     })();
   }, []);
 
-  const canSave = meta.name.trim().length > 0 && !saving;
+  // Errors are what the backend's ValidateSpec would refuse, so save stays off
+  // with the reason beside it; warnings save and are listed (#181).
+  const validation = useTemplateYamlValidation(resourcesYaml, uispecYaml);
+  const saveBlockedReason = useSaveBlockedReason();
+  const blockedReason = saveBlockedReason(validation);
+  const canSave = meta.name.trim().length > 0 && !saving && !blockedReason;
   const touch = () => onDirty(true);
 
   async function saveDraft() {
     setErr(null);
+    // The list above is debounced; check the text actually being sent.
+    const now = saveBlockedReason(validateTemplateYaml(resourcesYaml, uispecYaml));
+    if (now) { setErr(now); return; }
     setSaving(true);
     try {
       const displayName = meta.display_name?.trim() || meta.name;
@@ -463,9 +474,10 @@ function YamlModeNew({ dirty, onDirty }: ModeProps) {
         </Select>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <YamlEditor label="resources.yaml" value={resourcesYaml} onChange={(v) => { setResourcesYaml(v); touch(); }} />
-        <YamlEditor label="ui-spec.yaml" value={uispecYaml} onChange={(v) => { setUispecYaml(v); touch(); }} />
+        <YamlEditor label="resources.yaml" value={resourcesYaml} issues={validation.resources} onChange={(v) => { setResourcesYaml(v); touch(); }} />
+        <YamlEditor label="ui-spec.yaml" value={uispecYaml} issues={validation.uiSpec} onChange={(v) => { setUispecYaml(v); touch(); }} />
       </div>
+      <YamlIssueList validation={validation} />
       <details className="rounded-md border bg-card p-3" open>
         <summary className="cursor-pointer text-sm font-semibold">{t("userFormPreview")}</summary>
         <div className="mt-3">
@@ -477,6 +489,7 @@ function YamlModeNew({ dirty, onDirty }: ModeProps) {
         canSave={canSave}
         dirty={dirty}
         canPublish={false}
+        blockedReason={blockedReason}
         saving={saving}
         onSave={saveDraft}
         onPublish={() => {}}

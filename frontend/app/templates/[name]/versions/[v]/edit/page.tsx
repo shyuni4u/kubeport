@@ -13,6 +13,9 @@ import { BottomBar, UnsavedChangesStatus } from "@/components/editor/BottomBar";
 import { saveErrorMessage } from "@/components/editor/saveError";
 import { findUnlabelledExposedField, useBeforeUnloadWhenDirty } from "@/components/editor/useDirtyGuard";
 import { YamlEditor } from "@/components/YamlEditor";
+import { useTemplateYamlValidation } from "@/components/editor/useTemplateYamlValidation";
+import { YamlIssueList, useSaveBlockedReason } from "@/components/editor/YamlIssues";
+import { validateTemplateYaml } from "@/lib/yaml-validation";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { findKindSchema, OpenAPISchemaDoc, SchemaNode } from "@/lib/openapi";
@@ -489,10 +492,18 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
   // rejects the shape and blocks authoring_mode flips on drafts anyway. Gate
   // save to preview-only in that case, mirroring UIModeEdit's isYamlDraft.
   const isUiDraft = isDraft && sourceAuthoringMode === "ui";
-  const canSave = loaded && !saving && !isUiDraft;
+  // Errors are what the backend's ValidateSpec would refuse, so save stays off
+  // with the reason beside it; warnings save and are listed (#181).
+  const validation = useTemplateYamlValidation(resourcesYaml, uispecYaml);
+  const saveBlockedReason = useSaveBlockedReason();
+  const blockedReason = saveBlockedReason(validation);
+  const canSave = loaded && !saving && !isUiDraft && !blockedReason;
 
   async function save() {
     setErr(null);
+    // The list below is debounced; check the text actually being sent.
+    const now = saveBlockedReason(validateTemplateYaml(resourcesYaml, uispecYaml));
+    if (now) { setErr(now); return; }
     setSaving(true);
     try {
       const req = isDraft
@@ -535,9 +546,10 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
         </div>
       )}
       <div className="grid grid-cols-2 gap-3">
-        <YamlEditor label="resources.yaml" value={resourcesYaml} onChange={(x) => { setResourcesYaml(x); touch(); }} />
-        <YamlEditor label="ui-spec.yaml" value={uispecYaml} onChange={(x) => { setUispecYaml(x); touch(); }} />
+        <YamlEditor label="resources.yaml" value={resourcesYaml} issues={validation.resources} onChange={(x) => { setResourcesYaml(x); touch(); }} />
+        <YamlEditor label="ui-spec.yaml" value={uispecYaml} issues={validation.uiSpec} onChange={(x) => { setUispecYaml(x); touch(); }} />
       </div>
+      <YamlIssueList validation={validation} />
       <details className="rounded-md border bg-card p-3" open>
         <summary className="cursor-pointer text-sm font-semibold">{t("userFormPreview")}</summary>
         <div className="mt-3">
@@ -555,7 +567,15 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
       <div className="flex flex-wrap items-center justify-end gap-3">
         {/* The screen #146 was observed on: say edits are pending before the leave prompt does. */}
         <UnsavedChangesStatus dirty={dirty} />
-        <Button onClick={save} disabled={!canSave}>
+        {/* Same as BottomBar: a save that is off for a reason says so (#181). */}
+        {blockedReason && (
+          <span id="yaml-save-blocked" className="text-xs text-destructive">{blockedReason}</span>
+        )}
+        <Button
+          onClick={save}
+          disabled={!canSave}
+          aria-describedby={blockedReason ? "yaml-save-blocked" : undefined}
+        >
           {saving ? t("saving") : isDraft ? t("save") : t("saveAsNew")}
         </Button>
       </div>
