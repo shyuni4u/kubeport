@@ -73,8 +73,8 @@ func writeProblem(t *testing.T, body, name string) problem {
 
 // requireWritesLookMissing asserts every write to hidden answers exactly as the
 // same write to a name that does not exist. demoCaller is a demo account on an
-// install that did not opt in to demo authoring: publish refuses it before
-// looking the template up (#294), so there both answers are that 403.
+// install that did not opt in to demo authoring: publish and undeprecate refuse
+// it before looking the template up (#294), so there both answers are that 403.
 func requireWritesLookMissing(t *testing.T, r http.Handler, hidden string, demoCaller bool) {
 	t.Helper()
 	missing := "no-such-template-" + randSuffix()
@@ -84,7 +84,7 @@ func requireWritesLookMissing(t *testing.T, r http.Handler, hidden string, demoC
 		missingCode, missingBody := writeTemplate(t, r, missingWr)
 
 		want := http.StatusNotFound
-		if demoCaller && strings.HasSuffix(wr.path, "/publish") {
+		if demoCaller && (strings.HasSuffix(wr.path, "/publish") || strings.HasSuffix(wr.path, "/undeprecate")) {
 			want = http.StatusForbidden
 			require.Equal(t, "demo-restricted", problemShape(t, hiddenBody).Title, "%s %s", wr.method, wr.path)
 		}

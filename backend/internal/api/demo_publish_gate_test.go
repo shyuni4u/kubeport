@@ -49,6 +49,34 @@ func TestDemoAdmin_PublishRefusalDoesNotDependOnTheTemplate(t *testing.T) {
 	require.Equal(t, "demo-restricted", problemShape(t, w.Body.String()).Title)
 }
 
+// Security review: undeprecate makes a version published again, and any
+// published version can be deployed. It is gated like publish; deprecating
+// only removes a version from the catalog and stays open.
+func TestDemoAdmin_CannotUndeprecateByDefault(t *testing.T) {
+	s := testStore(t)
+	optedIn := newDemoAdminRouterWithTemplateCreate(t, s)
+	tpl := "demo-authored-" + randSuffix()
+	w := do(t, optedIn, http.MethodPost, "/v1/templates", bytes.NewReader(createTemplateBody(tpl)))
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	publishV1(t, optedIn, tpl)
+
+	gated := newDemoAdminRouter(t, s, &fakeK8sApplier{})
+	w = do(t, gated, http.MethodPost, "/v1/templates/"+tpl+"/versions/1/deprecate", nil)
+	require.Equal(t, http.StatusOK, w.Code, "deprecating stays open: %s", w.Body.String())
+
+	w = do(t, gated, http.MethodPost, "/v1/templates/"+tpl+"/versions/1/undeprecate", nil)
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	require.Equal(t, "demo-restricted", problemShape(t, w.Body.String()).Title)
+
+	w = do(t, gated, http.MethodGet, "/v1/templates/"+tpl+"/versions/1", nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var v struct {
+		Status string `json:"status"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &v))
+	require.Equal(t, "deprecated", v.Status, "the refused undeprecate must not have happened")
+}
+
 // Drafts stay open to the demo: adding a version to a demo template is the
 // editor tour.
 func TestDemoAdmin_CanStillAddADraftVersion(t *testing.T) {

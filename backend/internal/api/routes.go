@@ -217,8 +217,11 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	// not stop that. Drafts stay open — they cannot be deployed (#252) — so the
 	// editor tour is unchanged.
 	v.POST("/templates/:name/versions/:v/publish", noDemoAuthoring, h.PublishVersion)
+	// Deprecating only takes a version out of the catalog, so it stays open.
+	// Undeprecating puts one back — any published version can be deployed — so
+	// it is publishing by another name and takes the same gate (#294, #306).
 	v.POST("/templates/:name/versions/:v/deprecate", h.DeprecateVersion)
-	v.POST("/templates/:name/versions/:v/undeprecate", h.UndeprecateVersion)
+	v.POST("/templates/:name/versions/:v/undeprecate", noDemoAuthoring, h.UndeprecateVersion)
 	v.GET("/releases", h.ListReleases)
 	// Release writes are budgeted inside the handlers — see Handlers.releaseWrite.
 	v.POST("/releases", h.CreateRelease)
