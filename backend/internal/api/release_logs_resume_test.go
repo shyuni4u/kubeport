@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -67,6 +68,36 @@ func resumeReleaseAt(t *testing.T, applier *fakeK8sApplier, query string, tweak 
 	return rec.Body.String()
 }
 
+// refusedAt opens the log stream with the given query and returns the recorder,
+// for the cases that expect the request to be turned away.
+func refusedAt(t *testing.T, applier *fakeK8sApplier, query string) *streamRecorder {
+	t.Helper()
+	s := testStore(t)
+	r := api.NewRouter(config.Config{}, api.Deps{
+		Verifier: adminVerifier{}, Store: s,
+		K8sFactory: &fakeK8sFactory{applier: applier},
+	})
+	cluster := seedCluster(t, r)
+	tpl := seedPublishedTemplate(t, r)
+	body, _ := json.Marshal(map[string]any{
+		"template": tpl, "version": 1,
+		"cluster": cluster, "namespace": "default",
+		"name":   "logs-" + randSuffix(),
+		"values": map[string]any{"Deployment[web].spec.replicas": 1},
+	})
+	w := do(t, r, http.MethodPost, "/v1/releases", bytes.NewReader(body))
+	require.Equal(t, http.StatusCreated, w.Code)
+	var created map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/v1/releases/"+created["id"].(string)+"/logs"+query, nil)
+	req.Header.Set("Authorization", "Bearer x")
+	rec := newStreamRecorder()
+	r.ServeHTTP(rec, req)
+	return rec
+}
+
 // Every log frame carries its emission time as the SSE id. Without it the
 // browser has nothing to send back and the resume below cannot start.
 func TestStreamReleaseLogs_LogFramesCarryTheirTimeAsId(t *testing.T) {
@@ -112,35 +143,14 @@ func TestStreamReleaseLogs_IdsAreFixedWidthUTC(t *testing.T) {
 	require.Contains(t, body, "id:2026-09-09T07:36:36.100000000Z\n")
 }
 
-// `?since=` on an `instance=all` stream is refused rather than ignored. The
-// caller wrote it; a 200 with the whole log would look like a working resume
-// while every reconnect duplicated. Tightening this later would break whoever
-// had come to rely on the silence, so it is strict from the first release.
-func TestStreamReleaseLogs_RefusesSinceWithoutANamedInstance(t *testing.T) {
+// A plain instant in `?since=` on an `instance=all` stream is refused rather
+// than ignored. The caller wrote it, and one instant applied to every pod is
+// exactly the resume that loses lines (#172) — while a 200 with the whole log
+// would look like a working resume as every reconnect duplicated.
+func TestStreamReleaseLogs_RefusesAPlainSinceOnAll(t *testing.T) {
 	applier := &fakeK8sApplier{instances: []k8s.Instance{{Name: "web-1"}}}
-	s := testStore(t)
-	r := api.NewRouter(config.Config{}, api.Deps{
-		Verifier: adminVerifier{}, Store: s,
-		K8sFactory: &fakeK8sFactory{applier: applier},
-	})
-	cluster := seedCluster(t, r)
-	tpl := seedPublishedTemplate(t, r)
-	body, _ := json.Marshal(map[string]any{
-		"template": tpl, "version": 1,
-		"cluster": cluster, "namespace": "default",
-		"name":   "logs-" + randSuffix(),
-		"values": map[string]any{"Deployment[web].spec.replicas": 1},
-	})
-	w := do(t, r, http.MethodPost, "/v1/releases", bytes.NewReader(body))
-	require.Equal(t, http.StatusCreated, w.Code)
-	var created map[string]any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
 
-	req := httptest.NewRequest(http.MethodGet,
-		"/v1/releases/"+created["id"].(string)+"/logs?since=2026-09-09T07:00:00Z", nil)
-	req.Header.Set("Authorization", "Bearer x")
-	rec := newStreamRecorder()
-	r.ServeHTTP(rec, req)
+	rec := refusedAt(t, applier, "?since=2026-09-09T07:00:00Z")
 
 	require.Equal(t, http.StatusBadRequest, rec.Code, "body: %s", rec.Body.String())
 	var p map[string]any
@@ -218,7 +228,7 @@ func TestStreamReleaseLogs_KeepsUnstampedLinesWhenResuming(t *testing.T) {
 		logLineAts: []time.Time{{}},
 	}
 
-	body := resumeRelease(t, applier, func(r *http.Request) {
+	body := resumeReleaseAt(t, applier, "?instance=web-1", func(r *http.Request) {
 		r.Header.Set("Last-Event-ID", resume.Format(time.RFC3339Nano))
 	})
 
@@ -230,29 +240,8 @@ func TestStreamReleaseLogs_KeepsUnstampedLinesWhenResuming(t *testing.T) {
 // 400 for this endpoint and openapi_spec_test.go pins the pairing.
 func TestStreamReleaseLogs_RejectsAnUnparseableResumePoint(t *testing.T) {
 	applier := &fakeK8sApplier{instances: []k8s.Instance{{Name: "web-1"}}}
-	s := testStore(t)
-	r := api.NewRouter(config.Config{}, api.Deps{
-		Verifier: adminVerifier{}, Store: s,
-		K8sFactory: &fakeK8sFactory{applier: applier},
-	})
-	cluster := seedCluster(t, r)
-	tpl := seedPublishedTemplate(t, r)
-	body, _ := json.Marshal(map[string]any{
-		"template": tpl, "version": 1,
-		"cluster": cluster, "namespace": "default",
-		"name":   "logs-" + randSuffix(),
-		"values": map[string]any{"Deployment[web].spec.replicas": 1},
-	})
-	w := do(t, r, http.MethodPost, "/v1/releases", bytes.NewReader(body))
-	require.Equal(t, http.StatusCreated, w.Code)
-	var created map[string]any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
 
-	req := httptest.NewRequest(http.MethodGet,
-		"/v1/releases/"+created["id"].(string)+"/logs?since=not-a-time", nil)
-	req.Header.Set("Authorization", "Bearer x")
-	rec := newStreamRecorder()
-	r.ServeHTTP(rec, req)
+	rec := refusedAt(t, applier, "?since=not-a-time")
 
 	require.Equal(t, http.StatusBadRequest, rec.Code, "body: %s", rec.Body.String())
 	var p map[string]any
@@ -277,32 +266,149 @@ func TestStreamReleaseLogs_NoResumePointStillSendsEverything(t *testing.T) {
 	require.Contains(t, body, "from the very beginning")
 }
 
-// A stream following several pods emits no ids at all.
-//
-// StreamPodLogs fans the pods into one channel with no ordering, so the last id
-// a client saw is whichever pod wrote last — not a watermark across all of
-// them. Handing that back would resume every pod from it, and a pod that was
-// still replaying older history would have the rest of it skipped: silently,
-// permanently, and invisibly to the reader. No id means the client keeps
-// replaying, which is what it did before and costs only bandwidth (#107, #172).
-func TestStreamReleaseLogs_NoResumeIdsWhenFollowingSeveralPods(t *testing.T) {
+// cursor writes an `instance=all` resume point in the contract's shape: pod@time
+// pairs sorted by pod, each time UTC with nine fractional digits. Spelled out
+// here rather than calling the handler's formatter, for the reason idLayout is.
+func cursor(pairs ...any) string {
+	var items []string
+	for i := 0; i < len(pairs); i += 2 {
+		items = append(items, pairs[i].(string)+"@"+pairs[i+1].(time.Time).UTC().Format(idLayout))
+	}
+	return strings.Join(items, ",")
+}
+
+// #172 — an `instance=all` stream carries a cursor as its id: every pod's
+// position, not only the pod that wrote the line. The browser keeps just the
+// last id, so that one id has to say how far each pod got; a lone instant, the
+// newest line's, would stand for whichever pod wrote last.
+func TestStreamReleaseLogs_AllCarriesAPerPodCursor(t *testing.T) {
+	web1 := time.Date(2026, 9, 9, 7, 36, 36, 0, time.UTC)
+	web2 := time.Date(2026, 9, 9, 7, 35, 0, 900_000_000, time.UTC)
 	applier := &fakeK8sApplier{
-		instances: []k8s.Instance{{Name: "web-1"}, {Name: "web-2"}},
-		logLines:  []string{"a line"},
-		logLineAt: time.Date(2026, 9, 9, 7, 36, 36, 0, time.UTC),
+		instances:   []k8s.Instance{{Name: "web-1"}, {Name: "web-2"}},
+		logLines:    []string{"from web-1", "from web-2"},
+		logLinePods: []string{"web-1", "web-2"},
+		logLineAts:  []time.Time{web1, web2},
 	}
 
 	body := resumeRelease(t, applier, func(*http.Request) {})
 
-	require.Contains(t, body, "a line")
-	require.NotContains(t, body, "id:",
-		"a multi-pod stream handed out a resume point one pod's clock cannot stand for")
+	require.Contains(t, body, "id:"+cursor("web-1", web1)+"\n")
+	require.Contains(t, body, "id:"+cursor("web-1", web1, "web-2", web2)+"\n",
+		"the second frame's id did not carry both pods — got: %s", body)
 }
 
-// ...and it ignores one if a client sends it anyway. The header survives across
-// a reconnect on the same EventSource, so a reader who switches from a single
-// instance to "all" carries the old id with them.
-func TestStreamReleaseLogs_IgnoresAResumePointForSeveralPods(t *testing.T) {
+// ...and hands it back per pod. Each pod picks up from its own position: web-2
+// had only reached 07:30 when web-1 was at 07:40, and resuming both from 07:40
+// would skip web-2's ten minutes for good.
+func TestStreamReleaseLogs_AllResumesEachPodFromItsOwnPosition(t *testing.T) {
+	web1 := time.Date(2026, 9, 9, 7, 40, 0, 0, time.UTC)
+	web2 := time.Date(2026, 9, 9, 7, 30, 0, 0, time.UTC)
+	applier := &fakeK8sApplier{
+		instances: []k8s.Instance{{Name: "web-1"}, {Name: "web-2"}},
+		// A line to send lets the fake stream end; with none it follows forever.
+		logLines:  []string{"after the gap"},
+		logLineAt: web1.Add(time.Minute),
+	}
+
+	resumeRelease(t, applier, func(r *http.Request) {
+		r.Header.Set("Last-Event-ID", cursor("web-1", web1, "web-2", web2))
+	})
+
+	require.Len(t, applier.sinceByPod, 2, "want a start point per pod, got %v", applier.sinceByPod)
+	require.True(t, applier.sinceByPod["web-1"].Equal(web1), "web-1: %s", applier.sinceByPod["web-1"])
+	require.True(t, applier.sinceByPod["web-2"].Equal(web2), "web-2: %s", applier.sinceByPod["web-2"])
+}
+
+// The overlap trim is per pod as well. A single instant would have dropped
+// web-2's 07:35 line — later than web-2's own position, earlier than web-1's.
+func TestStreamReleaseLogs_AllTrimsEachPodAgainstItsOwnPosition(t *testing.T) {
+	web1 := time.Date(2026, 9, 9, 7, 40, 0, 500_000_000, time.UTC)
+	web2 := time.Date(2026, 9, 9, 7, 30, 0, 0, time.UTC)
+	applier := &fakeK8sApplier{
+		instances:   []k8s.Instance{{Name: "web-1"}, {Name: "web-2"}},
+		logLines:    []string{"web-1 already had this", "web-2 had not reached this", "web-1 genuinely new"},
+		logLinePods: []string{"web-1", "web-2", "web-1"},
+		logLineAts: []time.Time{
+			web1.Add(-100 * time.Millisecond),
+			time.Date(2026, 9, 9, 7, 35, 0, 0, time.UTC),
+			web1.Add(100 * time.Millisecond),
+		},
+	}
+
+	body := resumeRelease(t, applier, func(r *http.Request) {
+		r.Header.Set("Last-Event-ID", cursor("web-1", web1, "web-2", web2))
+	})
+
+	require.NotContains(t, body, "web-1 already had this")
+	require.Contains(t, body, "web-2 had not reached this",
+		"a slower pod's line was trimmed against another pod's position")
+	require.Contains(t, body, "web-1 genuinely new")
+}
+
+// A pod that has not written since the reconnect keeps its place in the next
+// id. Otherwise a second drop before it writes would lose its position and
+// replay it from the start.
+func TestStreamReleaseLogs_AllKeepsTheCursorOfAPodThatHasNotWrittenYet(t *testing.T) {
+	web1 := time.Date(2026, 9, 9, 7, 40, 0, 0, time.UTC)
+	web2 := time.Date(2026, 9, 9, 7, 30, 0, 0, time.UTC)
+	later := web1.Add(time.Minute)
+	applier := &fakeK8sApplier{
+		instances:   []k8s.Instance{{Name: "web-1"}, {Name: "web-2"}},
+		logLines:    []string{"only web-1 writes"},
+		logLinePods: []string{"web-1"},
+		logLineAts:  []time.Time{later},
+	}
+
+	body := resumeRelease(t, applier, func(r *http.Request) {
+		r.Header.Set("Last-Event-ID", cursor("web-1", web1, "web-2", web2))
+	})
+
+	require.Contains(t, body, "id:"+cursor("web-1", later, "web-2", web2)+"\n")
+}
+
+// The set `all` covers is not fixed. A pod the cursor does not name — one that
+// started since — has no position, so it is sent from the beginning.
+func TestStreamReleaseLogs_AllSendsANewPodFromTheBeginning(t *testing.T) {
+	web1 := time.Date(2026, 9, 9, 7, 40, 0, 0, time.UTC)
+	applier := &fakeK8sApplier{
+		instances: []k8s.Instance{{Name: "web-1"}, {Name: "web-3"}},
+		logLines:  []string{"after the gap"},
+		logLineAt: web1.Add(time.Minute),
+	}
+
+	resumeRelease(t, applier, func(r *http.Request) {
+		r.Header.Set("Last-Event-ID", cursor("web-1", web1))
+	})
+
+	require.Contains(t, applier.sinceByPod, "web-1")
+	require.NotContains(t, applier.sinceByPod, "web-3", "a pod the cursor never saw was given a start point")
+}
+
+// ...and a position for a pod that is gone is dropped, not handed to the pod
+// that replaced it. A one-replica release rolls over: the cursor holds pod A's
+// position, B now stands where A did, and applying A's to B would drop
+// whatever B wrote before that instant.
+func TestStreamReleaseLogs_AllDropsTheCursorOfAPodThatHasGone(t *testing.T) {
+	applier := &fakeK8sApplier{
+		instances: []k8s.Instance{{Name: "web-after-rollout"}},
+		logLines:  []string{"the replacement pod's startup"},
+		logLineAt: time.Date(2026, 9, 9, 7, 0, 0, 0, time.UTC),
+	}
+
+	body := resumeRelease(t, applier, func(r *http.Request) {
+		r.Header.Set("Last-Event-ID", cursor("web-before-rollout", time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)))
+	})
+
+	require.Nil(t, applier.sinceSeen, "a departed pod's position was applied to its replacement")
+	require.Contains(t, body, "the replacement pod's startup")
+}
+
+// A plain instant in the header on an `all` stream is ignored, not refused. The
+// browser keeps Last-Event-ID across a switch from one instance to `all` on the
+// same EventSource, so this is what such a switch sends — and one instant is
+// the resume `all` must not do.
+func TestStreamReleaseLogs_AllIgnoresAPlainInstantInTheHeader(t *testing.T) {
 	applier := &fakeK8sApplier{
 		instances: []k8s.Instance{{Name: "web-1"}, {Name: "web-2"}},
 		logLines:  []string{"older history"},
@@ -313,8 +419,150 @@ func TestStreamReleaseLogs_IgnoresAResumePointForSeveralPods(t *testing.T) {
 		r.Header.Set("Last-Event-ID", "2026-09-09T12:00:00Z")
 	})
 
-	require.Nil(t, applier.sinceSeen, "asked the cluster for a window it cannot honour per-pod")
+	require.Nil(t, applier.sinceSeen, "asked the cluster for a window one instant cannot honour per pod")
 	require.Contains(t, body, "older history", "history a slower pod had not reached was dropped")
+	require.Contains(t, body, "event:replay", "starting over despite a resume point went unannounced")
+}
+
+// A caller with no EventSource hands the same cursor back as `?since=`.
+func TestStreamReleaseLogs_AllResumesFromACursorInSince(t *testing.T) {
+	web1 := time.Date(2026, 9, 9, 7, 40, 0, 0, time.UTC)
+	applier := &fakeK8sApplier{
+		instances: []k8s.Instance{{Name: "web-1"}, {Name: "web-2"}},
+		logLines:  []string{"after the gap"},
+		logLineAt: web1.Add(time.Minute),
+	}
+
+	resumeRelease(t, applier, func(r *http.Request) {
+		r.URL.RawQuery = "since=" + cursor("web-1", web1)
+	})
+
+	require.Len(t, applier.sinceByPod, 1)
+	require.True(t, applier.sinceByPod["web-1"].Equal(web1))
+}
+
+// The cursor rides on every frame, so it is bounded. Past the bound an `all`
+// stream hands out no cursor and does not act on one either, since the next
+// reconnect would bring back an id it no longer hands out. It says it is
+// starting over, so a client that kept its lines can drop them first (#172).
+func TestStreamReleaseLogs_AllPastTheCursorBoundReplaysAndSaysSo(t *testing.T) {
+	var instances []k8s.Instance
+	for i := 0; i < 9; i++ {
+		instances = append(instances, k8s.Instance{Name: fmt.Sprintf("web-%d", i)})
+	}
+	applier := &fakeK8sApplier{
+		instances: instances,
+		logLines:  []string{"a line"},
+		logLineAt: time.Date(2026, 9, 9, 7, 36, 36, 0, time.UTC),
+	}
+
+	body := resumeRelease(t, applier, func(r *http.Request) {
+		r.Header.Set("Last-Event-ID", cursor("web-0", time.Date(2026, 9, 9, 7, 0, 0, 0, time.UTC)))
+	})
+
+	require.Nil(t, applier.sinceSeen, "a stream past the cursor bound resumed from a cursor")
+	require.Contains(t, body, "a line")
+	require.Contains(t, body, "event:replay", "a stream that ignored the cursor it was sent did not say so")
+	require.Contains(t, body, "id:-\n", "a stream past the cursor bound left the browser's old cursor standing")
+	require.NotContains(t, body, "@2026", "a stream past the cursor bound handed out a cursor")
+}
+
+// ...and coming back under the bound does not resume from the cursor the
+// browser kept from before it went over: the placeholder replaced it, so the
+// stream starts over and says so, instead of resending the lines since that old
+// cursor into a pane the replay already filled.
+func TestStreamReleaseLogs_AllBackUnderTheBoundStartsOverFromThePlaceholder(t *testing.T) {
+	at := time.Date(2026, 9, 9, 7, 36, 36, 0, time.UTC)
+	applier := &fakeK8sApplier{
+		instances:   []k8s.Instance{{Name: "web-1"}, {Name: "web-2"}},
+		logLines:    []string{"from the top"},
+		logLinePods: []string{"web-1"},
+		logLineAt:   at,
+	}
+
+	body := resumeRelease(t, applier, func(r *http.Request) {
+		r.Header.Set("Last-Event-ID", "-")
+	})
+
+	require.Nil(t, applier.sinceSeen)
+	require.Contains(t, body, "event:replay")
+	require.Contains(t, body, "id:"+cursor("web-1", at)+"\n", "back under the bound, the cursor did not return")
+}
+
+// The `replay` frame carries the placeholder id itself. It empties the pane, so
+// the resume point the browser still holds must go at the same moment: a drop
+// before the first stamped line would otherwise send the old cursor back, and
+// once the release is under the bound again that cursor would be applied —
+// resuming past lines the emptied pane no longer has.
+func TestStreamReleaseLogs_TheReplayFrameReplacesTheBrowsersResumePoint(t *testing.T) {
+	var instances []k8s.Instance
+	for i := 0; i < maxPodsInTest; i++ {
+		instances = append(instances, k8s.Instance{Name: fmt.Sprintf("web-%d", i)})
+	}
+	applier := &fakeK8sApplier{instances: instances, logLines: []string{"unstamped"}, logLineAts: []time.Time{{}}}
+
+	body := resumeRelease(t, applier, func(r *http.Request) {
+		r.Header.Set("Last-Event-ID", cursor("web-0", time.Date(2026, 9, 9, 7, 0, 0, 0, time.UTC)))
+	})
+
+	require.Contains(t, body, "id:-\nevent:replay\n", "the replay frame left the browser's old cursor standing — got: %s", body)
+}
+
+// maxPodsInTest is one past the cursor's pod bound, which the contract fixes
+// at 8.
+const maxPodsInTest = 9
+
+// `-` is an id the stream hands out, so a caller sending it back as `?since=`
+// — as the docs say to do with the last id — gets a fresh start with a
+// `replay` frame, not a 400, on either view.
+func TestStreamReleaseLogs_ThePlaceholderIdIsAcceptedAsSince(t *testing.T) {
+	at := time.Date(2026, 9, 9, 7, 36, 36, 0, time.UTC)
+	for name, query := range map[string]string{
+		"all":            "?since=-",
+		"named instance": "?instance=web-1&since=-",
+	} {
+		t.Run(name, func(t *testing.T) {
+			applier := &fakeK8sApplier{
+				instances: []k8s.Instance{{Name: "web-1"}},
+				logLines:  []string{"from the top"},
+				logLineAt: at,
+			}
+
+			body := resumeReleaseAt(t, applier, query, func(r *http.Request) {
+				// An explicit since wins over the header, placeholder or not.
+				r.Header.Set("Last-Event-ID", cursor("web-1", at.Add(time.Hour)))
+			})
+
+			require.Nil(t, applier.sinceSeen)
+			require.Contains(t, body, "event:replay")
+			require.Contains(t, body, "from the top")
+		})
+	}
+}
+
+// `replay` is only for a resume point that was sent and not applied. A first
+// open and a resume that worked say nothing, or a client would throw away the
+// very lines the resume kept.
+func TestStreamReleaseLogs_NoReplayFrameWhenNothingIsIgnored(t *testing.T) {
+	at := time.Date(2026, 9, 9, 7, 40, 0, 0, time.UTC)
+	for name, tweak := range map[string]func(*http.Request){
+		"first open": func(*http.Request) {},
+		"applied cursor": func(r *http.Request) {
+			r.Header.Set("Last-Event-ID", cursor("web-1", at))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			applier := &fakeK8sApplier{
+				instances: []k8s.Instance{{Name: "web-1"}},
+				logLines:  []string{"x"},
+				logLineAt: at.Add(time.Minute),
+			}
+
+			body := resumeRelease(t, applier, tweak)
+
+			require.NotContains(t, body, "event:replay")
+		})
+	}
 }
 
 // An unstamped line must not advance the cursor. `at` falls back to now so the
@@ -336,33 +584,7 @@ func TestStreamReleaseLogs_AnUnstampedLineDoesNotAdvanceTheResumePoint(t *testin
 		"the unstamped line carried an id, which would move the cursor to now — got: %s", body)
 }
 
-// `all` matching a single pod must still not resume.
-//
-// A one-replica release rolls over: the client was following pod A through
-// `instance=all`, A goes away, B takes its place. The reconnect matches one pod
-// either time, so a count-based gate stays on — and hands B the cursor A had
-// reached, dropping whatever B wrote before that instant. Which pods `all`
-// covers is not fixed, so nothing derived from one of them can be carried
-// across a reconnect (#172).
-func TestStreamReleaseLogs_AllDoesNotResumeEvenWithOnePod(t *testing.T) {
-	applier := &fakeK8sApplier{
-		instances: []k8s.Instance{{Name: "web-after-rollout"}},
-		logLines:  []string{"the replacement pod's startup"},
-		logLineAt: time.Date(2026, 9, 9, 7, 0, 0, 0, time.UTC),
-	}
-
-	body := resumeRelease(t, applier, func(r *http.Request) {
-		// The cursor the client reached on the pod that is now gone.
-		r.Header.Set("Last-Event-ID", "2026-09-09T12:00:00Z")
-	})
-
-	require.Nil(t, applier.sinceSeen,
-		"a cursor from one pod was applied to the pod that replaced it")
-	require.Contains(t, body, "the replacement pod's startup")
-	require.NotContains(t, body, "id:", "an `all` stream handed out a resume point")
-}
-
-// ...and naming the instance is what turns it on. The name is in the URL, so it
+// Naming an instance resumes from one instant. The name is in the URL, so it
 // means the same pod on every reconnect — and if that pod is gone the request
 // is a 404, not a different pod inheriting its cursor.
 func TestStreamReleaseLogs_NamingAnInstanceResumes(t *testing.T) {
@@ -387,9 +609,9 @@ func TestStreamReleaseLogs_NamingAnInstanceResumes(t *testing.T) {
 // Nobody typed that value. The browser attaches it on every automatic
 // reconnect and nothing on the page can clear it, so a 400 here would repeat
 // for as long as the tab stays open — and a non-2xx makes EventSource give up,
-// leaving a dead log pane the reader cannot revive without reloading. It is
-// also going to happen for real: the day the id format changes (#172), tabs
-// opened before the deploy carry the old shape into the new server.
+// leaving a dead log pane the reader cannot revive without reloading. It does
+// happen for real: a reader who switches from `all` to one instance carries an
+// `all` cursor (#172) into a stream that takes a single instant.
 func TestStreamReleaseLogs_AnUnreadableLastEventIDStartsOver(t *testing.T) {
 	applier := &fakeK8sApplier{
 		instances: []k8s.Instance{{Name: "web-1"}},
@@ -403,6 +625,8 @@ func TestStreamReleaseLogs_AnUnreadableLastEventIDStartsOver(t *testing.T) {
 
 	require.Nil(t, applier.sinceSeen, "an unreadable header was turned into a window")
 	require.Contains(t, body, "from the top")
+	require.Contains(t, body, "event:replay",
+		"the stream started over without saying so, and the pane kept what it already had")
 }
 
 // ...while the same garbage in `?since=` is still refused. That one the caller
@@ -434,6 +658,15 @@ func TestStreamReleaseLogs_AnUnreadableSinceIsStillRefused(t *testing.T) {
 	req.Header.Set("Last-Event-ID", "2026-09-09T07:00:00Z")
 	rec := newStreamRecorder()
 	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code, "body: %s", rec.Body.String())
+}
+
+// ...and so is anything in `?since=` on `all` that is not a cursor.
+func TestStreamReleaseLogs_AnUnreadableCursorInSinceIsRefused(t *testing.T) {
+	applier := &fakeK8sApplier{instances: []k8s.Instance{{Name: "web-1"}}}
+
+	rec := refusedAt(t, applier, "?since=web-1@yesterday")
 
 	require.Equal(t, http.StatusBadRequest, rec.Code, "body: %s", rec.Body.String())
 }

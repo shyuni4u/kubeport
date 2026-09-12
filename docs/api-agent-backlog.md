@@ -50,7 +50,7 @@
 
 - `backend/api/openapi.yaml` 의 `ErrorKind` enum 과 실제 응답의 일치
 - `docs/machine-clients.md` 가 가르치는 계약과 실제 동작의 괴리
-- SSE 프레임 스키마 (`log` / `ping` / `error` / `end`)
+- SSE 프레임 스키마 (`log` / `ping` / `error` / `end` / `replay`)
 
 이 손실이 가상이 아니라는 근거: **#82("SSE 인스트림 에러가 다른 스키마 + 에러 후 스트림 미종료")가 이
 페르소나에서 나왔고**, `backend/internal/api/release_logs.go` 의 `streamErrorKind` 주석이 아직 `since #82` 를

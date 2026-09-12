@@ -56,37 +56,62 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	// to replay the whole container log into a pane it does not clear (#107).
 	// `?since=` is the explicit form for callers with no EventSource keeping
 	// track for them, and wins when both are present.
-	resumeFrom, err := parseResumePoint(c.Query("since"), c.GetHeader("Last-Event-ID"))
-	if err != nil {
-		writeError(c, http.StatusBadRequest, "validation-error",
-			"since must be an RFC3339 timestamp")
-		return
-	}
-	// Resumable only when the request names an instance, never for `all` —
-	// even when `all` currently matches a single pod.
 	//
-	// One instant cannot stand for progress through several pods: they are
-	// merged with no ordering, so the last id belongs to whichever wrote most
-	// recently, and resuming all of them from it would silently skip what a
-	// slower pod had not reached. Nor can it survive the set changing: a
-	// single-replica release that rolls over matches one pod before and one
-	// after, and the departed pod's cursor would be applied to its replacement.
-	// A named instance is in the URL, means the same pod on every reconnect,
-	// and answers 404 if that pod is gone. A per-pod cursor for `all` is #172.
-	resumable := want != "all"
-	// An explicit `?since=` on an `all` stream is refused, not ignored. The
-	// caller wrote it, and answering with the whole log would look exactly like
-	// a working resume while every reconnect duplicated. `Last-Event-ID` stays
-	// ignored below: the browser attaches that on its own and keeps it when the
-	// reader switches from one instance to `all`.
-	if !resumable && c.Query("since") != "" {
-		writeError(c, http.StatusBadRequest, "validation-error",
-			"since requires a named instance; instance=all cannot resume")
-		return
+	// The two views take different resume points, because they follow different
+	// things. A named instance is the same pod on every reconnect — the name is
+	// in the URL, and a pod that is gone answers 404 — so one instant says how
+	// far the caller got. `all` follows a set: pods are merged with no ordering,
+	// so the newest line belongs to whichever wrote last, and the set itself
+	// changes when a release rolls over. One instant applied to every pod would
+	// skip, silently and for good, what a slower pod or a replacement had not
+	// reached. So `all` takes a cursor with a position per pod (#172).
+	var (
+		resumeFrom time.Time            // a named instance's point
+		cursor     map[string]time.Time // `all`'s positions, by pod
+	)
+	if want == "all" {
+		if since := c.Query("since"); since != "" {
+			// Written by the caller, so a value that is not a cursor is refused
+			// rather than answered with the whole log, which would look like a
+			// working resume while every reconnect duplicated. That includes a
+			// plain timestamp: on `all` it is exactly the one-instant resume point
+			// that loses lines.
+			//
+			// noCursorID is the exception: it is an id this stream hands out
+			// (on `replay`, and past the pod bound), so a caller sending it back
+			// is doing as told. It carries no position, so the stream starts
+			// over — and says so.
+			var ok bool
+			if since != noCursorID {
+				if cursor, ok = parseLogCursor(since); !ok {
+					writeError(c, http.StatusBadRequest, "validation-error",
+						"since on instance=all must be a per-pod cursor (pod@RFC3339,...), the id of a log frame")
+					return
+				}
+			}
+		} else {
+			// Nobody wrote this one, so a value that is not a cursor starts the
+			// stream over rather than being refused — see parseResumePoint for
+			// why. A single-instance id is the usual case: the browser keeps the
+			// header when the reader switches from one instance to `all`.
+			cursor, _ = parseLogCursor(c.GetHeader("Last-Event-ID"))
+		}
+	} else {
+		// A `replay` frame's id sent back as `?since=` starts over, like on
+		// `all`; it wins over the header as any explicit `since` does.
+		if c.Query("since") != noCursorID {
+			resumeFrom, err = parseResumePoint(c.Query("since"), c.GetHeader("Last-Event-ID"))
+			if err != nil {
+				writeError(c, http.StatusBadRequest, "validation-error",
+					"since must be an RFC3339 timestamp")
+				return
+			}
+		}
 	}
-	if !resumable {
-		resumeFrom = time.Time{}
-	}
+
+	// Whether the caller handed us a resume point at all, readable or not. A
+	// stream that then starts over anyway says so first — see replay below.
+	presented := c.Query("since") != "" || c.GetHeader("Last-Event-ID") != ""
 
 	// Take a slot for as long as this request lives. The route's rate limiter
 	// priced the open; this bounds how many a caller keeps (#169).
@@ -141,8 +166,8 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	// When the lifetime is up the handler just returns, with no `end` frame.
 	// To the browser that is a dropped connection, so it reconnects — through
 	// the BFF, which refreshes the token, into a handshake that authorizes
-	// again. A named instance resumes from Last-Event-ID; `instance=all`
-	// replays into a cleared pane, the same as after any other drop.
+	// again, and resumes from Last-Event-ID: a named instance from its time,
+	// `all` from each pod's own position (#172).
 	//
 	// It starts here, the moment the slot is taken, and covers pod discovery as
 	// well as the stream: the cluster client has no timeout of its own, and an
@@ -173,6 +198,48 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 		return
 	}
 
+	// Past maxCursorPods an `all` stream neither hands out ids nor acts on a
+	// cursor: the cursor rides on every frame, and a stream that cannot give
+	// one back must not resume from one either, or a reconnect would trust
+	// positions the next id no longer carries.
+	emitIDs := want != "all" || len(pods) <= maxCursorPods
+
+	// Where each pod picks up. Only a pod this stream follows gets an entry: a
+	// cursor position for a pod that has gone is dropped here, rather than
+	// handed to the pod that replaced it, and a pod the cursor does not name —
+	// one that started since — has none, so the cluster sends it from the start.
+	var since map[string]time.Time
+	switch {
+	case want != "all" && !resumeFrom.IsZero():
+		since = map[string]time.Time{pods[0]: resumeFrom}
+	case want == "all" && emitIDs:
+		for _, p := range pods {
+			if at, ok := cursor[p]; ok {
+				if since == nil {
+					since = make(map[string]time.Time, len(pods))
+				}
+				since[p] = at
+			}
+		}
+	}
+	// The positions an `all` stream reports, starting from where each pod picked
+	// up, so a pod that has not written since the reconnect keeps its place in
+	// the next id instead of falling back to the beginning.
+	positions := make(map[string]time.Time, len(since))
+	for p, at := range since {
+		positions[p] = at
+	}
+
+	// A resume point the caller sent but this stream does not apply — an
+	// unreadable Last-Event-ID, or a cursor on an `all` stream past the pod
+	// bound — means everything is sent again from the start. A client that kept
+	// what it had would show it twice, and it cannot tell from the frames: an
+	// SSE event with no id still reports the id before it. So the stream says
+	// so, before anything else.
+	replay := presented &&
+		((want == "all" && (cursor == nil || !emitIDs)) ||
+			(want != "all" && resumeFrom.IsZero()))
+
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	// Not reused after the stream, because of the write deadline below: with no
@@ -195,7 +262,7 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 		_ = http.NewResponseController(c.Writer).SetWriteDeadline(deadline)
 	}
 
-	ch, errCh := cli.StreamLogs(streamCtx, rel.Namespace, pods, resumeFrom)
+	ch, errCh := cli.StreamLogs(streamCtx, rel.Namespace, pods, since)
 	ping := time.NewTicker(15 * time.Second)
 	defer ping.Stop()
 
@@ -203,9 +270,8 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	//
 	// Without this the stream just stopped, and the client could not tell that
 	// from a dropped connection — WHATWG gives EventSource no way to, so the
-	// browser reopened three seconds later, forever. On an `instance=all`
-	// stream, which has no resume point, each reopen replayed the whole
-	// container log. A finished Job's pod was enough (#162).
+	// browser reopened three seconds later, forever, each time asking the
+	// cluster for the logs again. A finished Job's pod was enough (#162).
 	//
 	// The reason is ours, generic, and names nothing about the cluster — same
 	// rule as sseError (#108).
@@ -222,6 +288,16 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 		}
 		c.SSEvent("end", `{"reason":"all pods stopped emitting"}`)
 		return false
+	}
+
+	if replay {
+		// With an id of its own: the frame empties the reader's pane, so the
+		// resume point the browser still holds has to go with it. Otherwise a
+		// drop before the first stamped line would send that old point back —
+		// back under the pod bound it would be applied, and resume past lines
+		// the emptied pane no longer has.
+		c.Render(-1, sse.Event{Event: "replay", Id: noCursorID, Data: "{}"})
+		c.Writer.Flush()
 	}
 
 	c.Stream(func(w io.Writer) bool {
@@ -282,10 +358,11 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 				return end()
 			}
 			// SinceTime is whole seconds, so a resume gets back everything from
-			// the second the caller already had. Trim that overlap here: the
-			// exact instant asked for and the line's own nanoseconds are both
-			// known on this side, and doing it anywhere else would make every
-			// client responsible for deduplicating to be correct.
+			// the second the caller already had. Trim that overlap here, each pod
+			// against its own point: the exact instant asked for and the line's
+			// own nanoseconds are both known on this side, and doing it anywhere
+			// else would make every client responsible for deduplicating to be
+			// correct.
 			//
 			// A line with no stamp cannot be compared, so it goes through. A
 			// possible duplicate beats a line that silently disappears.
@@ -298,7 +375,7 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 			// insure against a tie at nanosecond resolution on per-line stamps.
 			// Chosen this way deliberately. If ties turn out to happen, the fix
 			// is a position beside the time in the id, not flipping this.
-			if !resumeFrom.IsZero() && !line.At.IsZero() && !line.At.After(resumeFrom) {
+			if from, ok := since[line.Pod]; ok && !line.At.IsZero() && !line.At.After(from) {
 				return true
 			}
 			// The container's own clock, not ours. Stamping with time.Now() here
@@ -330,17 +407,34 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 			// an unstamped line would skip whatever history was still coming.
 			// A frame with no id leaves the browser's cursor where it was,
 			// which is exactly right.
-			//
-			// And only when this stream follows one pod. See resumable().
 			ev := sse.Event{Event: "log", Data: string(body)}
-			if resumable && !line.At.IsZero() {
-				// UTC, nine fractional digits, always. RFC3339Nano trims trailing
-				// zeros and keeps the kubelet's offset, so ids varied in length
-				// and zone — "…36.1Z" sorts after "…36.123Z" as a string though
-				// it is earlier, and a non-browser caller picking the max id as
-				// its cursor would resume past lines it never read. Fixed width
-				// in one zone makes string order and time order the same thing.
-				ev.Id = line.At.UTC().Format(resumeIDLayout)
+			if !line.At.IsZero() && want == "all" && !emitIDs {
+				// Past the bound there is no position to give, but there is
+				// still an id: it replaces the cursor the browser kept from when
+				// the release had fewer pods. A reconnect then sends this, which
+				// is not a cursor, and starts over with a `replay` frame — rather
+				// than resuming from positions this stream has since replayed
+				// past, into a pane that already holds those lines.
+				ev.Id = noCursorID
+			} else if !line.At.IsZero() {
+				if want == "all" {
+					if prev, ok := positions[line.Pod]; !ok || line.At.After(prev) {
+						positions[line.Pod] = line.At
+					}
+					// Every pod's position, not only this line's: the browser
+					// keeps just the last id, so that one id has to say how far
+					// each pod got (#172).
+					ev.Id = formatLogCursor(positions)
+				} else {
+					// UTC, nine fractional digits, always. RFC3339Nano trims
+					// trailing zeros and keeps the kubelet's offset, so ids varied
+					// in length and zone — "…36.1Z" sorts after "…36.123Z" as a
+					// string though it is earlier, and a non-browser caller picking
+					// the max id as its cursor would resume past lines it never
+					// read. Fixed width in one zone makes string order and time
+					// order the same thing.
+					ev.Id = line.At.UTC().Format(resumeIDLayout)
+				}
 			}
 			c.Render(-1, ev)
 			return true
@@ -353,7 +447,8 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 // RFC3339 on the way in; this only fixes what the server hands out.
 const resumeIDLayout = "2006-01-02T15:04:05.000000000Z07:00"
 
-// parseResumePoint reads the point a caller wants to pick up from.
+// parseResumePoint reads the point a caller wants to pick up from on a named
+// instance.
 //
 // An empty result means "from the beginning", which is what a first open wants
 // and what any caller gets by saying nothing.
@@ -367,9 +462,9 @@ const resumeIDLayout = "2006-01-02T15:04:05.000000000Z07:00"
 //
 // `Last-Event-ID` is something no caller ever typed. The browser attaches it
 // by itself on every automatic reconnect, from whatever id it last stored, and
-// nothing on the page can clear it. If that value is ever unreadable — an id
-// format that has changed since the tab loaded (a per-pod cursor is planned,
-// #172), a proxy or an extension that rewrote it — a 400 would repeat on every
+// nothing on the page can clear it. If that value is ever unreadable — an
+// `instance=all` cursor carried over after the reader switched to one instance
+// (#172), a proxy or an extension that rewrote it — a 400 would repeat on every
 // reconnect for as long as the tab stays open, and since a non-2xx response
 // makes EventSource give up, the reader is left with a log pane that is dead
 // and no way to revive it short of a reload. Starting over costs a replay; a

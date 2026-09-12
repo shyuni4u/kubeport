@@ -41,16 +41,21 @@ func splitTimestamp(line string) (time.Time, string) {
 }
 
 // StreamLogs follows logs from the named pods in this client's cluster.
-// A non-zero since asks the cluster to start from that point instead of the
-// beginning of the container log.
-func (c *Client) StreamLogs(ctx context.Context, namespace string, pods []string, since time.Time) (<-chan LogLine, <-chan error) {
+// since holds where each pod picks up; a pod with no entry (or a nil map)
+// starts from the beginning of its container log.
+func (c *Client) StreamLogs(ctx context.Context, namespace string, pods []string, since map[string]time.Time) (<-chan LogLine, <-chan error) {
 	return StreamPodLogs(ctx, c.cs, namespace, pods, since)
 }
 
 // StreamPodLogs follows logs from multiple pods concurrently and fans
 // them into a single channel. ch closes when ctx is done or when all
 // pods stop emitting. errCh closes after ch closes.
-func StreamPodLogs(ctx context.Context, cs kubernetes.Interface, namespace string, pods []string, since time.Time) (<-chan LogLine, <-chan error) {
+//
+// The start point is per pod, not one instant for the lot (#172): the pods are
+// merged with no ordering, so how far a caller got is a different point for
+// each of them, and one time applied to every pod would skip what a slower one
+// had not yet sent.
+func StreamPodLogs(ctx context.Context, cs kubernetes.Interface, namespace string, pods []string, since map[string]time.Time) (<-chan LogLine, <-chan error) {
 	ch := make(chan LogLine, 64)
 	errCh := make(chan error, len(pods))
 
@@ -69,13 +74,13 @@ func StreamPodLogs(ctx context.Context, cs kubernetes.Interface, namespace strin
 				// and the log pane had no time axis at all (#131).
 				Timestamps: true,
 			}
-			if !since.IsZero() {
+			if at, ok := since[pod]; ok && !at.IsZero() {
 				// SinceTime is whole seconds, so this is a coarse filter: the
 				// cluster will resend everything from that second, including
 				// lines the caller already has. The caller trims the overlap,
 				// which it can do exactly because Timestamps gives every line
 				// its own nanoseconds.
-				t := metav1.NewTime(since)
+				t := metav1.NewTime(at)
 				opts.SinceTime = &t
 			}
 			req := cs.CoreV1().Pods(namespace).GetLogs(pod, opts)

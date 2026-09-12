@@ -19,7 +19,9 @@ type K8sApplier interface {
 	// alone is not an identity (#195).
 	DeleteByRelease(ctx context.Context, ref k8s.ReleaseRef) error
 	ListInstances(ctx context.Context, ref k8s.ReleaseRef) ([]k8s.Instance, error)
-	StreamLogs(ctx context.Context, namespace string, pods []string, since time.Time) (<-chan k8s.LogLine, <-chan error)
+	// StreamLogs follows the named pods. since holds where each pod picks up;
+	// a pod with no entry starts from the beginning of its container log (#172).
+	StreamLogs(ctx context.Context, namespace string, pods []string, since map[string]time.Time) (<-chan k8s.LogLine, <-chan error)
 	// CheckAccess proxies a SelfSubjectAccessReview so the caller can ask
 	// "can I do verb on resource?" before attempting an action.
 	CheckAccess(ctx context.Context, spec k8s.AccessCheck) (k8s.AccessResult, error)
