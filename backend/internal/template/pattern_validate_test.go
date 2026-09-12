@@ -31,13 +31,23 @@ func TestValidateSpec_RefusesAPatternTheBrowserReadsDifferently(t *testing.T) {
 	}
 }
 
-// #187: the form checks the pattern on every keystroke.
+// #187: the form checks the pattern on every keystroke. The message names the
+// label like its neighbours, the part to rewrite, and how to rewrite it.
 func TestValidateSpec_RefusesANestedRepeat(t *testing.T) {
-	err := template.ValidateSpec(fieldTypeResources, patternSpec("string", `^(a+)+$`))
+	err := template.ValidateSpec(fieldTypeResources, patternSpec("string", `^x(a+)+$`))
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "fields[0]")
+	require.Contains(t, err.Error(), `fields[0] (label "name", path `+"`Deployment[web].metadata.name`)")
 	require.Contains(t, err.Error(), "unusable pattern")
+	require.Contains(t, err.Error(), "in `(a+)+`")
+	require.Contains(t, err.Error(), "`^[a-z]+(-[a-z]+)*$`")
+}
+
+func TestValidateSpec_SuggestsListingCharactersForUnicodeClasses(t *testing.T) {
+	err := template.ValidateSpec(fieldTypeResources, patternSpec("string", `^\pL+$`))
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "`[a-zA-Z]`")
 }
 
 func TestValidateSpec_RefusesAnOverlongPattern(t *testing.T) {

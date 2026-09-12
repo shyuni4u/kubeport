@@ -73,7 +73,7 @@ func ValidateSpec(resourcesYAML, uiSpecYAML string) error {
 			// fix it (#187 #189). Only here: Render keeps honouring a version
 			// saved before, with Go's own engine.
 			if prob := checkPattern(f.Pattern); prob != nil {
-				return fmt.Errorf("fields[%d] (path `%s`) has an unusable pattern: it %s", i, f.Path, prob.reason)
+				return fmt.Errorf("fields[%d] (label %q, path `%s`) has an unusable pattern: it %s", i, f.Label, f.Path, prob.reason)
 			}
 		}
 	}

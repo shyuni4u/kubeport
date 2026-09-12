@@ -86,7 +86,7 @@ export function UserFormPreview(props: Props) {
   // its schema — may assume the UISpec type from here on, which is the point:
   // guarding the schema builder alone still left the widget renderer reading
   // `values.length` off an enum that had none.
-  const { spec: uiSpec, dropped, ignored } = normalizeUISpec(parsed);
+  const { spec: uiSpec, dropped, ignored, refused } = normalizeUISpec(parsed);
 
   // Fields left out are reported, not thrown on, and not silently dropped —
   // otherwise a field the admin just wrote simply fails to appear.
@@ -99,11 +99,15 @@ export function UserFormPreview(props: Props) {
   // Muted rather than red: mid-edit is the normal state of a ui-spec, and a
   // warning that fires on the way to every valid field is one the reader
   // learns to ignore. Unparseable YAML is a different thing and stays red.
-  const hasIssues = dropped.length > 0 || ignored.length > 0;
+  //
+  // A refused pattern is a third sentence: it is finished, so "until it is
+  // complete" would send the admin waiting for nothing. Saving says why.
+  const hasIssues = dropped.length > 0 || ignored.length > 0 || refused.length > 0;
   const note = hasIssues && (
     <div className="mb-3 space-y-1 text-xs text-muted-foreground">
       {dropped.length > 0 && <p>{t("skippedFields", { fields: dropped.join(", ") })}</p>}
       {ignored.length > 0 && <p>{t("ignoredSettings", { parts: ignored.join(", ") })}</p>}
+      {refused.length > 0 && <p>{t("ignoredPattern", { parts: refused.join(", ") })}</p>}
     </div>
   );
 

@@ -309,6 +309,58 @@ The pod is `<release>-postgres-0`, or `<release>-kubeport-postgres-0` when the
 release name does not contain `kubeport`. With `postgres.embedded=false`, point
 your own `psql` at `postgres.externalUrl`.
 
+### Behaviour changes when upgrading past #187 / #189
+
+A ui-spec `pattern` is checked twice: by the API with Go's RE2 on deploy, and by
+the deploy form in the browser, as a JavaScript RegExp, on every keystroke.
+Saving now refuses the patterns those two cannot agree on, and the ones that
+could freeze the browser:
+
+- **Patterns in RE2-only syntax are refused on save** (400 `validation-error`
+  naming the field and what to write instead). `(?i)` and `(?P<name>…)` do not
+  compile in the browser, so the form used to drop the pattern without a word;
+  `\A`, `\z`, `\pL`, `[[:alpha:]]` and `\x{41}` compile there with a different
+  meaning. Common rewrites:
+
+  | RE2-only | Write instead |
+  |---|---|
+  | `(?i)abc` | `[aA][bB][cC]` |
+  | `(?P<name>…)` | `(?<name>…)` |
+  | `\A` / `\z` | `^` / `$` |
+  | `[[:alpha:]]`, `\pL` | `[a-zA-Z]` (list the characters) |
+  | `\x{41}` | `\x41` |
+
+- **Patterns longer than 200 characters, and patterns that can match the same
+  text in more than one way inside a repeat, are refused on save** — `(a+)+`,
+  `(a|a)*`, `(a{1,20})+`, or three overlapping repeats in a row such as
+  `^[a-z0-9]+[-a-z0-9]*[a-z0-9]+$`. Give each repetition a separator nothing
+  else in it can match, at either end — `^[a-z]+(-[a-z]+)*$`,
+  `^([a-z]+,)*[a-z]+$`, `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` — and start the pattern
+  with `^`.
+- **Published versions with such a pattern still deploy**, and the API still
+  checks values against it, but the deploy form sets the pattern and its format
+  hint aside, so a user hears about a mismatch only from the deploy's 400. The
+  next version, and any PATCH to a draft, is refused until the pattern is
+  rewritten.
+- **Drafts saved before the upgrade can still be published unchanged**:
+  publishing does not re-check the ui-spec. Open each draft in the editor — the
+  preview names a refused pattern — and save it before publishing.
+
+Find stored versions with RE2-only syntax before upgrading:
+
+```sql
+SELECT t.name, tv.version, tv.status
+  FROM template_versions tv JOIN templates t ON t.id = tv.template_id
+ WHERE tv.ui_spec_yaml ~ '(?n)^[ \t]*(-[ \t]+)?pattern:.*(\(\?[^:<]|\(\?<[0-9=!]|\\+([AzQpPa1-9]|x\{)|\[\^?\]|\[[^]]*\[:\^?[a-z]+:\]|\{([0-9]+,)?0[0-9]|(^|[^[])\^[*+?]|\$[*+?]|\\+[bB][*+?{])';
+```
+
+The query reads `pattern:` lines, plain or quoted either way, so a spec written
+in flow style or as JSON is not matched. It cannot find a pattern that repeats
+ambiguously, one that is too long, or a group name used twice — the save checks
+those — and a literal backslash before one of the letters it looks for shows up
+as a false match. Open what it lists in the editor, or save it, to see the exact
+reason.
+
 ### Behaviour changes when upgrading past #268
 
 With `ingress.className=traefik` and `tls.enabled=true`, plain http now

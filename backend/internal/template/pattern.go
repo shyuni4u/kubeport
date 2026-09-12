@@ -2,6 +2,7 @@ package template
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"unicode/utf8"
 )
@@ -20,6 +21,20 @@ import (
 // is also what the frontend counts).
 const maxPatternLength = 200
 
+// maxAmbiguity is the number of times two ways of matching the same text merge
+// back together along one run at which a pattern is refused. Each merge
+// multiplies the work a backtracking engine does when a match fails; a merge
+// inside a loop (`(a+)+`, `(a|a)*`) repeats without end, so every exponential
+// pattern reaches it, and so do three overlapping loops in a row. One merge is
+// the ambiguity real patterns have — an image reference whose registry part
+// can also be read as its path, or an unanchored `[a-z]+` the browser retries
+// at every position — and costs roughly the square of the value's length.
+const maxAmbiguity = 2
+
+// analysisBudget caps the work spent looking. A pattern that needs more is
+// refused as too complex to vouch for.
+const analysisBudget = 200000
+
 type patternProblem struct {
 	// kind is "too-long", "dialect" or "nested-quantifier" — the names the
 	// frontend uses for the same outcomes.
@@ -32,254 +47,361 @@ func dialectProblem(format string, args ...any) *patternProblem {
 	return &patternProblem{kind: "dialect", reason: fmt.Sprintf(format, args...)}
 }
 
-// charSet answers "could this atom match r?". It may say yes too often (an
-// over-approximation is always safe here), never no too often.
-type charSet func(rune) bool
-
-func anyRune(rune) bool { return true }
-
-type itemKind int
-
-const (
-	itemNone itemKind = iota // nothing a quantifier could apply to
-	itemAssert
-	itemAtom
-	itemGroup
-)
-
-type patternItem struct {
-	kind  itemKind
-	set   charSet
-	exact bool // set is exact, so a negated class may use it
-	isLit bool
-	lit   rune
-	group *patternFrame
-	first bool // the first item of its group's body
-}
-
-func literalItem(c rune) patternItem {
-	return patternItem{kind: itemAtom, set: func(r rune) bool { return r == c }, exact: true, isLit: true, lit: c}
-}
-
-// patternFrame is one group's body (or the whole pattern).
-type patternFrame struct {
-	hasAlt          bool
-	hasFirst        bool
-	firstIsLit      bool
-	firstLit        rune
-	firstQuantified bool
-	// unbounded holds every atom in the body, nested groups included, that
-	// sits under `*`, `+` or `{n,}`.
-	unbounded []charSet
-}
-
-// canBacktrackCatastrophically reports whether repeating this group can split
-// one input many ways. That needs an unlimited repeat inside. It is ruled out
-// when every repetition must open with the same literal that none of those
-// inner repeats can match — `(-[a-z]+)*`, `(\.[a-z0-9]+)*` — because then each
-// repetition starts at exactly one place.
-func (f *patternFrame) canBacktrackCatastrophically() bool {
-	if len(f.unbounded) == 0 {
-		return false
+// checkPattern returns nil for a pattern both engines read the same way and
+// the browser can run without hanging. A pattern that does not compile is left
+// for the compiler to report.
+func checkPattern(pattern string) *patternProblem {
+	if utf8.RuneCountInString(pattern) > maxPatternLength {
+		return &patternProblem{kind: "too-long", reason: fmt.Sprintf("is longer than %d characters", maxPatternLength)}
 	}
-	if f.hasAlt || !f.firstIsLit || f.firstQuantified {
-		return true
+	p := &patternParser{s: []rune(pattern), names: map[string]bool{}}
+	root := p.parseAlt()
+	if p.prob != nil {
+		return p.prob
 	}
-	for _, set := range f.unbounded {
-		if set(f.firstLit) {
+	if p.incomplete || p.i < len(p.s) {
+		return nil
+	}
+	return checkAmbiguity(p, root)
+}
+
+// ---- character sets: sorted, merged, inclusive code point ranges ----
+
+type runeRange struct{ lo, hi rune }
+
+type charSet []runeRange
+
+const maxRuneValue = 0x10FFFF
+
+func setOf(bounds ...rune) charSet {
+	s := make(charSet, 0, len(bounds)/2)
+	for i := 0; i+1 < len(bounds); i += 2 {
+		s = append(s, runeRange{bounds[i], bounds[i+1]})
+	}
+	return normalizeSet(s)
+}
+
+func normalizeSet(s charSet) charSet {
+	sorted := append(charSet(nil), s...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].lo < sorted[j].lo })
+	var out charSet
+	for _, r := range sorted {
+		if n := len(out); n > 0 && r.lo <= out[n-1].hi+1 {
+			if r.hi > out[n-1].hi {
+				out[n-1].hi = r.hi
+			}
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+func negateSet(s charSet) charSet {
+	var out charSet
+	next := rune(0)
+	for _, r := range s {
+		if r.lo > next {
+			out = append(out, runeRange{next, r.lo - 1})
+		}
+		next = r.hi + 1
+	}
+	if next <= maxRuneValue {
+		out = append(out, runeRange{next, maxRuneValue})
+	}
+	return out
+}
+
+func setsIntersect(a, b charSet) bool {
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		switch {
+		case a[i].hi < b[j].lo:
+			i++
+		case b[j].hi < a[i].lo:
+			j++
+		default:
 			return true
 		}
 	}
 	return false
 }
 
-// checkPattern returns nil for a pattern both engines read the same way and
-// the browser can run without hanging. It is a scanner, not a parser: a
-// pattern that does not compile is left for the compiler to report.
-func checkPattern(p string) *patternProblem {
-	if utf8.RuneCountInString(p) > maxPatternLength {
-		return &patternProblem{kind: "too-long", reason: fmt.Sprintf("is longer than %d characters", maxPatternLength)}
+func singleRune(s charSet) (rune, bool) {
+	if len(s) == 1 && s[0].lo == s[0].hi {
+		return s[0].lo, true
 	}
-	s := []rune(p)
-	n := len(s)
-	stack := []*patternFrame{{}}
-	names := map[string]bool{}
-	var last patternItem
+	return 0, false
+}
 
-	emit := func(it patternItem) {
-		top := stack[len(stack)-1]
-		if !top.hasFirst {
-			top.hasFirst = true
-			top.firstIsLit, top.firstLit = it.isLit, it.lit
-			it.first = true
-		}
-		last = it
-	}
-	quantify := func(repeats, unbounded bool) *patternProblem {
-		it := last
-		last = patternItem{}
-		switch it.kind {
-		case itemNone:
-			return nil // `*` with nothing before it: both compilers refuse it
-		case itemAssert:
-			return dialectProblem("repeats `^`, `$`, `\\b` or `\\B`, which the browser refuses")
-		}
-		top := stack[len(stack)-1]
-		if it.first {
-			top.firstQuantified = true
-		}
-		if unbounded {
-			top.unbounded = append(top.unbounded, it.set)
-		}
-		if it.kind == itemGroup && repeats && it.group.canBacktrackCatastrophically() {
-			return &patternProblem{
-				kind:   "nested-quantifier",
-				reason: "repeats a group that itself holds an unlimited repeat, as in `(a+)+`; the deploy form runs the pattern in the browser on every keystroke, and this shape can freeze the page",
-			}
-		}
-		return nil
-	}
+// The browser's meaning of the classes, since that is where backtracking
+// happens.
+var (
+	digitSet = setOf('0', '9')
+	wordSet  = setOf('0', '9', 'A', 'Z', '_', '_', 'a', 'z')
+	spaceSet = setOf('\t', '\r', ' ', ' ', 0xA0, 0xA0, 0x1680, 0x1680, 0x2000, 0x200A,
+		0x2028, 0x2029, 0x202F, 0x202F, 0x205F, 0x205F, 0x3000, 0x3000, 0xFEFF, 0xFEFF)
+	dotSet = negateSet(setOf('\n', '\n', '\r', '\r', 0x2028, 0x2029))
+)
 
-	for i := 0; i < n; {
-		switch c := s[i]; c {
-		case '\\':
-			it, size, prob := scanEscape(s, i, false)
-			if prob != nil || size == 0 {
-				return prob
-			}
-			emit(it)
-			i += size
-		case '[':
-			it, size, prob := scanClass(s, i)
-			if prob != nil || size == 0 {
-				return prob
-			}
-			emit(it)
-			i += size
-		case '(':
-			size, prob := scanGroupOpen(s, i, names)
-			if prob != nil || size == 0 {
-				return prob
-			}
-			stack = append(stack, &patternFrame{})
-			last = patternItem{}
-			i += size
-		case ')':
-			if len(stack) == 1 {
+// ---- parsing ----
+
+type nodeOp int
+
+const (
+	opLit nodeOp = iota
+	opEmpty
+	opCat
+	opAlt
+	opRep
+)
+
+type patternNode struct {
+	op           nodeOp
+	pos          int // opLit: its position
+	subs         []*patternNode
+	min, max     int // opRep; max < 0 is unbounded
+	assert       bool
+	caret        bool // the assertion is `^`
+	start, end   int  // the source runes it covers
+	posLo, posHi int  // the positions created inside it
+}
+
+type patternParser struct {
+	s          []rune
+	i          int
+	sets       []charSet // one per position (a character the pattern consumes)
+	names      map[string]bool
+	prob       *patternProblem
+	incomplete bool // the compiler, not this, reports what is wrong
+}
+
+func (p *patternParser) failed() bool { return p.prob != nil || p.incomplete }
+
+func (p *patternParser) lit(set charSet) *patternNode {
+	p.sets = append(p.sets, set)
+	return &patternNode{op: opLit, pos: len(p.sets) - 1}
+}
+
+func (p *patternParser) parseAlt() *patternNode {
+	start, posLo := p.i, len(p.sets)
+	var branches []*patternNode
+	for {
+		b := p.parseCat()
+		if p.failed() {
+			return nil
+		}
+		branches = append(branches, b)
+		if p.i < len(p.s) && p.s[p.i] == '|' {
+			p.i++
+			continue
+		}
+		break
+	}
+	if len(branches) == 1 {
+		return branches[0]
+	}
+	return &patternNode{op: opAlt, subs: branches, start: start, end: p.i, posLo: posLo, posHi: len(p.sets)}
+}
+
+func (p *patternParser) parseCat() *patternNode {
+	cat := &patternNode{op: opCat, start: p.i, posLo: len(p.sets)}
+	for p.i < len(p.s) && p.s[p.i] != '|' && p.s[p.i] != ')' {
+		start, posLo := p.i, len(p.sets)
+		atom := p.parseAtom()
+		if p.failed() {
+			return nil
+		}
+		min, max, size := p.quantifierAt(p.i)
+		if p.failed() {
+			return nil
+		}
+		if size > 0 {
+			if atom.assert {
+				p.prob = dialectProblem("repeats `^`, `$`, `\\b` or `\\B`, which the browser refuses")
 				return nil
 			}
-			f := stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
-			parent := stack[len(stack)-1]
-			parent.unbounded = append(parent.unbounded, f.unbounded...)
-			emit(patternItem{kind: itemGroup, set: anyRune, group: f})
-			i++
-		case '|':
-			stack[len(stack)-1].hasAlt = true
-			last = patternItem{}
-			i++
-		case '^', '$':
-			emit(patternItem{kind: itemAssert})
-			i++
-		case '*', '+', '?':
-			if prob := quantify(c != '?', c != '?'); prob != nil {
-				return prob
+			p.i += size
+			if p.i < len(p.s) && p.s[p.i] == '?' {
+				p.i++
 			}
-			i++
-			if i < n && s[i] == '?' {
-				i++
+			// A repeat of a repeat (`a**`, `a{2}{3}`): both compilers refuse it.
+			if _, _, again := p.quantifierAt(p.i); p.failed() || again > 0 {
+				p.incomplete = p.prob == nil
+				return nil
 			}
-		case '{':
-			size, repeats, unbounded, prob := scanRepeat(s, i)
-			if prob != nil {
-				return prob
-			}
-			if size == 0 {
-				emit(literalItem('{'))
-				i++
-				continue
-			}
-			if prob := quantify(repeats, unbounded); prob != nil {
-				return prob
-			}
-			i += size
-			if i < n && s[i] == '?' {
-				i++
-			}
-		case '.':
-			emit(patternItem{kind: itemAtom, set: anyRune})
-			i++
-		default:
-			emit(literalItem(c))
-			i++
+			atom = &patternNode{op: opRep, subs: []*patternNode{atom}, min: min, max: max,
+				start: start, end: p.i, posLo: posLo, posHi: len(p.sets)}
+		}
+		cat.subs = append(cat.subs, atom)
+	}
+	cat.end, cat.posHi = p.i, len(p.sets)
+	return cat
+}
+
+func (p *patternParser) parseAtom() *patternNode {
+	s, i := p.s, p.i
+	switch s[i] {
+	case '(':
+		size, prob := scanGroupOpen(s, i, p.names)
+		if prob != nil {
+			p.prob = prob
+			return nil
+		}
+		if size == 0 {
+			p.incomplete = true
+			return nil
+		}
+		posLo := len(p.sets)
+		p.i += size
+		inner := p.parseAlt()
+		if p.failed() {
+			return nil
+		}
+		if p.i >= len(s) || s[p.i] != ')' {
+			p.incomplete = true
+			return nil
+		}
+		p.i++
+		// Wrapped, so that a group around an assertion — `(^)*` — is not one.
+		return &patternNode{op: opCat, subs: []*patternNode{inner}, start: i, end: p.i, posLo: posLo, posHi: len(p.sets)}
+	case '[':
+		set, size, prob := scanClass(s, i)
+		if prob != nil {
+			p.prob = prob
+			return nil
+		}
+		if size == 0 {
+			p.incomplete = true
+			return nil
+		}
+		p.i += size
+		return p.lit(set)
+	case '\\':
+		set, assert, size, prob := scanEscape(s, i, false)
+		if prob != nil {
+			p.prob = prob
+			return nil
+		}
+		if size == 0 {
+			p.incomplete = true
+			return nil
+		}
+		p.i += size
+		if assert {
+			return &patternNode{op: opEmpty, assert: true}
+		}
+		return p.lit(set)
+	case '^', '$':
+		p.i++
+		return &patternNode{op: opEmpty, assert: true, caret: s[i] == '^'}
+	case '.':
+		p.i++
+		return p.lit(dotSet)
+	case '*', '+', '?':
+		p.incomplete = true
+		return nil
+	case '{':
+		// A brace is literal text unless it is a counted repeat, and a repeat
+		// with nothing before it is refused by both compilers.
+		if _, _, size := p.quantifierAt(i); p.failed() || size > 0 {
+			p.incomplete = p.prob == nil
+			return nil
 		}
 	}
-	return nil
+	p.i++
+	return p.lit(setOf(s[i], s[i]))
+}
+
+// quantifierAt reads a quantifier at s[i]; size 0 means there is none.
+func (p *patternParser) quantifierAt(i int) (min, max, size int) {
+	if i >= len(p.s) {
+		return 0, 0, 0
+	}
+	switch p.s[i] {
+	case '*':
+		return 0, -1, 1
+	case '+':
+		return 1, -1, 1
+	case '?':
+		return 0, 1, 1
+	case '{':
+		size, lo, hi, prob := scanRepeat(p.s, i)
+		if prob != nil {
+			p.prob = prob
+			return 0, 0, 0
+		}
+		return lo, hi, size
+	}
+	return 0, 0, 0
 }
 
 // scanEscape reads the escape at s[i] == '\\'. size 0 means the pattern ends
 // there. Letters and digits are an allowlist: what is not on it either does not
 // compile in Go or means something else in the browser (`\A`, `\z`, `\pL`,
 // `\Q`, `\a`, `\1`), and the browser reads them all without complaint.
-func scanEscape(s []rune, i int, inClass bool) (patternItem, int, *patternProblem) {
+func scanEscape(s []rune, i int, inClass bool) (set charSet, assert bool, size int, prob *patternProblem) {
 	n := len(s)
 	if i+1 >= n {
-		return patternItem{}, 0, nil
+		return nil, false, 0, nil
 	}
 	c := s[i+1]
 	if c >= utf8.RuneSelf {
-		return patternItem{}, 0, dialectProblem("uses `\\%c`, which the browser reads differently", c)
+		return nil, false, 0, dialectProblem("uses `\\%c`, which the browser reads differently", c)
 	}
 	if !isASCIIAlnum(c) {
-		return literalItem(c), 2, nil
+		return setOf(c, c), false, 2, nil
 	}
 	switch c {
 	case 'f':
-		return literalItem('\f'), 2, nil
+		return setOf('\f', '\f'), false, 2, nil
 	case 'n':
-		return literalItem('\n'), 2, nil
+		return setOf('\n', '\n'), false, 2, nil
 	case 'r':
-		return literalItem('\r'), 2, nil
+		return setOf('\r', '\r'), false, 2, nil
 	case 't':
-		return literalItem('\t'), 2, nil
+		return setOf('\t', '\t'), false, 2, nil
 	case 'v':
-		return literalItem('\v'), 2, nil
+		return setOf('\v', '\v'), false, 2, nil
 	case '0':
 		// Octal: both engines take up to two more octal digits.
-		size := 2
+		v, size := rune(0), 2
 		for size < 4 && i+size < n && s[i+size] >= '0' && s[i+size] <= '7' {
+			v = v*8 + s[i+size] - '0'
 			size++
 		}
-		return patternItem{kind: itemAtom, set: anyRune}, size, nil
+		return setOf(v, v), false, size, nil
 	case 'x':
 		if i+3 < n && isHexDigit(s[i+2]) && isHexDigit(s[i+3]) {
-			return literalItem(hexValue(s[i+2])<<4 | hexValue(s[i+3])), 4, nil
+			v := hexValue(s[i+2])<<4 | hexValue(s[i+3])
+			return setOf(v, v), false, 4, nil
 		}
-		return patternItem{}, 0, dialectProblem("uses `\\x` without exactly two hex digits after it; `\\x{...}` is Go-only")
+		return nil, false, 0, dialectProblem("uses `\\x` without exactly two hex digits after it; `\\x{...}` is Go-only")
 	case 'd':
-		return patternItem{kind: itemAtom, set: isASCIIDigit, exact: true}, 2, nil
+		return digitSet, false, 2, nil
 	case 'D':
-		return patternItem{kind: itemAtom, set: func(r rune) bool { return !isASCIIDigit(r) }, exact: true}, 2, nil
+		return negateSet(digitSet), false, 2, nil
 	case 'w':
-		return patternItem{kind: itemAtom, set: isASCIIWord, exact: true}, 2, nil
+		return wordSet, false, 2, nil
 	case 'W':
-		return patternItem{kind: itemAtom, set: func(r rune) bool { return !isASCIIWord(r) }, exact: true}, 2, nil
+		return negateSet(wordSet), false, 2, nil
 	case 's':
-		// The browser's \s also takes Unicode spaces; say yes to all of those.
-		return patternItem{kind: itemAtom, set: func(r rune) bool { return isASCIISpace(r) || r >= utf8.RuneSelf }}, 2, nil
+		return spaceSet, false, 2, nil
 	case 'S':
-		return patternItem{kind: itemAtom, set: anyRune}, 2, nil
+		return negateSet(spaceSet), false, 2, nil
 	case 'b', 'B':
 		if !inClass {
-			return patternItem{kind: itemAssert}, 2, nil
+			return nil, true, 2, nil
 		}
+	case 'p', 'P':
+		return nil, false, 0, dialectProblem("uses `\\%c`, which the browser reads as a plain `%c`; list the characters instead, as in `[a-zA-Z]`", c, c)
 	}
-	return patternItem{}, 0, dialectProblem("uses `\\%c`, which the browser reads differently", c)
+	return nil, false, 0, dialectProblem("uses `\\%c`, which the browser reads differently", c)
 }
 
 // scanClass reads the character class at s[i] == '['. size 0 means it is not
-// closed.
-func scanClass(s []rune, i int) (patternItem, int, *patternProblem) {
+// closed, or not valid in either engine.
+func scanClass(s []rune, i int) (charSet, int, *patternProblem) {
 	n := len(s)
 	j := i + 1
 	negate := false
@@ -289,59 +411,54 @@ func scanClass(s []rune, i int) (patternItem, int, *patternProblem) {
 	}
 	if j < n && s[j] == ']' {
 		// Go takes a leading `]` as a member; the browser closes an empty class.
-		return patternItem{}, 0, dialectProblem("starts a character class with `]`, which the browser reads as an empty class; write it as `\\]`")
+		return nil, 0, dialectProblem("starts a character class with `]`, which the browser reads as an empty class; write it as `\\]`")
 	}
-	member := func(j int) (patternItem, int, *patternProblem) {
-		if s[j] == '\\' {
-			return scanEscape(s, j, true)
+	member := func(k int) (charSet, int, *patternProblem) {
+		if s[k] == '\\' {
+			set, _, size, prob := scanEscape(s, k, true)
+			return set, size, prob
 		}
-		return literalItem(s[j]), 1, nil
+		return setOf(s[k], s[k]), 1, nil
 	}
-	var parts []charSet
-	exact := true
+	var members charSet
 	for j < n && s[j] != ']' {
 		// Go's rule: `[:` with a `:]` anywhere after it is a POSIX class (or
 		// an error). The browser reads it as plain members.
 		if s[j] == '[' && j+1 < n && s[j+1] == ':' && strings.Contains(string(s[j+2:]), ":]") {
-			return patternItem{}, 0, dialectProblem("uses a POSIX class such as `[:alpha:]`, which the browser does not read")
+			return nil, 0, dialectProblem("uses a POSIX class such as `[:alpha:]`, which the browser does not read; list the characters instead, as in `[a-zA-Z]`")
 		}
 		lo, size, prob := member(j)
 		if prob != nil || size == 0 {
-			return patternItem{}, 0, prob
+			return nil, 0, prob
 		}
 		j += size
-		if lo.isLit && j+1 < n && s[j] == '-' && s[j+1] != ']' {
+		if from, ok := singleRune(lo); ok && j+1 < n && s[j] == '-' && s[j+1] != ']' {
 			hi, size, prob := member(j + 1)
 			if prob != nil || size == 0 {
-				return patternItem{}, 0, prob
+				return nil, 0, prob
 			}
 			j += 1 + size
-			if hi.isLit {
-				from, to := lo.lit, hi.lit
-				parts = append(parts, func(r rune) bool { return r >= from && r <= to })
-			} else {
-				parts, exact = append(parts, anyRune), false
+			to, ok := singleRune(hi)
+			if !ok {
+				// Go refuses it; the browser reads a, -, and the class.
+				return nil, 0, dialectProblem("ends a range in a class, as in `[a-\\d]`, which Go refuses; put `-` last, as in `[a\\d-]`")
 			}
+			if to < from {
+				return nil, 0, nil
+			}
+			members = append(members, runeRange{from, to})
 			continue
 		}
-		parts = append(parts, lo.set)
-		exact = exact && lo.exact
+		members = append(members, lo...)
 	}
 	if j >= n {
-		return patternItem{}, 0, nil
+		return nil, 0, nil
 	}
-	set := func(r rune) bool {
-		for _, part := range parts {
-			if part(r) {
-				return !negate
-			}
-		}
-		return negate
+	set := normalizeSet(members)
+	if negate {
+		set = negateSet(set)
 	}
-	if negate && !exact {
-		set = anyRune
-	}
-	return patternItem{kind: itemAtom, set: set, exact: exact}, j + 1 - i, nil
+	return set, j + 1 - i, nil
 }
 
 // scanGroupOpen reads the group opening at s[i] == '(' and returns its length.
@@ -383,40 +500,302 @@ func scanGroupOpen(s []rune, i int, names map[string]bool) (int, *patternProblem
 	case 'P':
 		return 0, dialectProblem("uses `(?P`; write a named group as `(?<name>...)`, which the browser also reads")
 	default:
-		return 0, dialectProblem("uses `(?%c`; the browser reads only `(?:` and `(?<name>` here, so flags such as `(?i)` cannot be used", s[i+2])
+		return 0, dialectProblem("uses `(?%c`; the browser reads only `(?:` and `(?<name>` here, so flags such as `(?i)` cannot be used — spell out both cases instead, as in `[aA][bB]`", s[i+2])
 	}
 }
 
 // scanRepeat reads a counted repeat at s[i] == '{'. size 0 means the brace is
 // literal text, which it is in both engines unless it is `{n}`, `{n,}` or
-// `{n,m}`.
-func scanRepeat(s []rune, i int) (size int, repeats, unbounded bool, prob *patternProblem) {
+// `{n,m}`. hi < 0 means unbounded.
+func scanRepeat(s []rune, i int) (size, lo, hi int, prob *patternProblem) {
 	n := len(s)
 	j := i + 1
-	lo := asciiDigitsAt(s, j)
-	if lo == "" {
-		return 0, false, false, nil
+	loDigits := asciiDigitsAt(s, j)
+	if loDigits == "" {
+		return 0, 0, 0, nil
 	}
-	j += len(lo)
-	hi, comma := lo, false
+	j += len(loDigits)
+	hiDigits, comma := loDigits, false
 	if j < n && s[j] == ',' {
 		comma = true
 		j++
-		hi = asciiDigitsAt(s, j)
-		j += len(hi)
+		hiDigits = asciiDigitsAt(s, j)
+		j += len(hiDigits)
 	}
 	if j >= n || s[j] != '}' {
-		return 0, false, false, nil
+		return 0, 0, 0, nil
 	}
 	j++
-	for _, d := range []string{lo, hi} {
+	for _, d := range []string{loDigits, hiDigits} {
 		if len(d) > 1 && d[0] == '0' {
-			return 0, false, false, dialectProblem("writes the repeat `%s` with a leading zero, which Go reads as literal text and the browser as a count", string(s[i:j]))
+			return 0, 0, 0, dialectProblem("writes the repeat `%s` with a leading zero, which Go reads as literal text and the browser as a count", string(s[i:j]))
 		}
 	}
-	unbounded = comma && hi == ""
-	repeats = unbounded || len(hi) > 1 || hi > "1"
-	return j - i, repeats, unbounded, nil
+	hi = -1
+	if !comma || hiDigits != "" {
+		hi = repeatCount(hiDigits)
+	}
+	return j - i, repeatCount(loDigits), hi, nil
+}
+
+func repeatCount(digits string) int {
+	v := 0
+	for _, r := range digits {
+		if v <= 100000 {
+			v = v*10 + int(r-'0')
+		}
+	}
+	return v
+}
+
+// ---- ambiguity ----
+
+// glushkov describes one node of the pattern as a position automaton that
+// keeps count (up to 2) of how many distinct ways lead to each position.
+type glushkov struct {
+	null        int
+	first, last []uint8
+}
+
+type ambiguityAnalyzer struct {
+	n      int
+	follow []uint8        // n*n: ways from one position straight to the next
+	dup    []*patternNode // n*n: the repeat that made a transition two ways
+	stack  []*patternNode
+	loops  []*patternNode // repeats that loop
+}
+
+func cap2(v int) uint8 {
+	if v > 2 {
+		return 2
+	}
+	return uint8(v)
+}
+
+func nonZero(v []uint8) []int {
+	var idx []int
+	for i, x := range v {
+		if x != 0 {
+			idx = append(idx, i)
+		}
+	}
+	return idx
+}
+
+func (a *ambiguityAnalyzer) addFollow(x, y, ways int) {
+	k := x*a.n + y
+	before := a.follow[k]
+	a.follow[k] = cap2(int(before) + ways)
+	if before < 2 && a.follow[k] == 2 && len(a.stack) > 0 {
+		a.dup[k] = a.stack[len(a.stack)-1]
+	}
+}
+
+func (a *ambiguityAnalyzer) connect(last, first []uint8) {
+	for _, x := range nonZero(last) {
+		for _, y := range nonZero(first) {
+			a.addFollow(x, y, int(last[x])*int(first[y]))
+		}
+	}
+}
+
+func (a *ambiguityAnalyzer) info(nd *patternNode) glushkov {
+	g := glushkov{first: make([]uint8, a.n), last: make([]uint8, a.n)}
+	switch nd.op {
+	case opLit:
+		g.first[nd.pos], g.last[nd.pos] = 1, 1
+	case opEmpty:
+		g.null = 1
+	case opCat:
+		g.null = 1
+		for _, sub := range nd.subs {
+			b := a.info(sub)
+			a.connect(g.last, b.first)
+			for y := 0; y < a.n; y++ {
+				g.first[y] = cap2(int(g.first[y]) + g.null*int(b.first[y]))
+				g.last[y] = cap2(int(b.last[y]) + b.null*int(g.last[y]))
+			}
+			g.null = int(cap2(g.null * b.null))
+		}
+	case opAlt:
+		for _, sub := range nd.subs {
+			b := a.info(sub)
+			for y := 0; y < a.n; y++ {
+				g.first[y] = cap2(int(g.first[y]) + int(b.first[y]))
+				g.last[y] = cap2(int(g.last[y]) + int(b.last[y]))
+			}
+			g.null = int(cap2(g.null + b.null))
+		}
+	case opRep:
+		if nd.max == 0 {
+			g.null = 1
+			return g
+		}
+		a.stack = append(a.stack, nd)
+		b := a.info(nd.subs[0])
+		g.first, g.last = b.first, b.last
+		switch {
+		case nd.max == 1 && nd.min == 0:
+			g.null = int(cap2(b.null + 1))
+		case nd.max == 1:
+			g.null = b.null
+		default:
+			// Any count above one is treated as unbounded: `(a{1,20})+`
+			// backtracks like `(a+)+`. The browser ends a loop on an empty
+			// repetition, so only non-empty ones connect.
+			a.loops = append(a.loops, nd)
+			a.connect(b.last, b.first)
+			g.null = b.null
+			if nd.min == 0 {
+				g.null = 1
+			}
+		}
+		a.stack = a.stack[:len(a.stack)-1]
+	}
+	return g
+}
+
+// checkAmbiguity walks pairs of runs over the same text, starting together,
+// and counts how often two runs that parted meet again at one position: along
+// a chain of pairs that is the log2 of the ways the text can be matched.
+func checkAmbiguity(p *patternParser, root *patternNode) *patternProblem {
+	if len(p.sets) == 0 {
+		return nil
+	}
+	// A pattern that does not start with `^` is tried again from every
+	// position of the value. Model that as a loop over any character in front
+	// of it, at position len(p.sets).
+	anchored := root.op == opCat && len(root.subs) > 0 && root.subs[0].caret
+	n := len(p.sets)
+	sets := p.sets
+	if !anchored {
+		n++
+		sets = append(append([]charSet(nil), p.sets...), charSet{{0, maxRuneValue}})
+	}
+	a := &ambiguityAnalyzer{n: n, follow: make([]uint8, n*n), dup: make([]*patternNode, n*n)}
+	start := a.info(root)
+	if !anchored {
+		prefix := n - 1
+		a.follow[prefix*n+prefix] = 1
+		for _, y := range nonZero(start.first) {
+			a.follow[prefix*n+y] = start.first[y]
+		}
+		start.first[prefix] = 1
+	}
+
+	compat := make([]bool, n*n)
+	succ := make([][]int, n)
+	for x := 0; x < n; x++ {
+		for y := 0; y < n; y++ {
+			compat[x*n+y] = setsIntersect(sets[x], sets[y])
+			if a.follow[x*n+y] > 0 {
+				succ[x] = append(succ[x], y)
+			}
+		}
+	}
+
+	dist := make([]int, n*n)
+	for k := range dist {
+		dist[k] = -1
+	}
+	queued := make([]bool, n*n)
+	var queue []int
+	relax := func(k, w int) bool {
+		if w <= dist[k] {
+			return false
+		}
+		dist[k] = w
+		if w >= maxAmbiguity {
+			return true
+		}
+		if !queued[k] {
+			queued[k] = true
+			queue = append(queue, k)
+		}
+		return false
+	}
+
+	firsts := nonZero(start.first)
+	for _, x := range firsts {
+		for _, y := range firsts {
+			if !compat[x*n+y] {
+				continue
+			}
+			w := 0
+			if x == y && start.first[x] == 2 {
+				w = 1
+			}
+			if relax(x*n+y, w) {
+				return a.ambiguous(p, anchored, nil, x, y)
+			}
+		}
+	}
+	work := 0
+	for head := 0; head < len(queue); head++ {
+		k := queue[head]
+		queued[k] = false
+		u, v := k/n, k%n
+		for _, x := range succ[u] {
+			for _, y := range succ[v] {
+				work++
+				if work > analysisBudget {
+					return &patternProblem{kind: "nested-quantifier", reason: "is too complex to check for repeats that can freeze the browser; split it or simplify it"}
+				}
+				if !compat[x*n+y] {
+					continue
+				}
+				w := dist[k]
+				var rep *patternNode
+				if x == y {
+					if u != v {
+						w++
+					} else if a.follow[u*n+x] == 2 {
+						w++
+						rep = a.dup[u*n+x]
+					}
+				}
+				if relax(x*n+y, w) {
+					return a.ambiguous(p, anchored, rep, u, v, x)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// ambiguous names the smallest loop the ambiguity sits in, so the admin knows
+// which part to rewrite.
+func (a *ambiguityAnalyzer) ambiguous(p *patternParser, anchored bool, rep *patternNode, positions ...int) *patternProblem {
+	if rep == nil {
+		lo, hi := -1, -1
+		for _, x := range positions {
+			if x >= len(p.sets) {
+				continue // the unanchored prefix is not part of the source
+			}
+			if lo < 0 || x < lo {
+				lo = x
+			}
+			hi = max(hi, x)
+		}
+		for _, l := range a.loops {
+			if lo >= 0 && l.posLo <= lo && hi < l.posHi && (rep == nil || l.end-l.start < rep.end-rep.start) {
+				rep = l
+			}
+		}
+	}
+	part := string(p.s)
+	if rep != nil {
+		part = string(p.s[rep.start:rep.end])
+	}
+	hint := ""
+	if !anchored {
+		hint = ", and start the pattern with `^` so the browser does not try it again from every position"
+	}
+	return &patternProblem{
+		kind: "nested-quantifier",
+		reason: fmt.Sprintf("can match the same text in more than one way in `%s`, and the deploy form runs it in the browser on every keystroke, where that can freeze the page; "+
+			"make each repetition start or end with a character nothing else in it can match, as in `^[a-z]+(-[a-z]+)*$` rather than `^([a-z]+-?)+$`%s", part, hint),
+	}
 }
 
 func validGroupName(name string) bool {
@@ -445,10 +824,6 @@ func isASCIIDigit(r rune) bool { return r >= '0' && r <= '9' }
 func isASCIIAlnum(r rune) bool {
 	return isASCIIDigit(r) || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')
 }
-
-func isASCIIWord(r rune) bool { return isASCIIAlnum(r) || r == '_' }
-
-func isASCIISpace(r rune) bool { return r == ' ' || (r >= '\t' && r <= '\r') }
 
 func isHexDigit(r rune) bool {
 	return isASCIIDigit(r) || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')

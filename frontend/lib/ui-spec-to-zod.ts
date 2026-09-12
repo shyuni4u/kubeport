@@ -93,12 +93,11 @@ const KNOWN_TYPES = [
  * RE2-only syntax, which here either throws or means something else, so the
  * form would run a rule the API does not have (#189); a pattern over 200
  * characters; and a repeated group holding an unlimited repeat (`^(a+)+$`),
- * which the form would run on every keystroke until the tab froze (#187). The
- * API refuses all of these on save, so only a version saved before that
- * reaches the form with one — and the API still checks it on deploy.
- *
- * The nested-repeat rule is a heuristic; `(a|aa)*` still passes. The input
- * bound in schemaFromUISpec is what limits the rest.
+ * or any other pattern that can match the same text in exponentially many
+ * ways — `(a|a)*`, `(a{1,20})+` — which the form would run on every keystroke
+ * until the tab froze (#187). The API refuses all of these on save, so only a
+ * version saved before that reaches the form with one — and the API still
+ * checks it on deploy.
  */
 function safeRegExp(pattern: string): RegExp | null {
   if (patternProblem(pattern) !== null) return null;
@@ -114,10 +113,14 @@ function safeRegExp(pattern: string): RegExp | null {
  * bound and checks every value on deploy, so a longer one is left to it rather
  * than refused here.
  *
- * With nested repeats refused, what is left backtracks polynomially at worst —
- * `^\w*\w*\w*!$` takes ~5 ms at 256 characters in V8, ~36 ms at 512 and
- * ~280 ms at 1024, on every keystroke. 256 covers the longest name-shaped
- * value Kubernetes has (a DNS subdomain, 253) while keeping that under a frame.
+ * Exponential patterns are refused before they get here, and so are three
+ * overlapping loops in a row (`^\w*\w*\w*!$`: ~5 ms at 256 characters in V8,
+ * ~36 ms at 512, ~280 ms at 1024). What is left can match a text at most two
+ * ways per run — two overlapping loops, or an unanchored repeat retried from
+ * every position — which grows with the square of the value's length;
+ * ui-spec-pattern.test.ts holds every accepted table pattern under 50 ms at 256
+ * on adversarial input. 256 covers the longest name-shaped value Kubernetes
+ * has (a DNS subdomain, 253).
  */
 const MAX_PATTERN_INPUT = 256;
 
@@ -128,7 +131,15 @@ const MAX_PATTERN_INPUT = 256;
  * type is not valid", which was wrong about the second kind twice over: the
  * field was still there, and the type was fine (#197).
  */
-export type UISpecIssue = { at: string; kind: "dropped" | "ignored" };
+export type UISpecIssue = {
+  at: string;
+  /**
+   * `refused` is a pattern kubeport will not save (see ui-spec-pattern.ts). It
+   * is set aside like an `ignored` one, but it is finished, so telling the
+   * admin to wait until it is complete would be wrong.
+   */
+  kind: "dropped" | "ignored" | "refused";
+};
 
 /**
  * What is wrong with this spec's fields, described for a human.
@@ -161,7 +172,7 @@ export function uiSpecIssues(spec: UISpec): UISpecIssue[] {
       f.pattern &&
       safeRegExp(f.pattern) === null
     ) {
-      out.push({ at: `${at}.pattern`, kind: "ignored" });
+      out.push({ at: `${at}.pattern`, kind: patternProblem(f.pattern) === null ? "ignored" : "refused" });
     }
   });
   return out;
@@ -209,6 +220,8 @@ export function normalizeUISpec(spec: UISpec): {
   dropped: string[];
   /** Settings set aside while their field stays in the form. */
   ignored: string[];
+  /** Patterns set aside because kubeport refuses them on save. */
+  refused: string[];
 } {
   const issues = uiSpecIssues(spec);
   // Same document-level guard as uiSpecIssues: `fields:` → null, no key →
@@ -253,6 +266,7 @@ export function normalizeUISpec(spec: UISpec): {
     problems: issues.map((issue) => issue.at),
     dropped: issues.filter((issue) => issue.kind === "dropped").map((issue) => issue.at),
     ignored: issues.filter((issue) => issue.kind === "ignored").map((issue) => issue.at),
+    refused: issues.filter((issue) => issue.kind === "refused").map((issue) => issue.at),
   };
 }
 

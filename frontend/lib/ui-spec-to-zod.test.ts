@@ -735,9 +735,21 @@ describe("normalizeUISpec", () => {
     const raw: UISpec = {
       fields: [{ path: "a", label: "A", type: "string", pattern: String.raw`\Aabc` }],
     };
-    const { spec, problems } = normalizeUISpec(raw);
+    const { spec, problems, ignored, refused } = normalizeUISpec(raw);
     expect((spec.fields[0] as { pattern?: string }).pattern).toBeUndefined();
     expect(problems).toEqual(["fields[0].pattern"]);
+    // Finished, not mid-keystroke: the preview must not say "until complete".
+    expect(refused).toEqual(["fields[0].pattern"]);
+    expect(ignored).toEqual([]);
+  });
+
+  it("still calls an unfinished pattern ignored, not refused", () => {
+    const raw: UISpec = {
+      fields: [{ path: "a", label: "A", type: "string", pattern: "^[a-z" }],
+    };
+    const { ignored, refused } = normalizeUISpec(raw);
+    expect(ignored).toEqual(["fields[0].pattern"]);
+    expect(refused).toEqual([]);
   });
 
   // #187: this compiles, and the form runs it on every keystroke.

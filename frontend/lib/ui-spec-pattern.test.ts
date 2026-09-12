@@ -28,11 +28,18 @@ const cases: [string, PatternProblemKind | null][] = [
   [r`^(a|b)*$`, null],
   [r`^(a+)?$`, null],
   [r`^(a+){1}$`, null],
-  // A repeated group that opens with a literal no inner repeat can match
-  // splits the input one way only, so it cannot backtrack catastrophically.
+  // A repeat that can match a given text only one way cannot backtrack
+  // catastrophically, whether its separator comes first or last.
   [r`^[a-z]+(?:-[a-z]+)*$`, null],
   [r`^(/[^/]+)+$`, null],
   [r`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`, null], // k8s DNS-1123 subdomain
+  [r`^([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)+[a-z]{2,}$`, null], // FQDN
+  [r`^([a-z]+,)*[a-z]+$`, null], // comma list
+  [r`^([a-z0-9]+(?:[._-][a-z0-9]+)*/)*[a-z0-9]+(?:[._-][a-z0-9]+)*(:[\w][\w.-]{0,127})?$`, null], // image reference
+  [r`^(?:[a-z0-9.-]+(?::\d+)?/)?[a-z0-9]+(?:[._/-][a-z0-9]+)*(?::[\w][\w.-]{0,127})?(?:@sha256:[a-f0-9]{64})?$`, null],
+  [r`^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$`, null], // semver
+  [r`^([0-9a-f]{2}:){5}[0-9a-f]{2}$`, null], // MAC address
+  [r`^(foo|bar)*$`, null],
   ["a".repeat(200), null],
 
   ["a".repeat(201), "too-long"],
@@ -69,6 +76,7 @@ const cases: [string, PatternProblemKind | null][] = [
   [r`^[^]a]$`, "dialect"], // JS: any character, then "a]"
   [r`^a{01}$`, "dialect"], // Go: literal "{01}"; JS: exactly one "a"
   [r`^a{0,01}$`, "dialect"],
+  [r`^[a-\d]$`, "dialect"], // the other way round: Go refuses it, JS reads "a", "-" and digits
 
   [r`^(a+)+$`, "nested-quantifier"],
   [r`^(a*)*$`, "nested-quantifier"],
@@ -80,6 +88,16 @@ const cases: [string, PatternProblemKind | null][] = [
   [r`^(?:-a|b+)*$`, "nested-quantifier"], // an alternative need not start with "-"
   [r`^(-?[a-z]+)*$`, "nested-quantifier"], // the separator is optional
   [r`^(-[a-z-]+)*$`, "nested-quantifier"], // the inner repeat can eat the separator
+  [r`^(a|a)*$`, "nested-quantifier"], // both alternatives match the same text
+  [r`^(?:[a-z]|[a-z0-9])+$`, "nested-quantifier"], // ...and here overlap on a-z
+  [r`^(a{1,20})+$`, "nested-quantifier"], // a bounded inner repeat splits the text as well
+  [r`^(a{0,30}){0,30}b$`, "nested-quantifier"], // bounded on both levels, still exponential
+  [r`^(a+,?)*$`, "nested-quantifier"], // the trailing separator is optional
+  [r`^([a-z,]+,)*$`, "nested-quantifier"], // the inner class also matches the separator
+  // Polynomial, but steep at 256 characters on every keystroke.
+  [r`^[a-z0-9]+[-a-z0-9]*[a-z0-9]+$`, "nested-quantifier"], // three overlapping repeats; write `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+  [r`\w+\w+`, "nested-quantifier"], // unanchored, so the browser retries it from every position
+  [r`[a-z]+`, null], // ...which one repeat can afford
 ];
 
 describe("patternProblem", () => {
@@ -95,4 +113,53 @@ describe("patternProblem", () => {
       expect(() => patternProblem(pattern)).not.toThrow();
     },
   );
+
+  // The analysis runs on every keystroke in the editor preview too.
+  it.each([
+    "(?:[a-z]-)*".repeat(18),
+    "[a-z]*".repeat(33),
+    "(a|b)".repeat(40),
+    "a?".repeat(100),
+    "(?:(?:(?:(?:a|b|c|d|e|f|g|h|i|j)*)*)*)*".repeat(4),
+    "[\\w.-]".repeat(28),
+  ])("decides %s quickly", (pattern) => {
+    const started = performance.now();
+    patternProblem(pattern);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+});
+
+/**
+ * Inputs that make a backtracking engine work hard on a pattern: every
+ * character the pattern mentions — separators and class bounds included —
+ * repeated, and every pair of them alternated, each ending in a character
+ * that breaks the match.
+ */
+function adversarialInputs(pattern: string): string[] {
+  const chars = new Set(["a", "0", "A", "_", "-", ".", "/", ":", ",", " "]);
+  for (const ch of pattern) if (ch >= " " && ch <= "~") chars.add(ch);
+  const list = [...chars];
+  const out: string[] = [];
+  for (const c of list) out.push(c.repeat(256) + "!", c.repeat(256) + "\n");
+  for (const c of list) for (const d of list) if (c !== d) out.push((c + d).repeat(128) + "!");
+  return out;
+}
+
+// The rule is judged by what the browser does, not by the shape it looks for:
+// everything the table accepts has to stay fast on inputs chosen to make it
+// backtrack, at the longest value the form checks (#187).
+describe("patterns patternProblem accepts run quickly in the browser's engine", () => {
+  const accepted = cases.filter(([, kind]) => kind === null).map(([pattern]) => pattern);
+  it.each(accepted)("%s", (pattern) => {
+    const re = new RegExp(pattern);
+    for (const input of adversarialInputs(pattern)) {
+      let best = Infinity;
+      for (let k = 0; k < 3 && best >= 5; k++) {
+        const started = performance.now();
+        re.test(input);
+        best = Math.min(best, performance.now() - started);
+      }
+      expect(best, JSON.stringify(input.slice(0, 6))).toBeLessThan(50);
+    }
+  });
 });

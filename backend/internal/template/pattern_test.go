@@ -38,11 +38,18 @@ var patternCases = []struct {
 	{`^(a|b)*$`, ""},
 	{`^(a+)?$`, ""},
 	{`^(a+){1}$`, ""},
-	// A repeated group that opens with a literal no inner repeat can match
-	// splits the input one way only, so it cannot backtrack catastrophically.
+	// A repeat that can match a given text only one way cannot backtrack
+	// catastrophically, whether its separator comes first or last.
 	{`^[a-z]+(?:-[a-z]+)*$`, ""},
 	{`^(/[^/]+)+$`, ""},
-	{`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`, ""}, // k8s DNS-1123 subdomain
+	{`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`, ""},                   // k8s DNS-1123 subdomain
+	{`^([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)+[a-z]{2,}$`, ""},                                       // FQDN
+	{`^([a-z]+,)*[a-z]+$`, ""},                                                                  // comma list
+	{`^([a-z0-9]+(?:[._-][a-z0-9]+)*/)*[a-z0-9]+(?:[._-][a-z0-9]+)*(:[\w][\w.-]{0,127})?$`, ""}, // image reference
+	{`^(?:[a-z0-9.-]+(?::\d+)?/)?[a-z0-9]+(?:[._/-][a-z0-9]+)*(?::[\w][\w.-]{0,127})?(?:@sha256:[a-f0-9]{64})?$`, ""},
+	{`^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$`, ""}, // semver
+	{`^([0-9a-f]{2}:){5}[0-9a-f]{2}$`, ""},                                                  // MAC address
+	{`^(foo|bar)*$`, ""},
 	{strings.Repeat("a", 200), ""},
 
 	{strings.Repeat("a", 201), "too-long"},
@@ -79,6 +86,7 @@ var patternCases = []struct {
 	{`^[^]a]$`, "dialect"}, // JS: any character, then "a]"
 	{`^a{01}$`, "dialect"}, // Go: literal "{01}"; JS: exactly one "a"
 	{`^a{0,01}$`, "dialect"},
+	{`^[a-\d]$`, "dialect"}, // the other way round: Go refuses it, JS reads "a", "-" and digits
 
 	{`^(a+)+$`, "nested-quantifier"},
 	{`^(a*)*$`, "nested-quantifier"},
@@ -86,10 +94,20 @@ var patternCases = []struct {
 	{`^(a+){2,}$`, "nested-quantifier"},
 	{`^(a+){2}$`, "nested-quantifier"},
 	{`^((a)+)+$`, "nested-quantifier"},
-	{`^(a.*)*$`, "nested-quantifier"},      // the literal "a" is also what ".*" can eat
-	{`^(?:-a|b+)*$`, "nested-quantifier"},  // an alternative need not start with "-"
-	{`^(-?[a-z]+)*$`, "nested-quantifier"}, // the separator is optional
-	{`^(-[a-z-]+)*$`, "nested-quantifier"}, // the inner repeat can eat the separator
+	{`^(a.*)*$`, "nested-quantifier"},              // the literal "a" is also what ".*" can eat
+	{`^(?:-a|b+)*$`, "nested-quantifier"},          // an alternative need not start with "-"
+	{`^(-?[a-z]+)*$`, "nested-quantifier"},         // the separator is optional
+	{`^(-[a-z-]+)*$`, "nested-quantifier"},         // the inner repeat can eat the separator
+	{`^(a|a)*$`, "nested-quantifier"},              // both alternatives match the same text
+	{`^(?:[a-z]|[a-z0-9])+$`, "nested-quantifier"}, // ...and here overlap on a-z
+	{`^(a{1,20})+$`, "nested-quantifier"},          // a bounded inner repeat splits the text as well
+	{`^(a{0,30}){0,30}b$`, "nested-quantifier"},    // bounded on both levels, still exponential
+	{`^(a+,?)*$`, "nested-quantifier"},             // the trailing separator is optional
+	{`^([a-z,]+,)*$`, "nested-quantifier"},         // the inner class also matches the separator
+	// Polynomial, but steep at 256 characters on every keystroke.
+	{`^[a-z0-9]+[-a-z0-9]*[a-z0-9]+$`, "nested-quantifier"}, // three overlapping repeats; write `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	{`\w+\w+`, "nested-quantifier"},                         // unanchored, so the browser retries it from every position
+	{`[a-z]+`, ""},                                          // ...which one repeat can afford
 }
 
 func TestCheckPattern(t *testing.T) {

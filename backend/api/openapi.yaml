@@ -2235,10 +2235,12 @@ components:
                   RE2-only syntax such as `(?i)`, `(?s)`, `(?P<name>...)`,
                   `\A`, `\z`, `\Q...\E`, `\pL` or `[[:alpha:]]` (use
                   `(?:...)` and `(?<name>...)` for groups); a pattern longer
-                  than 200 characters; and a repeated group that itself holds
-                  an unlimited repeat, as in `(a+)+`, which can freeze the
-                  browser — unless every repetition opens with a literal the
-                  inner repeat cannot match, as in `(-[a-z]+)*`.
+                  than 200 characters; and a pattern that can match the same
+                  text in more than one way inside a repeat, as in `(a+)+`,
+                  `(a|a)*` or `(a{1,20})+`, which can freeze the browser
+                  (bounded counts are judged like unbounded ones). A separator
+                  nothing else in the repeat can match keeps it unambiguous,
+                  at either end: `^[a-z]+(-[a-z]+)*$`, `^([a-z]+,)*[a-z]+$`.
               values:
                 type: array
                 items: { type: string }
