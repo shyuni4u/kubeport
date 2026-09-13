@@ -30,8 +30,27 @@ describe("DeleteReleaseButton", () => {
     render(<DeleteReleaseButton releaseId="rel-1" name="my-app" />);
     fireEvent.click(screen.getByRole("button", { name: "삭제" }));
     expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining("'my-app'"));
+    expect(confirmMock).toHaveBeenCalledWith(expect.not.stringContaining("저장소"));
     expect(fetchMock).not.toHaveBeenCalled();
     expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  // #340: deleting a StatefulSet's storage cannot be undone, so the reader
+  // hears it before confirming.
+  it("says the storage is deleted too when it is", () => {
+    confirmMock.mockReturnValue(false);
+    render(<DeleteReleaseButton releaseId="rel-1" name="my-app" storage="deleted" />);
+    fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining("저장소(데이터)도 함께 삭제됩니다"));
+    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining("'my-app'"));
+  });
+
+  it("says the storage stays when the release keeps it", () => {
+    confirmMock.mockReturnValue(false);
+    render(<DeleteReleaseButton releaseId="rel-1" name="my-app" storage="kept" />);
+    fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining("클러스터에 남습니다"));
+    expect(confirmMock).toHaveBeenCalledWith(expect.not.stringContaining("함께 삭제됩니다"));
   });
 
   it("calls DELETE /api/v1/releases/<id> without ?force and redirects on success", async () => {

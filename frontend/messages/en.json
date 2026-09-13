@@ -207,6 +207,8 @@
     "delete": {
       "button": "Delete",
       "confirm": "This takes ''{name}'' down from the cluster and removes it from the list. This cannot be undone. Continue?",
+      "confirmStorageDeleted": "This takes ''{name}'' down from the cluster and removes it from the list. Its storage (data) is deleted with it. This cannot be undone. Continue?",
+      "confirmStorageKept": "This takes ''{name}'' down from the cluster and removes it from the list. This cannot be undone. Its storage (data) stays in the cluster — ask an admin to clean it up if it is no longer needed. Continue?",
       "failed": "Could not delete. Try again later or contact an admin.",
       "forbidden": "You do not have permission to delete this release."
     },

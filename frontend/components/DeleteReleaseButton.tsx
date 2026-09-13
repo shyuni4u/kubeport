@@ -5,16 +5,23 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { ProblemMessage, type RequestFailure } from "@/components/ProblemMessage";
+import type { ReleaseStorage } from "@/lib/release-storage";
 
 // Normal-path delete for the release owner: tears the resources down in the
 // cluster and removes the DB record. The admin-only `ForceDeleteButton`
 // (stale banner) is the DB-only escape hatch and keeps a distinct label.
+//
+// `storage` says what the delete does to the release's StatefulSet storage
+// (#340). Deleting it cannot be undone, so the confirmation says so before the
+// click, not after.
 export function DeleteReleaseButton({
   releaseId,
   name,
+  storage = "none",
 }: {
   releaseId: string;
   name: string;
+  storage?: ReleaseStorage;
 }) {
   const t = useTranslations("releases.delete");
   const tProblem = useTranslations("problem");
@@ -24,7 +31,9 @@ export function DeleteReleaseButton({
 
   async function onClick() {
     if (busy) return;
-    if (!window.confirm(t("confirm", { name }))) return;
+    const confirmKey =
+      storage === "deleted" ? "confirmStorageDeleted" : storage === "kept" ? "confirmStorageKept" : "confirm";
+    if (!window.confirm(t(confirmKey, { name }))) return;
     setBusy(true);
     setError(null);
     try {
