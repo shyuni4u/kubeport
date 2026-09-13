@@ -1530,12 +1530,13 @@ spec:
                 # pods are gone; nothing can mount it meanwhile, and a new
                 # release gets a new claim once it is.
                 #
-                # The demo-reset Role has no watch, and kubectl skips a wait it
-                # is refused, so --wait does not hold the Job today. --timeout
-                # bounds it if watch is ever granted: a finalizer that never
-                # clears must fail the Job well inside activeDeadlineSeconds,
-                # not after the namespace is wiped and before the seed runs.
-                - kubectl -n demo delete deploy,sts,ds,job,cronjob,svc,cm,secret,pod,pvc --all --wait=true --timeout=120s --ignore-not-found
+                # No wait. The seed re-creates only objects without finalizers,
+                # which are gone when delete returns, so it needs none. A wait
+                # would only add a way to fail this init container after the
+                # deletes and before the seed — the emptied, unseeded demo of
+                # #105. (It never waited anyway: the demo-reset Role has no
+                # watch, and kubectl skips a wait it is refused.)
+                - kubectl -n demo delete deploy,sts,ds,job,cronjob,svc,cm,secret,pod,pvc --all --wait=false --ignore-not-found
               env:
                 # kubectl writes its discovery cache under $HOME/.kube/cache;
                 # readOnlyRootFilesystem forces it into the tmp emptyDir below.
