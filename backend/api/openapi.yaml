@@ -2550,17 +2550,20 @@ components:
               `persistentVolumeClaimRetentionPolicy.whenDeleted: Delete` — its
               controller and the garbage collector remove the claims whatever
               the caller's RBAC — or the release carries claims of its own the
-              delete removes.
+              delete removes, which it does only if the caller may
+              delete-collection claims (a SelfSubjectAccessReview).
             - `kept`: it has StatefulSets with claims, and none deletes them.
             - `none`: nothing of the release holds storage.
             - `unknown`: the caller may not list the release's StatefulSets, or
               the cluster could not be asked. Say the storage may be deleted.
 
-            A caller who may not list claims is still told about StatefulSets.
-            Claims carrying the release's labels directly are then left out only
-            if the cluster says the caller may not delete-collection claims
-            either (a SelfSubjectAccessReview); otherwise the verdict is
-            `unknown`, since list and deletecollection are granted separately.
+            Claims carrying the release's labels directly count only as far as
+            the caller's own delete reaches, since list and deletecollection
+            are granted separately. The cluster is asked once
+            (SelfSubjectAccessReview for deletecollection): claims it may not
+            delete are left to the StatefulSets' verdict, listed or not; if it
+            may delete claims it cannot list, or nobody can say, the verdict is
+            `unknown`.
 
     ReleaseStatus:
       type: string

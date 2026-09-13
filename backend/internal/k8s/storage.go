@@ -54,18 +54,27 @@ func releaseSelectors(ref ReleaseRef) []string {
 // default, still deletes its claims when the release goes. The manifest does
 // not show it; the same selectors DeleteByRelease uses do (security review).
 //
-// Claims listed under the release's labels count as deleted: DeleteByRelease
-// deletes them itself. For a caller who may not list claims, those cannot be
-// seen. RBAC grants list and deletecollection separately (codex review), so
-// that alone says nothing about what its delete removes: the cluster is asked.
-// Only a caller it says may not delete claims — the demo user Role withholds
-// both — is told about its StatefulSets alone; any other answer is unknown.
+// Claims carrying the release's labels are deleted by DeleteByRelease itself,
+// with the caller's token, and a refused delete-collection is skipped there.
+// Whether the caller may delete them is a separate grant from whether it may
+// list them (codex review), so the cluster is asked (claimDeletion), once:
+//   - claims listed: deleted if it may delete them; left to the StatefulSets'
+//     verdict if it may not, since they stay; unknown if nobody can say.
+//   - claims not listable: left to the StatefulSets' verdict only if it may
+//     not delete them — the demo user Role withholds both — else unknown.
 func (c *Client) StorageOnDelete(ctx context.Context, ref ReleaseRef) (Storage, error) {
 	if ref.UID == "" {
 		return StorageUnknown, errors.New("storage on delete: no release id")
 	}
 	verdict := StorageNone
-	claimsUnseen := false
+	unknown := false
+	access := claimsUnasked
+	deletion := func() claimAccess {
+		if access == claimsUnasked {
+			access = c.claimDeletion(ctx, ref.Namespace)
+		}
+		return access
+	}
 	for _, sel := range releaseSelectors(ref) {
 		opts := metav1.ListOptions{LabelSelector: sel}
 		sets, err := c.dyn.Resource(storageSetsGVR).Namespace(ref.Namespace).List(ctx, opts)
@@ -88,28 +97,52 @@ func (c *Client) StorageOnDelete(ctx context.Context, ref ReleaseRef) (Storage, 
 		claims, err := c.dyn.Resource(storageClaimsGVR).Namespace(ref.Namespace).List(ctx, opts)
 		switch {
 		case apierrors.IsForbidden(err):
-			claimsUnseen = true
+			if deletion() != claimsNotDeletable {
+				unknown = true
+			}
 		case err != nil:
 			return StorageUnknown, fmt.Errorf("list persistentvolumeclaims: %w", err)
 		case len(claims.Items) > 0:
-			return StorageDeleted, nil
+			switch deletion() {
+			case claimsDeletable:
+				return StorageDeleted, nil
+			case claimsAccessUnknown:
+				unknown = true
+			}
+			// claimsNotDeletable: the delete leaves them where they are.
 		}
 	}
 	// A StatefulSet that deletes its claims has returned above whatever the
-	// claims list said: its controller deletes them, not the caller.
-	if claimsUnseen && !c.mayNotDeleteClaims(ctx, ref.Namespace) {
+	// claims said: its controller deletes them, not the caller.
+	if unknown {
 		return StorageUnknown, nil
 	}
 	return verdict, nil
 }
 
-// mayNotDeleteClaims reports whether the cluster says the caller may not
-// delete-collection claims in namespace. An error, or a client that cannot
-// ask, is not that answer.
-func (c *Client) mayNotDeleteClaims(ctx context.Context, namespace string) bool {
+type claimAccess int
+
+const (
+	claimsUnasked claimAccess = iota
+	claimsDeletable
+	claimsNotDeletable
+	claimsAccessUnknown
+)
+
+// claimDeletion asks the cluster whether the caller may delete-collection
+// claims in namespace — what DeleteByRelease does to them. An error, or a
+// client that cannot ask, is neither answer.
+func (c *Client) claimDeletion(ctx context.Context, namespace string) claimAccess {
 	if c.cs == nil {
-		return false
+		return claimsAccessUnknown
 	}
 	res, err := c.CheckAccess(ctx, AccessCheck{Namespace: namespace, Verb: "deletecollection", Resource: "persistentvolumeclaims"})
-	return err == nil && !res.Allowed
+	switch {
+	case err != nil:
+		return claimsAccessUnknown
+	case res.Allowed:
+		return claimsDeletable
+	default:
+		return claimsNotDeletable
+	}
 }

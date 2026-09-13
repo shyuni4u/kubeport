@@ -57,12 +57,45 @@ func storageRef(nameOnly bool) k8s.ReleaseRef {
 	return k8s.ReleaseRef{Namespace: "demo", Name: "db", UID: "uid-db", NameOnly: nameOnly}
 }
 
-func TestStorageOnDelete(t *testing.T) {
-	ownClaim := &unstructured.Unstructured{Object: map[string]any{
+// ownClaim is a claim the template applied itself, carrying the release's
+// labels, so DeleteByRelease deletes it directly with the caller's token.
+func ownClaim() *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "v1", "kind": "PersistentVolumeClaim",
 		"metadata": map[string]any{"name": "shared", "namespace": "demo",
 			"labels": map[string]any{k8s.ReleaseLabel: "db", k8s.ReleaseUIDLabel: "uid-db"}},
 	}}
+}
+
+// codex review: a labelled claim is deleted only if the caller may delete it;
+// DeleteByRelease skips a refused delete-collection and leaves it.
+func TestStorageOnDelete_ClaimsOfItsOwnCountOnlyIfTheCallerMayDeleteThem(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cs   bool
+		ok   bool
+		err  error
+		want k8s.Storage
+	}{
+		"it may delete them":               {cs: true, ok: true, want: k8s.StorageDeleted},
+		"it may not: the StatefulSet says": {cs: true, ok: false, want: k8s.StorageKept},
+		"the review fails":                 {cs: true, err: errors.New("simulated timeout"), want: k8s.StorageUnknown},
+		"nothing to ask with":              {cs: false, want: k8s.StorageUnknown},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dyn := storageCluster(set("db", "uid-db", "Retain"), ownClaim())
+			cli := k8s.NewForTest(dyn)
+			if tc.cs {
+				cs, _ := accessAnswer(tc.ok, tc.err)
+				cli = k8s.NewForTestWithClientset(dyn, cs)
+			}
+			got, err := cli.StorageOnDelete(context.Background(), storageRef(false))
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestStorageOnDelete(t *testing.T) {
 	cases := map[string]struct {
 		objs     []runtime.Object
 		nameOnly bool
@@ -74,7 +107,6 @@ func TestStorageOnDelete(t *testing.T) {
 		"one deletes and another keeps":                   {objs: []runtime.Object{set("a", "uid-db", "Retain"), set("b", "uid-db", "Delete")}, want: k8s.StorageDeleted},
 		"a StatefulSet without claim templates":           {objs: []runtime.Object{set("db", "uid-db", "-")}, want: k8s.StorageNone},
 		"another release's StatefulSet of the same name":  {objs: []runtime.Object{set("db", "uid-other", "Delete")}, want: k8s.StorageNone},
-		"claims of its own the delete removes directly":   {objs: []runtime.Object{set("db", "uid-db", "Retain"), ownClaim}, want: k8s.StorageDeleted},
 		"nothing at all":                                  {want: k8s.StorageNone},
 		"an unstamped StatefulSet of a name-only release": {objs: []runtime.Object{set("db", "", "Delete")}, nameOnly: true, want: k8s.StorageDeleted},
 		"an unstamped StatefulSet is not an id release's": {objs: []runtime.Object{set("db", "", "Delete")}, want: k8s.StorageNone},
