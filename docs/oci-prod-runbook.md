@@ -152,6 +152,14 @@ main push → build-images (sha-<7> 이미지 push)  ┐
   - ⚠️ 롤백은 **이미지·템플릿만** 되돌린다. backend 의 `migrate` initContainer 가 이미 적용한
     스키마 변경은 그대로다 — 스키마를 바꾼 커밋 이전으로 갈 때는 옛 코드가 새 스키마에서 도는지 먼저 본다.
     helm 의 자동 롤백도 같은 한계를 갖는다.
+  - ⚠️ **다중 인스턴스(#190) 이전 커밋으로 롤백할 때** — 옛 이미지는 ui-spec 의 `instances` 를 모른 채 무시해서
+    `instances: multiple` 버전을 single 로 렌더한다. 그 상태로 multiple 릴리스를 업데이트하면 템플릿이 쓴 이름·selector
+    (`app: web` 같은)로 Service 가 만들어져 **같은 네임스페이스의 다른 릴리스 파드까지 트래픽을 받는다.** 롤백 **전에**
+    게시된 multiple 버전을 deprecate 한다 — 옛 이미지도 deprecated 버전으로의 배포·업데이트는 거절하므로 그 템플릿이
+    single 로 렌더될 일이 없다. 대상 확인(읽기 전용):
+    `SELECT t.name, tv.version FROM template_versions tv JOIN templates t ON t.id = tv.template_id WHERE tv.status = 'published' AND tv.ui_spec_yaml ~ '(?m)^instances:\s*multiple';`
+    결과가 있으면 관리자 토큰으로 각각 `POST /v1/templates/<name>/versions/<v>/deprecate`, 원인이 고쳐져 다시 앞으로 간 뒤
+    `/undeprecate`.
 - **실패 읽기** — Actions 요약의 `result:` (스크립트의 `KUBEPORT_DEPLOY_RESULT=` 줄). 워크플로 메시지도
   exit 코드가 아니라 이 줄로 갈린다 — exit 1 에는 "아무것도 안 바뀜" 과 "새 리비전이 롤백 없이 떠 있음" 이
   함께 들어 있어서다:

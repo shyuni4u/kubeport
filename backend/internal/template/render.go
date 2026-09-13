@@ -186,7 +186,7 @@ func Render(resourcesYAML, uiSpecYAML string, values json.RawMessage, l Labels) 
 	// After values, which find objects by the template's own names; before
 	// labels, so the release label goes on the renamed objects.
 	if spec.multiple() {
-		if err := renameForRelease(docs, l.ReleaseName); err != nil {
+		if err := renameForRelease(docs, l.ReleaseName, l.ReleaseID); err != nil {
 			return nil, err
 		}
 	}

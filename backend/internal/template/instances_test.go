@@ -143,12 +143,88 @@ func TestRender_MultipleInstancesNamesEveryObjectAfterTheRelease(t *testing.T) {
 	require.Equal(t, "rel-a-app", at(t, docs["Ingress"], "spec", "rules", 0, "http", "paths", 0, "backend", "service", "name"))
 	require.Equal(t, "rel-a-app-secret", at(t, docs["Ingress"], "spec", "tls", 0, "secretName"))
 
-	require.Equal(t, map[string]any{"app": "app", "kubeport.io/release": "rel-a"},
-		at(t, docs["Service"], "spec", "selector"))
-	require.Equal(t, map[string]any{"app": "app", "kubeport.io/release": "rel-a"},
-		at(t, docs["Deployment"], "spec", "selector", "matchLabels"))
-	require.Equal(t, "rel-a", at(t, docs["Deployment"], "spec", "template", "metadata", "labels", "kubeport.io/release"),
-		"the pods carry what the selector now asks for")
+	want := map[string]any{"app": "app", "kubeport.io/release": "rel-a", "kubeport.io/release-uid": "id-rel-a"}
+	require.Equal(t, want, at(t, docs["Service"], "spec", "selector"))
+	require.Equal(t, want, at(t, docs["Deployment"], "spec", "selector", "matchLabels"))
+	podLabels := at(t, docs["Deployment"], "spec", "template", "metadata", "labels").(map[string]any)
+	for k, v := range want {
+		require.Equalf(t, v, podLabels[k], "the pods carry %s, which the selector now asks for", k)
+	}
+}
+
+// Security review: the selectors match the release's id as well as its name,
+// as ownership and delete do, so a later release of the same name does not
+// select pods an earlier one left behind. A preview has no id and selects by
+// name.
+func TestRender_MultipleInstancesSelectsByReleaseID(t *testing.T) {
+	out, err := template.Render(multiResources, "instances: multiple\nfields: []\n", json.RawMessage(`{}`),
+		template.Labels{ReleaseName: "rel-a"})
+	require.NoError(t, err)
+	dec := yaml.NewDecoder(bytes.NewReader(out))
+	for {
+		var d map[string]any
+		if err := dec.Decode(&d); errors.Is(err, io.EOF) {
+			break
+		} else {
+			require.NoError(t, err)
+		}
+		if d["kind"] == "Service" {
+			require.Equal(t, map[string]any{"app": "app", "kubeport.io/release": "rel-a"}, at(t, d, "spec", "selector"))
+		}
+	}
+
+	earlier := renderByKind(t, "instances: multiple\nfields: []\n", "rel-a")
+	later, err := template.Render(multiResources, "instances: multiple\nfields: []\n", json.RawMessage(`{}`),
+		template.Labels{ReleaseName: "rel-a", ReleaseID: "a-later-release"})
+	require.NoError(t, err)
+	require.Contains(t, string(later), "kubeport.io/release-uid: a-later-release")
+	require.NotEqual(t, "a-later-release",
+		at(t, earlier["Deployment"], "spec", "template", "metadata", "labels", "kubeport.io/release-uid"),
+		"the pods of an earlier release of the same name carry another id, so the later selector misses them")
+}
+
+// codex review: a pod's subdomain names the headless Service its per-pod DNS
+// records live under, and follows that Service's new name.
+func TestRender_MultipleInstancesRewritesPodSubdomain(t *testing.T) {
+	resources := `
+apiVersion: v1
+kind: Service
+metadata: { name: peers }
+spec: { clusterIP: None, selector: { app: worker }, ports: [{ port: 80 }] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: worker }
+spec:
+  selector: { matchLabels: { app: worker } }
+  template:
+    metadata: { labels: { app: worker } }
+    spec: { subdomain: peers, containers: [{ name: w, image: nginx }] }
+---
+apiVersion: batch/v1
+kind: Job
+metadata: { name: once }
+spec:
+  template:
+    spec: { subdomain: somewhere-else, restartPolicy: Never, containers: [{ name: j, image: busybox }] }
+`
+	out, err := template.Render(resources, "instances: multiple\nfields: []\n", json.RawMessage(`{}`),
+		template.Labels{ReleaseName: "rel", ReleaseID: "x"})
+	require.NoError(t, err)
+	byKind := map[string]map[string]any{}
+	dec := yaml.NewDecoder(bytes.NewReader(out))
+	for {
+		var d map[string]any
+		if err := dec.Decode(&d); errors.Is(err, io.EOF) {
+			break
+		} else {
+			require.NoError(t, err)
+		}
+		byKind[d["kind"].(string)] = d
+	}
+	require.Equal(t, "rel-peers", at(t, byKind["Deployment"], "spec", "template", "spec", "subdomain"))
+	require.Equal(t, "somewhere-else", at(t, byKind["Job"], "spec", "template", "spec", "subdomain"),
+		"a Service the template does not declare keeps its name")
 }
 
 // codex review: a claim cloned from another claim of the template must follow
