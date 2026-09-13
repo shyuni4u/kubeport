@@ -1360,6 +1360,41 @@ describe("DeployClient preview payload", () => {
       expect(screen.getByText(/hello-web/)).toBeInTheDocument();
     });
 
+    // ICU treats ' and { as syntax in the message, not in an argument value:
+    // a name with either must come through as typed, and React escapes it.
+    it("shows a name with quotes or braces as typed", () => {
+      vi.stubGlobal("fetch", routedFetch({}));
+      render(
+        <DeployClient
+          templateName="web-app"
+          version={2}
+          team={null}
+          spec={spec}
+          updateReleaseId="rel-1"
+          updateRelease={{ name: "it's-{a}-<b>", version: 2 }}
+          initialValues={{}}
+        />,
+      );
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("'it's-{a}-<b>' 설정 바꾸기");
+    });
+
+    it("falls back to the version wording when the release came without a name", () => {
+      vi.stubGlobal("fetch", routedFetch({}));
+      render(
+        <DeployClient
+          templateName="web-app"
+          version={2}
+          team={null}
+          spec={spec}
+          updateReleaseId="rel-1"
+          updateRelease={{ name: "", version: 2 }}
+          initialValues={{}}
+        />,
+      );
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("v2 로 업데이트");
+      expect(screen.queryByText(/설정 바꾸기/)).toBeNull();
+    });
+
     it("falls back to the version wording when the release is not described", () => {
       vi.stubGlobal("fetch", routedFetch({}));
       render(
