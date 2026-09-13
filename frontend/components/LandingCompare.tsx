@@ -8,7 +8,7 @@ import { DynamicForm, type UISpec } from "@/components/DynamicForm";
 import { HelpHint } from "@/components/HelpHint";
 import { Badge } from "@/components/ui/badge";
 import { applyValuesToYaml, changedLineRange } from "@/lib/apply-values-to-yaml";
-import { defaultsFromUISpec } from "@/lib/ui-spec-to-zod";
+import { defaultsFromUISpec, emptyTakesDefault } from "@/lib/ui-spec-to-zod";
 import { cn } from "@/lib/utils";
 
 // LandingCompare is the pitch in one screen: the YAML an admin writes on the
@@ -25,6 +25,12 @@ export function LandingCompare({ resourcesYaml, uiSpecYaml }: Props) {
   const t = useTranslations("landing.compare");
   const spec = useMemo(() => parse(uiSpecYaml) as UISpec, [uiSpecYaml]);
   const defaults = useMemo(() => defaultsFromUISpec(spec), [spec]);
+  // Fields whose emptied box is no value too (#338), read by the same rule the
+  // form's schema uses so the pitch and a deploy can't drift apart (#341).
+  const emptyUsesDefault = useMemo(
+    () => new Set(spec.fields.filter(emptyTakesDefault).map((f) => f.path)),
+    [spec],
+  );
   // Baseline goes through the same serializer as every later render so the
   // diff below only ever reflects value changes, never formatting.
   const baseline = useMemo(
@@ -37,12 +43,19 @@ export function LandingCompare({ resourcesYaml, uiSpecYaml }: Props) {
 
   const onChange = useCallback(
     (values: Record<string, unknown>) => {
-      // A field cleared to no value holds null (an optional enum, #325 #326).
-      // A deploy leaves that key out and render fills it from the ui-spec
-      // default, so show the default here too, never `null`. With no default,
-      // applyValuesToYaml skips the key and the template's own value stays.
+      // A field cleared to no value holds null (an optional enum, #325 #326),
+      // or "" in a text box emptyTakesDefault picks (#338). A deploy leaves
+      // that key out and render fills it from the ui-spec default, so show the
+      // default here too, never `null` or `""`. With no default,
+      // applyValuesToYaml skips a null key and the template's own value stays.
+      // These are the raw form values, not the parsed ones, so the YAML keeps
+      // up while the form doesn't parse (#328); this is the one place the
+      // parse would change a value the YAML shows.
       const shown = Object.fromEntries(
-        Object.entries(values).map(([k, v]) => [k, v ?? defaults[k]]),
+        Object.entries(values).map(([k, v]) => [
+          k,
+          v === "" && emptyUsesDefault.has(k) ? defaults[k] : (v ?? defaults[k]),
+        ]),
       );
       const next = applyValuesToYaml(resourcesYaml, shown);
       const range = changedLineRange(prevRef.current, next);
@@ -50,7 +63,7 @@ export function LandingCompare({ resourcesYaml, uiSpecYaml }: Props) {
       setCurrent(next);
       if (range) setChanged(range);
     },
-    [resourcesYaml, defaults],
+    [resourcesYaml, defaults, emptyUsesDefault],
   );
 
   const lines = useMemo(() => current.replace(/\n$/, "").split("\n"), [current]);
