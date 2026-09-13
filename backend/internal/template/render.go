@@ -31,7 +31,8 @@ type Labels struct {
 // segments make that more likely, since they are the one part of the grammar
 // an admin writes by hand.
 func ValidateSpec(resourcesYAML, uiSpecYAML string) error {
-	if _, err := parseMultiDoc(resourcesYAML); err != nil {
+	docs, err := parseMultiDoc(resourcesYAML)
+	if err != nil {
 		return err
 	}
 	spec, err := parseSpec(uiSpecYAML)
@@ -76,6 +77,9 @@ func ValidateSpec(resourcesYAML, uiSpecYAML string) error {
 				return fmt.Errorf("fields[%d] (label %q, path `%s`) has an unusable pattern: it %s", i, f.Label, f.Path, prob.reason)
 			}
 		}
+	}
+	if spec.multiple() {
+		return validateMultiInstance(spec, docs)
 	}
 	return nil
 }
@@ -178,6 +182,15 @@ func Render(resourcesYAML, uiSpecYAML string, values json.RawMessage, l Labels) 
 
 	for _, d := range docs {
 		stringifyStringMaps(d)
+	}
+	// After values, which find objects by the template's own names; before
+	// labels, so the release label goes on the renamed objects.
+	if spec.multiple() {
+		if err := renameForRelease(docs, l.ReleaseName); err != nil {
+			return nil, err
+		}
+	}
+	for _, d := range docs {
 		stampLabels(d, l)
 	}
 
@@ -284,7 +297,8 @@ func stampLabels(obj map[string]any, l Labels) {
 	//
 	// Only metadata.labels, never spec.selector: a workload's selector is
 	// immutable, and adding a key to it would refuse every update of an
-	// existing release.
+	// existing release. A multi-instance template is the exception, and gets
+	// the release label in its selectors from its first render (instances.go).
 	if spec, ok := obj["spec"].(map[string]any); ok {
 		if tmpl, ok := spec["template"].(map[string]any); ok {
 			// A Job's pod template is immutable too, so a release with a Job
