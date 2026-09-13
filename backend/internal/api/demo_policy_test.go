@@ -233,6 +233,32 @@ func TestUpdateRelease_DemoPolicyRefusesLimitsSetHigher(t *testing.T) {
 	require.Empty(t, applier.applied)
 }
 
+// A violation with no limit to name — a podFailurePolicy rule that ignores
+// failures — is still a 403 that says what to change, not a panic.
+func TestCreateRelease_DemoPolicyRefusesAFailurePolicyThatIgnoresFailures(t *testing.T) {
+	s := testStore(t)
+	admin := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: s})
+	clusterName := seedCluster(t, admin)
+	tpl := publishTemplate(t, newDemoAdminRouterWithTemplateCreate(t, s), `apiVersion: batch/v1
+kind: Job
+metadata: { name: retry }
+spec:
+  podFailurePolicy: { rules: [{ action: Ignore, onExitCodes: { operator: NotIn, values: [0] } }] }
+  template: { spec: { restartPolicy: Never, containers: [{ name: c, image: "busybox:1.36" }] } }
+`)
+
+	applier := &fakeK8sApplier{}
+	w := do(t, demoUserRouter(s, demoPolicyConfig, applier), http.MethodPost, "/v1/releases", policyDeployBody(t, tpl, clusterName))
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	p := decodePolicyProblem(t, w.Body.Bytes())
+	require.Equal(t, "demo-restricted", p.Title)
+	require.Len(t, p.DemoPolicy, 1)
+	require.Equal(t, "spec.podFailurePolicy.rules[0].action", p.DemoPolicy[0].Field)
+	require.Nil(t, p.DemoPolicy[0].Limit)
+	require.Contains(t, p.Detail, "sets spec.podFailurePolicy.rules[0].action to Ignore, which demo accounts may not use")
+	require.Empty(t, applier.applied)
+}
+
 func TestPreviewRender_DemoPolicyShowsWhatADeployWouldGet(t *testing.T) {
 	s := testStore(t)
 	demoAdmin := newDemoAdminRouterWithTemplateCreate(t, s)

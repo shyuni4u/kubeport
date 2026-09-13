@@ -55,9 +55,12 @@ func withDemoPolicy(violations []template.DemoViolation) problemOption {
 func demoPolicyDetail(violations []template.DemoViolation) string {
 	v := violations[0]
 	var what string
-	switch v.Rule {
-	case "image-prefix":
+	switch {
+	case v.Rule == "image-prefix":
 		what = fmt.Sprintf("%s %s uses image %q in container %q, which demo accounts may not use", v.Kind, v.Name, v.Got, v.Container)
+	case v.Limit == nil:
+		// A podFailurePolicy rule that ignores failures has no limit to name.
+		what = fmt.Sprintf("%s %s sets %s to %v, which demo accounts may not use", v.Kind, v.Name, v.Field, v.Got)
 	default:
 		what = fmt.Sprintf("%s %s sets %s to %v, above the demo limit of %d", v.Kind, v.Name, v.Field, v.Got, *v.Limit)
 	}

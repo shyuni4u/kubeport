@@ -88,6 +88,9 @@ helm-lint:
 	@helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
 		--set-json 'demo.policy.allowedImagePrefixes=["a,b"]' 2>&1 | grep -q "allowedImagePrefixes entries must be non-empty strings without commas" \
 		|| { echo "demo policy guard: an image prefix with a comma rendered (#350)"; exit 1; }
+	@helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
+		--set demo.policy.allowedImagePrefixes=ghcr.io/nginx/ 2>&1 | grep -q "demo.policy.allowedImagePrefixes must be a list" \
+		|| { echo "demo policy guard: an image prefix string instead of a list rendered (#350)"; exit 1; }
 	@echo "demo policy guard: ok"
 
 # Diff the rendered chart against the checked-in golden snapshot. Fails

@@ -273,9 +273,11 @@ dry-run create 로 존재 여부만 확인해, 있으면 `owner` 없이 `owner_u
 `successfulJobsHistoryLimit`·`failedJobsHistoryLimit` 이 검사된다. 템플릿이 비워 둔 값은 **상한으로 채워지고**
 (적용·저장·미리보기 모두 채운 YAML 이다), 상한보다 크게 박힌 값은 **403 `demo-restricted`** 에 확장 필드
 `demo_policy[]`(`rule`·`kind`·`name`·`container`·`field`·`limit`·`got`)를 달고 거절된다. `rule` 은
-`job-backoff-limit`·`job-ttl`·`cronjob-history-limit`·`image-prefix` 다. 이미지 허용 목록을 켠 설치에서는 목록 밖
-이미지가 `image-prefix` 로 거절되는데, 이때 `limit` 은 없고 `got` 이 거절된 이미지이며 **허용 접두어는 어디에도
-나오지 않는다**. 위반은 한 번에 전부 오고, 이 응답이면 아무것도 적용·기록되지 않았다. 같은 `demo-restricted`
+`job-backoff-limit`·`job-ttl`·`cronjob-history-limit`·`image-prefix` 다. `job-backoff-limit` 은 상한을 넘는
+`backoffLimitPerIndex` 와, 실패를 세지 않아 상한을 무의미하게 만드는 `podFailurePolicy` 의 `action: Ignore` 규칙(이때 `limit`
+없음)에도 온다. 이미지 허용 목록을 켠 설치에서는 목록 밖 이미지·image volume(`volumes[].image.reference`)이 `image-prefix`
+로 거절되는데, 이때 `limit` 은 없고 `got` 이 거절된 이미지다. 허용 접두어는 응답에 싣지 않지만 **비밀로 취급하지
+않는다** — 미리보기로 이미지 하나씩의 허용 여부는 알 수 있다. 위반은 한 번에 전부 오고, 이 응답이면 아무것도 적용·기록되지 않았다. 같은 `demo-restricted`
 라도 `demo_policy` 가 없으면 관리 쓰기 차단이다 — 있으면 `field` 가 폼에 노출된 값일 때만 입력값으로 풀리고,
 아니면 템플릿을 고쳐야 한다. 데모가 아닌 호출자, 그리고 정책 키(`KBP_DEMO_JOB_BACKOFF_LIMIT` 등)를 두지 않은
 설치는 영향이 없다.

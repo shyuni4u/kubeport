@@ -57,6 +57,9 @@ data:
   {{- end }}
   {{- end }}
   {{- with .allowedImagePrefixes }}
+  {{- if not (kindIs "slice" .) }}
+  {{- fail (printf "demo.policy.allowedImagePrefixes must be a list, e.g. --set 'demo.policy.allowedImagePrefixes={ghcr.io/nginx/,docker.io/library/busybox}' (got %v)" .) }}
+  {{- end }}
   {{- range . }}
   {{- if or (not (kindIs "string" .)) (eq . "") (contains "," .) }}
   {{- fail (printf "demo.policy.allowedImagePrefixes entries must be non-empty strings without commas (got %v)" .) }}

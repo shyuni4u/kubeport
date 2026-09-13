@@ -644,6 +644,24 @@ ui-spec fields are now checked the way the contract always described them:
   scalars. A release whose stored values have `2.5` for an integer field, or a
   list for an enum, fails to update until the value is corrected.
 
+### Behaviour changes when upgrading past #350
+
+With `demo.enabled=true`, demo accounts' manifests are now held to
+`demo.policy`, on by default: `jobBackoffLimit: 2`,
+`jobTTLSecondsAfterFinished: 86400`, `cronJobHistoryLimit: 1`. Installs without
+demo mode, and accounts outside `demo.emailDomain`, are unaffected.
+
+- **A template that sets one of these higher can no longer be deployed,
+  updated or previewed by a demo account** — including a draft's preview in the
+  editor. The answer is 403 `demo-restricted` with `demo_policy[]`. Lower the
+  value in the template, or set that key to `null` to keep the old behaviour.
+- **Where a template leaves them unset, the preview and the applied manifest now
+  carry the limit.** Existing releases are not touched until their next update.
+- **`allowedImagePrefixes` is empty, so images are not restricted** unless you
+  set it. If you do, the demo reset checks the seed against it before it deletes
+  anything, and fails the Job (logging the refused image) when the seed would be
+  refused.
+
 ### Behaviour changes when upgrading past #195
 
 A release's objects now carry its database id as a label,
@@ -1023,10 +1041,19 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
   list, with nothing applied. `null` turns a rule off. `allowedImagePrefixes`
   (empty by default, which allows any image) limits the images demo pods may
   use, compared after normalizing (`busybox:1.36` is
-  `docker.io/library/busybox:1.36`); a refusal names the image, never the
-  allowed prefixes. If you set it, include the seed's images —
+  `docker.io/library/busybox:1.36`), and a registry on its own (`ghcr.io`)
+  allows every image from it. Container, init container and image volume
+  images are checked. A refusal names the image, not the allowed prefixes, but
+  treat the list as public: a preview tells whether one image is allowed. From
+  the command line it is a list:
+  `--set 'demo.policy.allowedImagePrefixes={ghcr.io/nginx/,docker.io/library/busybox,ghcr.io/does-not-exist/}'`.
+  If you set it, include the seed's images —
   `ghcr.io/nginx/`, `docker.io/library/busybox` and `ghcr.io/does-not-exist/`
-  (the release that fails on purpose) — or the reset cannot re-seed. Accounts
+  (the release that fails on purpose); otherwise the reset's `preflight`
+  container fails the Job before anything is deleted. With the backoff rule on,
+  a Job's `backoffLimitPerIndex` is held to the same limit and a
+  `podFailurePolicy` rule with `action: Ignore` is refused, since either retries
+  past `backoffLimit`. Accounts
   outside `demo.emailDomain` are not affected, and a release created before the
   policy takes it on its next update. The keys become
   `KBP_DEMO_JOB_BACKOFF_LIMIT`, `KBP_DEMO_JOB_TTL_SECONDS`,

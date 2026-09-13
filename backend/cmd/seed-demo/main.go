@@ -131,6 +131,11 @@ func runPreflight(ctx context.Context, hc *http.Client, dsn, demoDomain string) 
 		return nil, fmt.Errorf("DEMO_ADMIN_EMAIL %s is outside KBP_DEMO_EMAIL_DOMAIN %s — "+
 			"the seeded catalog would not be demo-owned", adminEmail, demoDomain)
 	}
+	// Also no I/O: whether the backend's demo policy would refuse a seed
+	// release, which the seed would otherwise learn only after the wipe (#350).
+	if err := checkSeedDemoPolicy(os.Getenv, getenv("DEMO_NAMESPACE", "demo")); err != nil {
+		return nil, err
+	}
 	adminTok, err := passwordGrant(ctx, hc, issuer, cid, csec, adminEmail, must("DEMO_ADMIN_PASSWORD"))
 	if err != nil {
 		return nil, fmt.Errorf("admin token: %w", err)

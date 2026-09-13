@@ -1514,6 +1514,30 @@ spec:
                   value: "demo"
                 - name: KBP_DEMO_EMAIL_DOMAIN
                   value: "demo.kubeport"
+                - name: KBP_DEMO_JOB_BACKOFF_LIMIT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: kp-kubeport-backend
+                      key: KBP_DEMO_JOB_BACKOFF_LIMIT
+                      optional: true
+                - name: KBP_DEMO_JOB_TTL_SECONDS
+                  valueFrom:
+                    configMapKeyRef:
+                      name: kp-kubeport-backend
+                      key: KBP_DEMO_JOB_TTL_SECONDS
+                      optional: true
+                - name: KBP_DEMO_CRONJOB_HISTORY_LIMIT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: kp-kubeport-backend
+                      key: KBP_DEMO_CRONJOB_HISTORY_LIMIT
+                      optional: true
+                - name: KBP_DEMO_ALLOWED_IMAGE_PREFIXES
+                  valueFrom:
+                    configMapKeyRef:
+                      name: kp-kubeport-backend
+                      key: KBP_DEMO_ALLOWED_IMAGE_PREFIXES
+                      optional: true
                 - name: DEMO_ADMIN_PASSWORD
                   valueFrom:
                     secretKeyRef:
@@ -1595,6 +1619,30 @@ spec:
                   value: "demo"
                 - name: KBP_DEMO_EMAIL_DOMAIN
                   value: "demo.kubeport"
+                - name: KBP_DEMO_JOB_BACKOFF_LIMIT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: kp-kubeport-backend
+                      key: KBP_DEMO_JOB_BACKOFF_LIMIT
+                      optional: true
+                - name: KBP_DEMO_JOB_TTL_SECONDS
+                  valueFrom:
+                    configMapKeyRef:
+                      name: kp-kubeport-backend
+                      key: KBP_DEMO_JOB_TTL_SECONDS
+                      optional: true
+                - name: KBP_DEMO_CRONJOB_HISTORY_LIMIT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: kp-kubeport-backend
+                      key: KBP_DEMO_CRONJOB_HISTORY_LIMIT
+                      optional: true
+                - name: KBP_DEMO_ALLOWED_IMAGE_PREFIXES
+                  valueFrom:
+                    configMapKeyRef:
+                      name: kp-kubeport-backend
+                      key: KBP_DEMO_ALLOWED_IMAGE_PREFIXES
+                      optional: true
                 - name: DEMO_ADMIN_PASSWORD
                   valueFrom:
                     secretKeyRef:

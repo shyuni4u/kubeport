@@ -252,6 +252,17 @@ containers sit in different lists.
   value: {{ .Values.demo.namespace | quote }}
 - name: KBP_DEMO_EMAIL_DOMAIN
   value: {{ .Values.demo.emailDomain | quote }}
+{{- /* The demo policy the backend enforces (#350), from the backend's own
+ConfigMap so preflight checks the seed against the same values. A rule that is
+off has no key there, and optional leaves it unset here too. */}}
+{{- range list "KBP_DEMO_JOB_BACKOFF_LIMIT" "KBP_DEMO_JOB_TTL_SECONDS" "KBP_DEMO_CRONJOB_HISTORY_LIMIT" "KBP_DEMO_ALLOWED_IMAGE_PREFIXES" }}
+- name: {{ . }}
+  valueFrom:
+    configMapKeyRef:
+      name: {{ include "kubeport.backend.fullname" $ }}
+      key: {{ . }}
+      optional: true
+{{- end }}
 - name: DEMO_ADMIN_PASSWORD
   valueFrom:
     secretKeyRef:

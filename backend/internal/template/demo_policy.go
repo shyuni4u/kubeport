@@ -28,7 +28,8 @@ type DemoPolicy struct {
 	// it keeps.
 	CronJobHistoryLimit *int64
 	// ImagePrefixes, when not empty, are the image references a demo pod may
-	// use. Compared after normalizing both sides (normalizeImage).
+	// use: container, init container and image volume images. Compared after
+	// normalizing both sides (normalizeImage, normalizePrefix).
 	ImagePrefixes []string
 }
 
@@ -74,7 +75,7 @@ func ApplyDemoPolicy(rendered []byte, p DemoPolicy) ([]byte, []DemoViolation, er
 	}
 	prefixes := make([]string, 0, len(p.ImagePrefixes))
 	for _, prefix := range p.ImagePrefixes {
-		prefixes = append(prefixes, normalizeImage(prefix))
+		prefixes = append(prefixes, normalizePrefix(prefix))
 	}
 
 	var violations []DemoViolation
@@ -89,15 +90,42 @@ func ApplyDemoPolicy(rendered []byte, p DemoPolicy) ([]byte, []DemoViolation, er
 		spec := mapAt(d, "spec")
 		var podSpec map[string]any
 		podPath := "spec.template.spec"
+		// backoffLimit bounds a Job's failed pods only while every failure
+		// counts toward it (security review). A podFailurePolicy rule that
+		// ignores a failure retries past it, and so does a limit per index, so
+		// with the backoff rule on the first is refused and the second is held
+		// to the same limit. Neither is filled: a Job without them is bounded.
+		jobFailures := func(jobSpec map[string]any, path string) {
+			if p.JobBackoffLimit == nil || jobSpec == nil {
+				return
+			}
+			if v, set := jobSpec["backoffLimitPerIndex"]; set && v != nil {
+				limit(jobSpec, "backoffLimitPerIndex", path+".backoffLimitPerIndex", "job-backoff-limit", p.JobBackoffLimit)
+			}
+			policy := mapAt(jobSpec, "podFailurePolicy")
+			if policy == nil {
+				return
+			}
+			for i, rule := range mapsIn(policy, "rules") {
+				if action, _ := rule["action"].(string); action == "Ignore" {
+					violations = append(violations, DemoViolation{
+						Rule: "job-backoff-limit", Kind: kind, Name: name,
+						Field: fmt.Sprintf("%s.podFailurePolicy.rules[%d].action", path, i), Got: action,
+					})
+				}
+			}
+		}
 		switch kind {
 		case "Job":
 			limit(spec, "backoffLimit", "spec.backoffLimit", "job-backoff-limit", p.JobBackoffLimit)
+			jobFailures(spec, "spec")
 			limit(spec, "ttlSecondsAfterFinished", "spec.ttlSecondsAfterFinished", "job-ttl", p.JobTTLSecondsAfterFinished)
 			podSpec = mapAt(spec, "template", "spec")
 		case "CronJob":
 			limit(spec, "successfulJobsHistoryLimit", "spec.successfulJobsHistoryLimit", "cronjob-history-limit", p.CronJobHistoryLimit)
 			limit(spec, "failedJobsHistoryLimit", "spec.failedJobsHistoryLimit", "cronjob-history-limit", p.CronJobHistoryLimit)
 			limit(mapAt(spec, "jobTemplate", "spec"), "backoffLimit", "spec.jobTemplate.spec.backoffLimit", "job-backoff-limit", p.JobBackoffLimit)
+			jobFailures(mapAt(spec, "jobTemplate", "spec"), "spec.jobTemplate.spec")
 			podSpec = mapAt(spec, "jobTemplate", "spec", "template", "spec")
 			podPath = "spec.jobTemplate.spec.template.spec"
 		case "Pod":
@@ -124,6 +152,18 @@ func ApplyDemoPolicy(rendered []byte, p DemoPolicy) ([]byte, []DemoViolation, er
 					Field: fmt.Sprintf("%s.%s[%d].image", podPath, key, i), Got: image,
 				})
 			}
+		}
+		// An image volume pulls an image as surely as a container does
+		// (security review).
+		for i, v := range mapsIn(podSpec, "volumes") {
+			ref, ok := mapAt(v, "image")["reference"].(string)
+			if !ok || imageAllowed(normalizeImage(ref), prefixes) {
+				continue
+			}
+			violations = append(violations, DemoViolation{
+				Rule: "image-prefix", Kind: kind, Name: name,
+				Field: fmt.Sprintf("%s.volumes[%d].image.reference", podPath, i), Got: ref,
+			})
 		}
 	}
 	if len(violations) > 0 {
@@ -195,6 +235,24 @@ func normalizeImage(ref string) string {
 		rest = "library/" + rest
 	}
 	return registry + "/" + rest
+}
+
+// normalizePrefix is normalizeImage for an allowed prefix, except that a
+// registry on its own — ghcr.io, registry.example.com:5000, localhost:5000 —
+// means every image from that registry rather than a Docker Hub library image
+// of that name (master review). Without a "/" it is a registry when the part
+// before any ":" holds a "." or is "localhost"; busybox:1.36 is still an image.
+func normalizePrefix(prefix string) string {
+	prefix = strings.TrimSpace(prefix)
+	host, _, _ := strings.Cut(prefix, ":")
+	if strings.Contains(prefix, "/") || !(strings.Contains(host, ".") || host == "localhost") {
+		return normalizeImage(prefix)
+	}
+	registry := strings.ToLower(prefix)
+	if registry == "index.docker.io" {
+		registry = "docker.io"
+	}
+	return registry + "/"
 }
 
 // imageAllowed reports whether image starts with one of prefixes at a boundary.

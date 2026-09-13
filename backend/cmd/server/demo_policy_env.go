@@ -4,9 +4,9 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"strings"
 
 	"kubeport/internal/config"
+	"kubeport/internal/template"
 )
 
 // logDemoPolicy says at startup which demo manifest rules are on, so an
@@ -26,29 +26,18 @@ func logDemoPolicy(cfg config.Config) {
 		show(cfg.DemoJobBackoffLimit), show(cfg.DemoJobTTLSecondsAfterFinished), show(cfg.DemoCronJobHistoryLimit), images)
 }
 
-// optionalLimit reads a demo policy limit (#350). Unset or empty turns the rule
-// off. Anything but a whole number of zero or more stops the server: a typo
-// that quietly switched a limit off would reopen what the limit closes.
+// optionalLimit reads a demo policy limit (#350), and stops the server on a
+// malformed one — see template.ParseDemoLimit.
 func optionalLimit(name string) *int64 {
-	raw := strings.TrimSpace(os.Getenv(name))
-	if raw == "" {
-		return nil
+	n, err := template.ParseDemoLimit(name, os.Getenv(name))
+	if err != nil {
+		log.Fatal(err)
 	}
-	n, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || n < 0 {
-		log.Fatalf("%s must be a whole number of zero or more, or unset to turn the rule off (got %q)", name, raw)
-	}
-	return &n
+	return n
 }
 
 // imagePrefixes reads KBP_DEMO_ALLOWED_IMAGE_PREFIXES, a comma-separated list.
 // Empty means demo accounts may use any image.
 func imagePrefixes(name string) []string {
-	var out []string
-	for _, p := range strings.Split(os.Getenv(name), ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
+	return template.ParseImagePrefixes(os.Getenv(name))
 }
