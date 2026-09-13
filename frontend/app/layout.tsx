@@ -5,6 +5,7 @@ import { getLocale, getMessages, getNow, getTimeZone } from "next-intl/server";
 import "./globals.css";
 import { cookies } from "next/headers";
 import { AppShell } from "@/components/AppShell";
+import { ERROR_DETAIL_COOKIE } from "@/lib/error-detail";
 import { parseTheme, THEME_COOKIE, themeClass } from "@/lib/theme";
 import { Providers } from "./providers";
 
@@ -39,8 +40,11 @@ export default async function RootLayout({
   // hydration sees the class it was sent (#155, and #247 for the alternative).
   // This layout was already request-time — next-intl's config reads the locale
   // cookie — so this adds no dynamic rendering that was not there.
-  const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
+  const cookieStore = await cookies();
+  const theme = parseTheme(cookieStore.get(THEME_COOKIE)?.value);
   const themeCls = themeClass(theme);
+  // Same reason: the error detail level (#6) is rendered on the server first.
+  const errorDetailCookie = cookieStore.get(ERROR_DETAIL_COOKIE)?.value;
 
   return (
     <html
@@ -55,7 +59,9 @@ export default async function RootLayout({
           now={now}
         >
           <Providers>
-            <AppShell theme={theme}>{children}</AppShell>
+            <AppShell theme={theme} errorDetailCookie={errorDetailCookie}>
+              {children}
+            </AppShell>
           </Providers>
         </NextIntlClientProvider>
       </body>

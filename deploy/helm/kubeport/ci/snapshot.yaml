@@ -267,6 +267,11 @@ data:
   SECURITY_HSTS: "max-age=63072000; includeSubDomains"
   SECURITY_FRAME_ANCESTORS: "'none'"
   SECURITY_CSP_MODE: "enforce"
+  # Where each role's error detail starts (#6). Absent keys leave the frontend's
+  # own defaults (raw / friendly), so a release upgraded with --reuse-values
+  # from an older chart renders nothing here rather than empty values.
+  ERROR_DETAIL_ADMIN: "raw"
+  ERROR_DETAIL_USER: "friendly"
   DEMO_OIDC_ISSUER: "https://dex.example.test"
   DEMO_OIDC_CLIENT_ID: "kubeport-demo"
   DEMO_EMAIL_DOMAIN: "demo.kubeport"
@@ -1244,7 +1249,7 @@ spec:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/component: frontend
       annotations:
-        checksum/config: fb005fcdecd4a9eca0098a9e907b62953c8bf5fc0d52c3ca95edd48522746040
+        checksum/config: cb69db16489e265a2f8f3aeeb77baa4f43482bb3741af5efbc9425919b64c33b
         checksum/secret: e7dde2c9f0d9e6ff324c1fe9ec29e374b1dfb55ceb2fe06c296a8b108aa27451
     spec:
       securityContext:

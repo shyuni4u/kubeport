@@ -149,6 +149,16 @@ frontend:
     # A whole policy replacing the default; frame-ancestors is appended. Empty
     # uses the default in frontend/lib/security-headers.ts.
     contentSecurityPolicy: ""
+  # How much of a refused request the screens show (#6), by where a viewer
+  # starts; each viewer can change their own in the header. "friendly" is the
+  # screen's sentence plus a copyable block to send an admin, "detailed" adds
+  # the kind, status and the server's message folded, "raw" unfolds every
+  # message. No level shows anything the API withheld — only what the response
+  # already carries. A demo admin always starts at "detailed". Quoted, like
+  # cspMode; the chart refuses anything but the three.
+  errorDetail:
+    admin: "raw"
+    user: "friendly"
   resources:
     requests:
       cpu: 50m

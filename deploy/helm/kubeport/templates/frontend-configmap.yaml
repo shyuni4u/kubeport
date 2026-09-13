@@ -41,6 +41,24 @@ data:
   SECURITY_CSP: {{ . | quote }}
   {{- end }}
   {{- end }}
+  # Where each role's error detail starts (#6). Absent keys leave the frontend's
+  # own defaults (raw / friendly), so a release upgraded with --reuse-values
+  # from an older chart renders nothing here rather than empty values.
+  {{- with .Values.frontend.errorDetail }}
+  {{- $levels := list "friendly" "detailed" "raw" }}
+  {{- if and (hasKey . "admin") (not (has (toString .admin) $levels)) }}
+  {{- fail (printf "frontend.errorDetail.admin must be \"friendly\", \"detailed\" or \"raw\" (got %v)" .admin) }}
+  {{- end }}
+  {{- if and (hasKey . "user") (not (has (toString .user) $levels)) }}
+  {{- fail (printf "frontend.errorDetail.user must be \"friendly\", \"detailed\" or \"raw\" (got %v)" .user) }}
+  {{- end }}
+  {{- if hasKey . "admin" }}
+  ERROR_DETAIL_ADMIN: {{ .admin | quote }}
+  {{- end }}
+  {{- if hasKey . "user" }}
+  ERROR_DETAIL_USER: {{ .user | quote }}
+  {{- end }}
+  {{- end }}
   {{- if .Values.dex.enabled }}
   DEMO_OIDC_ISSUER: {{ include "kubeport.dex.issuer" . | quote }}
   DEMO_OIDC_CLIENT_ID: {{ .Values.dex.clientId | quote }}
