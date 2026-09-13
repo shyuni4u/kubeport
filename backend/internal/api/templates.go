@@ -846,6 +846,12 @@ func (h *Handlers) setVersionStatus(c *gin.Context, expected, newStatus string) 
 			"version is "+tv.Status+", expected "+expected)
 		return
 	}
+	// Undeprecating publishes a version again, so it keeps the template's
+	// instance mode as publishing does (#190, security review). A rollback past
+	// that check can leave a version of the other mode published meanwhile.
+	if newStatus == "published" && !h.sameModeAsTemplate(c, name, tv.UiSpecYaml, tv.ID) {
+		return
+	}
 	updated, err := h.deps.Store.SetTemplateVersionStatus(c, store.SetTemplateVersionStatusParams{
 		ID: tv.ID, Status: newStatus,
 	})

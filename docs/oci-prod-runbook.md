@@ -160,9 +160,12 @@ main push → build-images (sha-<7> 이미지 push)  ┐
     flow 형식으로 쓴 버전도 있다):
     `SELECT t.name, tv.version, tv.status FROM template_versions tv JOIN templates t ON t.id = tv.template_id WHERE tv.status IN ('published', 'draft') AND tv.ui_spec_yaml ~ 'instances';`
     결과를 기록해 두고, **published 이면서 multiple 인 것만** `POST /v1/templates/<name>/versions/<v>/deprecate` 한다.
-    롤백 동안 multiple 초안은 게시하지 않는다(옛 이미지의 게시는 `instances` 를 모른다). 원인이 고쳐져 다시 앞으로 간 뒤에는
-    **기록해 둔 목록만** `/undeprecate` 한다 — 원래 deprecated 였던 버전을 되살리지 않도록. deprecate·undeprecate 는
-    데모 게이트 뒤라 데모가 아닌 관리자(또는 소유 팀 편집자) 토큰이 필요하다.
+    롤백 동안 **기록한 템플릿에는 새 버전을 만들거나 게시하지 않는다**(옛 이미지는 `instances` 도 모드 고정도 모른다).
+    원인이 고쳐져 다시 앞으로 간 뒤에는 **기록해 둔 목록만** `/undeprecate` 한다 — 원래 deprecated 였던 버전을 되살리지 않도록.
+    그 전에 롤백 이후 게시된 버전을 본다:
+    `SELECT t.name, tv.version, tv.status FROM template_versions tv JOIN templates t ON t.id = tv.template_id WHERE tv.published_at > '<롤백 시작 시각>';`
+    기록한 템플릿에 결과가 있으면 undeprecate 는 모드가 다른 게시 버전이 있을 때 400 으로 거절된다 — 그때는 사용자에게 알린다.
+    deprecate·undeprecate 는 데모 게이트 뒤라 데모가 아닌 관리자(또는 소유 팀 편집자) 토큰이 필요하다.
 - **실패 읽기** — Actions 요약의 `result:` (스크립트의 `KUBEPORT_DEPLOY_RESULT=` 줄). 워크플로 메시지도
   exit 코드가 아니라 이 줄로 갈린다 — exit 1 에는 "아무것도 안 바뀜" 과 "새 리비전이 롤백 없이 떠 있음" 이
   함께 들어 있어서다:

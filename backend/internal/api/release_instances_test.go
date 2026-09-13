@@ -86,6 +86,33 @@ func TestTemplateVersions_DraftsDoNotFixTheMode(t *testing.T) {
 	require.Contains(t, resp, "released versions are multiple-instance")
 }
 
+// Security review: undeprecating is publishing again. A deprecated multiple
+// version must not come back beside a single one published meanwhile — as a
+// rollback past this check could leave — or the two modes share a template.
+func TestTemplateVersions_UndeprecateKeepsTheTemplatesInstanceMode(t *testing.T) {
+	r := newTestRouterAdmin(t)
+	tpl := seedPublishedTemplate(t, r) // v1: single, published
+
+	ctx := context.Background()
+	s := testStore(t)
+	row, err := s.GetTemplateByName(ctx, tpl)
+	require.NoError(t, err)
+	v, err := s.InsertTemplateVersionV2(ctx, store.InsertTemplateVersionV2Params{
+		TemplateID: row.ID, Version: 2, ResourcesYaml: minimalResources,
+		UiSpecYaml: "instances: multiple\n" + minimalUISpec, Status: "deprecated",
+		CreatedByUserID: row.OwnerUserID, AuthoringMode: "yaml",
+	})
+	require.NoError(t, err)
+
+	w := do(t, r, http.MethodPost, "/v1/templates/"+tpl+"/versions/2/undeprecate", nil)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "released versions are single-instance")
+
+	after, err := s.GetTemplateVersionByID(ctx, v.ID)
+	require.NoError(t, err)
+	require.Equal(t, "deprecated", after.Status, "the refused undeprecate must not have happened")
+}
+
 // The update guard stays for versions saved before the per-template check: a
 // release cannot be moved onto a version of the other mode.
 func TestUpdateRelease_RefusesMovingBetweenInstanceModes(t *testing.T) {
