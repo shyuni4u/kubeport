@@ -1326,4 +1326,46 @@ describe("DeployClient preview payload", () => {
     expect(String(put[1]?.body)).not.toContain(image);
     expect(JSON.stringify(bodyOf(put).values)).toBe(JSON.stringify(preview.values));
   });
+  // #359 — the header link (#354) says "설정 바꾸기", but this page said
+  // "v1 로 업데이트" for a release already on v1: a reader could not tell
+  // whether the version was going up or only the values. The page now names
+  // the release and, on the same version, calls the action what the link did.
+  describe("update form naming (#359)", () => {
+    function renderUpdate(version: number) {
+      vi.stubGlobal("fetch", routedFetch({}));
+      return render(
+        <DeployClient
+          templateName="web-app"
+          version={version}
+          team={null}
+          spec={spec}
+          updateReleaseId="rel-1"
+          updateRelease={{ name: "hello-web", version: 2 }}
+          initialValues={{ "spec.replicas": 1, "metadata.name": "nginx" }}
+        />,
+      );
+    }
+
+    it("on the same version, changes settings of the named release", () => {
+      renderUpdate(2);
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("'hello-web' 설정 바꾸기");
+      expect(screen.getByRole("button", { name: "바뀐 설정 적용" })).toBeInTheDocument();
+      expect(screen.queryByText(/로 업데이트/)).toBeNull();
+    });
+
+    it("on another version, still updates to it and names the release", () => {
+      renderUpdate(3);
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("v3 로 업데이트");
+      expect(screen.getByRole("button", { name: "v3 로 업데이트" })).toBeInTheDocument();
+      expect(screen.getByText(/hello-web/)).toBeInTheDocument();
+    });
+
+    it("falls back to the version wording when the release is not described", () => {
+      vi.stubGlobal("fetch", routedFetch({}));
+      render(
+        <DeployClient templateName="web-app" version={2} team={null} spec={spec} updateReleaseId="rel-1" initialValues={{}} />,
+      );
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("v2 로 업데이트");
+    });
+  });
 });

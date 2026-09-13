@@ -51,6 +51,7 @@ export default async function VersionPinnedDeployPage({
   // the PUT anyway, so the real trigger was a transient 5xx on this GET.
   let initialValues: Record<string, unknown> | undefined;
   let reenterSecrets: string[] | undefined;
+  let updateRelease: { name: string; version: number } | undefined;
   if (updateReleaseId !== undefined) {
     const read = await readReleaseForUpdate(apiFetch, updateReleaseId, name);
     if (read.kind === "not-found") notFound();
@@ -63,6 +64,7 @@ export default async function VersionPinnedDeployPage({
       return <UpdateValuesUnavailable releaseId={updateReleaseId} />;
     }
     initialValues = read.values;
+    updateRelease = { name: read.releaseName, version: read.version };
     // A Secret reads back redacted (#196), and only an update on the same
     // version can keep it: moving version needs it entered again. Those
     // fields start empty — not from the placeholder, nor from a ui-spec
@@ -94,6 +96,7 @@ export default async function VersionPinnedDeployPage({
       team={ver.owning_team_name ?? null}
       spec={spec}
       updateReleaseId={updateReleaseId}
+      updateRelease={updateRelease}
       initialValues={initialValues}
       reenterSecrets={reenterSecrets}
       defaultName={defaultName}

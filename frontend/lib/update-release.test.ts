@@ -17,6 +17,7 @@ function response(status: number, body?: unknown): Response {
 
 const release = {
   id: ID,
+  name: "hello-web",
   template: { name: "web-app", version: 2 },
   values_json: { "Secret[app].stringData.PASSWORD": "<redacted>" },
 };
@@ -43,6 +44,7 @@ describe("readReleaseForUpdate", () => {
       kind: "ok",
       templateName: "web-app",
       version: 2,
+      releaseName: "hello-web",
       values: release.values_json,
     });
   });

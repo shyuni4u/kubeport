@@ -76,7 +76,7 @@ describe("ReleaseProblems", () => {
   // defaults, on whatever version is current.
   it("links to the version-pinned update form, which loads the release's values", () => {
     render(panel([pulling]));
-    expect(screen.getByRole("link", { name: /설정을 바꿔 다시 배포/ })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "설정 바꾸기 →" })).toHaveAttribute(
       "href",
       "/catalog/web-app/versions/2/deploy?updateReleaseId=r1",
     );
@@ -93,7 +93,7 @@ describe("ReleaseProblems", () => {
     render(panel([pod("job-1", "Error")]));
     expect(screen.getByText("실행 중 오류로 멈췄습니다 (인스턴스 1개).")).toBeInTheDocument();
     expect(screen.queryByText(/재시작/)).toBeNull();
-    expect(screen.getByRole("link", { name: /설정을 바꿔 다시 배포/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "설정 바꾸기 →" })).toBeInTheDocument();
   });
 
   it("keeps an unexplained k8s word out of the sentence and behind the raw-terms toggle", () => {

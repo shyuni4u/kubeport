@@ -257,7 +257,7 @@
           "fix": "'로그' 탭에서 원인을 확인하거나 관리자에게 문의하세요."
         }
       },
-      "changeSettings": "설정을 바꿔 다시 배포 →"
+      "changeSettings": "설정 바꾸기 →"
     },
     "phase": {
       "Running": "실행 중",
@@ -307,6 +307,8 @@
   "deploy": {
     "titleNew": "새 배포",
     "titleUpdate": "v{version} 로 업데이트",
+    "titleChange": "''{name}'' 설정 바꾸기",
+    "submitChange": "바뀐 설정 적용",
     "submit": "배포하기",
     "submitting": "처리 중…",
     "namePlaceholder": "릴리스 이름",

@@ -257,7 +257,7 @@
           "fix": "Check the 'Logs' tab, or contact an admin."
         }
       },
-      "changeSettings": "Change settings and deploy again →"
+      "changeSettings": "Change settings →"
     },
     "phase": {
       "Running": "Running",
@@ -307,6 +307,8 @@
   "deploy": {
     "titleNew": "New deployment",
     "titleUpdate": "Update to v{version}",
+    "titleChange": "Change settings of ''{name}''",
+    "submitChange": "Apply changes",
     "submit": "Deploy",
     "submitting": "Working…",
     "namePlaceholder": "Release name",
