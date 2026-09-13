@@ -79,7 +79,7 @@ helm-lint:
 	done
 	@echo "demo quota guard: ok"
 	@for key in demo.policy.jobBackoffLimit demo.policy.jobTTLSecondsAfterFinished demo.policy.cronJobHistoryLimit; do \
-		for bad in -1 1.5 abc; do \
+		for bad in -1 1.5 abc 2147483648; do \
 			helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
 				--set $$key=$$bad 2>&1 | grep -q "$$key must be a whole number" \
 				|| { echo "demo policy guard: $$key=$$bad rendered (#350)"; exit 1; }; \

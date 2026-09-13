@@ -401,10 +401,15 @@ func TestDemoPolicyFromEnv(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, p.Enabled(), "nothing set is every rule off")
 
-	for _, bad := range []string{"-1", "1.5", "two", "9223372036854775808"} {
+	for _, bad := range []string{"-1", "1.5", "two", "2147483648", "9223372036854775808"} {
 		_, err := template.DemoPolicyFromEnv(env(map[string]string{"KBP_DEMO_CRONJOB_HISTORY_LIMIT": bad}))
 		require.ErrorContains(t, err, "KBP_DEMO_CRONJOB_HISTORY_LIMIT must be a whole number", bad)
 	}
+
+	// The fields it fills are int32 in the Job and CronJob APIs.
+	p, err = template.DemoPolicyFromEnv(env(map[string]string{"KBP_DEMO_JOB_TTL_SECONDS": "2147483647"}))
+	require.NoError(t, err)
+	require.Equal(t, i64(2147483647), p.JobTTLSecondsAfterFinished)
 }
 
 // The demo seeds its releases through the API as the demo user, so the default

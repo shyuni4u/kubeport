@@ -50,8 +50,9 @@ data:
   {{- if and (kindIs "float64" $v) (eq $v (floor $v)) }}
   {{- $s = int64 $v | toString }}
   {{- end }}
-  {{- if not (regexMatch "^[0-9]+$" $s) }}
-  {{- fail (printf "demo.policy.%s must be a whole number of zero or more, or null to turn the rule off (got %v)" $key $v) }}
+  {{- /* The Job and CronJob fields these fill are int32. */}}
+  {{- if or (not (regexMatch "^[0-9]{1,10}$" $s)) (gt (int64 $s) 2147483647) }}
+  {{- fail (printf "demo.policy.%s must be a whole number from 0 to 2147483647, or null to turn the rule off (got %v)" $key $v) }}
   {{- end }}
   {{ $env }}: {{ $s | quote }}
   {{- end }}

@@ -35,17 +35,20 @@ func DemoPolicyFromEnv(getenv func(string) string) (DemoPolicy, error) {
 }
 
 // ParseDemoLimit reads one limit from the environment variable name. Empty
-// turns the rule off. Anything but a whole number of zero or more is an error,
-// not off: a typo that quietly switched a limit off would reopen what the
-// limit closes.
+// turns the rule off. Anything but a whole number from 0 to 2147483647 is an
+// error, not off: a typo that quietly switched a limit off would reopen what
+// the limit closes, and the Job and CronJob fields it fills are int32, so a
+// larger limit would be filled into manifests the apiserver refuses — after
+// the reset's preflight had passed the seed and the demo was wiped (codex
+// review).
 func ParseDemoLimit(name, raw string) (*int64, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, nil
 	}
-	n, err := strconv.ParseInt(raw, 10, 64)
+	n, err := strconv.ParseInt(raw, 10, 32)
 	if err != nil || n < 0 {
-		return nil, fmt.Errorf("%s must be a whole number of zero or more, or unset to turn the rule off (got %q)", name, raw)
+		return nil, fmt.Errorf("%s must be a whole number from 0 to 2147483647, or unset to turn the rule off (got %q)", name, raw)
 	}
 	return &n, nil
 }
