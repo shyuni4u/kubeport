@@ -949,8 +949,16 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
 - A `demo` namespace (name from `demo.namespace`) with a `ResourceQuota`
   (CPU, memory, pods, Services, no Ingresses, and storage: `demo.quota.storage`,
   default `5Gi`, across at most `demo.quota.persistentVolumeClaims`, default `5`,
-  claims — both required),
-  `LimitRange`, an egress-only `NetworkPolicy` (DNS + outbound, no
+  claims; ephemeral storage of running pods — emptyDir, writable layers, logs —
+  capped at `demo.quota.ephemeralStorageRequests` / `demo.quota.ephemeralStorageLimits`,
+  defaults `2Gi` / `6Gi`, sized so the pods cap is still met first — all
+  required. A quota counts only pods that have not finished: a completed Job's
+  pod keeps its writable layer and logs on the node until the pod is deleted,
+  and image layers are not ephemeral storage at all, so neither is capped here),
+  a `LimitRange` (per-container CPU and memory, and ephemeral storage from
+  `demo.limits.ephemeralStorage` — `default` `512Mi`, `defaultRequest` `64Mi`,
+  `max` `1Gi`, filled in for containers that declare none so the quota admits
+  them), an egress-only `NetworkPolicy` (DNS + outbound, no
   in-cluster lateral traffic, no LoadBalancer Services, no Ingresses), and
   Pod Security Admission labels — `enforce: {{ demo.podSecurityEnforce }}`
   (default `baseline`), `warn`/`audit: restricted`. `baseline` is the default

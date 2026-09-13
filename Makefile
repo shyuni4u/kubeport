@@ -71,6 +71,12 @@ helm-lint:
 	@helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
 		--set demo.quota.persistentVolumeClaims= 2>&1 | grep -q "demo.quota.persistentVolumeClaims is required" \
 		|| { echo "demo quota guard: an empty claim count rendered (#340)"; exit 1; }
+	@for key in demo.quota.ephemeralStorageRequests demo.quota.ephemeralStorageLimits \
+		demo.limits.ephemeralStorage.default demo.limits.ephemeralStorage.defaultRequest demo.limits.ephemeralStorage.max; do \
+		helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
+			--set $$key= 2>&1 | grep -q "$$key is required" \
+			|| { echo "demo quota guard: an empty $$key rendered (#348)"; exit 1; }; \
+	done
 	@echo "demo quota guard: ok"
 
 # Diff the rendered chart against the checked-in golden snapshot. Fails
