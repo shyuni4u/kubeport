@@ -107,9 +107,16 @@ spec:
               args:
                 # pvc too, or a claim a visitor's StatefulSet made outlives the
                 # reset and the next visitor's release of that name mounts its
-                # data (#340). Last, so the pods using a claim are gone before
-                # its protection finalizer would hold --wait=true.
-                - kubectl -n {{ .Values.demo.namespace }} delete deploy,sts,ds,job,cronjob,svc,cm,secret,pod,pvc --all --wait=true --ignore-not-found
+                # data (#340). A claim still in use stays Terminating until its
+                # pods are gone; nothing can mount it meanwhile, and a new
+                # release gets a new claim once it is.
+                #
+                # The demo-reset Role has no watch, and kubectl skips a wait it
+                # is refused, so --wait does not hold the Job today. --timeout
+                # bounds it if watch is ever granted: a finalizer that never
+                # clears must fail the Job well inside activeDeadlineSeconds,
+                # not after the namespace is wiped and before the seed runs.
+                - kubectl -n {{ .Values.demo.namespace }} delete deploy,sts,ds,job,cronjob,svc,cm,secret,pod,pvc --all --wait=true --timeout=120s --ignore-not-found
               env:
                 # kubectl writes its discovery cache under $HOME/.kube/cache;
                 # readOnlyRootFilesystem forces it into the tmp emptyDir below.
