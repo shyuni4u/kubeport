@@ -195,6 +195,7 @@ func Render(resourcesYAML, uiSpecYAML string, values json.RawMessage, l Labels) 
 		}
 	}
 	for _, d := range docs {
+		defaultClaimRetention(d)
 		stampLabels(d, l, spec.multiple())
 	}
 

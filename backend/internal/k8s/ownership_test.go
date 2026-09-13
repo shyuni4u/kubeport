@@ -23,13 +23,15 @@ import (
 func cluster(objs ...runtime.Object) *dynamicfake.FakeDynamicClient {
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
 		map[schema.GroupVersionResource]string{
-			{Group: "apps", Version: "v1", Resource: "deployments"}: "DeploymentList",
-			{Version: "v1", Resource: "configmaps"}:                 "ConfigMapList",
-			{Version: "v1", Resource: "services"}:                   "ServiceList",
-			{Version: "v1", Resource: "secrets"}:                    "SecretList",
-			{Version: "v1", Resource: "pods"}:                       "PodList",
-			{Group: "batch", Version: "v1", Resource: "cronjobs"}:   "CronJobList",
-			{Group: "batch", Version: "v1", Resource: "jobs"}:       "JobList",
+			{Group: "apps", Version: "v1", Resource: "deployments"}:  "DeploymentList",
+			{Version: "v1", Resource: "configmaps"}:                  "ConfigMapList",
+			{Version: "v1", Resource: "services"}:                    "ServiceList",
+			{Version: "v1", Resource: "secrets"}:                     "SecretList",
+			{Version: "v1", Resource: "pods"}:                        "PodList",
+			{Group: "batch", Version: "v1", Resource: "cronjobs"}:    "CronJobList",
+			{Group: "batch", Version: "v1", Resource: "jobs"}:        "JobList",
+			{Group: "apps", Version: "v1", Resource: "statefulsets"}: "StatefulSetList",
+			{Version: "v1", Resource: "persistentvolumeclaims"}:      "PersistentVolumeClaimList",
 		}, objs...)
 }
 

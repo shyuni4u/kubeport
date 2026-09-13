@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -180,6 +181,11 @@ func placeInNamespace(o *unstructured.Unstructured, namespace string) error {
 func (c *Client) CheckApply(ctx context.Context, rel ReleaseRef, multiDoc []byte, creating bool) (ApplyCheck, error) {
 	namespace := rel.Namespace
 	var out ApplyCheck
+	// StatefulSets by what the cluster holds under their names, for checkClaims:
+	// added are not there yet, running are the release's own as the cluster has
+	// them, unreadable are ones an update's caller may not read.
+	added, unreadable := map[string]bool{}, map[string]bool{}
+	running := map[string]*unstructured.Unstructured{}
 	objs, err := splitYAML(multiDoc)
 	if err != nil {
 		return out, fmt.Errorf("split yaml: %w", err)
@@ -206,12 +212,20 @@ func (c *Client) CheckApply(ctx context.Context, rel ReleaseRef, multiDoc []byte
 			labels := existing.GetLabels()
 			if own, sameName := heldBy(labels, rel, creating); !own {
 				out.Conflicts = append(out.Conflicts, Conflict{ObjectRef: ref, Owner: labels[ReleaseLabel], SameName: sameName})
+			} else if isStatefulSet(gvk) {
+				running[o.GetName()] = existing
 			}
 		case apierrors.IsNotFound(err):
 			// Free to create.
+			if isStatefulSet(gvk) {
+				added[o.GetName()] = true
+			}
 		case apierrors.IsForbidden(err):
 			if !creating {
 				out.Unverified = append(out.Unverified, ref)
+				if isStatefulSet(gvk) {
+					unreadable[o.GetName()] = true
+				}
 				continue
 			}
 			switch c.probeCreate(ctx, gvr, namespace, o) {
@@ -226,7 +240,227 @@ func (c *Client) CheckApply(ctx context.Context, rel ReleaseRef, multiDoc []byte
 			return out, fmt.Errorf("check %s: %w", ref, err)
 		}
 	}
+	if err := c.checkClaims(ctx, namespace, objs, creating, added, unreadable, running, &out); err != nil {
+		return out, err
+	}
 	return out, nil
+}
+
+var claimsGVR = schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumeclaims"}
+
+func isStatefulSet(gvk schema.GroupVersionKind) bool {
+	return gvk.Group == "apps" && gvk.Kind == "StatefulSet"
+}
+
+// checkClaims adds the claims a release's StatefulSets would take over without
+// having made them.
+//
+// They are not in the manifest, so the loop above never sees them. A
+// StatefulSet whose claims go with it (whenDeleted: Delete, which Render
+// defaults, #340) makes its controller the owner of every claim named
+// <claim>-<statefulset>-<ordinal> that no other controller owns — including
+// one that was there before it. Deleting the release then deletes that claim,
+// and with the usual reclaim policy its volume: a claim an earlier release of
+// the same name kept, one another release chose to retain, or one made outside
+// kubeport. Before the default the same collision only mounted the other data;
+// now it destroys it, so such a claim is a conflict.
+//
+// On a create, and for a StatefulSet an update adds (a new version, a renamed
+// object), every matching claim was there first. For a StatefulSet the release
+// already runs, a claim is its own only on evidence (evidentlyOwn); any other
+// is a conflict. That includes the claim it was deployed next to — under
+// Retain, or before the default existed — and has mounted since, which turning
+// Delete on would take (security review), and one waiting at an ordinal a
+// scale-up would add (codex review).
+//
+// Every ordinal counts, not just the StatefulSet's current replicas, so
+// scaling up later cannot reach a claim that was there when it arrived. A
+// StatefulSet held by another release is a conflict already and is skipped.
+//
+// One list serves every StatefulSet. A caller who may not list claims — the
+// demo's user account — cannot be checked, nor can a StatefulSet an update's
+// caller may not read; those names are Unverified, as for any unreadable
+// object.
+func (c *Client) checkClaims(ctx context.Context, namespace string, objs []*unstructured.Unstructured, creating bool,
+	added, unreadable map[string]bool, running map[string]*unstructured.Unstructured, out *ApplyCheck) error {
+	var check []claimTemplate
+	for _, t := range claimTemplates(objs) {
+		_, isRunning := running[t.set]
+		switch {
+		case creating || added[t.set] || isRunning:
+			check = append(check, t)
+		case unreadable[t.set]:
+			out.Unverified = append(out.Unverified, t.ref(namespace))
+		}
+	}
+	if len(check) == 0 {
+		return nil
+	}
+	claims, err := c.dyn.Resource(claimsGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
+	switch {
+	case apierrors.IsForbidden(err):
+		for _, t := range check {
+			out.Unverified = append(out.Unverified, t.ref(namespace))
+		}
+		return nil
+	case err != nil:
+		return fmt.Errorf("check claims: %w", err)
+	}
+	// The pods of running StatefulSets, by name — listed once, and only if a
+	// claim needs them as evidence.
+	var pods map[string]*unstructured.Unstructured
+	podsReadable := true
+	for i := range claims.Items {
+		claim := &claims.Items[i]
+		for _, t := range check {
+			ordinal, ok := strings.CutPrefix(claim.GetName(), t.prefix)
+			if !ok || !isOrdinal(ordinal) {
+				continue
+			}
+			if sts, isRunning := running[t.set]; isRunning && !creating {
+				if ownedBy(claim, sts) {
+					break
+				}
+				if pods == nil && podsReadable {
+					pods, err = c.podsByName(ctx, namespace)
+					switch {
+					case apierrors.IsForbidden(err):
+						podsReadable = false
+					case err != nil:
+						return fmt.Errorf("check claims: pods: %w", err)
+					}
+				}
+				if !podsReadable {
+					// Nothing can show the claim is sts's, and nothing shows it
+					// is not.
+					out.Unverified = append(out.Unverified, ObjectRef{Kind: "PersistentVolumeClaim", Name: claim.GetName(), Namespace: namespace})
+					break
+				}
+				if mountedBy(claim, sts, pods[sts.GetName()+"-"+ordinal]) {
+					break
+				}
+			}
+			out.Conflicts = append(out.Conflicts, Conflict{
+				ObjectRef: ObjectRef{Kind: "PersistentVolumeClaim", Name: claim.GetName(), Namespace: namespace},
+				Owner:     claim.GetLabels()[ReleaseLabel],
+			})
+			break
+		}
+	}
+	return nil
+}
+
+// A claim of a StatefulSet the release already runs is its own only on
+// evidence, and there are two kinds.
+//
+// ownedBy: sts already owns it. Its controller sets that under Delete, and a
+// claim a scale-down left keeps it.
+//
+// mountedBy: sts's pod at that ordinal mounts it, and the claim is not older
+// than sts. The controller makes a pod's claim once sts exists, so an older
+// claim is one sts was deployed next to — under Retain, or before the default —
+// which turning Delete on would take (security review).
+//
+// Neither creation order nor sts's replica count is evidence (codex review): a
+// claim made after sts, at an ordinal whose pod does not exist yet — beyond the
+// replicas, or held back behind a pod that never became ready — is mounted by
+// nothing, and the controller would take it once it reaches that ordinal.
+func ownedBy(obj, owner *unstructured.Unstructured) bool {
+	uid := owner.GetUID()
+	if uid == "" {
+		return false
+	}
+	for _, ref := range obj.GetOwnerReferences() {
+		if ref.UID == uid {
+			return true
+		}
+	}
+	return false
+}
+
+func mountedBy(claim, sts, pod *unstructured.Unstructured) bool {
+	if pod == nil || !ownedBy(pod, sts) {
+		return false
+	}
+	volumes, _, _ := unstructured.NestedSlice(pod.Object, "spec", "volumes")
+	mounted := false
+	for _, v := range volumes {
+		m, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, _, _ := unstructured.NestedString(m, "persistentVolumeClaim", "claimName"); name == claim.GetName() {
+			mounted = true
+			break
+		}
+	}
+	if !mounted {
+		return false
+	}
+	made, since := claim.GetCreationTimestamp(), sts.GetCreationTimestamp()
+	return !made.Before(&since)
+}
+
+func (c *Client) podsByName(ctx context.Context, namespace string) (map[string]*unstructured.Unstructured, error) {
+	list, err := c.dyn.Resource(schema.GroupVersionResource{Version: "v1", Resource: "pods"}).
+		Namespace(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	byName := make(map[string]*unstructured.Unstructured, len(list.Items))
+	for i := range list.Items {
+		byName[list.Items[i].GetName()] = &list.Items[i]
+	}
+	return byName, nil
+}
+
+// claimTemplate is one claim template of a StatefulSet whose claims are
+// deleted with it.
+type claimTemplate struct {
+	set    string // the StatefulSet's name
+	prefix string // "<claim>-<set>-"
+}
+
+func (t claimTemplate) ref(namespace string) ObjectRef {
+	return ObjectRef{Kind: "PersistentVolumeClaim", Name: t.prefix + "<ordinal>", Namespace: namespace}
+}
+
+// claimTemplates lists them for every StatefulSet in objs. The ordinal after
+// the prefix is what tells data-db-0 (claim data of db) from data-db-x-0
+// (claim data of db-x).
+func claimTemplates(objs []*unstructured.Unstructured) []claimTemplate {
+	var out []claimTemplate
+	for _, o := range objs {
+		if !isStatefulSet(o.GroupVersionKind()) || o.GetName() == "" {
+			continue
+		}
+		if when, _, _ := unstructured.NestedString(o.Object, "spec", "persistentVolumeClaimRetentionPolicy", "whenDeleted"); when != "Delete" {
+			continue
+		}
+		templates, _, _ := unstructured.NestedSlice(o.Object, "spec", "volumeClaimTemplates")
+		for _, tmpl := range templates {
+			m, ok := tmpl.(map[string]any)
+			if !ok {
+				continue
+			}
+			if name, _, _ := unstructured.NestedString(m, "metadata", "name"); name != "" {
+				out = append(out, claimTemplate{set: o.GetName(), prefix: name + "-" + o.GetName() + "-"})
+			}
+		}
+	}
+	return out
+}
+
+func isOrdinal(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 type probeResult int

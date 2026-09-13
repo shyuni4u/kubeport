@@ -484,6 +484,34 @@ dry-run·apply 나 종류마다 DeleteCollection 을 부르는 가장 비싼 경
 않은 버전 409 등)는 예산을 쓰지 않는다. 같은 이름의 릴리스가 이미 있는 409 는 클러스터 API 를 부르지 않지만 DB 삽입 시점에 판정되므로 토큰을 쓴다 — 데모
 공유 계정에서 의도적으로 예산을 비우는 경우는 [#200](https://github.com/shyuni4u/kubeport/issues/200) 의 범위다. 데모 계정이 공유 신원이라 거절될 요청만으로 방문자 전원의 쓰기를 막지 못하게 하려는 것이다.
 
+**릴리스 삭제(`DELETE /v1/releases/{id}`)는 StatefulSet 저장소의 데이터까지 지운다**([#340](https://github.com/shyuni4u/kubeport/issues/340)).
+렌더가 `volumeClaimTemplates` 가 있는 StatefulSet 에 `persistentVolumeClaimRetentionPolicy.whenDeleted: Delete` 를
+기본으로 넣기 때문이다 — 컨트롤러가 만든 PVC 에는 릴리스 라벨이 없어, 예전에는 릴리스를 지워도 PVC 가 남고 같은
+이름으로 다시 배포한 릴리스가 이전 데이터를 그대로 붙였다. 이 정책이면 StatefulSet 이 **이름이
+`<claim>-<statefulset>-<n>` 과 맞고 다른 컨트롤러가 소유하지 않은 PVC 전부**(컨트롤러가 만든 것만이 아니라 먼저 있던
+것까지)를 소유하고, 클러스터의 가비지 컬렉터가 함께 지운다. 그래서 호출자에게 PVC 삭제 권한이 없어도 지워지고, PV 의
+reclaim 정책이 `Delete`(대부분의 동적 프로비저너 기본값)면 디스크 데이터도 사라진다. **되돌릴 수 없다.** 데이터를
+남기려면 템플릿이 `whenDeleted: Retain` 을 직접 쓰거나 필드로 노출한다 — 명시한 값은 덮어쓰지 않는다.
+
+먼저 있던 PVC 를 그렇게 넘겨받아 지우지 않도록, **릴리스 생성(`POST /v1/releases`)과 업데이트(`PUT /v1/releases/{id}`)는
+그 이름의 PVC 가 이미 있으면 `409 resource-conflict`** 로 거절한다(`conflicts[]` 의 `kind` 가 `PersistentVolumeClaim`,
+라벨이 없으니 `owner` 는 보통 빈 문자열). 순번은 지금 replicas 와 무관하게 전부 본다. 업데이트에서 릴리스가 **이미 돌리고
+있는** StatefulSet 이면 **자기 것이라는 근거가 있는 PVC 만** 통과한다 — 그 StatefulSet 이 이미 소유(ownerReference)한 PVC,
+또는 **그 순번의 파드(그 StatefulSet 소유)가 지금 붙이고 있고** 그 StatefulSet 보다 먼저 만들어지지 않은 PVC. replicas 값이나
+생성 순서는 근거가 아니다. 그 밖에는 충돌이다. 그래서 `Retain` 이던 템플릿이 `Delete` 로 바뀌거나 이 기본값 이전 릴리스가 처음
+업데이트될 때 배포 당시 이미 있던 남의 PVC 를 붙이고 있었거나, 아직 파드가 없는 순번(스케일 업할 순번, 앞 파드가 준비되지
+않아 멈춘 순번)에 누가 만든 PVC 가 있으면 그 업데이트가 거절된다. 파드를 list 할 수 없는 호출자에게는 소유 표시가 없는 그런
+PVC 가 검사되지 않고 통과한다. 이 기본값 이전에 스케일
+다운으로 남은 자기 PVC(소유 표시 없음)도 같은 이유로 충돌이니, 필요 없으면 지우고 필요하면 replicas 를 그 순번까지 올린다.
+StatefulSet 을 손으로 다시 만들었거나(`kubectl delete --cascade=orphan`) 백업에서 복원했으면 자기 PVC 도 근거가 없어
+거절된다. **거절된 PVC 를 지우지 말 것** — 지금 붙어 있는 데이터일 수 있다. 넘겨받지 않고 업데이트하려면 그 릴리스에
+`whenDeleted: Retain` 을 준다. 단 **`Retain` 은 삭제만 막는다** — 그 이름의 PVC 는 여전히 이 릴리스 파드에 붙어 읽고 쓰인다.
+그러니 이 릴리스의 저장소가 아니면 `Retain` 으로 우회하지 말고(생성이면 다른 네임스페이스에 배포하고), 업데이트에서는 그 순번으로
+스케일 업하지 않는다.
+PVC 를 list 할 수 없거나 StatefulSet 을 읽을 수 없는 호출자(데모 사용자 계정의 PVC)는 검사하지 못하고 통과한다. 이 기본값 이전에
+배포된 릴리스는 **다음 업데이트 때** 정책이 붙고, 그 전에 지운 릴리스의 PVC 는 저절로 사라지지 않는다. 같은
+StatefulSet·claim 이름으로 새로 배포하려면 `kubectl -n <ns> get pvc` 로 찾아 먼저 정리한다.
+
 **로그 스트림은 동시에 열어 둘 수 있는 개수에도 상한이 있다**([#169](https://github.com/shyuni4u/kubeport/issues/169)).
 위 버킷은 스트림을 **여는** 횟수만 센다 — 한 번 열린 스트림은 몇 시간을 붙들고 있어도 토큰을 더 쓰지
 않는다. 그런데 열린 스트림 하나가 파드마다 goroutine 하나와 apiserver 연결 하나를 계속 잡고 있어서,
