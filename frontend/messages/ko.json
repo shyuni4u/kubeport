@@ -204,6 +204,9 @@
       "namespace": "구역",
       "allInstances": "전체 인스턴스"
     },
+    "update": {
+      "button": "설정 바꾸기"
+    },
     "delete": {
       "button": "삭제",
       "confirm": "''{name}'' 을(를) 클러스터에서 내리고 목록에서 지웁니다. 되돌릴 수 없습니다. 계속할까요?",

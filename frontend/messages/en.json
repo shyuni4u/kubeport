@@ -204,6 +204,9 @@
       "namespace": "Area",
       "allInstances": "All instances"
     },
+    "update": {
+      "button": "Change settings"
+    },
     "delete": {
       "button": "Delete",
       "confirm": "This takes ''{name}'' down from the cluster and removes it from the list. This cannot be undone. Continue?",
