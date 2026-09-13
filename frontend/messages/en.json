@@ -466,6 +466,7 @@
       },
       "preview": {
         "loading": "Loading…",
+        "noResources": "Add a resource and its preview shows up here.",
         "noExposed": "No fields are exposed yet. In UI mode, mark a value in the tree as <strong>exposed</strong> and it shows up here. In YAML mode, add entries to <code>fields[]</code> in <code>ui-spec.yaml</code>.",
         "previewSubmit": "Deploy (preview — does nothing)",
         "parseFailed": "Failed to parse ui-spec: {detail}",

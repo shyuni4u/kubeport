@@ -466,6 +466,7 @@
       },
       "preview": {
         "loading": "로딩 중…",
+        "noResources": "리소스를 추가하면 여기에 미리보기가 나옵니다.",
         "noExposed": "아직 노출된 필드가 없습니다. UI 모드에서는 트리의 값을 <strong>노출</strong> 로 표시하면 여기 나타납니다. YAML 모드에서는 <code>ui-spec.yaml</code> 의 <code>fields[]</code> 를 추가하세요.",
         "previewSubmit": "배포 (미리보기 — 실제 동작 X)",
         "parseFailed": "ui-spec 파싱 실패: {detail}",
