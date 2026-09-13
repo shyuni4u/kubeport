@@ -204,6 +204,85 @@ spec:
 		"busybox admits busybox:1.36 and busybox@sha256 but not busybox-evil; nginx/other is Docker Hub's, not ghcr.io/nginx")
 }
 
+// Every object with a pod template is checked, not a list of kinds: the demo
+// roles may create ReplicaSets, and a kind left off a list is a way around it.
+func TestApplyDemoPolicy_ImagePrefixesCoverEveryPodTemplate(t *testing.T) {
+	manifest := `apiVersion: apps/v1
+kind: ReplicaSet
+metadata: { name: rs }
+spec:
+  template:
+    spec:
+      initContainers: [{ name: init, image: "quay.io/evil/init:1" }]
+      containers: [{ name: main, image: "quay.io/evil/main:1" }]
+---
+apiVersion: v1
+kind: ReplicationController
+metadata: { name: rc }
+spec:
+  template: { spec: { containers: [{ name: main, image: "quay.io/evil/rc:1" }] } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: svc }
+spec: { ports: [{ port: 80 }] }
+`
+	policy := template.DemoPolicy{ImagePrefixes: []string{"ghcr.io/nginx/"}}
+	_, violations, err := template.ApplyDemoPolicy([]byte(manifest), policy)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []template.DemoViolation{
+		{Rule: "image-prefix", Kind: "ReplicaSet", Name: "rs", Container: "init", Field: "spec.template.spec.initContainers[0].image", Got: "quay.io/evil/init:1"},
+		{Rule: "image-prefix", Kind: "ReplicaSet", Name: "rs", Container: "main", Field: "spec.template.spec.containers[0].image", Got: "quay.io/evil/main:1"},
+		{Rule: "image-prefix", Kind: "ReplicationController", Name: "rc", Container: "main", Field: "spec.template.spec.containers[0].image", Got: "quay.io/evil/rc:1"},
+	}, violations)
+}
+
+// A Docker Hub image is the same image however it is spelled, so an allowed
+// one is not refused for its spelling (codex review), and a lookalike is not
+// admitted for its spelling either.
+func TestApplyDemoPolicy_ImagePrefixesReadDockerHubSpellingsAlike(t *testing.T) {
+	pod := func(image string) []byte {
+		return []byte("apiVersion: v1\nkind: Pod\nmetadata: { name: p }\nspec:\n  containers: [{ name: c, image: \"" + image + "\" }]\n")
+	}
+	busybox := template.DemoPolicy{ImagePrefixes: []string{"docker.io/library/busybox"}}
+	for _, image := range []string{
+		"busybox:1.36",
+		"docker.io/busybox:1.36",
+		"docker.io/library/busybox:1.36",
+		"index.docker.io/library/busybox:1.36",
+		"index.docker.io/busybox@sha256:abc",
+		"DOCKER.IO/busybox:1.36",
+	} {
+		_, violations, err := template.ApplyDemoPolicy(pod(image), busybox)
+		require.NoError(t, err)
+		require.Empty(t, violations, image)
+	}
+	for _, image := range []string{
+		"docker.io/busybox-evil:1",
+		"docker.io/evil/busybox:1",
+		"ghcr.io/library/busybox:1",
+		"localhost:5000/busybox:1",
+	} {
+		_, violations, err := template.ApplyDemoPolicy(pod(image), busybox)
+		require.NoError(t, err)
+		require.Len(t, violations, 1, image)
+	}
+
+	// A prefix spelled another way means the same, and "docker.io/" is all of
+	// Docker Hub rather than its library namespace.
+	for _, prefixes := range [][]string{{"busybox"}, {"index.docker.io/busybox"}, {"docker.io/"}} {
+		_, violations, err := template.ApplyDemoPolicy(pod("docker.io/library/busybox:1.36"), template.DemoPolicy{ImagePrefixes: prefixes})
+		require.NoError(t, err)
+		require.Empty(t, violations, prefixes)
+	}
+	_, violations, err := template.ApplyDemoPolicy(pod("docker.io/bitnami/redis:7"), template.DemoPolicy{ImagePrefixes: []string{"docker.io/"}})
+	require.NoError(t, err)
+	require.Empty(t, violations, "docker.io/ admits an org's image")
+	_, violations, err = template.ApplyDemoPolicy(pod("ghcr.io/nginx/nginx:1"), template.DemoPolicy{ImagePrefixes: []string{"docker.io/"}})
+	require.NoError(t, err)
+	require.Len(t, violations, 1, "docker.io/ does not admit another registry")
+}
+
 // The demo seeds its releases through the API as the demo user, so the default
 // policy must pass them as they are — refusing one would leave the reset wiped
 // and unseeded (#105). Both seed releases, with the prefixes the live demo

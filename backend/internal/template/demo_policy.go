@@ -100,11 +100,14 @@ func ApplyDemoPolicy(rendered []byte, p DemoPolicy) ([]byte, []DemoViolation, er
 			limit(mapAt(spec, "jobTemplate", "spec"), "backoffLimit", "spec.jobTemplate.spec.backoffLimit", "job-backoff-limit", p.JobBackoffLimit)
 			podSpec = mapAt(spec, "jobTemplate", "spec", "template", "spec")
 			podPath = "spec.jobTemplate.spec.template.spec"
-		case "Deployment", "StatefulSet", "DaemonSet":
-			podSpec = mapAt(spec, "template", "spec")
 		case "Pod":
 			podSpec = spec
 			podPath = "spec"
+		default:
+			// Any other kind with a pod template — Deployment, StatefulSet,
+			// DaemonSet, and ReplicaSet, which the demo roles may create too
+			// (codex review). Listing kinds would let the next one through.
+			podSpec = mapAt(spec, "template", "spec")
 		}
 		if len(prefixes) == 0 || podSpec == nil {
 			continue
@@ -169,21 +172,29 @@ func capInt(m map[string]any, key string, max *int64) (any, bool) {
 
 // normalizeImage writes an image reference the way the container runtime reads
 // it, so a prefix matches however the reference was spelled: a reference with
-// no registry is Docker Hub's, and a bare name is in its library namespace.
-// busybox:1.36 is docker.io/library/busybox:1.36; nginx/nginx is
-// docker.io/nginx/nginx. The first path segment is a registry when it holds a
-// "." or ":" or is "localhost".
+// no registry is Docker Hub's, index.docker.io is Docker Hub too, and a Docker
+// Hub name with no namespace is in its library namespace. busybox:1.36,
+// docker.io/busybox:1.36 and index.docker.io/library/busybox:1.36 are all
+// docker.io/library/busybox:1.36; nginx/nginx is docker.io/nginx/nginx. The
+// first path segment is a registry when it holds a "." or ":" or is
+// "localhost", and a registry's name is case-insensitive.
+//
+// Prefixes go through it too, so "docker.io/" stays all of Docker Hub: only a
+// non-empty name gains library/.
 func normalizeImage(ref string) string {
 	ref = strings.TrimSpace(ref)
-	first, _, hasSlash := strings.Cut(ref, "/")
-	switch {
-	case !hasSlash:
-		return "docker.io/library/" + ref
-	case strings.ContainsAny(first, ".:") || first == "localhost":
-		return ref
-	default:
-		return "docker.io/" + ref
+	registry, rest, hasSlash := strings.Cut(ref, "/")
+	if !hasSlash || !(strings.ContainsAny(registry, ".:") || registry == "localhost") {
+		registry, rest = "docker.io", ref
 	}
+	registry = strings.ToLower(registry)
+	if registry == "index.docker.io" {
+		registry = "docker.io"
+	}
+	if registry == "docker.io" && rest != "" && !strings.Contains(rest, "/") {
+		rest = "library/" + rest
+	}
+	return registry + "/" + rest
 }
 
 // imageAllowed reports whether image starts with one of prefixes at a boundary.
