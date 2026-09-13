@@ -50,6 +50,23 @@ describe("RBACCheckPanel error detail level", () => {
     }
   });
 
+  // Security review: `reason` also carries what the panel writes itself for a
+  // check that failed — "HTTP 429", the browser's network error. Only a row the
+  // server judged gets a reason line at raw.
+  it("does not add a reason line at raw for a check that failed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 429, json: async () => ({}) }) as unknown as Response),
+    );
+    render(
+      <ErrorDetailProvider initial="raw">
+        <RBACCheckPanel cluster="dev" namespace="default" kinds={["Service"]} />
+      </ErrorDetailProvider>,
+    );
+    const row = await screen.findByText(/HTTP 429/);
+    expect(row.closest("li")?.querySelector(".font-mono")).toBeNull();
+  });
+
   it("shows nothing extra at raw when the server sent no reason", async () => {
     renderAt("raw", "");
     const row = await screen.findByText("내부 주소 — 만들 권한이 없습니다.");

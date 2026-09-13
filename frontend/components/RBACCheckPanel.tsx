@@ -207,7 +207,10 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult, idleReason
   const kube = useKubeTermsStore((s) => s.showKubeTerms);
   // At "raw" (#6) the apiserver's reason is shown under a denied row even with
   // plain terms. Presentation only: the server sends a reason to a non-demo
-  // admin alone (#102), and an empty one shows nothing at any level.
+  // admin alone (#102), and an empty one shows nothing at any level. `reason`
+  // also holds what this panel writes itself for a check that failed (an HTTP
+  // status, the browser's network error), so at raw only a row the server
+  // judged gets the line — a failed check already says why in its sentence.
   const { level } = useErrorDetail();
   const tKinds = useTranslations("kinds");
   const kind = (r: CheckResult) => kindLabel(r.resource, kube, (key) => tKinds(key), r.apiVersion);
@@ -281,7 +284,7 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult, idleReason
                     />
                     <span className="min-w-0">
                       <span>{t("deniedRow", { resource: label, message })}</span>
-                      {(kube || level === "raw") && r.reason && (
+                      {(kube || (level === "raw" && !isHttpError)) && r.reason && (
                         <span className="block break-all font-mono text-muted-foreground">
                           {r.reason}
                         </span>
