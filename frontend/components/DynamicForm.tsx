@@ -44,6 +44,8 @@ import {
 
 import {
   REDACTED_SECRET,
+  emptyTakesDefault,
+  isSecretPath,
   keptSecretPaths,
   schemaFromUISpec,
   defaultsFromUISpec,
@@ -471,6 +473,17 @@ function FieldRow({
   // refused on submit instead (see schemaFromUISpec).
   const current = useWatch({ control, name });
   const keeping = kept && current === REDACTED_SECRET;
+  // An empty box here goes out as no value and the API fills the default
+  // (#334), which an empty box does not otherwise say. Shown only while it is
+  // empty — the moment the rule applies — and under the box rather than as its
+  // placeholder, which the admin's own placeholder already holds and which
+  // would read as a value filled in. Not for a kept or re-entered Secret: the
+  // form requires those. A Secret's default is not printed, only that one is
+  // used; a default of "" would print nothing and is left unsaid.
+  const defaultText =
+    !kept && !reenter && emptyTakesDefault(field) && (current === "" || current == null)
+      ? String(field.default)
+      : null;
 
   // Either swap removes the button that was just pressed, so focus would
   // fall to <body>. Move it to what took the button's place.
@@ -574,6 +587,15 @@ function FieldRow({
           field.pattern &&
           !field.help ? (
             <p className="text-xs text-muted-foreground">{tv("hasPattern")}</p>
+          ) : null}
+          {defaultText ? (
+            // A default can be a long unbroken image ref; wrap it only where it
+            // would otherwise overflow the form.
+            <p data-slot="empty-uses-default" className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
+              {isSecretPath(field.path)
+                ? tf("emptyUsesDefault.hidden")
+                : tf("emptyUsesDefault.value", { value: defaultText })}
+            </p>
           ) : null}
           {reenter ? (
             <p className="text-xs text-muted-foreground">{tf("secretReenter")}</p>

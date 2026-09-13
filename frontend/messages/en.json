@@ -97,6 +97,10 @@
     "retryLogin": "Sign in again"
   },
   "form": {
+    "emptyUsesDefault": {
+      "value": "Leave empty to use the default ({value}).",
+      "hidden": "Leave empty to use the default."
+    },
     "secretReenter": "Secret values are not carried to another version. Please enter them again.",
     "secretKept": {
       "status": "Keeping the current value. It is not shown, for security.",

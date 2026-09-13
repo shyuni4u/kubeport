@@ -97,6 +97,10 @@
     "retryLogin": "다시 로그인"
   },
   "form": {
+    "emptyUsesDefault": {
+      "value": "비워 두면 기본값({value})을 씁니다.",
+      "hidden": "비워 두면 기본값을 씁니다."
+    },
     "secretReenter": "버전을 바꾸면 Secret 값은 옮겨지지 않아요. 다시 입력해 주세요.",
     "secretKept": {
       "status": "기존 값을 유지합니다. 보안상 값은 보여 주지 않아요.",

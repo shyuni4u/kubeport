@@ -954,4 +954,77 @@ describe("DeployClient preview payload", () => {
     expect(screen.queryByText(REQUIRED)).not.toBeInTheDocument();
     expect(bodyOf(renderCalls(fetchMock).at(-1)!)).toEqual({ values: { [apiKey]: "k2" } });
   });
+
+  // #334 — an optional text box with a default, typed in and emptied, sent ""
+  // to both the preview and the release, and the API wrote it over the
+  // default. Both now leave the key out, so the API fills the default — and
+  // they still send the same values (#322).
+  const image = "Deployment[web].spec.template.spec.containers[0].image";
+  const imageSpec: UISpec = {
+    fields: [{ path: image, label: "이미지", type: "string", default: "nginx:1.25" }],
+  };
+
+  it("previews and deploys an emptied optional box with a default without its key", async () => {
+    const user = userEvent.setup();
+    const fetchMock = backendFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={imageSpec} />);
+    await fillMeta(user);
+    const box = () => screen.getByLabelText(/이미지/);
+
+    await user.clear(box());
+    await user.type(box(), "custom");
+    await waitFor(() =>
+      expect(bodyOf(renderCalls(fetchMock).at(-1)!)).toEqual({ values: { [image]: "custom" } }),
+    );
+
+    await user.clear(box());
+    await waitFor(() => expect(String(renderCalls(fetchMock).at(-1)![1]?.body)).not.toContain(image));
+    expect(await screen.findByText(ALL_ALLOWED)).toBeInTheDocument();
+    const preview = bodyOf(renderCalls(fetchMock).at(-1)!);
+    expect(preview).toEqual({ values: {} });
+
+    const button = screen.getByRole("button", { name: /배포하기/ });
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+    await waitFor(() => expect(pushMock).toHaveBeenCalled());
+    const post = (fetchMock.mock.calls as Call[]).find(([url]) => url === "/api/v1/releases")!;
+    expect(String(post[1]?.body)).not.toContain(image);
+    expect(JSON.stringify(bodyOf(post).values)).toBe(JSON.stringify(preview.values));
+  });
+
+  it("previews and updates a stored value emptied on a box with a default without its key", async () => {
+    const user = userEvent.setup();
+    const fetchMock = backendFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <DeployClient
+        templateName="web-app"
+        version={2}
+        team={null}
+        spec={imageSpec}
+        updateReleaseId="rel-1"
+        initialValues={{ [image]: "registry.example/app:7" }}
+      />,
+    );
+    await waitFor(() =>
+      expect(bodyOf(renderCalls(fetchMock).at(-1)!)).toEqual({
+        values: { [image]: "registry.example/app:7" },
+        release_id: "rel-1",
+      }),
+    );
+
+    await user.clear(screen.getByLabelText(/이미지/));
+    await waitFor(() => expect(String(renderCalls(fetchMock).at(-1)![1]?.body)).not.toContain(image));
+    const preview = bodyOf(renderCalls(fetchMock).at(-1)!);
+    expect(preview).toEqual({ values: {}, release_id: "rel-1" });
+
+    const button = screen.getByRole("button", { name: /배포하기|업데이트/ });
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/releases/rel-1"));
+    const put = (fetchMock.mock.calls as Call[]).find(([url]) => url === "/api/v1/releases/rel-1")!;
+    expect(String(put[1]?.body)).not.toContain(image);
+    expect(JSON.stringify(bodyOf(put).values)).toBe(JSON.stringify(preview.values));
+  });
 });
