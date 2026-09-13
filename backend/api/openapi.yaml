@@ -2351,6 +2351,24 @@ components:
         `PUT /v1/releases/{id}` and `/render` with 400 whenever that field has
         a value or a `default` (#136).
       properties:
+        instances:
+          type: string
+          enum: [single, multiple]
+          default: single
+          description: |
+            How many releases of this version one namespace can hold (#190).
+            `single` (also an absent key) applies the objects under the names
+            the template gives them, so a second release in the namespace is
+            refused with 409 `resource-conflict`. `multiple` names every object
+            `<release>-<name>`, points the template's own references (pod
+            volumes, envFrom, env valueFrom, imagePullSecrets, StatefulSet
+            serviceName, Ingress backends and TLS, PVC clone sources) at the new
+            names, and adds `kubeport.io/release` to Service selectors and
+            workload `matchLabels`. With `multiple`, saving refuses a field that
+            exposes `metadata.name` and an object name over 30 characters, and
+            deploying refuses a release name that makes a renamed object break
+            its kind's naming rules (400 `validation-error`). An update cannot
+            move a release between a `single` and a `multiple` version.
         fields:
           type: array
           items:

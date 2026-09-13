@@ -75,6 +75,20 @@ const (
 
 func (s UISpec) multiple() bool { return s.Instances == InstancesMultiple }
 
+// InstancesOf reads a stored ui-spec's instance mode, with an absent key read
+// as single. The API compares two versions' modes before moving a release
+// between them.
+func InstancesOf(uiSpecYAML string) (string, error) {
+	spec, err := parseSpec(uiSpecYAML)
+	if err != nil {
+		return "", err
+	}
+	if spec.multiple() {
+		return InstancesMultiple, nil
+	}
+	return InstancesSingle, nil
+}
+
 func checkInstances(v string) error {
 	switch v {
 	case "", InstancesSingle, InstancesMultiple:
