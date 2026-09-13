@@ -449,14 +449,63 @@ spec:
 		byName[at(t, d, "metadata", "name").(string)] = d
 	}
 
-	require.Equal(t, map[string]any{"job": "batch", "kubeport.io/release": "rel"},
+	require.Equal(t, map[string]any{"job": "batch", "kubeport.io/release": "rel", "kubeport.io/release-uid": "x"},
 		at(t, byName["rel-manual"], "spec", "selector", "matchLabels"))
-	require.Equal(t, "rel", at(t, byName["rel-manual"], "spec", "template", "metadata", "labels", "kubeport.io/release"),
-		"the Job's pods carry the label its selector now asks for")
+	jobPods := at(t, byName["rel-manual"], "spec", "template", "metadata", "labels").(map[string]any)
+	require.Equal(t, "rel", jobPods["kubeport.io/release"], "the Job's pods carry the labels its selector now asks for")
+	require.Equal(t, "x", jobPods["kubeport.io/release-uid"])
 	require.Nil(t, byName["rel-generated"]["spec"].(map[string]any)["selector"],
 		"a generated selector is the apiserver's")
-	require.Equal(t, map[string]any{"job": "nightly", "kubeport.io/release": "rel"},
+	require.Equal(t, map[string]any{"job": "nightly", "kubeport.io/release": "rel", "kubeport.io/release-uid": "x"},
 		at(t, byName["rel-nightly"], "spec", "jobTemplate", "spec", "selector", "matchLabels"))
+}
+
+// codex review: a Service in a multi-instance template selecting a standalone
+// Job's pods matches the release id, so those pods must carry it — a Job's pod
+// template gets the id in this mode. A single-instance Job keeps its pods
+// without the id, as before (#195).
+func TestRender_MultipleInstancesStampsTheIDOnJobPods(t *testing.T) {
+	resources := `
+apiVersion: v1
+kind: Service
+metadata: { name: runner }
+spec: { selector: { job: runner }, ports: [{ port: 80 }] }
+---
+apiVersion: batch/v1
+kind: Job
+metadata: { name: runner }
+spec:
+  template:
+    metadata: { labels: { job: runner } }
+    spec: { restartPolicy: Never, containers: [{ name: j, image: busybox }] }
+`
+	render := func(spec string) map[string]map[string]any {
+		out, err := template.Render(resources, spec, json.RawMessage(`{}`), template.Labels{ReleaseName: "rel", ReleaseID: "x"})
+		require.NoError(t, err)
+		byKind := map[string]map[string]any{}
+		dec := yaml.NewDecoder(bytes.NewReader(out))
+		for {
+			var d map[string]any
+			if err := dec.Decode(&d); errors.Is(err, io.EOF) {
+				break
+			} else {
+				require.NoError(t, err)
+			}
+			byKind[d["kind"].(string)] = d
+		}
+		return byKind
+	}
+
+	multi := render("instances: multiple\nfields: []\n")
+	selector := at(t, multi["Service"], "spec", "selector").(map[string]any)
+	pods := at(t, multi["Job"], "spec", "template", "metadata", "labels").(map[string]any)
+	for k, v := range selector {
+		require.Equalf(t, v, pods[k], "the Service selects the Job's pods by %s", k)
+	}
+
+	single := render("fields: []\n")
+	_, hasID := at(t, single["Job"], "spec", "template", "metadata", "labels").(map[string]any)["kubeport.io/release-uid"]
+	require.False(t, hasID, "a single-instance Job's pods stay without the id")
 }
 
 // The point of the mode: two releases in one namespace share no object name,

@@ -279,8 +279,8 @@ func selectRelease(kind string, spec map[string]any, release, uid string) {
 		return
 	}
 	// The id goes in when the render has one — every render that is applied
-	// does. A preview has none and selects by name. Job pod templates carry no
-	// id (stampLabels), so manual Job selectors stay on the name.
+	// does. A preview has none and selects by name. In this mode every pod
+	// template carries the id, a Job's included (stampLabels).
 	scope := func(labels map[string]any) {
 		labels[releaseLabel] = release
 		if uid != "" {
@@ -297,21 +297,22 @@ func selectRelease(kind string, spec map[string]any, release, uid string) {
 			scope(ensureMap(sel, "matchLabels"))
 		}
 	case "Job":
-		selectManualJob(spec, release)
+		selectManualJob(spec, scope)
 	case "CronJob":
-		selectManualJob(mapAt(spec, "jobTemplate", "spec"), release)
+		selectManualJob(mapAt(spec, "jobTemplate", "spec"), scope)
 	}
 }
 
 // selectManualJob scopes a Job whose selector the template wrote itself
 // (manualSelector: true) to its release (codex review). Otherwise the apiserver
-// generates a selector unique to each Job, and the release label is not needed.
-func selectManualJob(jobSpec map[string]any, release string) {
+// generates a selector unique to each Job, and the release labels are not
+// needed.
+func selectManualJob(jobSpec map[string]any, scope func(map[string]any)) {
 	if jobSpec == nil || jobSpec["manualSelector"] != true {
 		return
 	}
 	if sel, ok := jobSpec["selector"].(map[string]any); ok {
-		ensureMap(sel, "matchLabels")[releaseLabel] = release
+		scope(ensureMap(sel, "matchLabels"))
 	}
 }
 

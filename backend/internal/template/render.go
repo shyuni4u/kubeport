@@ -191,7 +191,7 @@ func Render(resourcesYAML, uiSpecYAML string, values json.RawMessage, l Labels) 
 		}
 	}
 	for _, d := range docs {
-		stampLabels(d, l)
+		stampLabels(d, l, spec.multiple())
 	}
 
 	return marshalMultiDoc(docs)
@@ -283,7 +283,9 @@ func marshalMultiDoc(docs []map[string]any) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func stampLabels(obj map[string]any, l Labels) {
+// multiple is the template's instance mode (instances.go), which decides
+// whether a Job's pod template carries the release id.
+func stampLabels(obj map[string]any, l Labels, multiple bool) {
 	meta := ensureMap(obj, "metadata")
 	stampLabelsOnto(meta, l, true)
 	anns := ensureMap(meta, "annotations")
@@ -304,8 +306,11 @@ func stampLabels(obj map[string]any, l Labels) {
 			// A Job's pod template is immutable too, so a release with a Job
 			// applied before #195 could not be updated once the id appeared in
 			// it. The Job itself carries the id; its pods go without, and count
-			// by name the way every pod from before the id did.
-			stampLabelsOnto(ensureMap(tmpl, "metadata"), l, obj["kind"] != "Job")
+			// by name the way every pod from before the id did. A Job of a
+			// multi-instance template has no such history — it was created with
+			// the id — and its pods need it: that mode's selectors match the id
+			// (#190).
+			stampLabelsOnto(ensureMap(tmpl, "metadata"), l, obj["kind"] != "Job" || multiple)
 		}
 		// CronJob nests pod template under spec.jobTemplate.spec.template,
 		// which can change: it shapes the next Job, not a running one.
