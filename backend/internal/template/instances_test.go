@@ -151,6 +151,64 @@ func TestRender_MultipleInstancesNamesEveryObjectAfterTheRelease(t *testing.T) {
 		"the pods carry what the selector now asks for")
 }
 
+// codex review: a claim cloned from another claim of the template must follow
+// its source's new name, through dataSource and dataSourceRef. A source the
+// template does not declare, or one of another kind, stays as written.
+func TestRender_MultipleInstancesRewritesClaimsClonedFromTheTemplatesOwnClaim(t *testing.T) {
+	resources := `
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: data }
+spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 1Gi } } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: copy }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 1Gi } }
+  dataSource: { kind: PersistentVolumeClaim, name: data }
+  dataSourceRef: { kind: PersistentVolumeClaim, name: data }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: restored }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 1Gi } }
+  dataSource: { apiGroup: snapshot.storage.k8s.io, kind: VolumeSnapshot, name: data }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: external }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 1Gi } }
+  dataSource: { kind: PersistentVolumeClaim, name: shared-golden-image }
+`
+	out, err := template.Render(resources, "instances: multiple\nfields: []\n", json.RawMessage(`{}`),
+		template.Labels{ReleaseName: "rel", ReleaseID: "x"})
+	require.NoError(t, err)
+	claims := map[string]map[string]any{}
+	dec := yaml.NewDecoder(bytes.NewReader(out))
+	for {
+		var d map[string]any
+		if err := dec.Decode(&d); errors.Is(err, io.EOF) {
+			break
+		} else {
+			require.NoError(t, err)
+		}
+		claims[at(t, d, "metadata", "name").(string)] = d
+	}
+
+	require.Equal(t, "rel-data", at(t, claims["rel-copy"], "spec", "dataSource", "name"))
+	require.Equal(t, "rel-data", at(t, claims["rel-copy"], "spec", "dataSourceRef", "name"))
+	require.Equal(t, "data", at(t, claims["rel-restored"], "spec", "dataSource", "name"),
+		"a VolumeSnapshot named like a claim is another object")
+	require.Equal(t, "shared-golden-image", at(t, claims["rel-external"], "spec", "dataSource", "name"),
+		"a claim the template does not declare keeps its name")
+}
+
 // The point of the mode: two releases in one namespace share no object name,
 // and neither's selectors match the other's pods.
 func TestRender_TwoReleasesOfAMultipleTemplateShareNothing(t *testing.T) {

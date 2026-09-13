@@ -141,6 +141,8 @@ func renameForRelease(docs []map[string]any, release string) error {
 			r.podSpec(spec)
 		case "Ingress":
 			r.ingress(spec)
+		case "PersistentVolumeClaim":
+			r.pvcSource(spec)
 		}
 		if kind == "StatefulSet" {
 			r.rename(spec, "serviceName", "Service")
@@ -200,6 +202,23 @@ func (r refRewriter) podSpec(ps map[string]any) {
 	}
 	for _, s := range mapsIn(ps, "imagePullSecrets") {
 		r.rename(s, "name", "Secret")
+	}
+}
+
+// pvcSource rewrites a claim cloned from another claim of the template
+// (codex review). dataSource and dataSourceRef name their source by kind; only
+// a PersistentVolumeClaim in the core group is one of the template's own
+// objects — a VolumeSnapshot or a populator's resource is not renamed.
+func (r refRewriter) pvcSource(spec map[string]any) {
+	for _, key := range []string{"dataSource", "dataSourceRef"} {
+		src := mapAt(spec, key)
+		if src == nil || src["kind"] != "PersistentVolumeClaim" {
+			continue
+		}
+		if group, ok := src["apiGroup"].(string); ok && group != "" {
+			continue
+		}
+		r.rename(src, "name", "PersistentVolumeClaim")
 	}
 }
 
