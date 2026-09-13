@@ -512,6 +512,19 @@ curl -s -o /dev/null -w '%{http_code}\n' https://<host>/                  # the 
 curl -sL --max-redirs 3 -o /dev/null -w '%{num_redirects}\n' http://<host>/   # 1
 ```
 
+### Behaviour changes when upgrading past #6
+
+Refused requests on the deploy form now show a copyable block — request id,
+time, status, template, cluster, namespace — and, depending on the viewer's
+error detail level, the kind and the server's message. Admins start at `raw`
+and users at `friendly`; each viewer can change their own in the header (see
+[Error detail](#error-detail)). Two new values, `frontend.errorDetail.admin`
+and `frontend.errorDetail.user`, set where each role starts.
+`--reset-then-reuse-values` (the upgrade this README recommends, and what
+`kubeport-deploy` runs) fills them with the chart defaults; a plain
+`--reuse-values` renders neither key, and the frontend falls back to the same
+defaults. Nothing the API withholds is shown at any level.
+
 ### Behaviour changes when upgrading past #143
 
 The frontend now sends an enforced Content-Security-Policy, not only
@@ -782,6 +795,30 @@ within seconds. A write refused before it reaches the cluster (a bad body, a
 release that is not yours) does not spend that budget, and the demo reset's
 seeder — which runs as the demo user — waits out a 429 rather than failing.
 Changing a budget needs a code change (`backend/internal/api/routes.go`).
+
+### Error detail
+
+How much of a refused request the screens show (#6). Each viewer picks their
+own level in the header — it is kept in a `kbp_error_detail` cookie on that
+browser — and these values set where each role starts.
+
+| Value | Default | What it does |
+|---|---|---|
+| `frontend.errorDetail.admin` | `"raw"` | Where a `kubeport-admin` starts. A demo-domain admin always starts at `"detailed"`. |
+| `frontend.errorDetail.user` | `"friendly"` | Where everyone else starts. |
+
+- `"friendly"` — the screen's own sentence and a copyable block (request id,
+  time, status, and what the screen shows: template, cluster, namespace).
+- `"detailed"` — plus the error kind and status, structured fields, and the
+  server's message, folded. A 500's message is left to `raw`: it only names the
+  operation that failed.
+- `"raw"` — every message, unfolded. Never the JSON envelope.
+
+The levels change presentation only. What the API sends is decided on the
+server and does not depend on the level: a 500's cause, a cluster's address and
+a log stream's client-go text stay in the server log at every level, found by
+the request id. Quote the values in a values file; the chart refuses anything
+but the three.
 
 ### Security headers
 

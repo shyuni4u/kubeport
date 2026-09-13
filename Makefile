@@ -58,6 +58,13 @@ helm-lint:
 		2>&1 | grep -q "every dex.staticPasswords\[\].email must end in" \
 		|| { echo "demo email guard: a Dex account outside demo.emailDomain rendered (#253)"; exit 1; }
 	@echo "demo email guard: ok"
+	@helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
+		--set frontend.errorDetail.user=verbose 2>&1 | grep -q "frontend.errorDetail.user must be" \
+		|| { echo "error detail guard: a level that is not friendly/detailed/raw rendered (#6)"; exit 1; }
+	@helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
+		--set frontend.errorDetail.admin=false 2>&1 | grep -q "frontend.errorDetail.admin must be" \
+		|| { echo "error detail guard: an unquoted boolean level rendered (#6)"; exit 1; }
+	@echo "error detail guard: ok"
 
 # Diff the rendered chart against the checked-in golden snapshot. Fails
 # (non-zero exit) if they differ — that is the CI signal.

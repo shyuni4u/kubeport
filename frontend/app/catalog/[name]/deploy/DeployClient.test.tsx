@@ -4,6 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { renderWithIntl as render } from "@/tests/intl-test-utils";
 
 import { CLUSTER_CHANGED_EVENT } from "@/components/ClusterPicker";
+import { ErrorDetailProvider } from "@/components/ErrorDetailProvider";
+import type { ErrorDetailLevel } from "@/lib/error-detail";
 
 import { DeployClient } from "./DeployClient";
 import type { UISpec } from "@/lib/ui-spec-to-zod";
@@ -186,6 +188,46 @@ describe("DeployClient", () => {
 
     await waitFor(() => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+
+  // #6: a cluster's verdict arrives as 502 k8s-error. It was told as "something
+  // went wrong on the server", and its reason was thrown away with the body.
+  describe("a cluster that refuses the deploy (#6)", () => {
+    const forbidden = {
+      type: "https://kubeport.io/errors/k8s-error",
+      title: "k8s-error",
+      status: 502,
+      detail: 'deployments.apps is forbidden: User "u@example.com" cannot create resource "deployments" in the namespace "default"',
+      request_id: "req-cluster-9",
+    };
+
+    async function submitRefused(level?: ErrorDetailLevel) {
+      const user = userEvent.setup();
+      vi.stubGlobal("fetch", routedFetch({ releases: () => jsonResponse(forbidden, 502) }));
+      const form = <DeployClient templateName="web-app" version={3} team={null} spec={spec} />;
+      render(level ? <ErrorDetailProvider initial={level}>{form}</ErrorDetailProvider> : form);
+      await fillMeta(user);
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /배포하기/ })).toBeEnabled();
+      });
+      await user.click(screen.getByRole("button", { name: /배포하기/ }));
+      return screen.findByRole("alert");
+    }
+
+    it("says the cluster refused, with the block to send an admin, and no raw message at friendly", async () => {
+      const alert = await submitRefused();
+      expect(alert).toHaveTextContent(/클러스터가 배포를 받아들이지 않았습니다/);
+      expect(alert).not.toHaveTextContent(/서버에서 문제가 발생해/);
+      expect(alert).toHaveTextContent("요청 ID: req-cluster-9");
+      expect(alert).toHaveTextContent("템플릿: web-app v3");
+      expect(alert).not.toHaveTextContent("forbidden");
+    });
+
+    it("unfolds the apiserver's words at detailed", async () => {
+      const alert = await submitRefused("detailed");
+      expect(alert).toHaveTextContent('cannot create resource "deployments" in the namespace "default"');
+      expect(alert).toHaveTextContent("502 k8s-error");
     });
   });
 

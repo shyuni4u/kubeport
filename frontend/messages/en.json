@@ -43,10 +43,34 @@
       "light": "Light",
       "dark": "Dark"
     },
+    "errorDetailSwitchLabel": "Error detail",
+    "errorDetail": {
+      "friendly": "Simple",
+      "detailed": "Detailed",
+      "raw": "Raw"
+    },
     "role": {
       "adminDesc": "authors templates",
       "userDesc": "consumes the catalog"
     }
+  },
+  "problem": {
+    "more": "Details",
+    "kind": "Kind",
+    "detail": "Server message",
+    "extensions": "Additional fields",
+    "logsHint": "The cause is in the server log — search it for the request ID.",
+    "contactTitle": "Include this when you ask for help",
+    "copy": "Copy",
+    "copied": "Copied",
+    "requestId": "Request ID",
+    "time": "Time",
+    "status": "Status",
+    "template": "Template",
+    "release": "Release",
+    "cluster": "Cluster",
+    "namespace": "Namespace",
+    "name": "Release name"
   },
   "common": {
     "save": "Save",
@@ -301,6 +325,7 @@
       "templateNamespace": "This template is pinned to a different area, so it cannot be deployed here. Your input is fine — ask an admin to fix the template.",
       "templateDefect": "This template version has an input kubeport cannot handle, so it cannot be deployed. Your input is fine — ask an admin to fix the template.",
       "resourceConflictUnreadable": "Resources this template creates already exist in this area, and this account may not see who holds them. A different name will not help — deploy into another area, or ask an admin.",
+      "cluster": "The cluster did not accept the deployment. A permission, an input value or the cluster itself may be the cause — send the details below to an admin, or set 'Error detail' at the top to 'Detailed' to see why.",
       "server": "Something went wrong on the server and the deployment failed. Try again shortly or contact an admin.",
       "generic": "The deployment failed. Please review your inputs and try again."
     },

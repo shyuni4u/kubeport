@@ -10,6 +10,7 @@ import { CLUSTER_CHANGED_EVENT } from "@/components/ClusterPicker";
 import { DynamicForm, type ParsedFormValues } from "@/components/DynamicForm";
 import { HelpHint } from "@/components/HelpHint";
 import { PreviewErrorBoundary } from "@/components/PreviewErrorBoundary";
+import { ProblemMessage } from "@/components/ProblemMessage";
 import { RBACCheckPanel, type KindRef, type RbacStatus } from "@/components/RBACCheckPanel";
 import { groupOf } from "@/lib/kube-kinds";
 import { ResourcesPreview } from "@/components/ResourcesPreview";
@@ -107,6 +108,7 @@ export function DeployClient({
 }: Props) {
   const router = useRouter();
   const t = useTranslations("deploy");
+  const tProblem = useTranslations("problem");
   const isUpdate = Boolean(updateReleaseId);
   // The namespace label follows the terms switch like the permission card
   // under it: 구역 by default, Namespace with Kubernetes terms on (#250).
@@ -148,6 +150,11 @@ export function DeployClient({
         }
         return t("errors.conflict");
       }
+      // The apiserver's verdict — a Forbidden, an Invalid — arrives as 502
+      // k8s-error, and so does a cluster that could not be reached. Neither is
+      // "something went wrong on the server", which sent people looking for a
+      // kubeport outage when the cluster had said no (#6).
+      if (status === 502 && problem?.title === "k8s-error") return t("errors.cluster");
       if (status >= 500) return t("errors.server");
       return t("errors.generic");
     },
@@ -175,7 +182,11 @@ export function DeployClient({
   const [rendered, setRendered] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  // A refused submit: the sentence this form picked, plus the response as the
+  // API sent it, for ProblemMessage to unfold at the viewer's level (#6).
+  const [err, setErr] = useState<{ message: string; status: number; body: string; at: string } | null>(
+    null,
+  );
   /**
    * UX gate only. Authorization is decided by the backend forwarding the
    * user's own token to the k8s API, and k8s RBAC has the final say — never
@@ -192,7 +203,7 @@ export function DeployClient({
   }>({ cluster: "", namespace: "", status: "unknown" });
   // Move focus to the error notice when it appears so keyboard / screen
   // reader users land on it instead of hunting below the (long) form.
-  const errRef = useRef<HTMLParagraphElement>(null);
+  const errRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (err) errRef.current?.focus();
   }, [err]);
@@ -414,6 +425,19 @@ export function DeployClient({
     async (values: Record<string, unknown>) => {
       setSubmitting(true);
       setErr(null);
+      // The sentence is picked from the status and the Problem's structured
+      // fields; the body goes along to ProblemMessage, which unfolds as much of
+      // it as the viewer's error detail level asks for (#6). Submitting is
+      // released only on failure — see the catch below for why.
+      const fail = (status: number, body: string) => {
+        setErr({
+          message: errorMessageForStatus(status, body),
+          status,
+          body,
+          at: new Date().toISOString(),
+        });
+        setSubmitting(false);
+      };
       try {
         if (updateReleaseId) {
           const r = await fetch(`/api/v1/releases/${updateReleaseId}`, {
@@ -422,8 +446,8 @@ export function DeployClient({
             body: JSON.stringify({ version, values }),
           });
           if (!r.ok) {
-            const text = await r.text();
-            throw new Error(errorMessageForStatus(r.status, text), { cause: text });
+            fail(r.status, await r.text());
+            return;
           }
           router.push(`/releases/${updateReleaseId}`);
         } else {
@@ -440,14 +464,21 @@ export function DeployClient({
             }),
           });
           if (!r.ok) {
-            const text = await r.text();
-            throw new Error(errorMessageForStatus(r.status, text), { cause: text });
+            fail(r.status, await r.text());
+            return;
           }
           const body = (await r.json()) as { id: string };
           router.push(`/releases/${body.id}`);
         }
       } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
+        // The request never got an answer (offline, the BFF down): no status,
+        // no body, only the browser's own words.
+        setErr({
+          message: e instanceof Error ? e.message : String(e),
+          status: 0,
+          body: "",
+          at: new Date().toISOString(),
+        });
         // Released only on failure. `router.push` returns immediately and the
         // RSC transition takes hundreds of ms, during which this form is still
         // mounted — unlocking here would hand the user a second POST and a
@@ -638,14 +669,21 @@ export function DeployClient({
           </div>
         )}
         {err && (
-          <p
-            ref={errRef}
-            role="alert"
-            tabIndex={-1}
-            className="mt-2 whitespace-pre-wrap text-sm text-red-700 dark:text-red-400 outline-none"
-          >
-            {err}
-          </p>
+          <div ref={errRef} tabIndex={-1} className="mt-2 outline-none">
+            <ProblemMessage
+              message={err.message}
+              status={err.status}
+              body={err.body}
+              at={err.at}
+              context={[
+                [tProblem("template"), `${templateName} v${version}`],
+                ...(updateReleaseId ? [[tProblem("release"), updateReleaseId] as const] : []),
+                [tProblem("cluster"), meta.cluster],
+                [tProblem("namespace"), meta.namespace],
+                ...(isUpdate ? [] : [[tProblem("name"), meta.name] as const]),
+              ]}
+            />
+          </div>
         )}
         {submitting && (
           <p className="mt-2 text-sm text-muted-foreground">{t("submitting")}</p>
