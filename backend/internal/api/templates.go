@@ -503,6 +503,12 @@ func (h *Handlers) PublishVersion(c *gin.Context) {
 		return
 	}
 
+	// Checked again at publish: the draft was checked when written, but a
+	// version of the other mode may have been published since (#190).
+	if existing.Status == "draft" && !h.sameModeAsTemplate(c, c.Param("name"), existing.UiSpecYaml, existing.ID) {
+		return
+	}
+
 	var published store.TemplateVersion
 	var notDraft bool
 	err = h.deps.Store.WithTx(ctx, func(q *store.Queries) error {
@@ -579,6 +585,9 @@ func (h *Handlers) CreateTemplateVersion(c *gin.Context) {
 	// spec dry-run — same as CreateTemplate
 	if err := template.ValidateSpec(r.ResourcesYAML, r.UISpecYAML); err != nil {
 		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+		return
+	}
+	if !h.sameModeAsTemplate(c, c.Param("name"), r.UISpecYAML, pgtype.UUID{}) {
 		return
 	}
 
@@ -756,6 +765,9 @@ func (h *Handlers) UpdateTemplateVersion(c *gin.Context) {
 	}
 	if err := template.ValidateSpec(finalRes, finalSpec); err != nil {
 		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+		return
+	}
+	if !h.sameModeAsTemplate(c, name, finalSpec, tv.ID) {
 		return
 	}
 

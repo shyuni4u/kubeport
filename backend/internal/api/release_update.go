@@ -144,6 +144,7 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 		TemplateVersion: req.Version,
 		ReleaseID:       uid,
 		AppliedBy:       u.Email,
+		Namespace:       rel.Namespace,
 	})
 	if err != nil {
 		renderProblem(c, err)

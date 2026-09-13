@@ -2,36 +2,29 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"kubeport/internal/store"
 )
 
 // Issue #190. A single-instance and a multi-instance version name and select a
-// release's objects differently, so an update cannot move a release between
-// them; deploying the other version as a new release is the way across.
+// release's objects differently. A template's versions share one mode, and an
+// update cannot move a release between modes.
 
-func addVersionWithSpec(t *testing.T, r http.Handler, tpl, uiSpec string) {
+func postVersion(t *testing.T, r http.Handler, tpl, uiSpec string) (int, string) {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{
 		"authoring_mode": "yaml", "resources_yaml": minimalResources, "ui_spec_yaml": uiSpec,
 	})
 	w := do(t, r, http.MethodPost, "/v1/templates/"+tpl+"/versions", bytes.NewReader(body))
-	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
-	var v struct {
-		Version int `json:"version"`
-	}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &v))
-	w = do(t, r, http.MethodPost, "/v1/templates/"+tpl+"/versions/"+itoa(v.Version)+"/publish", nil)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-}
-
-func itoa(n int) string {
-	b, _ := json.Marshal(n)
-	return string(b)
+	return w.Code, w.Body.String()
 }
 
 func deployV1(t *testing.T, r http.Handler, cluster, tpl string) string {
@@ -49,37 +42,97 @@ func deployV1(t *testing.T, r http.Handler, cluster, tpl string) string {
 	return rel.ID
 }
 
-func updateTo(t *testing.T, r http.Handler, id string, version int) *bytes.Buffer {
-	t.Helper()
-	body, _ := json.Marshal(map[string]any{"version": version, "values": map[string]any{"Deployment[web].spec.replicas": 1}})
-	w := do(t, r, http.MethodPut, "/v1/releases/"+id, bytes.NewReader(body))
-	return bytes.NewBufferString(itoa(w.Code) + " " + w.Body.String())
+// Security review: with a single and a multiple version in one template, a
+// single release's Service would select the multiple release's pods by the
+// template's own labels. The mode is fixed per template.
+func TestTemplateVersions_KeepTheTemplatesInstanceMode(t *testing.T) {
+	r := newTestRouterAdmin(t)
+	tpl := seedPublishedTemplate(t, r) // v1: no instances key, so single
+
+	code, body := postVersion(t, r, tpl, "instances: multiple\n"+minimalUISpec)
+	require.Equal(t, http.StatusBadRequest, code, body)
+	require.Contains(t, body, "released versions are single-instance")
+
+	code, body = postVersion(t, r, tpl, "instances: single\n"+minimalUISpec)
+	require.Equal(t, http.StatusCreated, code, "an explicit single is the template's mode: %s", body)
+
+	// Turning the draft multiple on update is refused the same way.
+	patch, _ := json.Marshal(map[string]any{"ui_spec_yaml": "instances: multiple\n" + minimalUISpec})
+	w := do(t, r, http.MethodPatch, "/v1/templates/"+tpl+"/versions/2", bytes.NewReader(patch))
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "released versions are single-instance")
 }
 
+// A template whose only versions are drafts has no mode yet: its first version
+// may be either.
+func TestTemplateVersions_DraftsDoNotFixTheMode(t *testing.T) {
+	r := newTestRouterAdmin(t)
+	tpl := "tpl-" + randSuffix()
+	body, _ := json.Marshal(map[string]any{
+		"name": tpl, "display_name": "Draft only", "authoring_mode": "yaml",
+		"resources_yaml": minimalResources, "ui_spec_yaml": minimalUISpec,
+	})
+	w := do(t, r, http.MethodPost, "/v1/templates", bytes.NewReader(body))
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+
+	patch, _ := json.Marshal(map[string]any{"ui_spec_yaml": "instances: multiple\n" + minimalUISpec})
+	w = do(t, r, http.MethodPatch, "/v1/templates/"+tpl+"/versions/1", bytes.NewReader(patch))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	w = do(t, r, http.MethodPost, "/v1/templates/"+tpl+"/versions/1/publish", nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	code, resp := postVersion(t, r, tpl, minimalUISpec)
+	require.Equal(t, http.StatusBadRequest, code, resp)
+	require.Contains(t, resp, "released versions are multiple-instance")
+}
+
+// The update guard stays for versions saved before the per-template check: a
+// release cannot be moved onto a version of the other mode.
 func TestUpdateRelease_RefusesMovingBetweenInstanceModes(t *testing.T) {
 	r, applier := newTestRouterWithK8s(t)
 	cluster := seedCluster(t, r)
-	tpl := seedPublishedTemplate(t, r) // v1: no instances key, so single
+	tpl := seedPublishedTemplate(t, r)
 	id := deployV1(t, r, cluster, tpl)
-	addVersionWithSpec(t, r, tpl, "instances: multiple\n"+minimalUISpec)
+
+	// A multiple version written straight to the store, as one saved before
+	// the API refused it would be.
+	ctx := context.Background()
+	s := testStore(t)
+	row, err := s.GetTemplateByName(ctx, tpl)
+	require.NoError(t, err)
+	v, err := s.InsertTemplateVersionV2(ctx, store.InsertTemplateVersionV2Params{
+		TemplateID: row.ID, Version: 2, ResourcesYaml: minimalResources,
+		UiSpecYaml: "instances: multiple\n" + minimalUISpec, Status: "draft",
+		CreatedByUserID: row.OwnerUserID, AuthoringMode: "yaml",
+	})
+	require.NoError(t, err)
+	_, err = s.PublishTemplateVersion(ctx, v.ID)
+	require.NoError(t, err)
 	applied := len(applier.applied)
 
-	got := updateTo(t, r, id, 2).String()
+	body, _ := json.Marshal(map[string]any{"version": 2, "values": map[string]any{"Deployment[web].spec.replicas": 1}})
+	w := do(t, r, http.MethodPut, "/v1/releases/"+id, bytes.NewReader(body))
 
-	require.True(t, strings.HasPrefix(got, "400 "), got)
-	require.Contains(t, got, "cannot move to a multiple-instance one")
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "cannot move to a multiple-instance one")
+	require.NotContains(t, w.Body.String(), "new release", "the refusal must not point at deploying the other mode beside this one")
 	require.Equal(t, applied, len(applier.applied), "nothing may be applied")
 }
 
-// The other direction, and a move between two versions of the same mode, which
-// stays open.
+// A move between versions of the same mode stays open; an explicit single is
+// the same mode as none.
 func TestUpdateRelease_MovesBetweenVersionsOfTheSameInstanceMode(t *testing.T) {
 	r, _ := newTestRouterWithK8s(t)
 	cluster := seedCluster(t, r)
 	tpl := seedPublishedTemplate(t, r)
 	id := deployV1(t, r, cluster, tpl)
-	addVersionWithSpec(t, r, tpl, "instances: single\n"+minimalUISpec)
+	code, resp := postVersion(t, r, tpl, "instances: single\n"+minimalUISpec)
+	require.Equal(t, http.StatusCreated, code, resp)
+	w := do(t, r, http.MethodPost, "/v1/templates/"+tpl+"/versions/2/publish", nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
-	got := updateTo(t, r, id, 2).String()
-	require.True(t, strings.HasPrefix(got, "200 "), "an explicit single is the same mode as none: %s", got)
+	body, _ := json.Marshal(map[string]any{"version": 2, "values": map[string]any{"Deployment[web].spec.replicas": 1}})
+	w = do(t, r, http.MethodPut, "/v1/releases/"+id, bytes.NewReader(body))
+	got := strconv.Itoa(w.Code) + " " + w.Body.String()
+	require.True(t, strings.HasPrefix(got, "200 "), got)
 }

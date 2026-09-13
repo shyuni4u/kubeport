@@ -270,6 +270,14 @@ spec:
   resources: { requests: { storage: 1Gi } }
   dataSourceRef: { kind: PersistentVolumeClaim, name: data, namespace: golden-images }
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: here }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 1Gi } }
+  dataSourceRef: { kind: PersistentVolumeClaim, name: data, namespace: demo }
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata: { name: db }
@@ -287,7 +295,7 @@ spec:
         dataSource: { kind: PersistentVolumeClaim, name: data }
 `
 	out, err := template.Render(resources, "instances: multiple\nfields: []\n", json.RawMessage(`{}`),
-		template.Labels{ReleaseName: "rel", ReleaseID: "x"})
+		template.Labels{ReleaseName: "rel", ReleaseID: "x", Namespace: "demo"})
 	require.NoError(t, err)
 	claims := map[string]map[string]any{}
 	dec := yaml.NewDecoder(bytes.NewReader(out))
@@ -309,6 +317,26 @@ spec:
 		"a claim the template does not declare keeps its name")
 	require.Equal(t, "data", at(t, claims["rel-elsewhere"], "spec", "dataSourceRef", "name"),
 		"a dataSourceRef into another namespace is not the template's claim, even under the same name")
+	require.Equal(t, "rel-data", at(t, claims["rel-here"], "spec", "dataSourceRef", "name"),
+		"one that writes out the release's own namespace is the template's claim (codex review)")
+
+	// Without the release's namespace — a preview — a written-out namespace is
+	// not assumed to be the release's.
+	preview, err := template.Render(resources, "instances: multiple\nfields: []\n", json.RawMessage(`{}`),
+		template.Labels{ReleaseName: "rel"})
+	require.NoError(t, err)
+	previewClaims := map[string]map[string]any{}
+	pdec := yaml.NewDecoder(bytes.NewReader(preview))
+	for {
+		var d map[string]any
+		if err := pdec.Decode(&d); errors.Is(err, io.EOF) {
+			break
+		} else {
+			require.NoError(t, err)
+		}
+		previewClaims[at(t, d, "metadata", "name").(string)] = d
+	}
+	require.Equal(t, "data", at(t, previewClaims["rel-here"], "spec", "dataSourceRef", "name"))
 
 	sts := claims["rel-db"]
 	require.Equal(t, "pgdata", at(t, sts, "spec", "volumeClaimTemplates", 0, "metadata", "name"),

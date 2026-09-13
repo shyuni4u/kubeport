@@ -17,7 +17,8 @@ import (
 // by different labels. Moving between them would apply a second set of
 // objects beside the first, and change the selector of a workload that
 // already exists, which the apiserver refuses because a selector cannot
-// change. Deploying the other version as a new release is the way across.
+// change. A template's versions share one mode now (sameModeAsTemplate), so
+// this stays as the guard for versions saved before that check.
 func (h *Handlers) sameInstanceMode(c *gin.Context, currentVersionID pgtype.UUID, targetUISpec string) bool {
 	current, err := h.deps.Store.GetTemplateVersionByID(c.Request.Context(), currentVersionID)
 	if err != nil {
@@ -37,7 +38,7 @@ func (h *Handlers) sameInstanceMode(c *gin.Context, currentVersionID pgtype.UUID
 	if from != to {
 		writeError(c, http.StatusBadRequest, "validation-error",
 			"this release runs a "+from+"-instance version and cannot move to a "+to+"-instance one: "+
-				"the two name and select the release's objects differently; deploy that version as a new release")
+				"the two name and select the release's objects differently")
 		return false
 	}
 	return true

@@ -124,7 +124,7 @@ func validateMultiInstance(spec UISpec, docs []map[string]any) error {
 // renameForRelease is the rewrite instances: multiple asks for. It runs after
 // values are set — ui-spec paths name objects by the template's own names —
 // and before labels are stamped.
-func renameForRelease(docs []map[string]any, release, uid string) error {
+func renameForRelease(docs []map[string]any, release, uid, namespace string) error {
 	if release == "" {
 		return fmt.Errorf("instances: multiple needs a release name to render")
 	}
@@ -146,7 +146,7 @@ func renameForRelease(docs []map[string]any, release, uid string) error {
 		names[kind][old] = renamed
 	}
 
-	r := refRewriter{names: names}
+	r := refRewriter{names: names, namespace: namespace}
 	for _, d := range docs {
 		kind, _ := d["kind"].(string)
 		if meta, ok := d["metadata"].(map[string]any); ok {
@@ -185,6 +185,8 @@ func renameForRelease(docs []map[string]any, release, uid string) error {
 // as written.
 type refRewriter struct {
 	names map[string]map[string]string
+	// namespace is the release's, or "" when the render does not know it.
+	namespace string
 }
 
 func (r refRewriter) rename(m map[string]any, key, kind string) {
@@ -261,8 +263,10 @@ func (r refRewriter) pvcSource(spec map[string]any) {
 		}
 		// dataSourceRef may name a claim in another namespace (codex review).
 		// The template's claims live in the release's namespace, so a source
-		// that names one is not the template's, whatever it is called.
-		if ns, ok := src["namespace"].(string); ok && ns != "" {
+		// in another is not the template's, whatever it is called. One written
+		// out as the release's own namespace is; when the render does not know
+		// the namespace, a written-out one is left alone.
+		if ns, ok := src["namespace"].(string); ok && ns != "" && ns != r.namespace {
 			continue
 		}
 		r.rename(src, "name", "PersistentVolumeClaim")

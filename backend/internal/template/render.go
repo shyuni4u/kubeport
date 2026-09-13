@@ -17,6 +17,10 @@ type Labels struct {
 	TemplateVersion int
 	ReleaseID       string
 	AppliedBy       string
+	// Namespace is where the release goes. It is not stamped; a multi-instance
+	// template uses it to tell a clone source in the release's own namespace
+	// from one in another (#190). Empty for a preview.
+	Namespace string
 }
 
 // ValidateSpec parses the resources and ui-spec YAML pair and returns a
@@ -186,7 +190,7 @@ func Render(resourcesYAML, uiSpecYAML string, values json.RawMessage, l Labels) 
 	// After values, which find objects by the template's own names; before
 	// labels, so the release label goes on the renamed objects.
 	if spec.multiple() {
-		if err := renameForRelease(docs, l.ReleaseName, l.ReleaseID); err != nil {
+		if err := renameForRelease(docs, l.ReleaseName, l.ReleaseID, l.Namespace); err != nil {
 			return nil, err
 		}
 	}
