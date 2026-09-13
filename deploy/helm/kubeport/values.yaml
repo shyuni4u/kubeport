@@ -303,6 +303,22 @@ demo:
   quota:
     storage: 5Gi                # ResourceQuota requests.storage
     persistentVolumeClaims: 5   # ResourceQuota persistentvolumeclaims
+    # Ephemeral storage — emptyDir without a sizeLimit, a container's writable
+    # layer and its logs — takes the same node disk (#348).
+    # Keep these at least the pods cap (10) times limits.ephemeralStorage's
+    # defaultRequest and default, so pods — not ephemeral storage — is the first
+    # limit a visitor meets: 10 × 64Mi fits 2Gi, 10 × 512Mi fits 6Gi.
+    ephemeralStorageRequests: 2Gi   # ResourceQuota requests.ephemeral-storage
+    ephemeralStorageLimits: 6Gi     # ResourceQuota limits.ephemeral-storage
+  # Per-container defaults for the demo namespace's LimitRange. With ephemeral
+  # storage in the quota, a container that declares none would be refused; these
+  # fill it in, and max stops one container from taking the whole cap. The kubelet
+  # evicts a container that writes past its limit. All required when demo.enabled.
+  limits:
+    ephemeralStorage:
+      default: 512Mi          # limit when a container sets none
+      defaultRequest: 64Mi    # request when a container sets none
+      max: 1Gi                # most a container may set
   # Demo accounts. adminEmail and userEmail must each end in @<emailDomain>
   # (compared case-insensitively, as the backend does) and equal one of
   # dex.staticPasswords[].email exactly — changing an account is two edits. An

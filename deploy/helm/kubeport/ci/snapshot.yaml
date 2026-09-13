@@ -76,6 +76,12 @@ spec:
     # claims can fill it for every other visitor until the next reset.
     requests.storage: "5Gi"
     persistentvolumeclaims: "5"
+    # emptyDir without a sizeLimit and a container's writable layer and logs use
+    # the same node disk as the claims above (#348). Tracking these in the quota
+    # makes every container in the namespace declare them, which demo-limits
+    # below does for the ones that do not — most seed templates set no resources.
+    requests.ephemeral-storage: "2Gi"
+    limits.ephemeral-storage: "6Gi"
 ---
 # Source: kubeport/templates/demo-namespace.yaml
 apiVersion: v1
@@ -95,12 +101,15 @@ spec:
       default:
         cpu: 500m
         memory: 512Mi
+        ephemeral-storage: "512Mi"
       defaultRequest:
         cpu: 100m
         memory: 128Mi
+        ephemeral-storage: "64Mi"
       max:
         cpu: 500m
         memory: 512Mi
+        ephemeral-storage: "1Gi"
 ---
 # Source: kubeport/templates/demo-reset-cronjob.yaml
 apiVersion: v1
