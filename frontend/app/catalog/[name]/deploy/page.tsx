@@ -7,6 +7,7 @@ import { DeployClient } from "./DeployClient";
 import { UpdateValuesUnavailable } from "@/components/UpdateValuesUnavailable";
 import type { UISpec } from "@/lib/ui-spec-to-zod";
 import { decodeRouteParam, readReleaseForUpdate, updateDeployPath } from "@/lib/update-release";
+import { releaseNameRules } from "@/lib/release-name";
 
 type TemplateDetail = {
   name: string;
@@ -16,6 +17,7 @@ type TemplateDetail = {
 
 type TemplateVersion = {
   ui_spec_yaml: string;
+  resources_yaml?: string;
 };
 
 export default async function DeployPage({
@@ -68,7 +70,8 @@ export default async function DeployPage({
 
   // Computed on the server so SSR and hydration render the same value.
   // Only a new release gets here, and only a new release has a namespace field.
-  const defaultName = isDemoEmail(me?.email) ? withDemoSuffix(name, true) : "";
+  const nameRules = releaseNameRules(v.ui_spec_yaml, v.resources_yaml ?? "");
+  const defaultName = isDemoEmail(me?.email) ? withDemoSuffix(name, true, Math.random, nameRules) : "";
   const demoNamespace = demoNamespaceFor(me?.email);
 
   // The terms switch's starting value comes from KubeTermsProvider in the
@@ -81,6 +84,7 @@ export default async function DeployPage({
       spec={spec}
       defaultName={defaultName}
       demoNamespace={demoNamespace}
+      nameRules={nameRules}
     />
   );
 }

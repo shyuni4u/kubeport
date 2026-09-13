@@ -23,7 +23,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { termLabel } from "@/lib/kube-term-map";
-import { RELEASE_NAME_MAX_LENGTH, releaseNameProblem } from "@/lib/release-name";
+import {
+  SINGLE_INSTANCE_RULES,
+  releaseNameProblem,
+  type ReleaseNameRules,
+} from "@/lib/release-name";
 import { useKubeTermsStore } from "@/stores/kube-terms-store";
 import type { UISpec } from "@/lib/ui-spec-to-zod";
 
@@ -48,6 +52,12 @@ type Props = {
    * with demo mode on; undefined for everyone else (#179).
    */
   demoNamespace?: string;
+  /**
+   * What this version's objects leave a new release's name (#190): a
+   * multi-instance template puts it in front of every object's name. Computed
+   * on the server from the version's resources; single-instance by default.
+   */
+  nameRules?: ReleaseNameRules;
 };
 
 type Meta = { name: string; cluster: string; namespace: string };
@@ -105,6 +115,7 @@ export function DeployClient({
   reenterSecrets,
   defaultName = "",
   demoNamespace,
+  nameRules = SINGLE_INSTANCE_RULES,
 }: Props) {
   const router = useRouter();
   const t = useTranslations("deploy");
@@ -419,7 +430,11 @@ export function DeployClient({
     rbac.namespace === debouncedNamespace;
 
   // Only a new release has a name field; an update keeps the one it has.
-  const nameProblem = isUpdate ? null : releaseNameProblem(meta.name);
+  const nameProblem = isUpdate ? null : releaseNameProblem(meta.name, nameRules);
+  const nameDescribedBy =
+    [nameProblem ? "deploy-name-message" : "", nameRules.multiple ? "deploy-name-instances" : ""]
+      .filter(Boolean)
+      .join(" ") || undefined;
 
   const submit = useCallback(
     async (values: Record<string, unknown>) => {
@@ -519,9 +534,9 @@ export function DeployClient({
                 placeholder={t("namePlaceholder")}
                 value={meta.name}
                 required
-                maxLength={RELEASE_NAME_MAX_LENGTH}
-                aria-invalid={nameProblem === "format" || nameProblem === "tooLong"}
-                aria-describedby={nameProblem ? "deploy-name-message" : undefined}
+                maxLength={nameRules.maxLength}
+                aria-invalid={nameProblem !== null && nameProblem !== "empty"}
+                aria-describedby={nameDescribedBy}
                 onChange={(e) => {
                   clearErr();
                   setMeta({ ...meta, name: e.target.value });
@@ -541,9 +556,23 @@ export function DeployClient({
                 </p>
               ) : nameProblem ? (
                 <p id="deploy-name-message" className="text-sm text-destructive">
-                  {t(nameProblem === "tooLong" ? "nameTooLong" : "nameInvalid")}
+                  {nameProblem === "tooLong"
+                    ? t("nameTooLong", { max: nameRules.maxLength })
+                    : nameProblem === "letterFirst"
+                      ? t("nameLetterFirst")
+                      : t("nameInvalid")}
                 </p>
               ) : null}
+              {/*
+                A multi-instance template's objects take the name in front of
+                their own (#190), which is why the limit is lower than the 63
+                a release name alone may use.
+              */}
+              {nameRules.multiple && (
+                <p id="deploy-name-instances" className="text-xs text-muted-foreground">
+                  {t("nameMultiple", { max: nameRules.maxLength })}
+                </p>
+              )}
             </div>
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-1">

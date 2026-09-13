@@ -7,6 +7,7 @@ import { DeployClient } from "../../../deploy/DeployClient";
 import { UpdateValuesUnavailable } from "@/components/UpdateValuesUnavailable";
 import { keptSecretPaths, type UISpec } from "@/lib/ui-spec-to-zod";
 import { decodeRouteParam, readReleaseForUpdate, updateDeployPath } from "@/lib/update-release";
+import { releaseNameRules } from "@/lib/release-name";
 
 // Version-pinned deploy route.
 // Used by the UpdateAvailableBadge on the release detail page to re-deploy
@@ -34,6 +35,7 @@ export default async function VersionPinnedDeployPage({
   if (!verRes.ok) notFound();
   const ver = (await verRes.json()) as {
     ui_spec_yaml?: string;
+    resources_yaml?: string;
     owning_team_name?: string | null;
   };
   if (!ver.ui_spec_yaml) notFound();
@@ -77,8 +79,11 @@ export default async function VersionPinnedDeployPage({
   const me = await apiFetch("/v1/me").then((r) => (r.ok ? r.json() : null)).catch(() => null);
 
   // Computed on the server so SSR and hydration render the same value.
+  const nameRules = releaseNameRules(ver.ui_spec_yaml, ver.resources_yaml ?? "");
   const defaultName =
-    isDemoEmail(me?.email) && !updateReleaseId ? withDemoSuffix(name, true) : "";
+    isDemoEmail(me?.email) && !updateReleaseId
+      ? withDemoSuffix(name, true, Math.random, nameRules)
+      : "";
 
   // The terms switch's starting value comes from KubeTermsProvider in the
   // root shell (#39, #247).
@@ -92,6 +97,7 @@ export default async function VersionPinnedDeployPage({
       initialValues={initialValues}
       reenterSecrets={reenterSecrets}
       defaultName={defaultName}
+      nameRules={nameRules}
     />
   );
 }

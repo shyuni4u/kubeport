@@ -9,6 +9,7 @@ import { YamlPreview, UIModeTemplate } from "@/components/YamlPreview";
 import { UserFormPreview } from "@/components/UserFormPreview";
 import { EditorLayout } from "@/components/editor/EditorLayout";
 import { MetaRow, TemplateMeta } from "@/components/editor/MetaRow";
+import { InstancesToggle } from "@/components/editor/InstancesToggle";
 import { BottomBar, UnsavedChangesStatus } from "@/components/editor/BottomBar";
 import { problemDetail, saveFailure } from "@/components/editor/saveError";
 import { ProblemMessage, type RequestFailure } from "@/components/ProblemMessage";
@@ -496,6 +497,19 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
       {/* Same reason as the inspector's readOnly: nothing here can be saved on a
           YAML draft, and an edit would also arm the leave-page guard (#184). */}
       <MetaRow meta={meta} onChange={(m) => { setMeta(m); touch(); }} nameLocked hideTeam readOnly={isYamlDraft} />
+      {state && (
+        <InstancesToggle
+          multiple={state.instances === "multiple"}
+          readOnly={isYamlDraft}
+          onChange={(m) => {
+            // Unchecking puts back an explicit single the version was loaded
+            // with, so undoing the click undoes the edit (#274).
+            const off = initialState?.instances === "single" ? "single" : undefined;
+            setState({ ...state, instances: m ? "multiple" : off });
+            touch();
+          }}
+        />
+      )}
       {sourceAuthoringMode !== "ui" && (
         <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100 px-4 py-3 text-sm text-amber-900 space-y-1">
           <div>
