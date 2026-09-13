@@ -366,7 +366,17 @@ export function schemaFromUISpec(
         let s = z.string();
         // A Secret to enter again, or one replacing a kept value, needs a
         // value, not an emptied box.
-        if (opts.reenterSecrets?.has(f.path) || opts.keptSecrets?.has(f.path)) s = s.min(1);
+        const secret = opts.reenterSecrets?.has(f.path) || opts.keptSecrets?.has(f.path);
+        // A required text field emptied is missing too (#331). A new form
+        // starts it as undefined, which is refused, but a box typed in and
+        // cleared holds "", which react-hook-form keeps: it parsed, and the
+        // deploy form previewed and checked permissions for a required field
+        // nobody had filled. Only "" — "   " is a value the API accepts
+        // (`required` there is a presence check), and the form does not refuse
+        // what the API takes. A minLength of 1 or more already refuses "" with
+        // its own "at least N" message, which stays the one shown.
+        const emptyRefused = f.minLength !== undefined && f.minLength >= 1;
+        if (secret || (f.required && !emptyRefused)) s = s.min(1);
         if (f.minLength !== undefined) s = s.min(f.minLength);
         if (f.maxLength !== undefined) s = s.max(f.maxLength);
         // Defence in depth — normalizeUISpec drops an unusable pattern before

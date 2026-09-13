@@ -110,10 +110,19 @@ describe("optional non-integer fields, stored null (#316)", () => {
           }
         });
 
-        it(`${kind}: treats "" as it always has (${CASES[type].emptyString})`, () => {
+        // #331 changed one cell: a required string or autocomplete refuses ""
+        // as missing (ui-spec-to-zod.required-empty.test.ts). Optional still
+        // takes it as a value.
+        const emptyString =
+          required && CASES[type].emptyString === "accepted" ? "missing" : CASES[type].emptyString;
+        it(`${kind}: treats "" as ${emptyString}`, () => {
           const schema = schemaFromUISpec({ fields: [fieldFor(type, required)] });
           const r = schema.safeParse({ [path]: "" });
-          if (CASES[type].emptyString === "accepted") {
+          if (emptyString === "missing") {
+            expect(r.success).toBe(false);
+            expect(r.error?.issues).toHaveLength(1);
+            expect(r.error?.issues[0]).toMatchObject({ code: "too_small", type: "string", minimum: 1 });
+          } else if (emptyString === "accepted") {
             expect(r.success).toBe(true);
             expect(r.data?.[path]).toBe("");
           } else {

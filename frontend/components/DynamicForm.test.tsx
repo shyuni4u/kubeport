@@ -1131,6 +1131,67 @@ describe("DynamicForm clearing a number box that has a default", () => {
   });
 });
 
+// #331 — a required text box typed in and then emptied holds "", which the
+// schema used to accept: no "required" message, and the preview kept going.
+describe("DynamicForm clearing a required text box", () => {
+  const key = "Secret[app-secret].stringData.API_KEY";
+  const specFor = (type: "string" | "autocomplete", required: boolean): UISpec => ({
+    fields: [
+      type === "string"
+        ? { path: key, label: "API 키", type, required }
+        : { path: key, label: "API 키", type, values: ["one", "two"], required },
+    ],
+  });
+
+  for (const type of ["string", "autocomplete"] as const) {
+    it(`${type}: says required once cleared, and the preview hears it does not parse`, async () => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn();
+      const onParsedChange = vi.fn();
+      renderWithIntl(
+        <DynamicForm spec={specFor(type, true)} onSubmit={onSubmit} onParsedChange={onParsedChange} />,
+      );
+      expect(onParsedChange).toHaveBeenLastCalledWith({ success: false });
+
+      const input = screen.getByLabelText(/API 키/);
+      await user.type(input, "k");
+      expect(onParsedChange).toHaveBeenLastCalledWith({ success: true, values: { [key]: "k" } });
+      expect(screen.queryByText(ko.form.validation.required)).toBeNull();
+
+      await user.clear(input);
+      expect(input).toHaveValue("");
+      expect(onParsedChange).toHaveBeenLastCalledWith({ success: false });
+      expect(await screen.findByText(ko.form.validation.required)).toBeInTheDocument();
+
+      await user.tab();
+      await user.click(screen.getByRole("button", { name: /배포하기/ }));
+      expect(screen.getByText(ko.form.validation.required)).toBeInTheDocument();
+      expect(onSubmit).not.toHaveBeenCalled();
+
+      await user.type(input, "   ");
+      expect(onParsedChange).toHaveBeenLastCalledWith({ success: true, values: { [key]: "   " } });
+      await waitFor(() => expect(screen.queryByText(ko.form.validation.required)).toBeNull());
+    });
+
+    it(`${type}: an optional box cleared still sends "", as before`, async () => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn();
+      const onParsedChange = vi.fn();
+      renderWithIntl(
+        <DynamicForm spec={specFor(type, false)} onSubmit={onSubmit} onParsedChange={onParsedChange} />,
+      );
+      const input = screen.getByLabelText(/API 키/);
+      await user.type(input, "k");
+      await user.clear(input);
+      expect(onParsedChange).toHaveBeenLastCalledWith({ success: true, values: { [key]: "" } });
+      expect(screen.queryByText(ko.form.validation.required)).toBeNull();
+
+      await user.click(screen.getByRole("button", { name: /배포하기/ }));
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ [key]: "" }));
+    });
+  }
+});
+
 // #323 — pressing the picked item of an enum toggle again stored `undefined`,
 // and react-hook-form reads an undefined field back from its default values
 // (the same root as #321). The ui-spec default still looked pressed while the
