@@ -296,6 +296,13 @@ demo:
   # Namespace for demo RBAC, quota and the reset job, and where the deploy form
   # starts demo sessions (rendered to the frontend as DEMO_NAMESPACE).
   namespace: demo
+  # Storage the demo namespace's quota allows (#340). Visitors can deploy a
+  # StatefulSet whose claims take disk on the node — local-path on a single-node
+  # install — so these cap what a visitor can hold until the next reset, which
+  # also deletes the claims. Both are required when demo.enabled.
+  quota:
+    storage: 5Gi                # ResourceQuota requests.storage
+    persistentVolumeClaims: 5   # ResourceQuota persistentvolumeclaims
   # Demo accounts. adminEmail and userEmail must each end in @<emailDomain>
   # (compared case-insensitively, as the backend does) and equal one of
   # dex.staticPasswords[].email exactly — changing an account is two edits. An

@@ -105,7 +105,11 @@ spec:
               image: {{ .Values.demo.kubectlImage | quote }}
               command: ["sh", "-c"]
               args:
-                - kubectl -n {{ .Values.demo.namespace }} delete deploy,sts,ds,job,cronjob,svc,cm,secret,pod --all --wait=true --ignore-not-found
+                # pvc too, or a claim a visitor's StatefulSet made outlives the
+                # reset and the next visitor's release of that name mounts its
+                # data (#340). Last, so the pods using a claim are gone before
+                # its protection finalizer would hold --wait=true.
+                - kubectl -n {{ .Values.demo.namespace }} delete deploy,sts,ds,job,cronjob,svc,cm,secret,pod,pvc --all --wait=true --ignore-not-found
               env:
                 # kubectl writes its discovery cache under $HOME/.kube/cache;
                 # readOnlyRootFilesystem forces it into the tmp emptyDir below.

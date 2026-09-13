@@ -65,6 +65,13 @@ helm-lint:
 		--set frontend.errorDetail.admin=false 2>&1 | grep -q "frontend.errorDetail.admin must be" \
 		|| { echo "error detail guard: an unquoted boolean level rendered (#6)"; exit 1; }
 	@echo "error detail guard: ok"
+	@helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
+		--set demo.quota.storage= 2>&1 | grep -q "demo.quota.storage is required" \
+		|| { echo "demo quota guard: an empty storage cap rendered (#340)"; exit 1; }
+	@helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
+		--set demo.quota.persistentVolumeClaims= 2>&1 | grep -q "demo.quota.persistentVolumeClaims is required" \
+		|| { echo "demo quota guard: an empty claim count rendered (#340)"; exit 1; }
+	@echo "demo quota guard: ok"
 
 # Diff the rendered chart against the checked-in golden snapshot. Fails
 # (non-zero exit) if they differ — that is the CI signal.

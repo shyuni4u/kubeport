@@ -946,7 +946,10 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
 
 `demo.enabled=true` also creates:
 
-- A `demo` namespace (name from `demo.namespace`) with a `ResourceQuota`,
+- A `demo` namespace (name from `demo.namespace`) with a `ResourceQuota`
+  (CPU, memory, pods, Services, no Ingresses, and storage: `demo.quota.storage`,
+  default `5Gi`, across at most `demo.quota.persistentVolumeClaims`, default `5`,
+  claims — both required),
   `LimitRange`, an egress-only `NetworkPolicy` (DNS + outbound, no
   in-cluster lateral traffic, no LoadBalancer Services, no Ingresses), and
   Pod Security Admission labels — `enforce: {{ demo.podSecurityEnforce }}`
@@ -960,7 +963,8 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
   non-admin demo users.
 - A `demo-reset` `CronJob` (`demo.resetSchedule`, default daily at 21:00 UTC,
   read in `demo.resetTimeZone`) that
-  wipes all objects in the demo namespace and re-seeds it via
+  wipes all objects in the demo namespace — PersistentVolumeClaims included, so
+  a visitor's StatefulSet data does not reach the next visitor (#340) — and re-seeds it via
   `/seed-demo --reset` (shipped in the backend image).
   The demo banner derives its "next reset" from the same value; it understands
   `<minute> <hour|*/N|list> * * *` only and omits the time for any other form.
