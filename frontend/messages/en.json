@@ -312,7 +312,9 @@
     "nameHelp": "How this shows up in 'My releases'. Lowercase letters, digits and hyphens only.",
     "nameRequired": "Enter a deployment name to deploy.",
     "nameInvalid": "Use lowercase letters, digits and hyphens only, not starting or ending with a hyphen.",
-    "nameTooLong": "Keep it to 63 characters or fewer.",
+    "nameTooLong": "Keep it to {max} characters or fewer.",
+    "nameLetterFirst": "This template needs the name to start with a lowercase letter.",
+    "nameMultiple": "This template can be deployed more than once in an area. The name goes in front of every resource it creates, so it can be up to {max} characters.",
     "clusterLabel": "Where to run it",
     "clusterHelp": "Pick one group of servers (a cluster). If there is only one, leave it.",
     "namespaceLabel": "Area",
@@ -496,6 +498,10 @@
         "team": "Team",
         "addTag": "Add tag",
         "removeTag": "Remove tag {tag}"
+      },
+      "instances": {
+        "label": "Allow several releases per namespace",
+        "help": "When on, every resource's name gets the release name in front, and the selectors gain a release label so releases do not pick up each other's pods. Resource names can be up to 30 characters, and metadata.name cannot be exposed. This cannot change once a version is published; make a new template for the other mode."
       },
       "preview": {
         "loading": "Loading…",

@@ -10,6 +10,7 @@ import { YamlPreview, UIModeTemplate } from "@/components/YamlPreview";
 import { UserFormPreview } from "@/components/UserFormPreview";
 import { EditorLayout } from "@/components/editor/EditorLayout";
 import { MetaRow, TemplateMeta } from "@/components/editor/MetaRow";
+import { InstancesToggle } from "@/components/editor/InstancesToggle";
 import { BottomBar } from "@/components/editor/BottomBar";
 import { problemDetail, saveFailure } from "@/components/editor/saveError";
 import { ProblemMessage, type RequestFailure } from "@/components/ProblemMessage";
@@ -124,6 +125,7 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
     setSelectionEvent((n) => n + 1);
   };
   const [meta, setMeta] = useState<TemplateMeta>({ name: "", tags: [] });
+  const [instances, setInstances] = useState<UIModeTemplate["instances"]>(undefined);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -167,9 +169,10 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
       stableStringify({
         meta: { name: meta.name, display_name: meta.display_name ?? "", tags: meta.tags },
         owningTeamId,
+        instances: instances ?? "",
         resources: resources.map(({ gv, kind, name, fields }) => ({ gv, kind, name, fields })),
       }),
-    [meta, owningTeamId, resources],
+    [meta, owningTeamId, instances, resources],
   );
   const markSaved = useDirtyAgainstBaseline(snapshot, dirty, onDirty);
 
@@ -206,13 +209,14 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
   }
 
   const uiState: UIModeTemplate = useMemo(() => ({
+    ...(instances ? { instances } : {}),
     resources: resources.map(r => ({
       apiVersion: r.gv.includes("/") ? r.gv : (r.gv === "v1" ? "v1" : r.gv),
       kind: r.kind,
       name: r.name,
       fields: r.fields as unknown as Record<string, unknown>,
     })),
-  }), [resources]);
+  }), [instances, resources]);
 
   const canSave = meta.name.trim().length > 0 && resources.length > 0 && !saving;
   // Plan 4 Task 7 scope: Publish is not part of the create flow; a newly
@@ -379,6 +383,10 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
           </SelectContent>
         </Select>
       </div>
+      <InstancesToggle
+        multiple={instances === "multiple"}
+        onChange={(m) => { setInstances(m ? "multiple" : undefined); touch(); }}
+      />
       {resources.length === 0 && (
         <div className="rounded border-2 border-dashed border-primary/30 bg-accent p-3 text-sm text-accent-foreground">
           <strong>{t("getStartedLead")}</strong>{t("getStarted")}

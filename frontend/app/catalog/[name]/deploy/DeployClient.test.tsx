@@ -659,6 +659,57 @@ describe("DeployClient release name", () => {
     expect(nameInput()).toHaveAttribute("aria-invalid", "true");
     expect(submitButton()).toBeDisabled();
   });
+
+  // #190 — a multi-instance template's objects take the release name in front
+  // of theirs, so the backend refuses a name those objects cannot fit.
+  it("holds a multi-instance template's name to what its objects leave", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", clusterWithNamespace());
+    const nameRules = { multiple: true, maxLength: 37, letterFirst: true };
+    render(
+      <DeployClient templateName="web-app" version={1} team={null} spec={spec} nameRules={nameRules} />,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText("구역") as HTMLInputElement).value).toBe("team-a"),
+    );
+
+    expect(nameInput()).toHaveAttribute("maxLength", "37");
+    expect(nameInput()).toHaveAccessibleDescription(/37자까지 쓸 수 있습니다/);
+
+    await user.type(nameInput(), "2048-game");
+    expect(nameInput()).toHaveAttribute("aria-invalid", "true");
+    expect(nameInput()).toHaveAccessibleDescription(/영문 소문자로 시작해야 합니다/);
+    expect(submitButton()).toBeDisabled();
+
+    await user.clear(nameInput());
+    await user.type(nameInput(), "game-2048");
+    expect(nameInput()).toHaveAttribute("aria-invalid", "false");
+    await waitFor(() => expect(submitButton()).toBeEnabled());
+  });
+
+  it("gives a prefilled multi-instance name the limit it breaks", async () => {
+    vi.stubGlobal("fetch", clusterWithNamespace());
+    render(
+      <DeployClient
+        templateName="web-app"
+        version={1}
+        team={null}
+        spec={spec}
+        defaultName={"a".repeat(38)}
+        nameRules={{ multiple: true, maxLength: 37, letterFirst: false }}
+      />,
+    );
+
+    expect(nameInput()).toHaveAccessibleDescription(/37자 이하로 줄여 주세요\./);
+    expect(submitButton()).toBeDisabled();
+  });
+
+  it("does not mention several deployments for a single-instance template", async () => {
+    vi.stubGlobal("fetch", clusterWithNamespace());
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={spec} />);
+    expect(nameInput()).toHaveAttribute("maxLength", "63");
+    expect(screen.queryByText(/여러 번 배포할 수 있습니다/)).toBeNull();
+  });
 });
 
 // #319 — the preview sent the raw form values while submit sent the parsed

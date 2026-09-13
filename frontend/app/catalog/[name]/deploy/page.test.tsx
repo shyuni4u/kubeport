@@ -101,3 +101,42 @@ describe("unversioned deploy page, updating a release", () => {
     expect(el.props.updateReleaseId).toBeUndefined();
   });
 });
+
+// #190 — the form holds a new release's name to what a multi-instance
+// version's objects leave, read from the version's own resources.
+describe("unversioned deploy page, name rules", () => {
+  function routeVersion(version: { ui_spec_yaml: string; resources_yaml: string }, email = "someone@example.com") {
+    apiFetch.mockImplementation(async (path) => {
+      if (path === "/v1/templates/web-app") {
+        return json(200, { name: "web-app", current_version: 5, owning_team_name: null });
+      }
+      if (path === "/v1/templates/web-app/versions/5") return json(200, version);
+      if (path === "/v1/me") return json(200, { email });
+      return json(404);
+    });
+  }
+  const resources = "kind: Service\nmetadata:\n  name: web\n---\nkind: CronJob\nmetadata:\n  name: nightly-backup\n";
+
+  it("hands the form a multi-instance version's limits", async () => {
+    routeVersion({ ui_spec_yaml: "instances: multiple\nfields: []\n", resources_yaml: resources });
+    const el = await render("web-app");
+    expect(el.props.nameRules).toEqual({ multiple: true, maxLength: 37, letterFirst: true });
+  });
+
+  it("keeps a single-instance version's name as it was", async () => {
+    routeVersion({ ui_spec_yaml: "fields: []\n", resources_yaml: resources });
+    const el = await render("web-app");
+    expect(el.props.nameRules).toEqual({ multiple: false, maxLength: 63, letterFirst: false });
+  });
+
+  it("prefills a demo account's name within those limits", async () => {
+    routeVersion(
+      { ui_spec_yaml: "instances: multiple\nfields: []\n", resources_yaml: resources },
+      "demo-user@demo.kubeport",
+    );
+    const el = await render("web-app");
+    const name = el.props.defaultName as string;
+    expect(name).toMatch(/^web-app-[a-z0-9]{4}$/);
+    expect(name.length).toBeLessThanOrEqual(37);
+  });
+});

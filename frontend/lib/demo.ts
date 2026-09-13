@@ -1,4 +1,4 @@
-import { RELEASE_NAME_MAX_LENGTH } from "./release-name";
+import { SINGLE_INSTANCE_RULES, type ReleaseNameRules } from "./release-name";
 
 export function isDemoEmail(
   email: string | null | undefined,
@@ -28,18 +28,30 @@ export function demoNamespaceFor(
  *  The result prefills the deploy form, which accepts only a lowercase DNS-1123
  *  label (#182). Template names are not held to that — nothing validates their
  *  format — so the template name is folded into one first. Otherwise a template
- *  called `WebApp` would open the form on a red error the visitor never typed. */
-export function withDemoSuffix(name: string, isDemo: boolean, rand: () => number = Math.random): string {
+ *  called `WebApp` would open the form on a red error the visitor never typed.
+ *  The same goes for a multi-instance template's `rules` (#190): a shorter
+ *  limit, and a letter first when a Service takes the name. */
+export function withDemoSuffix(
+  name: string,
+  isDemo: boolean,
+  rand: () => number = Math.random,
+  rules: ReleaseNameRules = SINGLE_INSTANCE_RULES,
+): string {
   if (!isDemo) return name;
-  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-  let s = "";
-  for (let i = 0; i < 4; i++) s += alphabet[Math.floor(rand() * alphabet.length)];
-  const base = name
+  const letters = "abcdefghijklmnopqrstuvwxyz";
+  const alphabet = letters + "0123456789";
+  let base = name
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    // Room for "-" and the suffix.
-    .slice(0, RELEASE_NAME_MAX_LENGTH - (s.length + 1))
-    .replace(/-+$/, "");
+    .replace(/^-+|-+$/g, "");
+  if (rules.letterFirst) base = base.replace(/^[^a-z]+/, "");
+  let s = "";
+  for (let i = 0; i < 4; i++) {
+    // With no base, the suffix is the whole name and its first character leads.
+    const pool = rules.letterFirst && !base && i === 0 ? letters : alphabet;
+    s += pool[Math.floor(rand() * pool.length)];
+  }
+  // Room for "-" and the suffix.
+  base = base.slice(0, rules.maxLength - (s.length + 1)).replace(/-+$/, "");
   return base ? `${base}-${s}` : s;
 }
