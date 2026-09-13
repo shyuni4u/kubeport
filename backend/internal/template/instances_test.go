@@ -241,6 +241,87 @@ spec:
 		"a claim template cloned from the template's own claim follows its new name")
 }
 
+// codex review: a pod volume whose driver reads credentials from a Secret the
+// template declares must follow that Secret's new name, for every volume source
+// that names one; a generic ephemeral volume's claim follows a renamed clone
+// source like a PersistentVolumeClaim does.
+func TestRender_MultipleInstancesRewritesEveryVolumeSecretReference(t *testing.T) {
+	resources := `
+apiVersion: v1
+kind: Secret
+metadata: { name: creds }
+stringData: { key: x }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: golden }
+spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 1Gi } } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: app }
+spec:
+  selector: { matchLabels: { app: app } }
+  template:
+    metadata: { labels: { app: app } }
+    spec:
+      containers: [{ name: app, image: nginx }]
+      volumes:
+        - { name: csi, csi: { driver: secrets-store.csi.k8s.io, nodePublishSecretRef: { name: creds } } }
+        - { name: cephfs, cephfs: { monitors: [m], secretRef: { name: creds } } }
+        - { name: cinder, cinder: { volumeID: v, secretRef: { name: creds } } }
+        - { name: flex, flexVolume: { driver: d, secretRef: { name: creds } } }
+        - { name: iscsi, iscsi: { targetPortal: p, iqn: q, lun: 0, secretRef: { name: creds } } }
+        - { name: rbd, rbd: { monitors: [m], image: i, secretRef: { name: creds } } }
+        - { name: scaleio, scaleIO: { gateway: g, system: s, secretRef: { name: creds } } }
+        - { name: storageos, storageos: { volumeName: v, secretRef: { name: creds } } }
+        - { name: azure, azureFile: { secretName: creds, shareName: s } }
+        - { name: other, csi: { driver: d, nodePublishSecretRef: { name: not-in-template } } }
+        - name: scratch
+          ephemeral:
+            volumeClaimTemplate:
+              spec:
+                accessModes: [ReadWriteOnce]
+                resources: { requests: { storage: 1Gi } }
+                dataSource: { kind: PersistentVolumeClaim, name: golden }
+`
+	out, err := template.Render(resources, "instances: multiple\nfields: []\n", json.RawMessage(`{}`),
+		template.Labels{ReleaseName: "rel", ReleaseID: "x"})
+	require.NoError(t, err)
+	var dep map[string]any
+	dec := yaml.NewDecoder(bytes.NewReader(out))
+	for {
+		var d map[string]any
+		if err := dec.Decode(&d); errors.Is(err, io.EOF) {
+			break
+		} else {
+			require.NoError(t, err)
+		}
+		if d["kind"] == "Deployment" {
+			dep = d
+		}
+	}
+	require.NotNil(t, dep)
+	volumes := at(t, dep, "spec", "template", "spec", "volumes").([]any)
+	byName := map[string]map[string]any{}
+	for _, v := range volumes {
+		m := v.(map[string]any)
+		byName[m["name"].(string)] = m
+	}
+
+	require.Equal(t, "rel-creds", at(t, byName["csi"], "csi", "nodePublishSecretRef", "name"))
+	for _, src := range []struct{ volume, source string }{
+		{"cephfs", "cephfs"}, {"cinder", "cinder"}, {"flex", "flexVolume"}, {"iscsi", "iscsi"},
+		{"rbd", "rbd"}, {"scaleio", "scaleIO"}, {"storageos", "storageos"},
+	} {
+		require.Equal(t, "rel-creds", at(t, byName[src.volume], src.source, "secretRef", "name"), src.source)
+	}
+	require.Equal(t, "rel-creds", at(t, byName["azure"], "azureFile", "secretName"))
+	require.Equal(t, "not-in-template", at(t, byName["other"], "csi", "nodePublishSecretRef", "name"),
+		"a Secret the template does not declare keeps its name")
+	require.Equal(t, "rel-golden", at(t, byName["scratch"], "ephemeral", "volumeClaimTemplate", "spec", "dataSource", "name"))
+}
+
 // codex review: a Job with manualSelector: true keeps the selector the
 // template wrote, so two releases' Jobs would select each other's pods. The
 // release label is added there, for a CronJob's Job spec too. A Job whose

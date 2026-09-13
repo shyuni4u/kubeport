@@ -193,6 +193,17 @@ func (r refRewriter) podSpec(ps map[string]any) {
 			r.rename(mapAt(src, "configMap"), "name", "ConfigMap")
 			r.rename(mapAt(src, "secret"), "name", "Secret")
 		}
+		// Every volume source that names a Secret for its driver's credentials
+		// (codex review). Listed all at once from the pod volume API, so the
+		// closed list is closed by construction rather than one field a review.
+		r.rename(mapAt(v, "csi", "nodePublishSecretRef"), "name", "Secret")
+		for _, src := range []string{"cephfs", "cinder", "flexVolume", "iscsi", "rbd", "scaleIO", "storageos"} {
+			r.rename(mapAt(v, src, "secretRef"), "name", "Secret")
+		}
+		r.rename(mapAt(v, "azureFile"), "secretName", "Secret")
+		// A generic ephemeral volume stamps a claim from this template; its
+		// clone source is the same reference a PersistentVolumeClaim makes.
+		r.pvcSource(mapAt(v, "ephemeral", "volumeClaimTemplate", "spec"))
 	}
 	for _, key := range []string{"initContainers", "containers"} {
 		for _, c := range mapsIn(ps, key) {
