@@ -150,6 +150,12 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 		renderProblem(c, err)
 		return
 	}
+	// A demo account's manifest is held to the demo's limits (#350). An
+	// existing release takes them on its next update.
+	rendered, passed := h.holdToDemoPolicy(c, "UpdateRelease", rendered)
+	if !passed {
+		return
+	}
 
 	// The write budget is spent here, past every check that refuses the
 	// request without a cluster call — see Handlers.releaseWrite (#232).

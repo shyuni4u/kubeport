@@ -644,6 +644,26 @@ ui-spec fields are now checked the way the contract always described them:
   scalars. A release whose stored values have `2.5` for an integer field, or a
   list for an enum, fails to update until the value is corrected.
 
+### Behaviour changes when upgrading past #350
+
+With `demo.enabled=true`, demo accounts' manifests are now held to
+`demo.policy`, on by default: `jobBackoffLimit: 2`,
+`jobTTLSecondsAfterFinished: 86400`, `cronJobHistoryLimit: 1`. Installs without
+demo mode, and accounts outside `demo.emailDomain`, are unaffected.
+
+- **A template that sets one of these higher can no longer be deployed,
+  updated or previewed by a demo account** — previewed meaning the deploy form's
+  preview (`POST /v1/templates/:name/render`); the editor's preview of a draft
+  (`POST /v1/templates/preview`) deploys nothing and is not held to it. The
+  answer is 403 `demo-restricted` with `demo_policy[]`. Lower the
+  value in the template, or set that key to `null` to keep the old behaviour.
+- **Where a template leaves them unset, the preview and the applied manifest now
+  carry the limit.** Existing releases are not touched until their next update.
+- **`allowedImagePrefixes` is empty, so images are not restricted** unless you
+  set it. If you do, the demo reset checks the seed against it before it deletes
+  anything, and fails the Job (logging the refused image) when the seed would be
+  refused.
+
 ### Behaviour changes when upgrading past #195
 
 A release's objects now carry its database id as a label,
@@ -1012,6 +1032,34 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
   templates demo visitors author outlive a reset once someone deploys from
   them, and a version a visitor publishes can read other visitors' Secrets
   through pod logs (#294). Drafts stay open. The reset CronJob does not need it.
+- `demo.policy` holds a demo account's release manifest to the demo's limits
+  on create, update and preview (#350): `jobBackoffLimit` (`2`, for Jobs and
+  CronJob job templates), `jobTTLSecondsAfterFinished` (`86400`, for a Job on
+  its own — a CronJob's jobs are bounded by `cronJobHistoryLimit` instead, so
+  the seed's failing nightly job stays visible) and `cronJobHistoryLimit` (`1`,
+  both the successful and the failed history). A limit the template leaves
+  unset is filled in, and the filled manifest is what is applied and stored; a
+  limit set higher is refused with 403 `demo-restricted` and a `demo_policy`
+  list, with nothing applied. `null` turns a rule off. `allowedImagePrefixes`
+  (empty by default, which allows any image) limits the images demo pods may
+  use, compared after normalizing (`busybox:1.36` is
+  `docker.io/library/busybox:1.36`), and a registry on its own (`ghcr.io`)
+  allows every image from it. Container, init container and image volume
+  images are checked. A refusal names the image, not the allowed prefixes, but
+  treat the list as public: a preview tells whether one image is allowed. From
+  the command line it is a list:
+  `--set 'demo.policy.allowedImagePrefixes={ghcr.io/nginx/,docker.io/library/busybox,ghcr.io/does-not-exist/}'`.
+  If you set it, include the seed's images —
+  `ghcr.io/nginx/`, `docker.io/library/busybox` and `ghcr.io/does-not-exist/`
+  (the release that fails on purpose); otherwise the reset's `preflight`
+  container fails the Job before anything is deleted. With the backoff rule on,
+  a Job's `backoffLimitPerIndex` is held to the same limit and a
+  `podFailurePolicy` rule with `action: Ignore` is refused, since either retries
+  past `backoffLimit`. Accounts
+  outside `demo.emailDomain` are not affected, and a release created before the
+  policy takes it on its next update. The keys become
+  `KBP_DEMO_JOB_BACKOFF_LIMIT`, `KBP_DEMO_JOB_TTL_SECONDS`,
+  `KBP_DEMO_CRONJOB_HISTORY_LIMIT` and `KBP_DEMO_ALLOWED_IMAGE_PREFIXES`.
 - `demo.publicHealthCatalog=true` (off by default) makes the unauthenticated
   `/healthz?verbose=1` report `catalog.templates` (demo-owned published
   templates) and `catalog.last_seed` (UTC, the oldest of their `created_at`).

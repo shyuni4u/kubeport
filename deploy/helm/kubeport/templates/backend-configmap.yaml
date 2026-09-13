@@ -39,6 +39,36 @@ data:
   # Off by default — a self-hosted install should not disclose it.
   KBP_HEALTH_PUBLIC_CATALOG: "true"
   {{- end }}
+  {{- with .Values.demo.policy }}
+  # Limits on demo accounts' manifests (#350); an unset key turns a rule off.
+  {{- $policy := . }}
+  {{- range $key, $env := dict "jobBackoffLimit" "KBP_DEMO_JOB_BACKOFF_LIMIT" "jobTTLSecondsAfterFinished" "KBP_DEMO_JOB_TTL_SECONDS" "cronJobHistoryLimit" "KBP_DEMO_CRONJOB_HISTORY_LIMIT" }}
+  {{- $v := index $policy $key }}
+  {{- if not (kindIs "invalid" $v) }}
+  {{- $s := toString $v }}
+  {{- /* A number from a values file arrives as a float: 1000000 would print as 1e+06. */}}
+  {{- if and (kindIs "float64" $v) (eq $v (floor $v)) }}
+  {{- $s = int64 $v | toString }}
+  {{- end }}
+  {{- /* The Job and CronJob fields these fill are int32. */}}
+  {{- if or (not (regexMatch "^[0-9]{1,10}$" $s)) (gt (int64 $s) 2147483647) }}
+  {{- fail (printf "demo.policy.%s must be a whole number from 0 to 2147483647, or null to turn the rule off (got %v)" $key $v) }}
+  {{- end }}
+  {{ $env }}: {{ $s | quote }}
+  {{- end }}
+  {{- end }}
+  {{- with .allowedImagePrefixes }}
+  {{- if not (kindIs "slice" .) }}
+  {{- fail (printf "demo.policy.allowedImagePrefixes must be a list, e.g. --set 'demo.policy.allowedImagePrefixes={ghcr.io/nginx/,docker.io/library/busybox}' (got %v)" .) }}
+  {{- end }}
+  {{- range . }}
+  {{- if or (not (kindIs "string" .)) (eq . "") (contains "," .) }}
+  {{- fail (printf "demo.policy.allowedImagePrefixes entries must be non-empty strings without commas (got %v)" .) }}
+  {{- end }}
+  {{- end }}
+  KBP_DEMO_ALLOWED_IMAGE_PREFIXES: {{ join "," . | quote }}
+  {{- end }}
+  {{- end }}
   {{- end }}
   {{- with include "kubeport.devAdminEmails" . }}
   # Bootstrap admin(s): matching login emails are granted the kubeport-admin

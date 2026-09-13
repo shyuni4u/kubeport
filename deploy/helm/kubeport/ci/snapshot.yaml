@@ -211,6 +211,10 @@ data:
   KBP_OIDC_ISSUERS: "[{\"client_id\":\"kubeport\",\"issuer\":\"https://accounts.google.com\"},{\"client_id\":\"kubeport-demo\",\"issuer\":\"https://dex.example.test\"}]"
   KBP_OPENAPI_CACHE_MAX: "64"
   KBP_DEMO_EMAIL_DOMAIN: "demo.kubeport"
+  # Limits on demo accounts' manifests (#350); an unset key turns a rule off.
+  KBP_DEMO_CRONJOB_HISTORY_LIMIT: "1"
+  KBP_DEMO_JOB_BACKOFF_LIMIT: "2"
+  KBP_DEMO_JOB_TTL_SECONDS: "86400"
   # Bootstrap admin(s): matching login emails are granted the kubeport-admin
   # group in-app. Intended for demo/bootstrap when the IdP (e.g. Google) emits
   # no groups claim. Leave empty for group-aware IdPs. Includes demo.adminEmail
@@ -1036,7 +1040,7 @@ spec:
         app.kubernetes.io/component: backend
       annotations:
         # Roll the Pod when ConfigMap or Secret content changes.
-        checksum/config: 32a011b73e6af8dd51d53c5d406f524f4d2f9aa54c0980e9f8d07783732bb67c
+        checksum/config: dfd524939ecadeb16d2ed63d96f70cf7bfe7424b5957f93f85426800ab3249b9
         # schema.hcl 변경 시 backend pod 가 재시작되며 atlas initContainer
         # 가 새 스키마를 적용. 이 어노테이션이 없으면 migration ConfigMap
         # 갱신만으로는 Deployment template 해시가 안 바뀌어 롤이 안 됨.
@@ -1510,6 +1514,30 @@ spec:
                   value: "demo"
                 - name: KBP_DEMO_EMAIL_DOMAIN
                   value: "demo.kubeport"
+                - name: KBP_DEMO_JOB_BACKOFF_LIMIT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: kp-kubeport-backend
+                      key: KBP_DEMO_JOB_BACKOFF_LIMIT
+                      optional: true
+                - name: KBP_DEMO_JOB_TTL_SECONDS
+                  valueFrom:
+                    configMapKeyRef:
+                      name: kp-kubeport-backend
+                      key: KBP_DEMO_JOB_TTL_SECONDS
+                      optional: true
+                - name: KBP_DEMO_CRONJOB_HISTORY_LIMIT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: kp-kubeport-backend
+                      key: KBP_DEMO_CRONJOB_HISTORY_LIMIT
+                      optional: true
+                - name: KBP_DEMO_ALLOWED_IMAGE_PREFIXES
+                  valueFrom:
+                    configMapKeyRef:
+                      name: kp-kubeport-backend
+                      key: KBP_DEMO_ALLOWED_IMAGE_PREFIXES
+                      optional: true
                 - name: DEMO_ADMIN_PASSWORD
                   valueFrom:
                     secretKeyRef:
@@ -1591,6 +1619,30 @@ spec:
                   value: "demo"
                 - name: KBP_DEMO_EMAIL_DOMAIN
                   value: "demo.kubeport"
+                - name: KBP_DEMO_JOB_BACKOFF_LIMIT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: kp-kubeport-backend
+                      key: KBP_DEMO_JOB_BACKOFF_LIMIT
+                      optional: true
+                - name: KBP_DEMO_JOB_TTL_SECONDS
+                  valueFrom:
+                    configMapKeyRef:
+                      name: kp-kubeport-backend
+                      key: KBP_DEMO_JOB_TTL_SECONDS
+                      optional: true
+                - name: KBP_DEMO_CRONJOB_HISTORY_LIMIT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: kp-kubeport-backend
+                      key: KBP_DEMO_CRONJOB_HISTORY_LIMIT
+                      optional: true
+                - name: KBP_DEMO_ALLOWED_IMAGE_PREFIXES
+                  valueFrom:
+                    configMapKeyRef:
+                      name: kp-kubeport-backend
+                      key: KBP_DEMO_ALLOWED_IMAGE_PREFIXES
+                      optional: true
                 - name: DEMO_ADMIN_PASSWORD
                   valueFrom:
                     secretKeyRef:

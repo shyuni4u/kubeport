@@ -319,6 +319,31 @@ demo:
       default: 512Mi          # limit when a container sets none
       defaultRequest: 64Mi    # request when a container sets none
       max: 1Gi                # most a container may set
+  # Limits on the manifests demo accounts deploy (#350), enforced by the backend
+  # for demo-domain callers only; other users and installs without demo mode are
+  # untouched. They bound what finished Job pods — whose writable layers and logs
+  # stay on the node until the pod is deleted — and the images a visitor pulls
+  # can take. A limit the template leaves unset is filled in; one it sets higher
+  # is refused with 403 demo-restricted. null turns a rule off.
+  #
+  # The reset seeds its releases through the API as the demo user, so these
+  # defaults are what the seed must pass: nightly-job sets neither backoffLimit
+  # nor a history limit and is filled, not refused.
+  policy:
+    jobBackoffLimit: 2                 # Job and CronJob job template backoffLimit
+    jobTTLSecondsAfterFinished: 86400  # a Job on its own; a CronJob's jobs are
+                                       # bounded by history instead, so the seed's
+                                       # failing nightly job stays visible all day
+    cronJobHistoryLimit: 1             # successful and failed jobs a CronJob keeps
+    # Image prefixes demo pods may use; empty allows any. Compared after
+    # normalizing (busybox:1.36 is docker.io/library/busybox:1.36); a registry
+    # on its own (ghcr.io) allows every image from it. A list, e.g.
+    # --set 'demo.policy.allowedImagePrefixes={ghcr.io/nginx/,docker.io/library/busybox,ghcr.io/does-not-exist/}'.
+    # If set, it must admit the seed's images — ghcr.io/nginx/,
+    # docker.io/library/busybox and ghcr.io/does-not-exist/ (the release that
+    # fails on purpose) — or the reset's preflight fails the Job, before it
+    # deletes anything.
+    allowedImagePrefixes: []
   # Demo accounts. adminEmail and userEmail must each end in @<emailDomain>
   # (compared case-insensitively, as the backend does) and equal one of
   # dex.staticPasswords[].email exactly — changing an account is two edits. An

@@ -723,7 +723,15 @@ paths:
         "400": { $ref: "#/components/responses/ValidationError" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403":
+          description: |
+            A draft the caller may not read, or — `demo-restricted` with
+            `demo_policy` — for a demo account, a rendering that breaks the
+            demo's limits, as `POST /v1/releases` would refuse it (#350). A demo
+            account's 200 shows the manifest with unset limits filled in.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/InternalError" }
 
@@ -1122,6 +1130,14 @@ paths:
               schema: { $ref: "#/components/schemas/Problem" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403":
+          description: |
+            `demo-restricted`: a demo account's rendered manifest breaks the
+            demo's limits (#350). `demo_policy` lists each violation; nothing
+            was stored or applied.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "404":
           description: |
             No such template version, or no such cluster — `detail` says which.
@@ -1262,7 +1278,15 @@ paths:
               schema: { $ref: "#/components/schemas/Problem" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403":
+          description: |
+            The caller may not update this release, or — `demo-restricted` with
+            `demo_policy` — a demo account's new rendering breaks the demo's
+            limits (#350). An existing demo release takes the limits on its next
+            update; nothing was applied and the release is unchanged.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409":
           description: |
@@ -1960,6 +1984,50 @@ components:
         title: { $ref: "#/components/schemas/ErrorKind" }
         status: { type: integer }
         detail: { type: string }
+        demo_policy:
+          type: array
+          description: |
+            Only on `403 demo-restricted` from `POST /v1/releases`,
+            `PUT /v1/releases/{id}` and `POST /v1/templates/{name}/render` (#350):
+            where a demo account's rendered manifest breaks the demo's limits.
+            Every violation is listed at once. Accounts outside the demo, and
+            installs without demo mode, never get it.
+
+            The limits bound what a visitor leaves on the node. A limit the
+            template leaves unset is filled in rather than refused — the 200
+            and `rendered_yaml` show the filled manifest — so this lists only
+            values set above a limit, and images outside the allowed prefixes.
+            The allowed prefixes are not in any response, but they are not a
+            secret either: a preview answers whether one image is allowed.
+          items:
+            type: object
+            required: [rule, kind, name, field]
+            properties:
+              rule:
+                type: string
+                enum: [job-backoff-limit, job-ttl, cronjob-history-limit, image-prefix]
+                description: |
+                  `job-backoff-limit`: a Job's, or a CronJob job template's,
+                  `backoffLimit` or `backoffLimitPerIndex` above the limit, or a
+                  `podFailurePolicy` rule whose action is `Ignore` (no `limit`:
+                  it would retry past any). `job-ttl`: a Job's own `ttlSecondsAfterFinished`
+                  (a CronJob's jobs are bounded by its history instead).
+                  `cronjob-history-limit`: `successfulJobsHistoryLimit` or
+                  `failedJobsHistoryLimit`. `image-prefix`: a container or init
+                  container image the demo does not allow.
+              kind: { type: string }
+              name: { type: string }
+              container:
+                type: string
+                description: The container, for `image-prefix`.
+              field:
+                type: string
+                description: The path within the object, e.g. `spec.jobTemplate.spec.backoffLimit`.
+              limit:
+                type: integer
+                description: The cap, for the numeric rules.
+              got:
+                description: The value the manifest holds.
         conflicts:
           type: array
           description: |
@@ -2051,7 +2119,9 @@ components:
       enum:
         - unauthenticated   # 401 — no/invalid token or session
         - rbac-denied       # 403 — kubeport's own check refused
-        - demo-restricted   # 403 — the demo gate; scope in the Forbidden response
+        - demo-restricted   # 403 — the demo gate; scope in the Forbidden response.
+                            # Also a demo account's manifest that breaks the
+                            # demo's limits, with `demo_policy` (#350).
         - validation-error  # 400 — body or parameter rejected
         - not-found         # 404 — no such object, and also the router's own
                             # fallback for a path that matches no route (#81)

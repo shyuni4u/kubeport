@@ -1,0 +1,443 @@
+package template_test
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
+
+	"kubeport/internal/template"
+)
+
+// Issue #350. A demo account's rendered manifest is held to limits that bound
+// what one visitor leaves on the node: finished Job pods, and the images their
+// pods pull. An unset limit is filled; one set above the limit is refused.
+
+func i64(n int64) *int64 { return &n }
+
+func demoDocs(t *testing.T, out []byte) map[string]map[string]any {
+	t.Helper()
+	docs := map[string]map[string]any{}
+	dec := yaml.NewDecoder(bytes.NewReader(out))
+	for {
+		var d map[string]any
+		err := dec.Decode(&d)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		require.NoError(t, err)
+		docs[d["kind"].(string)+"/"+d["metadata"].(map[string]any)["name"].(string)] = d
+	}
+	return docs
+}
+
+const demoJobs = `apiVersion: batch/v1
+kind: Job
+metadata: { name: once }
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers: [{ name: job, image: busybox:1.36 }]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: nightly }
+spec:
+  schedule: "0 3 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers: [{ name: job, image: busybox:1.36 }]
+`
+
+var jobLimits = template.DemoPolicy{
+	JobBackoffLimit:            i64(2),
+	JobTTLSecondsAfterFinished: i64(86400),
+	CronJobHistoryLimit:        i64(1),
+}
+
+func TestApplyDemoPolicy_FillsJobLimitsATemplateLeavesUnset(t *testing.T) {
+	out, violations, err := template.ApplyDemoPolicy([]byte(demoJobs), jobLimits)
+	require.NoError(t, err)
+	require.Empty(t, violations)
+	docs := demoDocs(t, out)
+
+	job := docs["Job/once"]["spec"].(map[string]any)
+	require.EqualValues(t, 2, job["backoffLimit"])
+	require.EqualValues(t, 86400, job["ttlSecondsAfterFinished"])
+
+	cron := docs["CronJob/nightly"]["spec"].(map[string]any)
+	require.EqualValues(t, 1, cron["successfulJobsHistoryLimit"])
+	require.EqualValues(t, 1, cron["failedJobsHistoryLimit"])
+	jobTemplate := cron["jobTemplate"].(map[string]any)["spec"].(map[string]any)
+	require.EqualValues(t, 2, jobTemplate["backoffLimit"])
+	require.NotContains(t, jobTemplate, "ttlSecondsAfterFinished",
+		"a CronJob's jobs are bounded by its history, so a job the demo shows failing stays visible until the reset")
+}
+
+func TestApplyDemoPolicy_KeepsLimitsSetWithinTheCap(t *testing.T) {
+	within := `apiVersion: batch/v1
+kind: Job
+metadata: { name: once }
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 60
+  template: { spec: { restartPolicy: Never, containers: [{ name: job, image: busybox }] } }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: nightly }
+spec:
+  schedule: "0 3 * * *"
+  successfulJobsHistoryLimit: 0
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 999999
+      template: { spec: { restartPolicy: Never, containers: [{ name: job, image: busybox }] } }
+`
+	out, violations, err := template.ApplyDemoPolicy([]byte(within), jobLimits)
+	require.NoError(t, err)
+	require.Empty(t, violations)
+	docs := demoDocs(t, out)
+	require.EqualValues(t, 0, docs["Job/once"]["spec"].(map[string]any)["backoffLimit"])
+	require.EqualValues(t, 60, docs["Job/once"]["spec"].(map[string]any)["ttlSecondsAfterFinished"])
+	cron := docs["CronJob/nightly"]["spec"].(map[string]any)
+	require.EqualValues(t, 0, cron["successfulJobsHistoryLimit"])
+	require.EqualValues(t, 999999, cron["jobTemplate"].(map[string]any)["spec"].(map[string]any)["ttlSecondsAfterFinished"],
+		"no ttl rule on a CronJob's job template, in either direction")
+}
+
+func TestApplyDemoPolicy_RefusesLimitsSetAboveTheCap(t *testing.T) {
+	over := `apiVersion: batch/v1
+kind: Job
+metadata: { name: once }
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 172800
+  template: { spec: { restartPolicy: Never, containers: [{ name: job, image: busybox }] } }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: nightly }
+spec:
+  schedule: "0 3 * * *"
+  successfulJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 4
+      template: { spec: { restartPolicy: Never, containers: [{ name: job, image: busybox }] } }
+`
+	out, violations, err := template.ApplyDemoPolicy([]byte(over), jobLimits)
+	require.NoError(t, err)
+	require.Nil(t, out)
+	require.ElementsMatch(t, []template.DemoViolation{
+		{Rule: "job-backoff-limit", Kind: "Job", Name: "once", Field: "spec.backoffLimit", Limit: i64(2), Got: 6},
+		{Rule: "job-ttl", Kind: "Job", Name: "once", Field: "spec.ttlSecondsAfterFinished", Limit: i64(86400), Got: 172800},
+		{Rule: "cronjob-history-limit", Kind: "CronJob", Name: "nightly", Field: "spec.successfulJobsHistoryLimit", Limit: i64(1), Got: 3},
+		{Rule: "job-backoff-limit", Kind: "CronJob", Name: "nightly", Field: "spec.jobTemplate.spec.backoffLimit", Limit: i64(2), Got: 4},
+	}, violations, "every violation at once, so a caller does not fix one and meet the next")
+}
+
+func TestApplyDemoPolicy_OffLeavesTheManifestUntouched(t *testing.T) {
+	out, violations, err := template.ApplyDemoPolicy([]byte(demoJobs), template.DemoPolicy{})
+	require.NoError(t, err)
+	require.Empty(t, violations)
+	require.Equal(t, demoJobs, string(out), "byte for byte")
+}
+
+func TestApplyDemoPolicy_ImagePrefixes(t *testing.T) {
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata: { name: web }
+spec:
+  template:
+    spec:
+      initContainers: [{ name: init, image: quay.io/evil/init:1 }]
+      containers:
+        - { name: web, image: "ghcr.io/nginx/nginx-unprivileged:1.27-alpine" }
+        - { name: side, image: "busybox:1.36" }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: db }
+spec:
+  template: { spec: { containers: [{ name: db, image: "docker.io/library/busybox-evil:1" }] } }
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: { name: agent }
+spec:
+  template: { spec: { containers: [{ name: agent, image: "ghcr.io/does-not-exist/nightly:0.0.0" }] } }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: nightly }
+spec:
+  schedule: "0 3 * * *"
+  jobTemplate: { spec: { template: { spec: { containers: [{ name: job, image: "nginx/other" }] } } } }
+---
+apiVersion: v1
+kind: Pod
+metadata: { name: bare }
+spec:
+  containers: [{ name: bare, image: "busybox@sha256:abc" }]
+`
+	policy := template.DemoPolicy{ImagePrefixes: []string{"ghcr.io/nginx/", "busybox", "ghcr.io/does-not-exist/"}}
+	_, violations, err := template.ApplyDemoPolicy([]byte(manifest), policy)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []template.DemoViolation{
+		{Rule: "image-prefix", Kind: "Deployment", Name: "web", Container: "init", Field: "spec.template.spec.initContainers[0].image", Got: "quay.io/evil/init:1"},
+		{Rule: "image-prefix", Kind: "StatefulSet", Name: "db", Container: "db", Field: "spec.template.spec.containers[0].image", Got: "docker.io/library/busybox-evil:1"},
+		{Rule: "image-prefix", Kind: "CronJob", Name: "nightly", Container: "job", Field: "spec.jobTemplate.spec.template.spec.containers[0].image", Got: "nginx/other"},
+	}, violations,
+		"busybox admits busybox:1.36 and busybox@sha256 but not busybox-evil; nginx/other is Docker Hub's, not ghcr.io/nginx")
+}
+
+// Every object with a pod template is checked, not a list of kinds: the demo
+// roles may create ReplicaSets, and a kind left off a list is a way around it.
+func TestApplyDemoPolicy_ImagePrefixesCoverEveryPodTemplate(t *testing.T) {
+	manifest := `apiVersion: apps/v1
+kind: ReplicaSet
+metadata: { name: rs }
+spec:
+  template:
+    spec:
+      initContainers: [{ name: init, image: "quay.io/evil/init:1" }]
+      containers: [{ name: main, image: "quay.io/evil/main:1" }]
+---
+apiVersion: v1
+kind: ReplicationController
+metadata: { name: rc }
+spec:
+  template: { spec: { containers: [{ name: main, image: "quay.io/evil/rc:1" }] } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: svc }
+spec: { ports: [{ port: 80 }] }
+`
+	policy := template.DemoPolicy{ImagePrefixes: []string{"ghcr.io/nginx/"}}
+	_, violations, err := template.ApplyDemoPolicy([]byte(manifest), policy)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []template.DemoViolation{
+		{Rule: "image-prefix", Kind: "ReplicaSet", Name: "rs", Container: "init", Field: "spec.template.spec.initContainers[0].image", Got: "quay.io/evil/init:1"},
+		{Rule: "image-prefix", Kind: "ReplicaSet", Name: "rs", Container: "main", Field: "spec.template.spec.containers[0].image", Got: "quay.io/evil/main:1"},
+		{Rule: "image-prefix", Kind: "ReplicationController", Name: "rc", Container: "main", Field: "spec.template.spec.containers[0].image", Got: "quay.io/evil/rc:1"},
+	}, violations)
+}
+
+// A Docker Hub image is the same image however it is spelled, so an allowed
+// one is not refused for its spelling (codex review), and a lookalike is not
+// admitted for its spelling either.
+func TestApplyDemoPolicy_ImagePrefixesReadDockerHubSpellingsAlike(t *testing.T) {
+	pod := func(image string) []byte {
+		return []byte("apiVersion: v1\nkind: Pod\nmetadata: { name: p }\nspec:\n  containers: [{ name: c, image: \"" + image + "\" }]\n")
+	}
+	busybox := template.DemoPolicy{ImagePrefixes: []string{"docker.io/library/busybox"}}
+	for _, image := range []string{
+		"busybox:1.36",
+		"docker.io/busybox:1.36",
+		"docker.io/library/busybox:1.36",
+		"index.docker.io/library/busybox:1.36",
+		"index.docker.io/busybox@sha256:abc",
+		"DOCKER.IO/busybox:1.36",
+	} {
+		_, violations, err := template.ApplyDemoPolicy(pod(image), busybox)
+		require.NoError(t, err)
+		require.Empty(t, violations, image)
+	}
+	for _, image := range []string{
+		"docker.io/busybox-evil:1",
+		"docker.io/evil/busybox:1",
+		"ghcr.io/library/busybox:1",
+		"localhost:5000/busybox:1",
+	} {
+		_, violations, err := template.ApplyDemoPolicy(pod(image), busybox)
+		require.NoError(t, err)
+		require.Len(t, violations, 1, image)
+	}
+
+	// A prefix spelled another way means the same, and "docker.io/" is all of
+	// Docker Hub rather than its library namespace.
+	for _, prefixes := range [][]string{{"busybox"}, {"index.docker.io/busybox"}, {"docker.io/"}} {
+		_, violations, err := template.ApplyDemoPolicy(pod("docker.io/library/busybox:1.36"), template.DemoPolicy{ImagePrefixes: prefixes})
+		require.NoError(t, err)
+		require.Empty(t, violations, prefixes)
+	}
+	_, violations, err := template.ApplyDemoPolicy(pod("docker.io/bitnami/redis:7"), template.DemoPolicy{ImagePrefixes: []string{"docker.io/"}})
+	require.NoError(t, err)
+	require.Empty(t, violations, "docker.io/ admits an org's image")
+	_, violations, err = template.ApplyDemoPolicy(pod("ghcr.io/nginx/nginx:1"), template.DemoPolicy{ImagePrefixes: []string{"docker.io/"}})
+	require.NoError(t, err)
+	require.Len(t, violations, 1, "docker.io/ does not admit another registry")
+}
+
+// backoffLimit bounds failed pods only while every failure counts toward it, so
+// what retries past it is held too (security review): a podFailurePolicy rule
+// that ignores failures is refused, and backoffLimitPerIndex takes the limit.
+func TestApplyDemoPolicy_RefusesWhatRetriesPastBackoffLimit(t *testing.T) {
+	manifest := `apiVersion: batch/v1
+kind: Job
+metadata: { name: ignore }
+spec:
+  podFailurePolicy:
+    rules:
+      - { action: FailJob, onExitCodes: { operator: In, values: [42] } }
+      - { action: Ignore, onExitCodes: { operator: NotIn, values: [0] } }
+  template: { spec: { restartPolicy: Never, containers: [{ name: c, image: busybox }] } }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: indexed }
+spec:
+  schedule: "0 3 * * *"
+  jobTemplate:
+    spec:
+      completionMode: Indexed
+      backoffLimitPerIndex: 5
+      template: { spec: { restartPolicy: Never, containers: [{ name: c, image: busybox }] } }
+`
+	_, violations, err := template.ApplyDemoPolicy([]byte(manifest), jobLimits)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []template.DemoViolation{
+		{Rule: "job-backoff-limit", Kind: "Job", Name: "ignore", Field: "spec.podFailurePolicy.rules[1].action", Got: "Ignore"},
+		{Rule: "job-backoff-limit", Kind: "CronJob", Name: "indexed", Field: "spec.jobTemplate.spec.backoffLimitPerIndex", Limit: i64(2), Got: 5},
+	}, violations)
+
+	within := `apiVersion: batch/v1
+kind: Job
+metadata: { name: ok }
+spec:
+  completionMode: Indexed
+  backoffLimitPerIndex: 1
+  podFailurePolicy: { rules: [{ action: Count, onPodConditions: [{ type: DisruptionTarget }] }] }
+  template: { spec: { restartPolicy: Never, containers: [{ name: c, image: busybox }] } }
+`
+	out, violations, err := template.ApplyDemoPolicy([]byte(within), jobLimits)
+	require.NoError(t, err)
+	require.Empty(t, violations)
+	job := demoDocs(t, out)["Job/ok"]["spec"].(map[string]any)
+	require.EqualValues(t, 1, job["backoffLimitPerIndex"], "kept, not raised to the limit")
+
+	off := jobLimits
+	off.JobBackoffLimit = nil
+	_, violations, err = template.ApplyDemoPolicy([]byte(manifest), off)
+	require.NoError(t, err)
+	require.Empty(t, violations, "with the backoff rule off neither is held")
+}
+
+func TestApplyDemoPolicy_ImagePrefixesCoverImageVolumes(t *testing.T) {
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata: { name: web }
+spec:
+  template:
+    spec:
+      containers: [{ name: web, image: "ghcr.io/nginx/nginx:1" }]
+      volumes:
+        - { name: data, emptyDir: {} }
+        - { name: ok, image: { reference: "ghcr.io/nginx/assets:1" } }
+        - { name: evil, image: { reference: "quay.io/evil/blob:1" } }
+`
+	_, violations, err := template.ApplyDemoPolicy([]byte(manifest), template.DemoPolicy{ImagePrefixes: []string{"ghcr.io/nginx/"}})
+	require.NoError(t, err)
+	require.Equal(t, []template.DemoViolation{
+		{Rule: "image-prefix", Kind: "Deployment", Name: "web", Field: "spec.template.spec.volumes[2].image.reference", Got: "quay.io/evil/blob:1"},
+	}, violations)
+}
+
+// A registry written on its own allows that registry, not a Docker Hub image
+// named after it, while a tagged image stays an image (master review).
+func TestApplyDemoPolicy_RegistryPrefixAdmitsTheRegistry(t *testing.T) {
+	pod := func(image string) []byte {
+		return []byte("apiVersion: v1\nkind: Pod\nmetadata: { name: p }\nspec:\n  containers: [{ name: c, image: \"" + image + "\" }]\n")
+	}
+	allowed := func(prefix, image string) bool {
+		_, violations, err := template.ApplyDemoPolicy(pod(image), template.DemoPolicy{ImagePrefixes: []string{prefix}})
+		require.NoError(t, err)
+		return len(violations) == 0
+	}
+	for _, prefix := range []string{"ghcr.io", "GHCR.io", "ghcr.io/"} {
+		require.True(t, allowed(prefix, "ghcr.io/nginx/nginx-unprivileged:1.27"), prefix)
+		require.False(t, allowed(prefix, "ghcr.io.evil.example/nginx:1"), prefix)
+		require.False(t, allowed(prefix, "quay.io/nginx/nginx:1"), prefix)
+	}
+	require.True(t, allowed("localhost:5000", "localhost:5000/app:1"))
+	require.False(t, allowed("localhost:5000", "localhost:5001/app:1"))
+	require.True(t, allowed("index.docker.io", "busybox:1.36"), "Docker Hub on its own is all of it")
+
+	require.True(t, allowed("busybox:1.36", "busybox:1.36"), "a tag is not a port")
+	require.False(t, allowed("busybox:1.36", "busybox:1.37"))
+	require.False(t, allowed("busybox:1.36", "busybox:1.36.1"))
+}
+
+func TestDemoPolicyFromEnv(t *testing.T) {
+	env := func(kv map[string]string) func(string) string { return func(k string) string { return kv[k] } }
+
+	p, err := template.DemoPolicyFromEnv(env(map[string]string{
+		"KBP_DEMO_JOB_BACKOFF_LIMIT":      "2",
+		"KBP_DEMO_JOB_TTL_SECONDS":        " 86400 ",
+		"KBP_DEMO_CRONJOB_HISTORY_LIMIT":  "0",
+		"KBP_DEMO_ALLOWED_IMAGE_PREFIXES": " ghcr.io/nginx/, ,busybox ",
+	}))
+	require.NoError(t, err)
+	require.Equal(t, template.DemoPolicy{
+		JobBackoffLimit: i64(2), JobTTLSecondsAfterFinished: i64(86400), CronJobHistoryLimit: i64(0),
+		ImagePrefixes: []string{"ghcr.io/nginx/", "busybox"},
+	}, p)
+
+	p, err = template.DemoPolicyFromEnv(env(nil))
+	require.NoError(t, err)
+	require.False(t, p.Enabled(), "nothing set is every rule off")
+
+	for _, bad := range []string{"-1", "1.5", "two", "2147483648", "9223372036854775808"} {
+		_, err := template.DemoPolicyFromEnv(env(map[string]string{"KBP_DEMO_CRONJOB_HISTORY_LIMIT": bad}))
+		require.ErrorContains(t, err, "KBP_DEMO_CRONJOB_HISTORY_LIMIT must be a whole number", bad)
+	}
+
+	// The fields it fills are int32 in the Job and CronJob APIs.
+	p, err = template.DemoPolicyFromEnv(env(map[string]string{"KBP_DEMO_JOB_TTL_SECONDS": "2147483647"}))
+	require.NoError(t, err)
+	require.Equal(t, i64(2147483647), p.JobTTLSecondsAfterFinished)
+}
+
+// The demo seeds its releases through the API as the demo user, so the default
+// policy must pass them as they are — refusing one would leave the reset wiped
+// and unseeded (#105). Both seed releases, with the prefixes the live demo
+// would need, pass; the nightly job is filled, not refused.
+func TestApplyDemoPolicy_PassesTheDemoSeed(t *testing.T) {
+	dir := filepath.Join("..", "..", "cmd", "seed-demo", "fixtures")
+	policy := jobLimits
+	policy.ImagePrefixes = []string{"ghcr.io/nginx/", "docker.io/library/busybox", "ghcr.io/does-not-exist/"}
+	for _, tc := range []struct{ template, values string }{
+		{"app-with-config", `{"ConfigMap[app-config].data.REGION":"kr","Secret[app-secret].stringData.API_KEY":"demo-placeholder-not-a-secret"}`},
+		{"nightly-job", `{"CronJob[nightly].spec.jobTemplate.spec.template.spec.containers[0].image":"ghcr.io/does-not-exist/nightly:0.0.0"}`},
+		{"web-app", `{}`},
+	} {
+		t.Run(tc.template, func(t *testing.T) {
+			resources, err := os.ReadFile(filepath.Join(dir, tc.template+".resources.yaml"))
+			require.NoError(t, err)
+			uiSpec, err := os.ReadFile(filepath.Join(dir, tc.template+".ui-spec.yaml"))
+			require.NoError(t, err)
+			rendered, err := template.Render(string(resources), string(uiSpec), json.RawMessage(tc.values), template.Labels{
+				ReleaseName: tc.template + "-demo", TemplateName: tc.template, TemplateVersion: 1, ReleaseID: "id",
+			})
+			require.NoError(t, err)
+			out, violations, err := template.ApplyDemoPolicy(rendered, policy)
+			require.NoError(t, err)
+			require.Empty(t, violations)
+			require.NotEmpty(t, out)
+		})
+	}
+}
