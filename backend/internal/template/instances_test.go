@@ -185,6 +185,30 @@ spec:
   accessModes: [ReadWriteOnce]
   resources: { requests: { storage: 1Gi } }
   dataSource: { kind: PersistentVolumeClaim, name: shared-golden-image }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: elsewhere }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 1Gi } }
+  dataSourceRef: { kind: PersistentVolumeClaim, name: data, namespace: golden-images }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: db }
+spec:
+  serviceName: db
+  selector: { matchLabels: { app: db } }
+  template:
+    metadata: { labels: { app: db } }
+    spec: { containers: [{ name: db, image: postgres }] }
+  volumeClaimTemplates:
+    - metadata: { name: pgdata }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 1Gi } }
+        dataSource: { kind: PersistentVolumeClaim, name: data }
 `
 	out, err := template.Render(resources, "instances: multiple\nfields: []\n", json.RawMessage(`{}`),
 		template.Labels{ReleaseName: "rel", ReleaseID: "x"})
@@ -207,6 +231,14 @@ spec:
 		"a VolumeSnapshot named like a claim is another object")
 	require.Equal(t, "shared-golden-image", at(t, claims["rel-external"], "spec", "dataSource", "name"),
 		"a claim the template does not declare keeps its name")
+	require.Equal(t, "data", at(t, claims["rel-elsewhere"], "spec", "dataSourceRef", "name"),
+		"a dataSourceRef into another namespace is not the template's claim, even under the same name")
+
+	sts := claims["rel-db"]
+	require.Equal(t, "pgdata", at(t, sts, "spec", "volumeClaimTemplates", 0, "metadata", "name"),
+		"claim template names are the controller's to expand and stay as written")
+	require.Equal(t, "rel-data", at(t, sts, "spec", "volumeClaimTemplates", 0, "spec", "dataSource", "name"),
+		"a claim template cloned from the template's own claim follows its new name")
 }
 
 // The point of the mode: two releases in one namespace share no object name,

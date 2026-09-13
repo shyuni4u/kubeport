@@ -146,6 +146,12 @@ func renameForRelease(docs []map[string]any, release string) error {
 		}
 		if kind == "StatefulSet" {
 			r.rename(spec, "serviceName", "Service")
+			// Its claim templates keep their names — the controller builds each
+			// pod's claim from them — but a clone source among the template's
+			// own claims has been renamed (codex review).
+			for _, claim := range mapsIn(spec, "volumeClaimTemplates") {
+				r.pvcSource(mapAt(claim, "spec"))
+			}
 		}
 		selectRelease(kind, spec, release)
 	}
@@ -216,6 +222,12 @@ func (r refRewriter) pvcSource(spec map[string]any) {
 			continue
 		}
 		if group, ok := src["apiGroup"].(string); ok && group != "" {
+			continue
+		}
+		// dataSourceRef may name a claim in another namespace (codex review).
+		// The template's claims live in the release's namespace, so a source
+		// that names one is not the template's, whatever it is called.
+		if ns, ok := src["namespace"].(string); ok && ns != "" {
 			continue
 		}
 		r.rename(src, "name", "PersistentVolumeClaim")
