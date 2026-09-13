@@ -652,8 +652,10 @@ With `demo.enabled=true`, demo accounts' manifests are now held to
 demo mode, and accounts outside `demo.emailDomain`, are unaffected.
 
 - **A template that sets one of these higher can no longer be deployed,
-  updated or previewed by a demo account** — including a draft's preview in the
-  editor. The answer is 403 `demo-restricted` with `demo_policy[]`. Lower the
+  updated or previewed by a demo account** — previewed meaning the deploy form's
+  preview (`POST /v1/templates/:name/render`); the editor's preview of a draft
+  (`POST /v1/templates/preview`) deploys nothing and is not held to it. The
+  answer is 403 `demo-restricted` with `demo_policy[]`. Lower the
   value in the template, or set that key to `null` to keep the old behaviour.
 - **Where a template leaves them unset, the preview and the applied manifest now
   carry the limit.** Existing releases are not touched until their next update.
