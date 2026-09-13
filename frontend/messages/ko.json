@@ -344,6 +344,7 @@
       "demoPolicyOther": "이 배포는 데모 계정에 걸린 한도를 넘습니다.",
       "demoPolicyFixFieldLimit": "''{label}'' 값을 {limit} 이하로 바꾸세요.",
       "demoPolicyFixFieldImage": "''{label}'' 에 다른 이미지를 넣으세요.",
+      "demoPolicyFixFieldAction": "''{label}'' 을 실패를 무시하지 않는 값으로 바꾸세요.",
       "demoPolicyFixTemplate": "템플릿에 고정된 설정이라 입력한 값으로는 풀리지 않습니다 — 관리자에게 템플릿 수정을 요청하세요.",
       "demoPolicyMore": "이 밖에도 {count}곳이 데모 한도를 넘습니다.",
       "demoPolicyUpdateUnchanged": "업데이트하지 않았고, 지금 실행 중인 릴리스는 그대로입니다.",

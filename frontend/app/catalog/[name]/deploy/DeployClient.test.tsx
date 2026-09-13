@@ -509,6 +509,17 @@ describe("DeployClient", () => {
         expect(alert).toHaveTextContent("'재시도 횟수' 값을 2 이하로 바꾸세요");
       });
 
+      // An action has no number to name, but a form that exposes it still
+      // lets the visitor lift the refusal (codex review).
+      it("names a failure-policy action the form holds", async () => {
+        const alert = await alertFor(
+          [{ path: "Job.spec.podFailurePolicy.rules[0].action", label: "실패 처리", type: "string", default: "Count", required: true }],
+          { rule: "job-backoff-limit", kind: "Job", name: "once", field: "spec.podFailurePolicy.rules[0].action", got: "Ignore" },
+        );
+        expect(alert).toHaveTextContent("'실패 처리' 을 실패를 무시하지 않는 값으로 바꾸세요");
+        expect(alert).not.toHaveTextContent(toAdmin);
+      });
+
       it("does not guess that an index means the object refused", async () => {
         // The template may have another Job whose limit is fixed.
         const alert = await alertFor([retries("Job[0].spec.backoffLimit")], onJob("second"));

@@ -234,6 +234,10 @@ export function DeployClient({
       const field = formFieldFor(spec.fields, dp, releasePrefix);
       if (field && dp.rule === "image-prefix") {
         parts.push(t("errors.demoPolicyFixFieldImage", { label: field.label }));
+      } else if (field && dp.rule === "job-backoff-limit" && dp.limit === null) {
+        // A podFailurePolicy action the form exposes: no number to name, but
+        // still the visitor's to change (codex review).
+        parts.push(t("errors.demoPolicyFixFieldAction", { label: field.label }));
       } else if (field && dp.limit !== null) {
         parts.push(t("errors.demoPolicyFixFieldLimit", { label: field.label, limit: dp.limit }));
       } else {

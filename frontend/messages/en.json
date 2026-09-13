@@ -344,6 +344,7 @@
       "demoPolicyOther": "This goes past a limit set for demo accounts.",
       "demoPolicyFixFieldLimit": "Set ''{label}'' to {limit} or less.",
       "demoPolicyFixFieldImage": "Put another image in ''{label}''.",
+      "demoPolicyFixFieldAction": "Set ''{label}'' to an action that does not ignore failures.",
       "demoPolicyFixTemplate": "The template fixes this, so your input cannot change it — ask an admin to fix the template.",
       "demoPolicyMore": "{count, plural, one {# other place in this template also goes} other {# other places in this template also go}} past the demo's limits.",
       "demoPolicyUpdateUnchanged": "Nothing was updated; the running release is unchanged.",
