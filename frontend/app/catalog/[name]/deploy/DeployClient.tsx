@@ -88,6 +88,14 @@ type DemoPolicyRefusal = {
 };
 
 /**
+ * How a render named the objects: as the template does, or — for a
+ * multi-instance template — after a release, whose name is `prefix` when it is
+ * known here.
+ */
+type ObjectNaming = { multiple: boolean; prefix: string | null };
+const TEMPLATE_NAMES: ObjectNaming = { multiple: false, prefix: null };
+
+/**
  * A `demo-restricted` 403 that carries `demo_policy` (#350): the manifest these
  * values render goes past a limit the demo sets for its accounts, which the
  * template, or a value in the form, has to change. Null for any other body —
@@ -120,8 +128,10 @@ function demoPolicyOf(p: ProblemBody | null): DemoPolicyRefusal | null {
  * The response names the object as it was rendered, and a ui-spec path names
  * it by selector, so a field is taken only when its selector can only mean that
  * object (codex review): left out, which the backend accepts only for the one
- * object of its kind; the rendered name itself; or, for a new release of a
- * multi-instance template, the release name and "-" in front of it. An index
+ * object of its kind; for a single-instance template, the rendered name
+ * itself; for a multi-instance one, only the name the render gave it,
+ * "<release>-<selector>" — an unprefixed name there may be another object's
+ * renamed one, and an update does not know its release name here. An index
  * cannot be checked against a name, and a name that merely ends the same way
  * may be another object, so those fall back to the template's wording —
  * naming the wrong field is worse than sending the reader to an admin.
@@ -129,7 +139,7 @@ function demoPolicyOf(p: ProblemBody | null): DemoPolicyRefusal | null {
 function formFieldFor(
   fields: UISpec["fields"],
   dp: DemoPolicyRefusal,
-  releasePrefix: string | null,
+  naming: ObjectNaming,
 ): UISpec["fields"][number] | undefined {
   if (dp.kind === "" || dp.field === "") return undefined;
   const target = parseTemplatePath(`${dp.kind}.${dp.field}`);
@@ -138,11 +148,9 @@ function formFieldFor(
   const matches = fields.filter((f) => {
     const p = parseTemplatePath(f.path);
     if (!p || p.kind !== dp.kind || formatPath(p.keys) !== keys) return false;
-    return (
-      p.selector === "" ||
-      p.selector === dp.name ||
-      (releasePrefix !== null && releasePrefix !== "" && dp.name === `${releasePrefix}-${p.selector}`)
-    );
+    if (p.selector === "") return true;
+    if (!naming.multiple) return p.selector === dp.name;
+    return naming.prefix !== null && naming.prefix !== "" && dp.name === `${naming.prefix}-${p.selector}`;
   });
   return matches.length === 1 ? matches[0] : undefined;
 }
@@ -204,7 +212,7 @@ export function DeployClient({
   // limits (#350). "No permission" would send a visitor to an admin for what is
   // often a value in the form, and says nothing about which one.
   const demoPolicyMessage = useCallback(
-    (dp: DemoPolicyRefusal, submitted: boolean, releasePrefix: string | null): string => {
+    (dp: DemoPolicyRefusal, submitted: boolean, naming: ObjectNaming): string => {
       // 86400 seconds means nothing to a reader who does not count in seconds.
       const duration = (seconds: number) =>
         seconds > 0 && seconds % 3600 === 0
@@ -231,7 +239,7 @@ export function DeployClient({
       // A value the form holds is the visitor's to change, and saying which
       // field beats a hedge; anything else is fixed by the template, where
       // "change your input" would blame the one thing that is not wrong.
-      const field = formFieldFor(spec.fields, dp, releasePrefix);
+      const field = formFieldFor(spec.fields, dp, naming);
       if (field && dp.rule === "image-prefix") {
         parts.push(t("errors.demoPolicyFixFieldImage", { label: field.label }));
       } else if (field && dp.rule === "job-backoff-limit" && dp.limit === null) {
@@ -262,13 +270,13 @@ export function DeployClient({
   // account's manifest over the demo's limits (#350). An update gets its own
   // wording, because an existing release cannot move to another area.
   const errorMessageForStatus = useCallback(
-    (status: number, body = "", releasePrefix: string | null = null): string => {
+    (status: number, body = "", naming: ObjectNaming = TEMPLATE_NAMES): string => {
       const problem = parseProblem(body);
       if (status === 400 && problem?.pinned_namespace) return t("errors.templateNamespace");
       if (status === 400 && problem?.template_defect) return t("errors.templateDefect");
       if (status === 403) {
         const dp = demoPolicyOf(problem);
-        return dp ? demoPolicyMessage(dp, true, releasePrefix) : t("errors.forbidden");
+        return dp ? demoPolicyMessage(dp, true, naming) : t("errors.forbidden");
       }
       if (status === 409) {
         const held = resourceConflictOf(problem);
@@ -465,7 +473,8 @@ export function DeployClient({
           const dp = res.status === 403 ? demoPolicyOf(parseProblem(await res.text())) : null;
           if (inflight.current !== ctrl) return;
           setPreviewRefusal(
-            dp ? demoPolicyMessage(dp, false, nameRules.multiple && !updateReleaseId ? meta.name : null) : null,
+            // The backend renders every multi-instance preview as release "preview".
+            dp ? demoPolicyMessage(dp, false, { multiple: nameRules.multiple, prefix: "preview" }) : null,
           );
           return;
         }
@@ -589,8 +598,12 @@ export function DeployClient({
       // released only on failure — see the catch below for why.
       const fail = (status: number, body: string) => {
         setErr({
-          // A new multi-instance release names its objects after itself.
-          message: errorMessageForStatus(status, body, nameRules.multiple && !isUpdate ? meta.name : null),
+          // A multi-instance release names its objects after itself; an
+          // update's release name is not known here.
+          message: errorMessageForStatus(status, body, {
+            multiple: nameRules.multiple,
+            prefix: isUpdate ? null : meta.name,
+          }),
           status,
           body,
           at: new Date().toISOString(),

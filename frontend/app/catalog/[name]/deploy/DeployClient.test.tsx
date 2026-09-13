@@ -520,6 +520,34 @@ describe("DeployClient", () => {
         expect(alert).not.toHaveTextContent(toAdmin);
       });
 
+      // In a multi-instance release every object is renamed: "once" renders as
+      // my-app-once, so a Job[my-app-once] field is another Job (codex review).
+      it("does not take an unprefixed name for a multi-instance object", async () => {
+        const alert = await alertFor(
+          [retries("Job[my-app-once].spec.backoffLimit")],
+          onJob("my-app-once"),
+          { multiple: true, maxLength: 30, letterFirst: true },
+        );
+        expect(alert).not.toHaveTextContent(/재시도 횟수/);
+        expect(alert).toHaveTextContent(toAdmin);
+      });
+
+      // The backend renders a multi-instance preview as release "preview",
+      // whatever the name field holds.
+      it("finds the field in a multi-instance preview", async () => {
+        vi.stubGlobal("fetch", routedFetch({ render: demoPolicy([onJob("preview-once")]) }));
+        render(
+          <DeployClient
+            templateName="batch"
+            version={1}
+            team={null}
+            spec={{ fields: [retries("Job[once].spec.backoffLimit")] }}
+            nameRules={{ multiple: true, maxLength: 30, letterFirst: true }}
+          />,
+        );
+        expect(await screen.findByText(/'재시도 횟수' 값을 2 이하로 바꾸세요/)).toBeInTheDocument();
+      });
+
       it("does not guess that an index means the object refused", async () => {
         // The template may have another Job whose limit is fixed.
         const alert = await alertFor([retries("Job[0].spec.backoffLimit")], onJob("second"));
