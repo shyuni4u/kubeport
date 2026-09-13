@@ -178,6 +178,8 @@ func TestCreateRelease_SaysAClaimInTheWayWouldBeDeletedWithTheRelease(t *testing
 	require.Equal(t, "resource-conflict", title)
 	require.Contains(t, detail, "PersistentVolumeClaim/data-db-0 (storage this release's StatefulSet would take over and delete with it")
 	require.NotContains(t, detail, "not created by kubeport")
+	require.Contains(t, detail, "another namespace", "the way out that keeps both data sets apart")
+	require.Contains(t, detail, "would mount and write to it", "Retain does not stop the mount (security review)")
 	require.Len(t, fk.applied, 0, "nothing is applied")
 }
 

@@ -191,14 +191,19 @@ func conflictDetail(conflicts []k8s.Conflict, update bool) string {
 	if claims > 0 {
 		// Removing what holds them is the wrong first move for storage: a claim
 		// in the way can be data that is in use (security review of #340).
-		claimAdvice := " A claim is storage: it may have been left by an earlier release of this name, or made outside kubeport," +
-			" and deleting it destroys its data. Remove it only if nobody needs it; a template that sets" +
-			" persistentVolumeClaimRetentionPolicy.whenDeleted: Retain deploys without taking it over."
+		// Retain is not a way around the collision: it only stops the delete, and
+		// the release's pods still mount a claim of that name — the leak #340 is
+		// about (security review).
+		claimAdvice := " A claim is storage: it may have been left by an earlier release, be kept by another one, or have been made outside kubeport," +
+			" and deleting it destroys its data. Deploy into another namespace, or remove it only if nobody needs it." +
+			" persistentVolumeClaimRetentionPolicy.whenDeleted: Retain would not delete it, but this release's pods would mount and write to it" +
+			" — use that only if the storage is meant for this release."
 		if update {
 			claimAdvice = " Nothing shows these claims are this release's: storage its StatefulSet was deployed next to," +
-				" a claim waiting at an ordinal a scale-up would add, or its own if the StatefulSet was recreated" +
+				" a claim waiting at an ordinal whose pod does not exist yet, or its own if the StatefulSet was recreated" +
 				" (a restore, kubectl delete --cascade=orphan). Do not delete them to get past this — that destroys data that may be in use." +
-				" To update without taking them over, give this release persistentVolumeClaimRetentionPolicy.whenDeleted: Retain."
+				" To update without taking them over, give this release persistentVolumeClaimRetentionPolicy.whenDeleted: Retain" +
+				" — but its pods still mount a claim at an ordinal they reach, so do not scale up into one that is not this release's storage."
 		}
 		if claims == len(conflicts) {
 			advice = claimAdvice

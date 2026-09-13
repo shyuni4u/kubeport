@@ -306,14 +306,39 @@ func (c *Client) checkClaims(ctx context.Context, namespace string, objs []*unst
 	case err != nil:
 		return fmt.Errorf("check claims: %w", err)
 	}
-	for _, claim := range claims.Items {
+	// The pods of running StatefulSets, by name — listed once, and only if a
+	// claim needs them as evidence.
+	var pods map[string]*unstructured.Unstructured
+	podsReadable := true
+	for i := range claims.Items {
+		claim := &claims.Items[i]
 		for _, t := range check {
 			ordinal, ok := strings.CutPrefix(claim.GetName(), t.prefix)
 			if !ok || !isOrdinal(ordinal) {
 				continue
 			}
-			if sts, isRunning := running[t.set]; isRunning && !creating && evidentlyOwn(&claim, sts, ordinal) {
-				break
+			if sts, isRunning := running[t.set]; isRunning && !creating {
+				if ownedBy(claim, sts) {
+					break
+				}
+				if pods == nil && podsReadable {
+					pods, err = c.podsByName(ctx, namespace)
+					switch {
+					case apierrors.IsForbidden(err):
+						podsReadable = false
+					case err != nil:
+						return fmt.Errorf("check claims: pods: %w", err)
+					}
+				}
+				if !podsReadable {
+					// Nothing can show the claim is sts's, and nothing shows it
+					// is not.
+					out.Unverified = append(out.Unverified, ObjectRef{Kind: "PersistentVolumeClaim", Name: claim.GetName(), Namespace: namespace})
+					break
+				}
+				if mountedBy(claim, sts, pods[sts.GetName()+"-"+ordinal]) {
+					break
+				}
 			}
 			out.Conflicts = append(out.Conflicts, Conflict{
 				ObjectRef: ObjectRef{Kind: "PersistentVolumeClaim", Name: claim.GetName(), Namespace: namespace},
@@ -325,43 +350,68 @@ func (c *Client) checkClaims(ctx context.Context, namespace string, objs []*unst
 	return nil
 }
 
-// evidentlyOwn reports whether claim, which matches a claim template of the
-// release's running StatefulSet sts at ordinal, is shown to be sts's own.
+// A claim of a StatefulSet the release already runs is its own only on
+// evidence, and there are two kinds.
 //
-// Either sts already owns it — its controller does under Delete, and a claim a
-// scale-down left keeps that — or a pod of sts mounts it: its ordinal is one of
-// sts's current replicas, and it is not older than sts. The controller makes a
-// pod's claim once sts exists, so an older claim at that ordinal is one sts was
-// deployed next to.
+// ownedBy: sts already owns it. Its controller sets that under Delete, and a
+// claim a scale-down left keeps it.
 //
-// Creation time alone is not enough (codex review): a claim made after sts at
-// an ordinal beyond its replicas is mounted by nothing yet, and a scale-up
-// would take it.
-func evidentlyOwn(claim, sts *unstructured.Unstructured, ordinal string) bool {
-	if uid := sts.GetUID(); uid != "" {
-		for _, ref := range claim.GetOwnerReferences() {
-			if ref.UID == uid {
-				return true
-			}
+// mountedBy: sts's pod at that ordinal mounts it, and the claim is not older
+// than sts. The controller makes a pod's claim once sts exists, so an older
+// claim is one sts was deployed next to — under Retain, or before the default —
+// which turning Delete on would take (security review).
+//
+// Neither creation order nor sts's replica count is evidence (codex review): a
+// claim made after sts, at an ordinal whose pod does not exist yet — beyond the
+// replicas, or held back behind a pod that never became ready — is mounted by
+// nothing, and the controller would take it once it reaches that ordinal.
+func ownedBy(obj, owner *unstructured.Unstructured) bool {
+	uid := owner.GetUID()
+	if uid == "" {
+		return false
+	}
+	for _, ref := range obj.GetOwnerReferences() {
+		if ref.UID == uid {
+			return true
 		}
 	}
-	if len(ordinal) > 18 {
-		return false // past any replica count, and past int64
+	return false
+}
+
+func mountedBy(claim, sts, pod *unstructured.Unstructured) bool {
+	if pod == nil || !ownedBy(pod, sts) {
+		return false
 	}
-	var n int64
-	for _, r := range ordinal {
-		n = n*10 + int64(r-'0')
+	volumes, _, _ := unstructured.NestedSlice(pod.Object, "spec", "volumes")
+	mounted := false
+	for _, v := range volumes {
+		m, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, _, _ := unstructured.NestedString(m, "persistentVolumeClaim", "claimName"); name == claim.GetName() {
+			mounted = true
+			break
+		}
 	}
-	start, _, _ := unstructured.NestedInt64(sts.Object, "spec", "ordinals", "start")
-	replicas, found, _ := unstructured.NestedInt64(sts.Object, "spec", "replicas")
-	if !found {
-		replicas = 1
-	}
-	if n < start || n >= start+replicas {
+	if !mounted {
 		return false
 	}
 	made, since := claim.GetCreationTimestamp(), sts.GetCreationTimestamp()
 	return !made.Before(&since)
+}
+
+func (c *Client) podsByName(ctx context.Context, namespace string) (map[string]*unstructured.Unstructured, error) {
+	list, err := c.dyn.Resource(schema.GroupVersionResource{Version: "v1", Resource: "pods"}).
+		Namespace(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	byName := make(map[string]*unstructured.Unstructured, len(list.Items))
+	for i := range list.Items {
+		byName[list.Items[i].GetName()] = &list.Items[i]
+	}
+	return byName, nil
 }
 
 // claimTemplate is one claim template of a StatefulSet whose claims are
