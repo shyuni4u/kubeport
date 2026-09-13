@@ -133,4 +133,74 @@ describe("LandingCompare", () => {
       expect(yamlLines()).toContain("MODE: fast");
     });
   });
+
+  // #341 — an optional string with a default, emptied, is no value too (#338):
+  // the deploy form leaves the key out and render fills the default, and the
+  // hint under the box says so. The pitch has to show that default, not "".
+  describe("an optional text box with a default, emptied", () => {
+    const yamlLines = () =>
+      Array.from(screen.getByTestId("landing-yaml").children).map((row) =>
+        (row.lastElementChild?.textContent ?? "").trim(),
+      );
+    const renderWith = (resources: string, spec: string) =>
+      render(
+        <NextIntlClientProvider locale="ko" messages={ko}>
+          <LandingCompare resourcesYaml={resources} uiSpecYaml={spec} />
+        </NextIntlClientProvider>,
+      );
+
+    it("shows the default welcome text next to the 'uses the default' hint", async () => {
+      const user = userEvent.setup();
+      renderCompare();
+      const input = screen.getByRole("textbox", { name: /환영 문구/ });
+      await user.clear(input);
+      await user.type(input, "a");
+      expect(yamlLines()).toContain('value: "a"');
+
+      await user.clear(input);
+      expect(screen.getByText(/비워 두면 기본값\(Hello from kubeport\)을 씁니다/)).toBeInTheDocument();
+      expect(yamlLines()).toContain('value: "Hello from kubeport"');
+      expect(yamlLines()).not.toContain('value: ""');
+    });
+
+    // The ui-spec default, not the template's literal, as render does.
+    const resources = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app\ndata:\n  GREETING: literal\n";
+
+    it("applies the ui-spec default rather than the template's literal", async () => {
+      const user = userEvent.setup();
+      renderWith(
+        resources,
+        ["fields:", "  - path: ConfigMap[app].data.GREETING", "    label: Greeting", "    type: string", '    default: "hi"'].join("\n"),
+      );
+      const input = screen.getByRole("textbox", { name: /Greeting/ });
+      await user.type(input, "x");
+      expect(yamlLines()).toContain("GREETING: hix");
+      await user.clear(input);
+      expect(yamlLines()).toContain("GREETING: hi");
+    });
+
+    it("keeps an empty value on a field with no default", async () => {
+      const user = userEvent.setup();
+      renderWith(
+        resources,
+        ["fields:", "  - path: ConfigMap[app].data.GREETING", "    label: Greeting", "    type: string"].join("\n"),
+      );
+      const input = screen.getByRole("textbox", { name: /Greeting/ });
+      await user.type(input, "x");
+      await user.clear(input);
+      expect(yamlLines()).toContain('GREETING: ""');
+    });
+
+    it("keeps a value of only spaces as typed, as the deploy form sends it", async () => {
+      const user = userEvent.setup();
+      renderWith(
+        resources,
+        ["fields:", "  - path: ConfigMap[app].data.GREETING", "    label: Greeting", "    type: string", '    default: "hi"'].join("\n"),
+      );
+      const input = screen.getByRole("textbox", { name: /Greeting/ });
+      await user.clear(input);
+      await user.type(input, "   ");
+      expect(yamlLines()).toContain('GREETING: "   "');
+    });
+  });
 });
