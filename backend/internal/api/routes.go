@@ -37,6 +37,9 @@ type K8sApplier interface {
 	// ReleasePresence reports whether a release's rendered objects are still
 	// in the cluster, for a release that has no pods (#33).
 	ReleasePresence(ctx context.Context, ref k8s.ReleaseRef, yaml []byte) (k8s.Presence, error)
+	// StorageOnDelete says what deleting the release would do to its storage,
+	// for the delete confirmation (#340).
+	StorageOnDelete(ctx context.Context, ref k8s.ReleaseRef) (k8s.Storage, error)
 }
 
 // K8sClientFactory creates per-request k8s clients using the caller's token.

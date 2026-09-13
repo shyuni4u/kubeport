@@ -177,14 +177,13 @@ func MVPResourceNames() []string {
 // Job's pods carry no id (its pod template is immutable), so an orphaned pod
 // would outlive the release under its name alone.
 func (c *Client) DeleteByRelease(ctx context.Context, ref ReleaseRef) error {
-	namespace, release, releaseUID := ref.Namespace, ref.Name, ref.UID
-	if releaseUID == "" {
+	namespace := ref.Namespace
+	if ref.UID == "" {
 		return errors.New("delete by release: no release id")
 	}
-	selectors := []string{ReleaseLabel + "=" + release + "," + ReleaseUIDLabel + "=" + releaseUID}
-	if ref.NameOnly {
-		selectors = append(selectors, ReleaseLabel+"="+release+",!"+ReleaseUIDLabel)
-	}
+	// Shared with StorageOnDelete, whose warning has to be about exactly what
+	// this deletes (#340).
+	selectors := releaseSelectors(ref)
 	background := metav1.DeletePropagationBackground
 	opts := metav1.DeleteOptions{PropagationPolicy: &background}
 	errs := make([]error, 0, len(mvpResources))
