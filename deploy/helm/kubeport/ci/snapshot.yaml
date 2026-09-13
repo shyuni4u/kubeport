@@ -72,6 +72,10 @@ spec:
     services: "5"
     services.loadbalancers: "0"
     count/ingresses.networking.k8s.io: "0"
+    # A visitor's StatefulSet claims disk on the node (#340). Without a cap its
+    # claims can fill it for every other visitor until the next reset.
+    requests.storage: "5Gi"
+    persistentvolumeclaims: "5"
 ---
 # Source: kubeport/templates/demo-namespace.yaml
 apiVersion: v1
@@ -1520,7 +1524,19 @@ spec:
               image: "alpine/k8s:1.31.9"
               command: ["sh", "-c"]
               args:
-                - kubectl -n demo delete deploy,sts,ds,job,cronjob,svc,cm,secret,pod --all --wait=true --ignore-not-found
+                # pvc too, or a claim a visitor's StatefulSet made outlives the
+                # reset and the next visitor's release of that name mounts its
+                # data (#340). A claim still in use stays Terminating until its
+                # pods are gone; nothing can mount it meanwhile, and a new
+                # release gets a new claim once it is.
+                #
+                # No wait. The seed re-creates only objects without finalizers,
+                # which are gone when delete returns, so it needs none. A wait
+                # would only add a way to fail this init container after the
+                # deletes and before the seed — the emptied, unseeded demo of
+                # #105. (It never waited anyway: the demo-reset Role has no
+                # watch, and kubectl skips a wait it is refused.)
+                - kubectl -n demo delete deploy,sts,ds,job,cronjob,svc,cm,secret,pod,pvc --all --wait=false --ignore-not-found
               env:
                 # kubectl writes its discovery cache under $HOME/.kube/cache;
                 # readOnlyRootFilesystem forces it into the tmp emptyDir below.
