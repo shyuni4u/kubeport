@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithIntl as render } from "@/tests/intl-test-utils";
 
 const replaceMock = vi.fn();
@@ -28,9 +28,23 @@ describe("ReleaseAppliedNotice", () => {
     search = "applied=1";
     render(<ReleaseAppliedNotice />);
 
-    const notice = screen.getByRole("status");
-    expect(notice).toHaveTextContent("바뀐 설정을 적용했습니다");
-    expect(notice).toHaveTextContent("상태가 잠시 바뀔 수 있습니다");
+    expect(screen.getByText("바뀐 설정을 적용했습니다.")).toBeInTheDocument();
+    expect(screen.getByText(/상태가 잠시 바뀔 수 있습니다/)).toBeInTheDocument();
+  });
+
+  // A status region that appears together with its text is often not read
+  // out. The region is there, empty, from the first render, and the sentence
+  // arrives in it afterwards — a change screen readers do announce.
+  it("fills an already-present live region after mount, so it is announced", async () => {
+    search = "applied=1";
+    render(<ReleaseAppliedNotice />);
+
+    const region = screen.getByRole("status");
+    expect(region).toHaveAttribute("aria-live", "polite");
+    expect(region).toBeEmptyDOMElement();
+
+    await waitFor(() => expect(region).toHaveTextContent("바뀐 설정을 적용했습니다."));
+    expect(region).toHaveTextContent("상태가 잠시 바뀔 수 있습니다");
   });
 
   // Once: a reload, a shared link or going back must not announce it again.
@@ -40,10 +54,10 @@ describe("ReleaseAppliedNotice", () => {
     expect(replaceMock).toHaveBeenCalledWith("/releases/rel-1", { scroll: false });
 
     replaceMock.mockReset();
-    search = "applied=1&tab=x";
+    search = "applied=1&instance=web-1";
     pathname = "/releases/rel-1/logs";
     render(<ReleaseAppliedNotice />);
-    expect(replaceMock).toHaveBeenCalledWith("/releases/rel-1/logs?tab=x", { scroll: false });
+    expect(replaceMock).toHaveBeenCalledWith("/releases/rel-1/logs?instance=web-1", { scroll: false });
   });
 
   it("stays visible after the query is gone, until dismissed", () => {
@@ -52,16 +66,18 @@ describe("ReleaseAppliedNotice", () => {
 
     search = ""; // what router.replace leads to
     rerender(<ReleaseAppliedNotice />);
-    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.getByText("바뀐 설정을 적용했습니다.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "닫기" }));
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("button", { name: "닫기" })).toBeNull();
   });
 
-  it("shows nothing and leaves the URL alone on a plain visit", () => {
+  it("shows nothing, announces nothing and leaves the URL alone on a plain visit", async () => {
     render(<ReleaseAppliedNotice />);
 
-    expect(screen.queryByRole("status")).toBeNull();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByText("바뀐 설정을 적용했습니다.")).toBeNull();
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
@@ -69,7 +85,7 @@ describe("ReleaseAppliedNotice", () => {
     search = "applied=yes";
     render(<ReleaseAppliedNotice />);
 
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText("바뀐 설정을 적용했습니다.")).toBeNull();
     expect(replaceMock).not.toHaveBeenCalled();
   });
 });

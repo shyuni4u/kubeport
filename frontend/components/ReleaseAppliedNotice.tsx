@@ -21,9 +21,8 @@ export const APPLIED_PARAM = "applied";
  * so not even the chip moved. Nothing said the change was applied, and the
  * natural reaction was to submit the same form again.
  *
- * The notice is non-blocking (`role="status"`) and says the status may change
- * for a moment while pods restart with the new settings, since that is what
- * the reader sees next.
+ * The notice is non-blocking and says the status may change for a moment while
+ * pods restart with the new settings, since that is what the reader sees next.
  *
  * It shows once: the query is taken off the URL straight away, so reloading,
  * sharing or going back to this address does not announce the update again.
@@ -37,7 +36,27 @@ export function ReleaseAppliedNotice() {
   const pathname = usePathname();
   const router = useRouter();
   const arrived = searchParams.get(APPLIED_PARAM) === "1";
+  // Fixed at mount: the query is about to be taken off the URL, and nothing
+  // here should change when it is.
+  const [arrivedAtMount] = useState(arrived);
   const [shown, setShown] = useState(arrived);
+  // What the live region says. It starts empty and is filled after mount: a
+  // status region inserted together with its text is often not announced —
+  // screen readers speak changes to a region they already know about — and
+  // arrival mounts this layout fresh, so the region and the sentence would
+  // always appear in the same render.
+  const [announcement, setAnnouncement] = useState("");
+  // A string, so the effect below depends on the words and not on the
+  // translator function's identity.
+  const message = `${t("title")} ${t("body")}`;
+
+  // Keyed on the mount-time value only, so taking the query off the URL (or a
+  // refresh re-rendering this) cannot cancel the announcement before it lands.
+  useEffect(() => {
+    if (!arrivedAtMount) return;
+    const fill = setTimeout(() => setAnnouncement(message), 0);
+    return () => clearTimeout(fill);
+  }, [arrivedAtMount, message]);
 
   useEffect(() => {
     if (!arrived) return;
@@ -47,24 +66,27 @@ export function ReleaseAppliedNotice() {
     router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
   }, [arrived, searchParams, pathname, router]);
 
-  if (!shown) return null;
   return (
-    <div
-      role="status"
-      className="flex items-start gap-3 rounded-xl border border-emerald-300/60 bg-emerald-50 p-4 dark:border-emerald-500/40 dark:bg-emerald-500/10"
-    >
-      <CheckCircle2 aria-hidden className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-      <div className="flex-1 space-y-1">
-        <p className="font-medium">{t("title")}</p>
-        <p className="text-sm text-muted-foreground">{t("body")}</p>
+    <>
+      <div role="status" aria-live="polite" className="sr-only">
+        {announcement}
       </div>
-      <button
-        type="button"
-        className="rounded px-2 py-0.5 text-sm hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
-        onClick={() => setShown(false)}
-      >
-        {t("dismiss")}
-      </button>
-    </div>
+      {shown && (
+        <div className="flex items-start gap-3 rounded-xl border border-emerald-300/60 bg-emerald-50 p-4 dark:border-emerald-500/40 dark:bg-emerald-500/10">
+          <CheckCircle2 aria-hidden className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <div className="flex-1 space-y-1">
+            <p className="font-medium">{t("title")}</p>
+            <p className="text-sm text-muted-foreground">{t("body")}</p>
+          </div>
+          <button
+            type="button"
+            className="rounded px-2 py-0.5 text-sm hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
+            onClick={() => setShown(false)}
+          >
+            {t("dismiss")}
+          </button>
+        </div>
+      )}
+    </>
   );
 }
