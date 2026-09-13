@@ -1,6 +1,11 @@
 package template
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+
+	"k8s.io/apimachinery/pkg/util/validation"
+)
 
 // A template says, in its ui-spec, how many releases of it one namespace holds
 // (#190). Single — also what an absent key means — renders the objects under
@@ -14,10 +19,44 @@ const (
 	InstancesMultiple = "multiple"
 )
 
-// MultiInstanceNameLimit is the longest name the rewrite may give an object. A
-// Service's name is a DNS-1035 label, and a workload's name reappears in its
-// pods' names with a suffix, so 63 is what holds for every kind renamed.
+// MultiInstanceNameLimit is the longest name the rewrite gives an object of
+// most kinds; nameLimit has the exceptions. A Service's name is a DNS-1035
+// label and a workload's name reappears in its pods', so 63 holds for them,
+// and kubeport keeps the rest to it too rather than the 253 a DNS-1123
+// subdomain allows.
 const MultiInstanceNameLimit = 63
+
+// cronJobNameLimit is 52: the controller appends an 11-character suffix to
+// name each Job, which must still fit a label.
+const cronJobNameLimit = 52
+
+func nameLimit(kind string) int {
+	if kind == "CronJob" {
+		return cronJobNameLimit
+	}
+	return MultiInstanceNameLimit
+}
+
+// nameProblems is what the apiserver would say about name for kind, checked
+// before apply so a release name that makes a valid template's names invalid
+// is a 400 naming the fix, not a failed apply. The release name's own rules
+// are looser — it may start with a digit or hold dots — and a Service's name
+// may do neither.
+func nameProblems(kind, name string) []string {
+	var probs []string
+	switch kind {
+	case "Service":
+		probs = validation.IsDNS1035Label(name)
+	case "Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "Pod":
+		probs = validation.IsDNS1123Label(name)
+	default:
+		probs = validation.IsDNS1123Subdomain(name)
+	}
+	if limit := nameLimit(kind); len(name) > limit {
+		probs = append(probs, fmt.Sprintf("must be no more than %d characters", limit))
+	}
+	return probs
+}
 
 // MultiInstanceMaxObjectName is the longest object name a multi-instance
 // template may use, so a release name of at least 32 characters still fits.
@@ -76,9 +115,9 @@ func renameForRelease(docs []map[string]any, release string) error {
 			continue
 		}
 		renamed := release + "-" + old
-		if len(renamed) > MultiInstanceNameLimit {
-			return fmt.Errorf("%s %q would be named %q, longer than %d characters; use a release name of at most %d characters",
-				kind, old, renamed, MultiInstanceNameLimit, MultiInstanceNameLimit-len(old)-1)
+		if probs := nameProblems(kind, renamed); len(probs) > 0 {
+			return fmt.Errorf("%s %q would be named %q, which Kubernetes refuses (%s); use a release name that starts with a lowercase letter, holds only lowercase letters, digits and '-', and is at most %d characters",
+				kind, old, renamed, strings.Join(probs, "; "), nameLimit(kind)-len(old)-1)
 		}
 		if names[kind] == nil {
 			names[kind] = map[string]string{}

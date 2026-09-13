@@ -192,7 +192,31 @@ func TestRender_MultipleInstancesRefusesANameThatWouldBeTooLong(t *testing.T) {
 	_, err := template.Render(multiResources, "instances: multiple\nfields: []\n", json.RawMessage(`{}`),
 		template.Labels{ReleaseName: release, ReleaseID: "x"})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "longer than 63 characters")
+	require.Contains(t, err.Error(), "no more than 63 characters")
+}
+
+// codex review: a release name the API accepts can still make a name the
+// apiserver refuses. A Service name is a DNS-1035 label, so it cannot start
+// with a digit or hold a dot; a CronJob's is capped at 52, which leaves room for
+// the suffix of the Jobs it creates. Both are refused at render, not at apply.
+func TestRender_MultipleInstancesChecksEachKindsNamingRules(t *testing.T) {
+	spec := "instances: multiple\nfields: []\n"
+
+	for _, release := range []string{"1demo", "demo.one"} {
+		_, err := template.Render(multiResources, spec, json.RawMessage(`{}`), template.Labels{ReleaseName: release, ReleaseID: "x"})
+		require.Errorf(t, err, "release %q", release)
+		require.Contains(t, err.Error(), "Kubernetes refuses", release)
+	}
+
+	cron := "apiVersion: batch/v1\nkind: CronJob\nmetadata: { name: " + strings.Repeat("c", 30) + " }\n" +
+		"spec:\n  schedule: \"0 3 * * *\"\n  jobTemplate: { spec: { template: { spec: { restartPolicy: Never, containers: [{ name: job, image: busybox }] } } } }\n"
+	require.NoError(t, template.ValidateSpec(cron, spec), "a 30-character name is allowed at save")
+	_, err := template.Render(cron, spec, json.RawMessage(`{}`), template.Labels{ReleaseName: strings.Repeat("r", 22), ReleaseID: "x"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no more than 52 characters")
+	require.Contains(t, err.Error(), "at most 21 characters", "the suggested release length follows the CronJob limit")
+	_, err = template.Render(cron, spec, json.RawMessage(`{}`), template.Labels{ReleaseName: strings.Repeat("r", 21), ReleaseID: "x"})
+	require.NoError(t, err)
 }
 
 func TestRender_MultipleInstancesNeedsAReleaseName(t *testing.T) {
