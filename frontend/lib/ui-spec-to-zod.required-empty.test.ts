@@ -11,8 +11,9 @@ import { REDACTED_SECRET, schemaFromUISpec, type UISpecField } from "./ui-spec-t
 // - "   " is still a value. The API's `required` is a presence check and a
 //   string field takes any string (backend template/empty_string_test.go);
 //   the form does not refuse what the API accepts.
-// - an optional field takes "" as "", exactly as before. The API writes it
-//   over the ui-spec default (same test file), which is out of scope here.
+// - an optional field with no default takes "" as "", exactly as before. One
+//   with a default leaves "" out so the API fills the default (#334,
+//   ui-spec-to-zod.optional-default.test.ts); the fields below have none.
 // - a minLength of 1 or more already refuses "" with its own message, which
 //   stays the one shown.
 

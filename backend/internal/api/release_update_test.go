@@ -182,6 +182,35 @@ func TestUpdateRelease_Success(t *testing.T) {
 	require.Equal(t, relName, detail["name"])
 }
 
+// TestUpdateRelease_OmittedKeyTakesTheDefault: an update renders from the
+// values it is sent, not merged over the stored ones, so a key it leaves out
+// gets the ui-spec default exactly as on create. The deploy form relies on
+// this for an emptied optional text box that has a default (#334): it leaves
+// the key out, and the stored value is replaced by the default.
+func TestUpdateRelease_OmittedKeyTakesTheDefault(t *testing.T) {
+	r, fk := newTestRouterWithK8s(t)
+	clusterName := seedCluster(t, r)
+	tplName := seedPublishedTemplate(t, r) // replicas: default 1
+	id := createRelease(t, r, tplName, clusterName, "update-omit-"+randSuffix(), map[string]any{
+		"Deployment[web].spec.replicas": 5,
+	})
+	require.Contains(t, string(fk.applied[0]), "replicas: 5")
+
+	body, _ := json.Marshal(map[string]any{"version": 1, "values": map[string]any{}})
+	w := do(t, r, http.MethodPut, "/v1/releases/"+id, bytes.NewReader(body))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Len(t, fk.applied, 2)
+	require.Contains(t, string(fk.applied[1]), "replicas: 1", "the default, not the stored 5")
+	require.NotContains(t, string(fk.applied[1]), "replicas: 5")
+
+	w = do(t, r, http.MethodGet, "/v1/releases/"+id, nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	var detail map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &detail))
+	require.Contains(t, detail["rendered_yaml"], "replicas: 1")
+	require.NotContains(t, w.Body.String(), `"Deployment[web].spec.replicas"`, "the stored values no longer hold the key")
+}
+
 // TestUpdateRelease_IgnoresImmutableFields: request body may include
 // template/cluster/namespace/name keys, but they're ignored (not in the
 // request struct). Confirm the release's template/cluster/namespace/name

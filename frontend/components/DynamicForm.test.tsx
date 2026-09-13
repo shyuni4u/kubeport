@@ -1192,6 +1192,176 @@ describe("DynamicForm clearing a required text box", () => {
   }
 });
 
+// #334 — an optional text box with a ui-spec default, typed in and emptied,
+// sent "", which the API writes over the default. Emptied now means the key is
+// left out, so the API fills the default, and the form says so under the box.
+describe("DynamicForm clearing an optional text box that has a default", () => {
+  const image = "Deployment[web].spec.template.spec.containers[0].image";
+  const specFor = (type: "string" | "autocomplete", extra: Record<string, unknown> = {}): UISpec => ({
+    fields: [
+      {
+        ...(type === "string"
+          ? { path: image, label: "이미지", type }
+          : { path: image, label: "이미지", type, values: ["nginx:1.25", "nginx:1.27"] }),
+        ...extra,
+      } as UISpec["fields"][number],
+    ],
+  });
+  const usesDefault = (value: string) => ko.form.emptyUsesDefault.value.replace("{value}", value);
+  /** The values as they go on the wire: JSON leaves out a key whose value is undefined. */
+  const wire = (v: unknown) => JSON.stringify(v);
+  const lastParsed = (m: ReturnType<typeof vi.fn>) => m.mock.lastCall?.[0] as { success: boolean; values?: unknown };
+
+  for (const type of ["string", "autocomplete"] as const) {
+    it(`${type}: emptied, leaves the key out of submit and the parsed values, and says the default is used`, async () => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn();
+      const onParsedChange = vi.fn();
+      renderWithIntl(
+        <DynamicForm spec={specFor(type, { default: "nginx:1.25" })} onSubmit={onSubmit} onParsedChange={onParsedChange} />,
+      );
+      const input = screen.getByLabelText(/이미지/);
+      expect(input).toHaveValue("nginx:1.25");
+      expect(screen.queryByText(usesDefault("nginx:1.25"))).toBeNull();
+
+      await user.clear(input);
+      await user.type(input, "custom");
+      expect(wire(lastParsed(onParsedChange).values)).toBe(wire({ [image]: "custom" }));
+
+      await user.clear(input);
+      expect(input).toHaveValue("");
+      expect(screen.getByText(usesDefault("nginx:1.25"))).toBeInTheDocument();
+      expect(lastParsed(onParsedChange).success).toBe(true);
+      expect(wire(lastParsed(onParsedChange).values)).toBe("{}");
+      expect(screen.queryByText(ko.form.validation.required)).toBeNull();
+
+      await user.click(screen.getByRole("button", { name: /배포하기/ }));
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect(wire(onSubmit.mock.calls[0][0])).toBe("{}");
+    });
+
+    it(`${type}: "   " is a value, sent as it is, with no default hint`, async () => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn();
+      const onParsedChange = vi.fn();
+      renderWithIntl(
+        <DynamicForm spec={specFor(type, { default: "nginx:1.25" })} onSubmit={onSubmit} onParsedChange={onParsedChange} />,
+      );
+      const input = screen.getByLabelText(/이미지/);
+      await user.clear(input);
+      await user.type(input, "   ");
+      expect(screen.queryByText(usesDefault("nginx:1.25"))).toBeNull();
+      expect(wire(lastParsed(onParsedChange).values)).toBe(wire({ [image]: "   " }));
+      await user.click(screen.getByRole("button", { name: /배포하기/ }));
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ [image]: "   " }));
+    });
+
+    it(`${type}: with no default, emptied still sends "" and says nothing about a default`, async () => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn();
+      renderWithIntl(<DynamicForm spec={specFor(type)} onSubmit={onSubmit} />);
+      const input = screen.getByLabelText(/이미지/);
+      await user.type(input, "custom");
+      await user.clear(input);
+      expect(screen.queryByText(/기본값/)).toBeNull();
+      await user.click(screen.getByRole("button", { name: /배포하기/ }));
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect(wire(onSubmit.mock.calls[0][0])).toBe(wire({ [image]: "" }));
+    });
+
+    it(`${type}: required with a default, emptied is still required and has no default hint`, async () => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn();
+      renderWithIntl(<DynamicForm spec={specFor(type, { default: "nginx:1.25", required: true })} onSubmit={onSubmit} />);
+      const input = screen.getByLabelText(/이미지/);
+      await user.clear(input);
+      expect(await screen.findByText(ko.form.validation.required)).toBeInTheDocument();
+      expect(screen.queryByText(usesDefault("nginx:1.25"))).toBeNull();
+      await user.click(screen.getByRole("button", { name: /배포하기/ }));
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it(`${type}: an update emptied from its stored value leaves the key out, so the default replaces it`, async () => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn();
+      renderWithIntl(
+        <DynamicForm
+          spec={specFor(type, { default: "nginx:1.25" })}
+          initialValues={{ [image]: "registry.example/app:7" }}
+          submitLabel="업데이트"
+          onSubmit={onSubmit}
+        />,
+      );
+      const input = screen.getByLabelText(/이미지/);
+      expect(input).toHaveValue("registry.example/app:7");
+      await user.clear(input);
+      expect(screen.getByText(usesDefault("nginx:1.25"))).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "업데이트" }));
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect(wire(onSubmit.mock.calls[0][0])).toBe("{}");
+    });
+  }
+
+  it("says an update's stored null uses the default too, as it leaves the key out (#316)", () => {
+    renderWithIntl(
+      <DynamicForm
+        spec={specFor("string", { default: "nginx:1.25" })}
+        initialValues={{ [image]: null }}
+        onSubmit={() => {}}
+      />,
+    );
+    expect(screen.getByLabelText(/이미지/)).toHaveValue("");
+    expect(screen.getByText(usesDefault("nginx:1.25"))).toBeInTheDocument();
+  });
+
+  it("does not print a Secret's default, and says only that the default is used", async () => {
+    const user = userEvent.setup();
+    const password = "Secret[app].stringData.PASSWORD";
+    const onSubmit = vi.fn();
+    renderWithIntl(
+      <DynamicForm
+        spec={{ fields: [{ path: password, label: "비밀번호", type: "string", default: "changeme" }] }}
+        onSubmit={onSubmit}
+      />,
+    );
+    await user.clear(screen.getByLabelText(/비밀번호/));
+    expect(screen.getByText(ko.form.emptyUsesDefault.hidden)).toBeInTheDocument();
+    expect(screen.queryByText(/changeme/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(wire(onSubmit.mock.calls[0][0])).toBe("{}");
+  });
+
+  it("keeps a kept Secret with a default required once replaced, with no default hint", async () => {
+    const user = userEvent.setup();
+    const password = "Secret[app].stringData.PASSWORD";
+    const onSubmit = vi.fn();
+    renderWithIntl(
+      <DynamicForm
+        spec={{ fields: [{ path: password, label: "비밀번호", type: "string", default: "changeme" }] }}
+        initialValues={{ [password]: REDACTED_SECRET }}
+        submitLabel="업데이트"
+        onSubmit={onSubmit}
+      />,
+    );
+    expect(screen.queryByText(ko.form.emptyUsesDefault.hidden)).toBeNull();
+    await user.click(screen.getByRole("button", { name: /새 값 입력/ }));
+    expect(screen.queryByText(ko.form.emptyUsesDefault.hidden)).toBeNull();
+    expect(screen.queryByText(/기본값/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "업데이트" }));
+    expect(await screen.findByText(ko.form.validation.required)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("leaves a ui-spec default of \"\" without a hint, which would name nothing", async () => {
+    const user = userEvent.setup();
+    renderWithIntl(<DynamicForm spec={specFor("string", { default: "" })} onSubmit={() => {}} />);
+    await user.type(screen.getByLabelText(/이미지/), "x");
+    await user.clear(screen.getByLabelText(/이미지/));
+    expect(screen.queryByText(/기본값/)).toBeNull();
+  });
+});
+
 // #323 — pressing the picked item of an enum toggle again stored `undefined`,
 // and react-hook-form reads an undefined field back from its default values
 // (the same root as #321). The ui-spec default still looked pressed while the

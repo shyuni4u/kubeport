@@ -324,6 +324,39 @@ function optionalInput(v: unknown): unknown {
 }
 
 /**
+ * Whether an emptied box on this field goes out as no value (#334).
+ *
+ * An optional string or autocomplete with a ui-spec default. A text box
+ * emptied holds "", and render writes a present "" over the default where an
+ * omitted key takes it (backend template/empty_string_test.go), so clearing a
+ * box that started on the default left the release with nothing in its place.
+ * For these fields "" is left out instead, and the API fills the default.
+ *
+ * Only these. With no default, "" is the only way to send an empty value, and
+ * leaving it out would render the template's own text instead. A required
+ * field refuses "" as missing (#331). The caller rules out kept and re-entered
+ * Secrets, which the form makes required whatever the ui-spec says (#288): for
+ * them an omitted key would put the default over the running Secret.
+ */
+export function emptyTakesDefault(f: UISpecField): boolean {
+  return (
+    (f.type === "string" || f.type === "autocomplete") &&
+    !f.required &&
+    f.default !== undefined &&
+    f.default !== null
+  );
+}
+
+/**
+ * optionalInput, and "" as no value too, for a field emptyTakesDefault picks.
+ * Exactly "": "   " is something typed, which the API takes as a value (#331),
+ * so it goes out as it is rather than being swapped for the default unseen.
+ */
+function emptyToDefaultInput(v: unknown): unknown {
+  return v === null || v === "" ? undefined : v;
+}
+
+/**
  * Never throws. A field it cannot describe is left out of the schema instead.
  *
  * It used to do neither. `let zs: ZodTypeAny;` had no initialiser and the
@@ -445,7 +478,13 @@ export function schemaFromUISpec(
     // sent although nobody touched it. As for integers, the optional sits
     // inside the preprocess. A required field is left as it was — kept and
     // re-entered Secrets among them — so null is still refused as missing.
-    shape[f.path] = required ? zs : z.preprocess(optionalInput, zs.optional());
+    //
+    // An emptied box on an optional text field with a default is no value
+    // too (#334), so the API fills the default. Here, in the one schema, so
+    // submit and the deploy form's preview both leave the key out (#322).
+    // `required` already covers kept and re-entered Secrets.
+    const input = emptyTakesDefault(f) ? emptyToDefaultInput : optionalInput;
+    shape[f.path] = required ? zs : z.preprocess(input, zs.optional());
   }
   return z.object(shape);
 }
