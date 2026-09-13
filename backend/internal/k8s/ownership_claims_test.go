@@ -80,15 +80,56 @@ func TestCheckApply_OnUpdateTheStatefulSetsClaimsAreItsOwn(t *testing.T) {
 		stamped("apps/v1", "StatefulSet", "demo", "db", "db", uidMine),
 		existing("v1", claimKind, "demo", "data-db-0", ""),
 	)
-	listed := false
-	dyn.PrependReactor("list", "persistentvolumeclaims", func(clientgotesting.Action) (bool, runtime.Object, error) {
-		listed = true
-		return false, nil, nil
-	})
 	check, err := k8s.NewForTest(dyn).CheckApply(context.Background(), relRef("db"), []byte(dbStatefulSet), false)
 	require.NoError(t, err)
 	require.Empty(t, check.Conflicts)
-	require.False(t, listed, "an update does not look for them")
+}
+
+// security review of #340: a StatefulSet the release already runs can still
+// take a claim it never made — one that was there when it was deployed with
+// Retain, or before this default existed, and that it has been mounting. Its
+// controller makes its claims after it exists, so a claim older than the
+// StatefulSet is not its own.
+func TestCheckApply_OnUpdateAClaimOlderThanTheReleasesStatefulSetIsAConflict(t *testing.T) {
+	sts := stamped("apps/v1", "StatefulSet", "demo", "db", "db", uidMine)
+	sts.Object["metadata"].(map[string]any)["creationTimestamp"] = "2026-09-02T00:00:00Z"
+	before := existing("v1", claimKind, "demo", "data-db-0", "")
+	before.Object["metadata"].(map[string]any)["creationTimestamp"] = "2026-09-01T00:00:00Z"
+	after := existing("v1", claimKind, "demo", "data-db-1", "")
+	after.Object["metadata"].(map[string]any)["creationTimestamp"] = "2026-09-03T00:00:00Z"
+	same := existing("v1", claimKind, "demo", "data-db-2", "")
+	same.Object["metadata"].(map[string]any)["creationTimestamp"] = "2026-09-02T00:00:00Z"
+
+	check, err := k8s.NewForTest(cluster(sts, before, after, same)).
+		CheckApply(context.Background(), relRef("db"), []byte(dbStatefulSet), false)
+	require.NoError(t, err)
+	require.Equal(t, []k8s.Conflict{
+		{ObjectRef: k8s.ObjectRef{Kind: claimKind, Name: "data-db-0", Namespace: "demo"}},
+	}, check.Conflicts, "claims made with or after the StatefulSet are its controller's")
+}
+
+// codex review: an update can add a StatefulSet — a new template version, or
+// a renamed one. Its claims are not the release's yet, so they are checked as
+// on a create.
+func TestCheckApply_OnUpdateAStatefulSetTheReleaseDoesNotHaveYetIsChecked(t *testing.T) {
+	dyn := cluster(existing("v1", claimKind, "demo", "data-db-0", ""))
+	check, err := k8s.NewForTest(dyn).CheckApply(context.Background(), relRef("db"), []byte(dbStatefulSet), false)
+	require.NoError(t, err)
+	require.Equal(t, []k8s.Conflict{
+		{ObjectRef: k8s.ObjectRef{Kind: claimKind, Name: "data-db-0", Namespace: "demo"}},
+	}, check.Conflicts)
+}
+
+func TestCheckApply_OnUpdateAStatefulSetTheCallerMayNotReadLeavesItsClaimsUnverified(t *testing.T) {
+	dyn := cluster(existing("v1", claimKind, "demo", "data-db-0", ""))
+	forbidGet(dyn, "statefulsets")
+	check, err := k8s.NewForTest(dyn).CheckApply(context.Background(), relRef("db"), []byte(dbStatefulSet), false)
+	require.NoError(t, err)
+	require.Empty(t, check.Conflicts, "whether it is the release's own cannot be told")
+	require.Equal(t, []k8s.ObjectRef{
+		{Kind: "StatefulSet", Name: "db", Namespace: "demo"},
+		{Kind: claimKind, Name: "data-db-<ordinal>", Namespace: "demo"},
+	}, check.Unverified)
 }
 
 func TestCheckApply_ClaimsTheCallerMayNotListAreUnverified(t *testing.T) {

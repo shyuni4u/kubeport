@@ -1287,10 +1287,13 @@ paths:
         whether or not the caller may delete claims — and, under the usual
         `Delete` reclaim policy, their volumes. It cannot be undone.
 
-        A claim under such a name that exists before the release would be
-        taken over the same way, so `POST /v1/releases` refuses it with 409
-        `resource-conflict` (`kind: PersistentVolumeClaim` in `conflicts`) when
-        the caller may list claims; a caller who may not is not checked. A
+        A claim under such a name that exists before the StatefulSet would be
+        taken over the same way, so `POST /v1/releases` and
+        `PUT /v1/releases/{id}` refuse it with 409 `resource-conflict`
+        (`kind: PersistentVolumeClaim` in `conflicts`) when the caller may list
+        claims; a caller who may not is not checked. For a StatefulSet the
+        release already runs, only a claim older than that StatefulSet counts:
+        the claims its controller made are always newer. A
         release applied before this default takes it on its next update. One
         deleted before that leaves its claims behind, and a later release
         whose StatefulSet and claim names match refuses to deploy until they
