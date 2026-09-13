@@ -169,12 +169,17 @@ func conflictDetail(conflicts []k8s.Conflict, update bool) string {
 			parts = append(parts, cf.ObjectRef.String()+" (exists, but this account cannot read who holds it)")
 		case cf.Kind == "PersistentVolumeClaim":
 			// Claims a StatefulSet's controller made carry no release label, so an
-			// unlabelled one may well be kubeport's, left by an earlier release
-			// (#340). The release's StatefulSet would take it over and delete it
-			// with the release.
-			parts = append(parts, cf.ObjectRef.String()+" (storage this release's StatefulSet would take over and delete with it: left by an earlier release, or made outside kubeport)")
+			// unlabelled one is not "not created by kubeport": it may be an earlier
+			// release's, or this one's (#340). The advice below says what it may be.
+			parts = append(parts, cf.ObjectRef.String()+" (storage this release's StatefulSet would take over and delete with it)")
 		default:
 			parts = append(parts, cf.ObjectRef.String()+" (not created by kubeport)")
+		}
+	}
+	claims := 0
+	for _, cf := range conflicts {
+		if cf.Kind == "PersistentVolumeClaim" {
+			claims++
 		}
 	}
 	advice := " A different release name will not help; deploy into another namespace, or remove what holds them first."
@@ -182,6 +187,24 @@ func conflictDetail(conflicts []k8s.Conflict, update bool) string {
 		advice = " A release cannot move namespace, so what holds them has to be removed first." +
 			" If they were taken from this release before #161, removing the holder also removes this release's workload;" +
 			" update this release again afterwards to recreate it."
+	}
+	if claims > 0 {
+		// Removing what holds them is the wrong first move for storage: a claim
+		// in the way can be data that is in use (security review of #340).
+		claimAdvice := " A claim is storage: it may have been left by an earlier release of this name, or made outside kubeport," +
+			" and deleting it destroys its data. Remove it only if nobody needs it; a template that sets" +
+			" persistentVolumeClaimRetentionPolicy.whenDeleted: Retain deploys without taking it over."
+		if update {
+			claimAdvice = " Nothing shows these claims are this release's: storage its StatefulSet was deployed next to," +
+				" a claim waiting at an ordinal a scale-up would add, or its own if the StatefulSet was recreated" +
+				" (a restore, kubectl delete --cascade=orphan). Do not delete them to get past this — that destroys data that may be in use." +
+				" To update without taking them over, give this release persistentVolumeClaimRetentionPolicy.whenDeleted: Retain."
+		}
+		if claims == len(conflicts) {
+			advice = claimAdvice
+		} else {
+			advice += claimAdvice
+		}
 	}
 	return "objects this template creates already exist in namespace " + strconv.Quote(conflicts[0].Namespace) +
 		" and belong to something else: " + strings.Join(parts, ", ") + "." + advice

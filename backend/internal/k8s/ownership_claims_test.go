@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientgotesting "k8s.io/client-go/testing"
@@ -85,27 +86,64 @@ func TestCheckApply_OnUpdateTheStatefulSetsClaimsAreItsOwn(t *testing.T) {
 	require.Empty(t, check.Conflicts)
 }
 
-// security review of #340: a StatefulSet the release already runs can still
-// take a claim it never made — one that was there when it was deployed with
-// Retain, or before this default existed, and that it has been mounting. Its
-// controller makes its claims after it exists, so a claim older than the
-// StatefulSet is not its own.
-func TestCheckApply_OnUpdateAClaimOlderThanTheReleasesStatefulSetIsAConflict(t *testing.T) {
+// A StatefulSet the release already runs has its own claims only where there
+// is evidence of it:
+//   - the StatefulSet already owns the claim (its controller does so under
+//     Delete, and keeps doing so for a claim a scale-down left), or
+//   - the claim's ordinal is one of the StatefulSet's current replicas, which a
+//     pod of it mounts, and the claim is not older than the StatefulSet.
+//
+// security review: an older claim is one it was deployed next to — under
+// Retain, or before this default existed — and turning Delete on would take
+// it. codex review: a newer claim at an ordinal beyond the current replicas is
+// not evidence of anything; a scale-up would take it.
+func TestCheckApply_OnUpdateOnlyClaimsTheStatefulSetEvidentlyHasAreItsOwn(t *testing.T) {
+	born := func(u interface{ UnstructuredContent() map[string]any }, ts string) {
+		u.UnstructuredContent()["metadata"].(map[string]any)["creationTimestamp"] = ts
+	}
 	sts := stamped("apps/v1", "StatefulSet", "demo", "db", "db", uidMine)
-	sts.Object["metadata"].(map[string]any)["creationTimestamp"] = "2026-09-02T00:00:00Z"
-	before := existing("v1", claimKind, "demo", "data-db-0", "")
-	before.Object["metadata"].(map[string]any)["creationTimestamp"] = "2026-09-01T00:00:00Z"
-	after := existing("v1", claimKind, "demo", "data-db-1", "")
-	after.Object["metadata"].(map[string]any)["creationTimestamp"] = "2026-09-03T00:00:00Z"
-	same := existing("v1", claimKind, "demo", "data-db-2", "")
-	same.Object["metadata"].(map[string]any)["creationTimestamp"] = "2026-09-02T00:00:00Z"
+	sts.SetUID("sts-db")
+	sts.Object["spec"] = map[string]any{"replicas": int64(3)}
+	born(sts, "2026-09-02T00:00:00Z")
 
-	check, err := k8s.NewForTest(cluster(sts, before, after, same)).
+	olderInRange := existing("v1", claimKind, "demo", "data-db-0", "")
+	born(olderInRange, "2026-09-01T00:00:00Z")
+	newerInRange := existing("v1", claimKind, "demo", "data-db-1", "")
+	born(newerInRange, "2026-09-03T00:00:00Z")
+	sameSecondInRange := existing("v1", claimKind, "demo", "data-db-2", "")
+	born(sameSecondInRange, "2026-09-02T00:00:00Z")
+	newerBeyond := existing("v1", claimKind, "demo", "data-db-3", "")
+	born(newerBeyond, "2026-09-03T00:00:00Z")
+	ownedBeyond := existing("v1", claimKind, "demo", "data-db-9", "")
+	born(ownedBeyond, "2026-09-03T00:00:00Z")
+	ownedBeyond.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "StatefulSet", Name: "db", UID: "sts-db"}})
+	ownedByAnother := existing("v1", claimKind, "demo", "data-db-8", "")
+	born(ownedByAnother, "2026-09-03T00:00:00Z")
+	ownedByAnother.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "StatefulSet", Name: "db", UID: "an-earlier-db"}})
+
+	check, err := k8s.NewForTest(cluster(sts, olderInRange, newerInRange, sameSecondInRange, newerBeyond, ownedBeyond, ownedByAnother)).
 		CheckApply(context.Background(), relRef("db"), []byte(dbStatefulSet), false)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []k8s.Conflict{
+		{ObjectRef: k8s.ObjectRef{Kind: claimKind, Name: "data-db-0", Namespace: "demo"}},
+		{ObjectRef: k8s.ObjectRef{Kind: claimKind, Name: "data-db-3", Namespace: "demo"}},
+		{ObjectRef: k8s.ObjectRef{Kind: claimKind, Name: "data-db-8", Namespace: "demo"}},
+	}, check.Conflicts)
+}
+
+// ordinals.start moves the range the current replicas cover.
+func TestCheckApply_OnUpdateTheReplicaRangeStartsAtOrdinalsStart(t *testing.T) {
+	sts := stamped("apps/v1", "StatefulSet", "demo", "db", "db", uidMine)
+	sts.Object["spec"] = map[string]any{"replicas": int64(2), "ordinals": map[string]any{"start": int64(5)}}
+	check, err := k8s.NewForTest(cluster(sts,
+		existing("v1", claimKind, "demo", "data-db-0", ""),
+		existing("v1", claimKind, "demo", "data-db-5", ""),
+		existing("v1", claimKind, "demo", "data-db-6", ""),
+	)).CheckApply(context.Background(), relRef("db"), []byte(dbStatefulSet), false)
 	require.NoError(t, err)
 	require.Equal(t, []k8s.Conflict{
 		{ObjectRef: k8s.ObjectRef{Kind: claimKind, Name: "data-db-0", Namespace: "demo"}},
-	}, check.Conflicts, "claims made with or after the StatefulSet are its controller's")
+	}, check.Conflicts)
 }
 
 // codex review: an update can add a StatefulSet — a new template version, or

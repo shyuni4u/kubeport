@@ -496,10 +496,15 @@ reclaim 정책이 `Delete`(대부분의 동적 프로비저너 기본값)면 디
 먼저 있던 PVC 를 그렇게 넘겨받아 지우지 않도록, **릴리스 생성(`POST /v1/releases`)과 업데이트(`PUT /v1/releases/{id}`)는
 그 이름의 PVC 가 이미 있으면 `409 resource-conflict`** 로 거절한다(`conflicts[]` 의 `kind` 가 `PersistentVolumeClaim`,
 라벨이 없으니 `owner` 는 보통 빈 문자열). 순번은 지금 replicas 와 무관하게 전부 본다. 업데이트에서 릴리스가 **이미 돌리고
-있는** StatefulSet 이면 **그 StatefulSet 보다 먼저 만들어진 PVC 만** 충돌이다 — 컨트롤러가 만든 자기 PVC 는 항상 그보다
-늦다. 그래서 `Retain` 이던 템플릿이 `Delete` 로 바뀌거나 이 기본값 이전 릴리스가 처음 업데이트될 때, 배포 당시 이미 있던 남의
-PVC 를 붙이고 있었다면 그 업데이트가 거절된다. PVC 를 list 할 수 없거나 StatefulSet 을 읽을 수 없는 호출자(데모 사용자
-계정의 PVC)는 검사하지 못하고 통과한다. 이 기본값 이전에
+있는** StatefulSet 이면 **자기 것이라는 근거가 있는 PVC 만** 통과한다 — 그 StatefulSet 이 이미 소유(ownerReference)한 PVC,
+또는 지금 replicas 범위의 순번이면서(파드가 붙이고 있다) 그 StatefulSet 보다 먼저 만들어지지 않은 PVC. 그 밖에는 충돌이다.
+그래서 `Retain` 이던 템플릿이 `Delete` 로 바뀌거나 이 기본값 이전 릴리스가 처음 업데이트될 때 배포 당시 이미 있던 남의 PVC 를
+붙이고 있었거나, 스케일 업으로 새로 붙을 순번에 누가 만든 PVC 가 있으면 그 업데이트가 거절된다. 이 기본값 이전에 스케일
+다운으로 남은 자기 PVC(소유 표시 없음)도 같은 이유로 충돌이니, 필요 없으면 지우고 필요하면 replicas 를 그 순번까지 올린다.
+StatefulSet 을 손으로 다시 만들었거나(`kubectl delete --cascade=orphan`) 백업에서 복원했으면 자기 PVC 도 근거가 없어
+거절된다. **거절된 PVC 를 지우지 말 것** — 지금 붙어 있는 데이터일 수 있다. 넘겨받지 않고 업데이트하려면 그 릴리스에
+`whenDeleted: Retain` 을 준다.
+PVC 를 list 할 수 없거나 StatefulSet 을 읽을 수 없는 호출자(데모 사용자 계정의 PVC)는 검사하지 못하고 통과한다. 이 기본값 이전에
 배포된 릴리스는 **다음 업데이트 때** 정책이 붙고, 그 전에 지운 릴리스의 PVC 는 저절로 사라지지 않는다. 같은
 StatefulSet·claim 이름으로 새로 배포하려면 `kubectl -n <ns> get pvc` 로 찾아 먼저 정리한다.
 

@@ -181,6 +181,38 @@ func TestCreateRelease_SaysAClaimInTheWayWouldBeDeletedWithTheRelease(t *testing
 	require.Len(t, fk.applied, 0, "nothing is applied")
 }
 
+// security review of #340: on an update a claim in the way may be data the
+// release's pods mount, or its own after a restore. The advice written for
+// other objects — remove what holds them — would destroy it.
+func TestUpdateRelease_DoesNotAdviseDeletingAClaimInTheWay(t *testing.T) {
+	r, fk := newTestRouterWithK8s(t)
+	clusterName := seedCluster(t, r)
+	tplName := seedPublishedTemplate(t, r)
+	id := createRelease(t, r, tplName, clusterName, "upd-"+randSuffix(), map[string]any{
+		"Deployment[web].spec.replicas": 1,
+	})
+	appliedBefore := len(fk.applied)
+	fk.applyCheck = k8s.ApplyCheck{Conflicts: []k8s.Conflict{
+		{ObjectRef: k8s.ObjectRef{Kind: "PersistentVolumeClaim", Name: "data-db-0", Namespace: "default"}},
+	}}
+
+	body, err := json.Marshal(map[string]any{
+		"version": 1,
+		"values":  map[string]any{"Deployment[web].spec.replicas": 2},
+	})
+	require.NoError(t, err)
+	w := do(t, r, http.MethodPut, "/v1/releases/"+id, bytes.NewReader(body))
+
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	title, detail := problemOf(t, w.Body.Bytes())
+	require.Equal(t, "resource-conflict", title)
+	require.Contains(t, detail, "whenDeleted: Retain")
+	require.Contains(t, detail, "Do not delete them")
+	require.NotContains(t, detail, "#161")
+	require.NotContains(t, detail, "removed first")
+	require.Len(t, fk.applied, appliedBefore, "nothing is applied")
+}
+
 // #137: the template pins a namespace other than the one being deployed into.
 // That is the template's fault, so it is a 400 that says what to change, not a
 // cluster error, and nothing is applied.

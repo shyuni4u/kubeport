@@ -182,10 +182,10 @@ func (c *Client) CheckApply(ctx context.Context, rel ReleaseRef, multiDoc []byte
 	namespace := rel.Namespace
 	var out ApplyCheck
 	// StatefulSets by what the cluster holds under their names, for checkClaims:
-	// added are not there yet, running are the release's own (and when each was
-	// created), unreadable are ones an update's caller may not read.
+	// added are not there yet, running are the release's own as the cluster has
+	// them, unreadable are ones an update's caller may not read.
 	added, unreadable := map[string]bool{}, map[string]bool{}
-	running := map[string]metav1.Time{}
+	running := map[string]*unstructured.Unstructured{}
 	objs, err := splitYAML(multiDoc)
 	if err != nil {
 		return out, fmt.Errorf("split yaml: %w", err)
@@ -213,7 +213,7 @@ func (c *Client) CheckApply(ctx context.Context, rel ReleaseRef, multiDoc []byte
 			if own, sameName := heldBy(labels, rel, creating); !own {
 				out.Conflicts = append(out.Conflicts, Conflict{ObjectRef: ref, Owner: labels[ReleaseLabel], SameName: sameName})
 			} else if isStatefulSet(gvk) {
-				running[o.GetName()] = existing.GetCreationTimestamp()
+				running[o.GetName()] = existing
 			}
 		case apierrors.IsNotFound(err):
 			// Free to create.
@@ -267,10 +267,11 @@ func isStatefulSet(gvk schema.GroupVersionKind) bool {
 //
 // On a create, and for a StatefulSet an update adds (a new version, a renamed
 // object), every matching claim was there first. For a StatefulSet the release
-// already runs, the claims its controller made are newer than it, so only an
-// older one is a conflict. That is the claim it was deployed next to — under
-// Retain, or before the default existed — and has mounted since; turning Delete
-// on would take it (security review).
+// already runs, a claim is its own only on evidence (evidentlyOwn); any other
+// is a conflict. That includes the claim it was deployed next to — under
+// Retain, or before the default existed — and has mounted since, which turning
+// Delete on would take (security review), and one waiting at an ordinal a
+// scale-up would add (codex review).
 //
 // Every ordinal counts, not just the StatefulSet's current replicas, so
 // scaling up later cannot reach a claim that was there when it arrived. A
@@ -281,7 +282,7 @@ func isStatefulSet(gvk schema.GroupVersionKind) bool {
 // caller may not read; those names are Unverified, as for any unreadable
 // object.
 func (c *Client) checkClaims(ctx context.Context, namespace string, objs []*unstructured.Unstructured, creating bool,
-	added, unreadable map[string]bool, running map[string]metav1.Time, out *ApplyCheck) error {
+	added, unreadable map[string]bool, running map[string]*unstructured.Unstructured, out *ApplyCheck) error {
 	var check []claimTemplate
 	for _, t := range claimTemplates(objs) {
 		_, isRunning := running[t.set]
@@ -307,13 +308,12 @@ func (c *Client) checkClaims(ctx context.Context, namespace string, objs []*unst
 	}
 	for _, claim := range claims.Items {
 		for _, t := range check {
-			if ordinal, ok := strings.CutPrefix(claim.GetName(), t.prefix); !ok || !isOrdinal(ordinal) {
+			ordinal, ok := strings.CutPrefix(claim.GetName(), t.prefix)
+			if !ok || !isOrdinal(ordinal) {
 				continue
 			}
-			if since, isRunning := running[t.set]; isRunning && !creating {
-				if made := claim.GetCreationTimestamp(); !made.Before(&since) {
-					break // made with or after the release's own StatefulSet
-				}
+			if sts, isRunning := running[t.set]; isRunning && !creating && evidentlyOwn(&claim, sts, ordinal) {
+				break
 			}
 			out.Conflicts = append(out.Conflicts, Conflict{
 				ObjectRef: ObjectRef{Kind: "PersistentVolumeClaim", Name: claim.GetName(), Namespace: namespace},
@@ -323,6 +323,45 @@ func (c *Client) checkClaims(ctx context.Context, namespace string, objs []*unst
 		}
 	}
 	return nil
+}
+
+// evidentlyOwn reports whether claim, which matches a claim template of the
+// release's running StatefulSet sts at ordinal, is shown to be sts's own.
+//
+// Either sts already owns it — its controller does under Delete, and a claim a
+// scale-down left keeps that — or a pod of sts mounts it: its ordinal is one of
+// sts's current replicas, and it is not older than sts. The controller makes a
+// pod's claim once sts exists, so an older claim at that ordinal is one sts was
+// deployed next to.
+//
+// Creation time alone is not enough (codex review): a claim made after sts at
+// an ordinal beyond its replicas is mounted by nothing yet, and a scale-up
+// would take it.
+func evidentlyOwn(claim, sts *unstructured.Unstructured, ordinal string) bool {
+	if uid := sts.GetUID(); uid != "" {
+		for _, ref := range claim.GetOwnerReferences() {
+			if ref.UID == uid {
+				return true
+			}
+		}
+	}
+	if len(ordinal) > 18 {
+		return false // past any replica count, and past int64
+	}
+	var n int64
+	for _, r := range ordinal {
+		n = n*10 + int64(r-'0')
+	}
+	start, _, _ := unstructured.NestedInt64(sts.Object, "spec", "ordinals", "start")
+	replicas, found, _ := unstructured.NestedInt64(sts.Object, "spec", "replicas")
+	if !found {
+		replicas = 1
+	}
+	if n < start || n >= start+replicas {
+		return false
+	}
+	made, since := claim.GetCreationTimestamp(), sts.GetCreationTimestamp()
+	return !made.Before(&since)
 }
 
 // claimTemplate is one claim template of a StatefulSet whose claims are

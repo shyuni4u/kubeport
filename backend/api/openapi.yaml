@@ -1292,8 +1292,11 @@ paths:
         `PUT /v1/releases/{id}` refuse it with 409 `resource-conflict`
         (`kind: PersistentVolumeClaim` in `conflicts`) when the caller may list
         claims; a caller who may not is not checked. For a StatefulSet the
-        release already runs, only a claim older than that StatefulSet counts:
-        the claims its controller made are always newer. A
+        release already runs, a claim is its own only if the StatefulSet
+        already owns it, or if its ordinal is one of the StatefulSet's current
+        replicas and it is not older than the StatefulSet; any other matching
+        claim — including one at an ordinal a scale-up would add — is a
+        conflict. A
         release applied before this default takes it on its next update. One
         deleted before that leaves its claims behind, and a later release
         whose StatefulSet and claim names match refuses to deploy until they
