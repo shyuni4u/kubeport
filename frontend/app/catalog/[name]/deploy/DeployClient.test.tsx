@@ -1326,4 +1326,115 @@ describe("DeployClient preview payload", () => {
     expect(String(put[1]?.body)).not.toContain(image);
     expect(JSON.stringify(bodyOf(put).values)).toBe(JSON.stringify(preview.values));
   });
+  // #359 — the header link (#354) says "설정 바꾸기", but this page said
+  // "v1 로 업데이트" for a release already on v1: a reader could not tell
+  // whether the version was going up or only the values. The page now names
+  // the release and, on the same version, calls the action what the link did.
+  describe("update form naming (#359)", () => {
+    function renderUpdate(version: number) {
+      vi.stubGlobal("fetch", routedFetch({}));
+      return render(
+        <DeployClient
+          templateName="web-app"
+          version={version}
+          team={null}
+          spec={spec}
+          updateReleaseId="rel-1"
+          updateRelease={{ name: "hello-web", version: 2 }}
+          initialValues={{ "spec.replicas": 1, "metadata.name": "nginx" }}
+        />,
+      );
+    }
+
+    it("on the same version, changes settings of the named release", () => {
+      renderUpdate(2);
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("'hello-web' 설정 바꾸기");
+      expect(screen.getByRole("button", { name: "바뀐 설정 적용" })).toBeInTheDocument();
+      expect(screen.queryByText(/로 업데이트/)).toBeNull();
+    });
+
+    it("on another version, still updates to it and names the release", () => {
+      renderUpdate(3);
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("v3 로 업데이트");
+      expect(screen.getByRole("button", { name: "v3 로 업데이트" })).toBeInTheDocument();
+      expect(screen.getByText(/hello-web/)).toBeInTheDocument();
+    });
+
+    // ICU treats ' and { as syntax in the message, not in an argument value:
+    // a name with either must come through as typed, and React escapes it.
+    it("shows a name with quotes or braces as typed", () => {
+      vi.stubGlobal("fetch", routedFetch({}));
+      render(
+        <DeployClient
+          templateName="web-app"
+          version={2}
+          team={null}
+          spec={spec}
+          updateReleaseId="rel-1"
+          updateRelease={{ name: "it's-{a}-<b>", version: 2 }}
+          initialValues={{}}
+        />,
+      );
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("'it's-{a}-<b>' 설정 바꾸기");
+    });
+
+    it("falls back to the version wording when the release came without a name", () => {
+      vi.stubGlobal("fetch", routedFetch({}));
+      render(
+        <DeployClient
+          templateName="web-app"
+          version={2}
+          team={null}
+          spec={spec}
+          updateReleaseId="rel-1"
+          updateRelease={{ name: "", version: 2 }}
+          initialValues={{}}
+        />,
+      );
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("v2 로 업데이트");
+      expect(screen.queryByText(/설정 바꾸기/)).toBeNull();
+    });
+
+    // The failure's contact block used to say "릴리스: <uuid>" under a title
+    // that had just named the release; now it shows the name and the id.
+    it("names the release in the failure contact block, with its id beside it", async () => {
+      const user = userEvent.setup();
+      const base = routedFetch({});
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) =>
+          url === "/api/v1/releases/rel-1" && init?.method === "PUT"
+            ? jsonResponse({ type: "about:blank", title: "internal", status: 500, detail: "boom" }, 500)
+            : base(url, init),
+        ),
+      );
+      render(
+        <ErrorDetailProvider initial={"detailed" as ErrorDetailLevel}>
+          <DeployClient
+            templateName="web-app"
+            version={2}
+            team={null}
+            spec={spec}
+            updateReleaseId="rel-1"
+            updateRelease={{ name: "hello-web", version: 2 }}
+            initialValues={{ "spec.replicas": 1, "metadata.name": "nginx" }}
+          />
+        </ErrorDetailProvider>,
+      );
+      const button = screen.getByRole("button", { name: "바뀐 설정 적용" });
+      await waitFor(() => expect(button).toBeEnabled());
+      await user.click(button);
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(/릴리스: hello-web/);
+      expect(alert).toHaveTextContent(/릴리스 ID: rel-1/);
+    });
+
+    it("falls back to the version wording when the release is not described", () => {
+      vi.stubGlobal("fetch", routedFetch({}));
+      render(
+        <DeployClient templateName="web-app" version={2} team={null} spec={spec} updateReleaseId="rel-1" initialValues={{}} />,
+      );
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("v2 로 업데이트");
+    });
+  });
 });

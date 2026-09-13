@@ -38,6 +38,13 @@ type Props = {
   team: string | null;
   spec: UISpec;
   updateReleaseId?: string;
+  /**
+   * The release being updated: its name, and the version it runs now. On the
+   * same version the page calls the action "change settings", the words the
+   * release header's link used to get here (#359); on another version it is
+   * an update to that version.
+   */
+  updateRelease?: { name: string; version: number };
   initialValues?: Record<string, unknown>;
   /** Secret paths to enter again on a move to another version (#196). */
   reenterSecrets?: string[];
@@ -193,6 +200,7 @@ export function DeployClient({
   team,
   spec,
   updateReleaseId,
+  updateRelease,
   initialValues,
   reenterSecrets,
   defaultName = "",
@@ -203,6 +211,15 @@ export function DeployClient({
   const t = useTranslations("deploy");
   const tProblem = useTranslations("problem");
   const isUpdate = Boolean(updateReleaseId);
+  // Needs the name too: "'' 설정 바꾸기" would name nothing, so a body that
+  // came without one falls back to the version wording.
+  const sameVersion =
+    isUpdate && updateRelease !== undefined && updateRelease.version === version && updateRelease.name !== "";
+  const actionLabel = sameVersion
+    ? t("submitChange")
+    : isUpdate
+      ? t("titleUpdate", { version })
+      : t("submit");
   // The namespace label follows the terms switch like the permission card
   // under it: 구역 by default, Namespace with Kubernetes terms on (#250).
   const kube = useKubeTermsStore((s) => s.showKubeTerms);
@@ -666,9 +683,16 @@ export function DeployClient({
       <div>
         <header className="mb-4">
           <h1 className="text-lg font-semibold">
-            {isUpdate ? t("titleUpdate", { version }) : t("titleNew")}
+            {sameVersion && updateRelease
+              ? t("titleChange", { name: updateRelease.name })
+              : isUpdate
+                ? t("titleUpdate", { version })
+                : t("titleNew")}
           </h1>
           <p className="text-xs text-muted-foreground">
+            {/* Moving version: the title names the version, so the release
+                goes here (on the same version it is already in the title). */}
+            {isUpdate && !sameVersion && updateRelease ? `${updateRelease.name} · ` : ""}
             {templateName} · v{version}
             {team ? ` · ${t("teamSuffix", { team })}` : ""}
           </p>
@@ -824,13 +848,7 @@ export function DeployClient({
             spec={spec}
             initialValues={initialValues}
             reenterSecrets={reenterSecrets}
-            submitLabel={
-              submitting
-                ? t("submitting")
-                : isUpdate
-                  ? t("titleUpdate", { version })
-                  : t("submit")
-            }
+            submitLabel={submitting ? t("submitting") : actionLabel}
             disabled={
               submitting ||
               rbacBlocked ||
@@ -863,7 +881,13 @@ export function DeployClient({
               at={err.at}
               context={[
                 [tProblem("template"), `${templateName} v${version}`],
-                ...(updateReleaseId ? [[tProblem("release"), updateReleaseId] as const] : []),
+                // The name the title showed, then the id support will look up (#359).
+                ...(updateReleaseId
+                  ? [
+                      [tProblem("release"), updateRelease?.name || updateReleaseId] as const,
+                      [tProblem("releaseId"), updateReleaseId] as const,
+                    ]
+                  : []),
                 [tProblem("cluster"), meta.cluster],
                 [tProblem("namespace"), meta.namespace],
                 ...(isUpdate ? [] : [[tProblem("name"), meta.name] as const]),

@@ -64,6 +64,16 @@ describe("version-pinned deploy page, updating a release", () => {
     expect(el.props.initialValues).toEqual({ [SECRET]: "<redacted>" });
   });
 
+  // #359 — the form names the release it changes, and says "change settings"
+  // rather than "update to v2" when the version stays the same.
+  it("tells the form which release it is changing, and its version", async () => {
+    route(() =>
+      json(200, { name: "hello-web", template: { name: "web-app", version: 2 }, values_json: {} }),
+    );
+    const el = await render(ID);
+    expect(el.props.updateRelease).toEqual({ name: "hello-web", version: 2 });
+  });
+
   it("does not render an update form when the release's values could not be read", async () => {
     route(() => json(503));
     const el = await render(ID);

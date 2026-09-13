@@ -25,6 +25,8 @@ export type UpdateRead =
       kind: "ok";
       templateName: string;
       version: number;
+      /** The release's own name — the form names what it is changing (#359). */
+      releaseName: string;
       values: Record<string, unknown>;
     }
   /** A malformed id, a release that is gone or not yours, or another template's. */
@@ -105,7 +107,8 @@ export async function readReleaseForUpdate(
   if (name !== templateName && name !== decodeRouteParam(templateName)) {
     return { kind: "not-found" };
   }
-  return { kind: "ok", templateName: name, version, values };
+  const releaseName = typeof rel.name === "string" ? rel.name : "";
+  return { kind: "ok", templateName: name, version, releaseName, values };
 }
 
 /** The version-pinned update form for a release — the only one that loads its values. */
