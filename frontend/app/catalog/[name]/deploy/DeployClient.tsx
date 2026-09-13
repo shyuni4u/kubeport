@@ -30,6 +30,7 @@ import {
   type ReleaseNameRules,
 } from "@/lib/release-name";
 import { useKubeTermsStore } from "@/stores/kube-terms-store";
+import { APPLIED_PARAM } from "@/components/ReleaseAppliedNotice";
 import type { UISpec } from "@/lib/ui-spec-to-zod";
 
 type Props = {
@@ -638,7 +639,9 @@ export function DeployClient({
             fail(r.status, await r.text());
             return;
           }
-          router.push(`/releases/${updateReleaseId}`);
+          // The release page says the update was applied; without it the
+          // arrival looked like nothing happened (#362).
+          router.push(`/releases/${updateReleaseId}?${APPLIED_PARAM}=1`);
         } else {
           const r = await fetch("/api/v1/releases", {
             method: "POST",

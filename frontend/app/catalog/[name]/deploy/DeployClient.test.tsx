@@ -1088,7 +1088,7 @@ describe("DeployClient preview payload", () => {
     const button = screen.getByRole("button", { name: /배포하기|업데이트/ });
     await waitFor(() => expect(button).toBeEnabled());
     await user.click(button);
-    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/releases/rel-1"));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/releases/rel-1?applied=1"));
     const put = (fetchMock.mock.calls as Call[]).find(([url]) => url === "/api/v1/releases/rel-1")!;
 
     expect(preview.values).toEqual({
@@ -1321,7 +1321,7 @@ describe("DeployClient preview payload", () => {
     const button = screen.getByRole("button", { name: /배포하기|업데이트/ });
     await waitFor(() => expect(button).toBeEnabled());
     await user.click(button);
-    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/releases/rel-1"));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/releases/rel-1?applied=1"));
     const put = (fetchMock.mock.calls as Call[]).find(([url]) => url === "/api/v1/releases/rel-1")!;
     expect(String(put[1]?.body)).not.toContain(image);
     expect(JSON.stringify(bodyOf(put).values)).toBe(JSON.stringify(preview.values));

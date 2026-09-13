@@ -1,4 +1,7 @@
+import { Suspense } from "react";
+
 import { apiFetch } from "@/lib/api-server";
+import { ReleaseAppliedNotice } from "@/components/ReleaseAppliedNotice";
 import { ReleaseAutoRefresh } from "@/components/ReleaseAutoRefresh";
 import { ReleaseHeader, type ReleaseHeaderData } from "@/components/ReleaseHeader";
 import { ReleaseTabs } from "@/components/ReleaseTabs";
@@ -36,6 +39,11 @@ export default async function ReleaseDetailLayout({
           still settling, instead of until the reader reloads (#183). */}
       <ReleaseAutoRefresh status={data.status} />
       <ReleaseHeader data={data} />
+      {/* "Applied" after the update form sends the reader back (#362). It
+          reads the URL, which Next wants inside a Suspense boundary. */}
+      <Suspense fallback={null}>
+        <ReleaseAppliedNotice />
+      </Suspense>
       {isStaleStatus(data.status) && (
         <ReleaseStaleBanner
           status={data.status}

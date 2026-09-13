@@ -287,6 +287,11 @@
       "cluster-unreachable": "cluster unreachable",
       "resources-missing": "resources missing"
     },
+    "applied": {
+      "title": "Your changes were applied.",
+      "body": "The status may change for a moment while it restarts with the new settings.",
+      "dismiss": "Dismiss"
+    },
     "stale": {
       "title": {
         "cluster-unreachable": "Cluster is unreachable",
