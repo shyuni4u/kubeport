@@ -80,8 +80,10 @@ type DemoPolicyRefusal = {
   rule: string;
   limit: number | null;
   got: string;
-  /** Where it is, spelled the way a ui-spec path names it: `Kind[name].field`. */
-  path: string;
+  /** Where it is: the rendered object's kind and name, and the field in it. */
+  kind: string;
+  name: string;
+  field: string;
   more: number;
 };
 
@@ -104,24 +106,47 @@ function demoPolicyOf(p: ProblemBody | null): DemoPolicyRefusal | null {
     rule: v.rule,
     limit: typeof v.limit === "number" ? v.limit : null,
     got: v.got === undefined || v.got === null ? "" : String(v.got),
-    path:
-      typeof v.kind === "string" && typeof v.name === "string" && typeof v.field === "string"
-        ? `${v.kind}[${v.name}].${v.field}`
-        : "",
+    kind: typeof v.kind === "string" ? v.kind : "",
+    name: typeof v.name === "string" ? v.name : "",
+    field: typeof v.field === "string" ? v.field : "",
     more: p.demo_policy.length - 1,
   };
 }
 
+const indexSelector = /^\d+$/;
+
 /**
- * Whether a ui-spec field names the same place as a demo_policy entry, however
- * either path is spelled (#129).
+ * The form field that holds a demo_policy entry's value, when the form holds it.
+ *
+ * The response names the object as it was rendered, and a ui-spec path need not
+ * (codex review): its selector can be left out or be an index, and a
+ * multi-instance release puts its own name and a "-" in front of every object's
+ * name. So a field matches on kind and on the field path spelled canonically
+ * (#129), and a selector that is a name must equal the rendered name or be its
+ * end after that prefix. A field with no name to compare is taken only when it
+ * is the one field at that kind and path: otherwise which object it means is a
+ * guess, and naming the wrong field is worse than sending the reader to an
+ * admin.
  */
-function samePath(fieldPath: string, policyPath: string): boolean {
-  const a = parseTemplatePath(fieldPath);
-  const b = parseTemplatePath(policyPath);
-  if (!a || !b || a.kind !== b.kind || a.selector !== b.selector) return false;
-  const keys = formatPath(a.keys);
-  return keys !== null && keys === formatPath(b.keys);
+function formFieldFor(fields: UISpec["fields"], dp: DemoPolicyRefusal): UISpec["fields"][number] | undefined {
+  if (dp.kind === "" || dp.field === "") return undefined;
+  const target = parseTemplatePath(`${dp.kind}.${dp.field}`);
+  const keys = target ? formatPath(target.keys) : null;
+  if (keys === null) return undefined;
+  const candidates = fields.flatMap((f) => {
+    const p = parseTemplatePath(f.path);
+    return p && p.kind === dp.kind && formatPath(p.keys) === keys ? [{ f, selector: p.selector }] : [];
+  });
+  const named = candidates.filter(
+    ({ selector }) =>
+      selector !== "" &&
+      !indexSelector.test(selector) &&
+      (selector === dp.name || dp.name.endsWith(`-${selector}`)),
+  );
+  if (named.length === 1) return named[0].f;
+  if (named.length > 1) return undefined;
+  const [only] = candidates;
+  return candidates.length === 1 && (only.selector === "" || indexSelector.test(only.selector)) ? only.f : undefined;
 }
 
 function parseProblem(body: string): ProblemBody | null {
@@ -208,7 +233,7 @@ export function DeployClient({
       // A value the form holds is the visitor's to change, and saying which
       // field beats a hedge; anything else is fixed by the template, where
       // "change your input" would blame the one thing that is not wrong.
-      const field = dp.path === "" ? undefined : spec.fields.find((f) => samePath(f.path, dp.path));
+      const field = formFieldFor(spec.fields, dp);
       if (field && dp.rule === "image-prefix") {
         parts.push(t("errors.demoPolicyFixFieldImage", { label: field.label }));
       } else if (field && dp.limit !== null) {

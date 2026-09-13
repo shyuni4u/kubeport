@@ -463,6 +463,57 @@ describe("DeployClient", () => {
       expect(alert).not.toHaveTextContent(/관리자/);
     });
 
+    // The response names the object as rendered; a ui-spec path may leave its
+    // selector out, use an index, or name an object a multi-instance release
+    // renamed (codex review). Which field it is must not become a guess.
+    describe("which form field holds the value", () => {
+      async function alertFor(fields: UISpec["fields"], violation: Record<string, unknown>) {
+        const user = userEvent.setup();
+        vi.stubGlobal("fetch", routedFetch({ releases: demoPolicy([violation]) }));
+        render(<DeployClient templateName="batch" version={1} team={null} spec={{ fields }} />);
+        await fillMeta(user);
+        const button = screen.getByRole("button", { name: /배포하기/ });
+        await waitFor(() => expect(button).toBeEnabled());
+        await user.click(button);
+        return screen.findByRole("alert");
+      }
+      const retries = (path: string, label = "재시도 횟수") =>
+        ({ path, label, type: "integer", default: 6, required: true }) as const;
+      const onJob = (name: string) => ({
+        rule: "job-backoff-limit", kind: "Job", name, field: "spec.backoffLimit", limit: 2, got: 6,
+      });
+
+      it("finds a field that leaves the selector out", async () => {
+        const alert = await alertFor([retries("Job.spec.backoffLimit")], onJob("once"));
+        expect(alert).toHaveTextContent("'재시도 횟수' 값을 2 이하로 바꾸세요");
+      });
+
+      it("finds a field that selects by index", async () => {
+        const alert = await alertFor([retries("Job[0].spec.backoffLimit")], onJob("once"));
+        expect(alert).toHaveTextContent("'재시도 횟수' 값을 2 이하로 바꾸세요");
+      });
+
+      it("finds a field on an object a multi-instance release renamed", async () => {
+        const alert = await alertFor([retries("Job[once].spec.backoffLimit")], onJob("my-batch-once"));
+        expect(alert).toHaveTextContent("'재시도 횟수' 값을 2 이하로 바꾸세요");
+      });
+
+      it("does not pick between two fields it cannot tell apart", async () => {
+        const alert = await alertFor(
+          [retries("Job[0].spec.backoffLimit", "첫 작업"), retries("Job[1].spec.backoffLimit", "둘째 작업")],
+          onJob("once"),
+        );
+        expect(alert).not.toHaveTextContent(/첫 작업|둘째 작업/);
+        expect(alert).toHaveTextContent(/관리자에게 템플릿 수정을 요청하세요/);
+      });
+
+      it("does not name a field on another object", async () => {
+        const alert = await alertFor([retries("Job[other].spec.backoffLimit")], onJob("once"));
+        expect(alert).not.toHaveTextContent(/재시도 횟수/);
+        expect(alert).toHaveTextContent(/관리자에게 템플릿 수정을 요청하세요/);
+      });
+    });
+
     // A release from before #350 meets the limits on its next update. "Cannot
     // deploy" would leave the visitor wondering what happened to the one running.
     it("says the running release is unchanged when an update is refused", async () => {
