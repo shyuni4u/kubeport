@@ -862,4 +862,54 @@ describe("DeployClient preview payload", () => {
     expect(screen.queryByText(ALL_ALLOWED)).not.toBeInTheDocument();
     expect(screen.getByText(INVALID)).toBeInTheDocument();
   });
+
+  // #331 — app-with-config's "API 키": required, no default. Typed in and then
+  // emptied, the box held "", which parsed: the preview and the verdict stayed,
+  // and the render API was asked again with "".
+  const apiKey = "Secret[app-secret].stringData.API_KEY";
+  const apiKeySpec: UISpec = {
+    fields: [{ path: apiKey, label: "API 키", type: "string", required: true }],
+  };
+  const REQUIRED = "필수 항목입니다.";
+
+  it("holds the preview again when a filled required text box is emptied", async () => {
+    const user = userEvent.setup();
+    const fetchMock = backendFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DeployClient templateName="app-with-config" version={1} team={null} spec={apiKeySpec} />);
+    await fillMeta(user);
+    const box = () => screen.getByLabelText(/API 키/);
+
+    await pastDebounce();
+    expect(renderCalls(fetchMock)).toHaveLength(0);
+    expect(screen.getByText(INVALID)).toBeInTheDocument();
+    expect(screen.getByText(RBAC_WAITS)).toBeInTheDocument();
+
+    await user.type(box(), "k");
+    expect(await screen.findByText(ALL_ALLOWED)).toBeInTheDocument();
+    expect(bodyOf(renderCalls(fetchMock).at(-1)!)).toEqual({ values: { [apiKey]: "k" } });
+
+    const before = renderCalls(fetchMock).length;
+    await user.clear(box());
+
+    await waitFor(() => expect(screen.getByText(INVALID)).toBeInTheDocument());
+    expect(screen.getByText(REQUIRED)).toBeInTheDocument();
+    expect(screen.queryByText(ALL_ALLOWED)).not.toBeInTheDocument();
+    expect(screen.queryByText(PREVIEW_ROW)).not.toBeInTheDocument();
+    expect(screen.getByText(RBAC_WAITS)).toBeInTheDocument();
+    await pastDebounce();
+    expect(renderCalls(fetchMock)).toHaveLength(before);
+
+    // The button stays pressable, as on a fresh form, but submit refuses "".
+    await user.click(screen.getByRole("button", { name: /배포하기/ }));
+    await pastDebounce();
+    expect((fetchMock.mock.calls as Call[]).some(([url]) => url === "/api/v1/releases")).toBe(false);
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(screen.getByText(REQUIRED)).toBeInTheDocument();
+
+    await user.type(box(), "k2");
+    expect(await screen.findByText(ALL_ALLOWED)).toBeInTheDocument();
+    expect(screen.queryByText(REQUIRED)).not.toBeInTheDocument();
+    expect(bodyOf(renderCalls(fetchMock).at(-1)!)).toEqual({ values: { [apiKey]: "k2" } });
+  });
 });
