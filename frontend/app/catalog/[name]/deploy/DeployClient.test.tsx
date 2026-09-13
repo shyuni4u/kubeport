@@ -425,6 +425,77 @@ describe("DeployClient", () => {
       expect(alert).not.toHaveTextContent(/null|undefined|NaN/);
     });
 
+    it("sends a value the template fixes to an admin, not to the form", async () => {
+      const alert = await submitAndReadAlert(
+        demoPolicy([
+          { rule: "job-ttl", kind: "Job", name: "once", field: "spec.ttlSecondsAfterFinished", limit: 86400, got: 172800 },
+        ]),
+      );
+      expect(alert).toHaveTextContent(/끝난 작업을 24시간까지만/);
+      expect(alert).not.toHaveTextContent(/86400|86,400/);
+      expect(alert).toHaveTextContent(/관리자에게 템플릿 수정을 요청하세요/);
+    });
+
+    it("names the form field to change when the form holds the value", async () => {
+      const user = userEvent.setup();
+      vi.stubGlobal(
+        "fetch",
+        routedFetch({
+          releases: demoPolicy([
+            { rule: "job-backoff-limit", kind: "CronJob", name: "nightly", field: "spec.jobTemplate.spec.backoffLimit", limit: 2, got: 6 },
+          ]),
+        }),
+      );
+      const retrySpec: UISpec = {
+        fields: [
+          // Spelled differently from the response on purpose (#129).
+          { path: "CronJob[nightly].spec.jobTemplate.spec['backoffLimit']", label: "재시도 횟수", type: "integer", default: 6, required: true },
+        ],
+      };
+      render(<DeployClient templateName="nightly-job" version={1} team={null} spec={retrySpec} />);
+      await fillMeta(user);
+      const button = screen.getByRole("button", { name: /배포하기/ });
+      await waitFor(() => expect(button).toBeEnabled());
+      await user.click(button);
+      const alert = await screen.findByRole("alert");
+
+      expect(alert).toHaveTextContent("'재시도 횟수' 값을 2 이하로 바꾸세요");
+      expect(alert).not.toHaveTextContent(/관리자/);
+    });
+
+    // A release from before #350 meets the limits on its next update. "Cannot
+    // deploy" would leave the visitor wondering what happened to the one running.
+    it("says the running release is unchanged when an update is refused", async () => {
+      const user = userEvent.setup();
+      const base = routedFetch({});
+      const refused = demoPolicy([
+        { rule: "cronjob-history-limit", kind: "CronJob", name: "nightly", field: "spec.failedJobsHistoryLimit", limit: 1, got: 5 },
+      ]);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) =>
+          url.startsWith("/api/v1/releases/") ? refused() : base(url, init),
+        ),
+      );
+      render(
+        <DeployClient
+          templateName="nightly-job"
+          version={2}
+          team={null}
+          spec={spec}
+          updateReleaseId="rel-1"
+          initialValues={{ "spec.replicas": 1, "metadata.name": "nginx" }}
+        />,
+      );
+      const button = screen.getByRole("button", { name: /배포하기|업데이트/ });
+      await waitFor(() => expect(button).toBeEnabled());
+      await user.click(button);
+      const alert = await screen.findByRole("alert");
+
+      expect(alert).toHaveTextContent(/실행 기록을 1개까지만/);
+      expect(alert).toHaveTextContent(/지금 실행 중인 릴리스는 그대로입니다/);
+    });
+
     it("still says no permission for a demo-restricted refusal without limits", async () => {
       const alert = await submitAndReadAlert(() =>
         jsonResponse({ title: "demo-restricted", status: 403, detail: "demo accounts cannot perform this action" }, 403),

@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { termLabel } from "@/lib/kube-term-map";
+import { formatPath, parseTemplatePath } from "@/lib/template-path";
 import {
   SINGLE_INSTANCE_RULES,
   releaseNameProblem,
@@ -75,7 +76,14 @@ type ProblemBody = {
 };
 
 /** The first place a demo account's manifest goes past the demo's limits. */
-type DemoPolicyRefusal = { rule: string; limit: number | null; got: string; more: number };
+type DemoPolicyRefusal = {
+  rule: string;
+  limit: number | null;
+  got: string;
+  /** Where it is, spelled the way a ui-spec path names it: `Kind[name].field`. */
+  path: string;
+  more: number;
+};
 
 /**
  * A `demo-restricted` 403 that carries `demo_policy` (#350): the manifest these
@@ -90,14 +98,30 @@ function demoPolicyOf(p: ProblemBody | null): DemoPolicyRefusal | null {
   }
   const first: unknown = p.demo_policy[0];
   if (!first || typeof first !== "object") return null;
-  const v = first as { rule?: unknown; limit?: unknown; got?: unknown };
+  const v = first as { rule?: unknown; limit?: unknown; got?: unknown; kind?: unknown; name?: unknown; field?: unknown };
   if (typeof v.rule !== "string") return null;
   return {
     rule: v.rule,
     limit: typeof v.limit === "number" ? v.limit : null,
     got: v.got === undefined || v.got === null ? "" : String(v.got),
+    path:
+      typeof v.kind === "string" && typeof v.name === "string" && typeof v.field === "string"
+        ? `${v.kind}[${v.name}].${v.field}`
+        : "",
     more: p.demo_policy.length - 1,
   };
+}
+
+/**
+ * Whether a ui-spec field names the same place as a demo_policy entry, however
+ * either path is spelled (#129).
+ */
+function samePath(fieldPath: string, policyPath: string): boolean {
+  const a = parseTemplatePath(fieldPath);
+  const b = parseTemplatePath(policyPath);
+  if (!a || !b || a.kind !== b.kind || a.selector !== b.selector) return false;
+  const keys = formatPath(a.keys);
+  return keys !== null && keys === formatPath(b.keys);
 }
 
 function parseProblem(body: string): ProblemBody | null {
@@ -157,27 +181,48 @@ export function DeployClient({
   // limits (#350). "No permission" would send a visitor to an admin for what is
   // often a value in the form, and says nothing about which one.
   const demoPolicyMessage = useCallback(
-    (dp: DemoPolicyRefusal): string => {
-      let message: string;
+    (dp: DemoPolicyRefusal, submitted: boolean): string => {
+      // 86400 seconds means nothing to a reader who does not count in seconds.
+      const duration = (seconds: number) =>
+        seconds > 0 && seconds % 3600 === 0
+          ? t("errors.durationHours", { count: seconds / 3600 })
+          : seconds > 0 && seconds % 60 === 0
+            ? t("errors.durationMinutes", { count: seconds / 60 })
+            : t("errors.durationSeconds", { count: seconds });
+      const parts: string[] = [];
       if (dp.rule === "image-prefix" && dp.got !== "") {
-        message = t("errors.demoPolicyImage", { image: dp.got });
+        parts.push(t("errors.demoPolicyImage", { image: dp.got }));
+      } else if (dp.rule === "job-backoff-limit" && dp.limit !== null) {
+        parts.push(t("errors.demoPolicyBackoff", { limit: dp.limit }));
       } else if (dp.rule === "job-backoff-limit") {
         // No limit is a podFailurePolicy rule that ignores failures: there is
         // no number of retries to name.
-        message =
-          dp.limit === null
-            ? t("errors.demoPolicyRetryUncounted")
-            : t("errors.demoPolicyBackoff", { limit: dp.limit });
+        parts.push(t("errors.demoPolicyRetryUncounted"));
       } else if (dp.rule === "job-ttl" && dp.limit !== null) {
-        message = t("errors.demoPolicyTtl", { limit: dp.limit });
+        parts.push(t("errors.demoPolicyTtl", { duration: duration(dp.limit) }));
       } else if (dp.rule === "cronjob-history-limit" && dp.limit !== null) {
-        message = t("errors.demoPolicyHistory", { limit: dp.limit });
+        parts.push(t("errors.demoPolicyHistory", { limit: dp.limit }));
       } else {
-        message = t("errors.demoPolicyOther");
+        parts.push(t("errors.demoPolicyOther"));
       }
-      return dp.more > 0 ? `${message} ${t("errors.demoPolicyMore", { count: dp.more })}` : message;
+      // A value the form holds is the visitor's to change, and saying which
+      // field beats a hedge; anything else is fixed by the template, where
+      // "change your input" would blame the one thing that is not wrong.
+      const field = dp.path === "" ? undefined : spec.fields.find((f) => samePath(f.path, dp.path));
+      if (field && dp.rule === "image-prefix") {
+        parts.push(t("errors.demoPolicyFixFieldImage", { label: field.label }));
+      } else if (field && dp.limit !== null) {
+        parts.push(t("errors.demoPolicyFixFieldLimit", { label: field.label, limit: dp.limit }));
+      } else {
+        parts.push(t("errors.demoPolicyFixTemplate"));
+      }
+      if (dp.more > 0) parts.push(t("errors.demoPolicyMore", { count: dp.more }));
+      // A refused update leaves the running release as it was. A preview
+      // attempted nothing, so it does not say so.
+      if (submitted && isUpdate) parts.push(t("errors.demoPolicyUpdateUnchanged"));
+      return parts.join(" ");
     },
-    [t],
+    [t, spec, isUpdate],
   );
 
   // Map a failed response to a non-technical, localized message. The raw
@@ -196,7 +241,7 @@ export function DeployClient({
       if (status === 400 && problem?.template_defect) return t("errors.templateDefect");
       if (status === 403) {
         const dp = demoPolicyOf(problem);
-        return dp ? demoPolicyMessage(dp) : t("errors.forbidden");
+        return dp ? demoPolicyMessage(dp, true) : t("errors.forbidden");
       }
       if (status === 409) {
         const held = resourceConflictOf(problem);
@@ -392,7 +437,7 @@ export function DeployClient({
           // before submit does. Any other refusal still only clears the preview.
           const dp = res.status === 403 ? demoPolicyOf(parseProblem(await res.text())) : null;
           if (inflight.current !== ctrl) return;
-          setPreviewRefusal(dp ? demoPolicyMessage(dp) : null);
+          setPreviewRefusal(dp ? demoPolicyMessage(dp, false) : null);
           return;
         }
         const body = (await res.json()) as { rendered_yaml: string };

@@ -1040,7 +1040,11 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
   both the successful and the failed history). A limit the template leaves
   unset is filled in, and the filled manifest is what is applied and stored; a
   limit set higher is refused with 403 `demo-restricted` and a `demo_policy`
-  list, with nothing applied. `null` turns a rule off. `allowedImagePrefixes`
+  list, with nothing applied. The deploy form says which limit or image it is,
+  and names the form field to change when the form holds that value — in the
+  preview panel as soon as the values go past a limit, and again on submit; any
+  other `demo-restricted` 403 still reads as no permission. `null` turns a rule
+  off. `allowedImagePrefixes`
   (empty by default, which allows any image) limits the images demo pods may
   use, compared after normalizing (`busybox:1.36` is
   `docker.io/library/busybox:1.36`), and a registry on its own (`ghcr.io`)
