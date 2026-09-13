@@ -2556,9 +2556,11 @@ components:
             - `unknown`: the caller may not list the release's StatefulSets, or
               the cluster could not be asked. Say the storage may be deleted.
 
-            A caller who may not list claims is still told about StatefulSets;
-            only claims carrying the release's labels directly are left out,
-            and those the same caller's delete cannot remove either.
+            A caller who may not list claims is still told about StatefulSets.
+            Claims carrying the release's labels directly are then left out only
+            if the cluster says the caller may not delete-collection claims
+            either (a SelfSubjectAccessReview); otherwise the verdict is
+            `unknown`, since list and deletecollection are granted separately.
 
     ReleaseStatus:
       type: string

@@ -7,11 +7,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	authv1 "k8s.io/api/authorization/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
 	clientgotesting "k8s.io/client-go/testing"
 
 	"kubeport/internal/k8s"
@@ -110,14 +112,62 @@ func TestStorageOnDelete_UnlistableStatefulSetsAreUnknown(t *testing.T) {
 	require.Equal(t, k8s.StorageUnknown, got)
 }
 
-// The demo user may not list claims, and may not delete them either, so its
-// delete removes none directly; its StatefulSets still decide.
-func TestStorageOnDelete_UnlistableClaimsAreSkipped(t *testing.T) {
+// accessAnswer is a clientset whose SelfSubjectAccessReviews answer allowed,
+// or fail with err; seen records what each one asked.
+func accessAnswer(allowed bool, err error) (*k8sfake.Clientset, *[]authv1.ResourceAttributes) {
+	cs := k8sfake.NewSimpleClientset()
+	var seen []authv1.ResourceAttributes
+	cs.PrependReactor("create", "selfsubjectaccessreviews", func(a clientgotesting.Action) (bool, runtime.Object, error) {
+		review := a.(clientgotesting.CreateAction).GetObject().(*authv1.SelfSubjectAccessReview)
+		seen = append(seen, *review.Spec.ResourceAttributes)
+		if err != nil {
+			return true, nil, err
+		}
+		return true, &authv1.SelfSubjectAccessReview{Status: authv1.SubjectAccessReviewStatus{Allowed: allowed}}, nil
+	})
+	return cs, &seen
+}
+
+// The demo user may not list claims, and the cluster says it may not delete
+// them either, so its delete removes none directly; its StatefulSets decide.
+func TestStorageOnDelete_ClaimsTheCallerCanNeitherListNorDeleteAreSkipped(t *testing.T) {
 	dyn := storageCluster(set("db", "uid-db", "Retain"))
+	forbidListing(dyn, "persistentvolumeclaims")
+	cs, seen := accessAnswer(false, nil)
+	got, err := k8s.NewForTestWithClientset(dyn, cs).StorageOnDelete(context.Background(), storageRef(false))
+	require.NoError(t, err)
+	require.Equal(t, k8s.StorageKept, got)
+	require.Equal(t, []authv1.ResourceAttributes{
+		{Namespace: "demo", Verb: "deletecollection", Resource: "persistentvolumeclaims"},
+	}, *seen, "asked once, about exactly what DeleteByRelease does to claims")
+}
+
+// codex review: list and deletecollection are granted separately. A caller
+// that may delete claims it cannot list gets no promise that storage stays.
+func TestStorageOnDelete_ClaimsTheCallerMayDeleteButNotListAreUnknown(t *testing.T) {
+	for name, answer := range map[string]struct {
+		allowed bool
+		err     error
+	}{
+		"allowed":          {allowed: true},
+		"the review fails": {err: errors.New("simulated timeout")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dyn := storageCluster(set("db", "uid-db", "Retain"))
+			forbidListing(dyn, "persistentvolumeclaims")
+			cs, _ := accessAnswer(answer.allowed, answer.err)
+			got, err := k8s.NewForTestWithClientset(dyn, cs).StorageOnDelete(context.Background(), storageRef(false))
+			require.NoError(t, err)
+			require.Equal(t, k8s.StorageUnknown, got)
+		})
+	}
+
+	// A client with nothing to ask with cannot say no either.
+	dyn := storageCluster(set("db", "uid-db", "-"))
 	forbidListing(dyn, "persistentvolumeclaims")
 	got, err := k8s.NewForTest(dyn).StorageOnDelete(context.Background(), storageRef(false))
 	require.NoError(t, err)
-	require.Equal(t, k8s.StorageKept, got)
+	require.Equal(t, k8s.StorageUnknown, got)
 }
 
 // Claims a Delete-retaining StatefulSet made are removed by its controller
@@ -140,6 +190,32 @@ func TestStorageOnDelete_OtherErrorsSurface(t *testing.T) {
 	got, err := k8s.NewForTest(dyn).StorageOnDelete(context.Background(), storageRef(false))
 	require.Error(t, err)
 	require.Equal(t, k8s.StorageUnknown, got)
+}
+
+// The warning is only as right as its selectors: they have to be the ones
+// DeleteByRelease deletes StatefulSets by (security review). Asked of the same
+// fake, the two must name the same objects.
+func TestStorageOnDelete_ListsStatefulSetsByTheSelectorsDeleteByReleaseDeletesBy(t *testing.T) {
+	for _, nameOnly := range []bool{false, true} {
+		dyn := storageCluster()
+		var listed, deleted []string
+		dyn.PrependReactor("list", "statefulsets", func(a clientgotesting.Action) (bool, runtime.Object, error) {
+			listed = append(listed, a.(clientgotesting.ListAction).GetListRestrictions().Labels.String())
+			return false, nil, nil
+		})
+		dyn.PrependReactor("delete-collection", "*", func(a clientgotesting.Action) (bool, runtime.Object, error) {
+			if a.GetResource().Resource == "statefulsets" {
+				deleted = append(deleted, a.(clientgotesting.DeleteCollectionAction).GetListRestrictions().Labels.String())
+			}
+			return true, nil, nil
+		})
+		cli := k8s.NewForTest(dyn)
+		_, err := cli.StorageOnDelete(context.Background(), storageRef(nameOnly))
+		require.NoError(t, err)
+		require.NoError(t, cli.DeleteByRelease(context.Background(), storageRef(nameOnly)))
+		require.NotEmpty(t, listed)
+		require.Equal(t, deleted, listed, "nameOnly=%v", nameOnly)
+	}
 }
 
 func TestStorageOnDelete_RefusesAnEmptyID(t *testing.T) {

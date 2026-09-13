@@ -55,14 +55,17 @@ func releaseSelectors(ref ReleaseRef) []string {
 // not show it; the same selectors DeleteByRelease uses do (security review).
 //
 // Claims listed under the release's labels count as deleted: DeleteByRelease
-// deletes them itself. A caller who may not list claims is skipped rather
-// than made unknown — the demo user Role withholds them, and its delete
-// collection of claims is refused the same way, so it removes none.
+// deletes them itself. For a caller who may not list claims, those cannot be
+// seen. RBAC grants list and deletecollection separately (codex review), so
+// that alone says nothing about what its delete removes: the cluster is asked.
+// Only a caller it says may not delete claims — the demo user Role withholds
+// both — is told about its StatefulSets alone; any other answer is unknown.
 func (c *Client) StorageOnDelete(ctx context.Context, ref ReleaseRef) (Storage, error) {
 	if ref.UID == "" {
 		return StorageUnknown, errors.New("storage on delete: no release id")
 	}
 	verdict := StorageNone
+	claimsUnseen := false
 	for _, sel := range releaseSelectors(ref) {
 		opts := metav1.ListOptions{LabelSelector: sel}
 		sets, err := c.dyn.Resource(storageSetsGVR).Namespace(ref.Namespace).List(ctx, opts)
@@ -85,11 +88,28 @@ func (c *Client) StorageOnDelete(ctx context.Context, ref ReleaseRef) (Storage, 
 		claims, err := c.dyn.Resource(storageClaimsGVR).Namespace(ref.Namespace).List(ctx, opts)
 		switch {
 		case apierrors.IsForbidden(err):
+			claimsUnseen = true
 		case err != nil:
 			return StorageUnknown, fmt.Errorf("list persistentvolumeclaims: %w", err)
 		case len(claims.Items) > 0:
 			return StorageDeleted, nil
 		}
 	}
+	// A StatefulSet that deletes its claims has returned above whatever the
+	// claims list said: its controller deletes them, not the caller.
+	if claimsUnseen && !c.mayNotDeleteClaims(ctx, ref.Namespace) {
+		return StorageUnknown, nil
+	}
 	return verdict, nil
+}
+
+// mayNotDeleteClaims reports whether the cluster says the caller may not
+// delete-collection claims in namespace. An error, or a client that cannot
+// ask, is not that answer.
+func (c *Client) mayNotDeleteClaims(ctx context.Context, namespace string) bool {
+	if c.cs == nil {
+		return false
+	}
+	res, err := c.CheckAccess(ctx, AccessCheck{Namespace: namespace, Verb: "deletecollection", Resource: "persistentvolumeclaims"})
+	return err == nil && !res.Allowed
 }
