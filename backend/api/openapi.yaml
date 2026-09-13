@@ -1273,6 +1273,20 @@ paths:
       tags: [releases]
       operationId: deleteRelease
       summary: Delete a release
+      description: |
+        Deletes every object the release applied, selected by its
+        `kubeport.io/release` and `kubeport.io/release-uid` labels, and then
+        its database row.
+
+        **This includes the data in a StatefulSet's storage** (#340). Rendering
+        gives a StatefulSet with `volumeClaimTemplates` the retention policy
+        `persistentVolumeClaimRetentionPolicy.whenDeleted: Delete` unless the
+        template writes `whenDeleted` itself, so the claims its controller
+        created are removed with it by the cluster's garbage collector —
+        whether or not the caller may delete claims — and, under the usual
+        `Delete` reclaim policy, so is the volume. It cannot be undone. A
+        release applied before this default takes it on its next update; one
+        deleted before that leaves its claims behind as before.
       parameters:
         - $ref: "#/components/parameters/ReleaseID"
         - name: force

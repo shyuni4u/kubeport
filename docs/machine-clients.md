@@ -484,6 +484,15 @@ dry-run·apply 나 종류마다 DeleteCollection 을 부르는 가장 비싼 경
 않은 버전 409 등)는 예산을 쓰지 않는다. 같은 이름의 릴리스가 이미 있는 409 는 클러스터 API 를 부르지 않지만 DB 삽입 시점에 판정되므로 토큰을 쓴다 — 데모
 공유 계정에서 의도적으로 예산을 비우는 경우는 [#200](https://github.com/shyuni4u/kubeport/issues/200) 의 범위다. 데모 계정이 공유 신원이라 거절될 요청만으로 방문자 전원의 쓰기를 막지 못하게 하려는 것이다.
 
+**릴리스 삭제(`DELETE /v1/releases/{id}`)는 StatefulSet 저장소의 데이터까지 지운다**([#340](https://github.com/shyuni4u/kubeport/issues/340)).
+렌더가 `volumeClaimTemplates` 가 있는 StatefulSet 에 `persistentVolumeClaimRetentionPolicy.whenDeleted: Delete` 를
+기본으로 넣기 때문이다 — 컨트롤러가 만든 PVC 에는 릴리스 라벨이 없어, 예전에는 릴리스를 지워도 PVC 가 남고 같은
+이름으로 다시 배포한 릴리스가 이전 데이터를 그대로 붙였다. PVC 는 클러스터의 가비지 컬렉터가 지우므로 호출자에게
+PVC 삭제 권한이 없어도 지워지고, PV 의 reclaim 정책이 `Delete`(대부분의 동적 프로비저너 기본값)면 디스크 데이터도
+사라진다. **되돌릴 수 없다.** 데이터를 남기려면 템플릿이 `whenDeleted: Retain` 을 직접 쓰거나 필드로 노출한다 — 명시한
+값은 덮어쓰지 않는다. 이 기본값 이전에 배포된 릴리스는 **다음 업데이트 때** 정책이 붙고, 그 전에 지운 릴리스의 PVC
+(`<claim>-<statefulset>-<n>`)는 저절로 사라지지 않으니 `kubectl -n <ns> get pvc` 로 찾아 정리한다.
+
 **로그 스트림은 동시에 열어 둘 수 있는 개수에도 상한이 있다**([#169](https://github.com/shyuni4u/kubeport/issues/169)).
 위 버킷은 스트림을 **여는** 횟수만 센다 — 한 번 열린 스트림은 몇 시간을 붙들고 있어도 토큰을 더 쓰지
 않는다. 그런데 열린 스트림 하나가 파드마다 goroutine 하나와 apiserver 연결 하나를 계속 잡고 있어서,
