@@ -377,6 +377,12 @@ demo:
   publicHealthCatalog: false
   adminPassword: ""               # --set; used by the reset job only
   userPassword: ""                # --set
+  # The cluster the reset seeds its demo releases into, by the name it was
+  # registered under — the `name` from README "After install" step 3
+  # (POST /v1/clusters), not a kubeconfig context. The default is the live
+  # demo's; set it to your cluster's name on any other install. When no cluster
+  # of this name is registered, the reset's preflight fails the Job before
+  # anything is deleted and logs the names that are registered (#363).
   cluster: oci-a1
   # 21:00 UTC = 06:00 KST — the quietest hour for a Korean-audience demo, so a
   # reset is least likely to take a visitor's work away mid-session, and the

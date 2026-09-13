@@ -160,6 +160,12 @@ func runPreflight(ctx context.Context, hc *http.Client, dsn, demoDomain string) 
 			return nil, fmt.Errorf("/v1/me: %d %s %v", code, b, err)
 		}
 	}
+	// The cluster the seed releases go to, by the name it was registered under
+	// (#363): a wrong demo.cluster used to surface only as the seed's 404, after
+	// the wipe.
+	if err := checkDemoCluster(ctx, s.user, s.cluster); err != nil {
+		return nil, err
+	}
 	st, err := store.NewStore(ctx, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("store: %w", err)

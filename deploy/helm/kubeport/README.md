@@ -946,7 +946,16 @@ demo:
   adminPassword: <random>         # --set; used by the reset CronJob only
   userPassword: <random>          # --set
   passwordHint: ""                # shown on the landing page — public by design
+  cluster: <registered name>      # the `name` from "After install" step 3; default oci-a1
 ```
+
+`demo.cluster` is the registered cluster the reset Job seeds its demo releases
+into: the `name` you gave `POST /v1/clusters` in "After install" step 3, not a
+kubeconfig context. It defaults to `oci-a1`, the live demo's name, so set it on
+any other install. When no cluster of that name is registered, the reset's
+`preflight` container fails the Job before anything is deleted and logs the
+names that are registered (#363) — without it, the seed's releases would be
+refused only after the reset had already emptied the demo.
 
 Changing a demo account's email is two edits, not one: `dex.staticPasswords[].email`
 is the account Dex accepts, and `demo.adminEmail`/`demo.userEmail` are what the
