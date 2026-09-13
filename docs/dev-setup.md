@@ -94,8 +94,9 @@ sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && rm kubect
 curl -fsSL https://get.helm.sh/helm-v3.20.2-linux-amd64.tar.gz | tar xz
 sudo install -o root -g root -m 0755 linux-amd64/helm /usr/local/bin/helm && rm -rf linux-amd64
 
-# kind — 로컬 e2e 클러스터. scripts/e2e/up.sh 의 표준 경로이고
-# scripts/e2e/doctor.sh 도 이걸 검사한다.
+# kind — 로컬 e2e 클러스터. scripts/e2e/up.sh 의 표준 경로다. 버전은 이 줄이 기준이다 —
+# docs/local-e2e.md 도 이 줄을 가리키고, scripts/e2e/doctor.sh·up.sh 는 kind 가 PATH 에
+# 있는지만 보고 버전은 검사하지 않는다(CI 의 kind 잡은 kind-action 에서 따로 핀한다).
 go install sigs.k8s.io/kind@v0.31.0     # $(go env GOPATH)/bin 이 PATH 에 있어야 한다
 
 # make + openssl — Ubuntu/WSL 기본 이미지에 make 가 없다. README 의 `make test`·`make e2e`,
@@ -164,7 +165,7 @@ pnpm -v
 atlas version
 kubectl version --client
 helm version --short    # v3.20.2 여야 한다 — helm 4 는 차트 스냅샷 CI 를 깨뜨린다
-kind version            # scripts/e2e/up.sh · doctor.sh 가 요구한다
+kind version            # scripts/e2e/up.sh · doctor.sh 가 요구한다(설치 여부만 — 버전은 §2 Step 3 의 `go install sigs.k8s.io/kind@…` 줄과 맞출 것)
 make --version          # README 의 `make test` · 차트의 `make helm-snapshot` 이 부른다
 openssl version         # 아래 2번의 dex 인증서 생성
 sqlc version            # backend/ 코드 생성용 (backend 를 건드릴 때만)
