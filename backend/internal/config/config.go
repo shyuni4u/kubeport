@@ -33,4 +33,19 @@ type Config struct {
 	// through a fresh token and authorization. Zero uses the api package's
 	// default (#169).
 	LogStreamMaxLifetime time.Duration
+	// The demo manifest policy (#350), applied to demo accounts' releases only.
+	// A nil limit or an empty prefix list turns that rule off.
+	//
+	// DemoJobBackoffLimit — KBP_DEMO_JOB_BACKOFF_LIMIT. Caps backoffLimit on a
+	// Job and on a CronJob's job template.
+	DemoJobBackoffLimit *int64
+	// DemoJobTTLSecondsAfterFinished — KBP_DEMO_JOB_TTL_SECONDS. Caps
+	// ttlSecondsAfterFinished on a Job applied on its own.
+	DemoJobTTLSecondsAfterFinished *int64
+	// DemoCronJobHistoryLimit — KBP_DEMO_CRONJOB_HISTORY_LIMIT. Caps a
+	// CronJob's successfulJobsHistoryLimit and failedJobsHistoryLimit.
+	DemoCronJobHistoryLimit *int64
+	// DemoAllowedImagePrefixes — KBP_DEMO_ALLOWED_IMAGE_PREFIXES (comma
+	// separated). The images a demo pod may use; empty allows any.
+	DemoAllowedImagePrefixes []string
 }

@@ -217,6 +217,12 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		renderProblem(c, err)
 		return
 	}
+	// A demo account's manifest is held to the demo's limits (#350), before
+	// the row stores it and before the write budget is spent.
+	rendered, passed := h.holdToDemoPolicy(c, "CreateRelease", rendered)
+	if !passed {
+		return
+	}
 
 	// The write budget is spent here, past every check that refuses the
 	// request without a cluster call — see Handlers.releaseWrite (#232).
@@ -281,6 +287,9 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 	uid := releaseUID(rel.ID)
 	labels.ReleaseID = uid
 	rendered, err = template.Render(tv.ResourcesYaml, tv.UiSpecYaml, r.Values, labels)
+	if err == nil {
+		rendered, err = h.demoPolicyFill(c, rendered)
+	}
 	if err == nil {
 		err = h.deps.Store.UpdateReleaseValuesAndVersion(ctx, store.UpdateReleaseValuesAndVersionParams{
 			ID:                rel.ID,

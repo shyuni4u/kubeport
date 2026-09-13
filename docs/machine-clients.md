@@ -267,6 +267,19 @@ dry-run create 로 존재 여부만 확인해, 있으면 `owner` 없이 `owner_u
 (`kind`·`name`·`namespace`)가 붙는다([#137](https://github.com/shyuni4u/kubeport/issues/137)). 요청이 아니라
 **템플릿**을 고쳐야 하는 경우라, 이 필드가 있으면 "입력값을 확인하라" 고 안내하지 말 것.
 
+**데모 계정의 매니페스트에는 설치가 정한 상한이 걸린다**([#350](https://github.com/shyuni4u/kubeport/issues/350)).
+데모 도메인 신원이 릴리스를 생성·업데이트하거나 미리보기(`POST /v1/templates/:name/render`)를 부르면, 렌더된
+매니페스트의 Job·CronJob job template `backoffLimit`, 단독 Job 의 `ttlSecondsAfterFinished`, CronJob 의
+`successfulJobsHistoryLimit`·`failedJobsHistoryLimit` 이 검사된다. 템플릿이 비워 둔 값은 **상한으로 채워지고**
+(적용·저장·미리보기 모두 채운 YAML 이다), 상한보다 크게 박힌 값은 **403 `demo-restricted`** 에 확장 필드
+`demo_policy[]`(`rule`·`kind`·`name`·`container`·`field`·`limit`·`got`)를 달고 거절된다. `rule` 은
+`job-backoff-limit`·`job-ttl`·`cronjob-history-limit`·`image-prefix` 다. 이미지 허용 목록을 켠 설치에서는 목록 밖
+이미지가 `image-prefix` 로 거절되는데, 이때 `limit` 은 없고 `got` 이 거절된 이미지이며 **허용 접두어는 어디에도
+나오지 않는다**. 위반은 한 번에 전부 오고, 이 응답이면 아무것도 적용·기록되지 않았다. 같은 `demo-restricted`
+라도 `demo_policy` 가 없으면 관리 쓰기 차단이다 — 있으면 `field` 가 폼에 노출된 값일 때만 입력값으로 풀리고,
+아니면 템플릿을 고쳐야 한다. 데모가 아닌 호출자, 그리고 정책 키(`KBP_DEMO_JOB_BACKOFF_LIMIT` 등)를 두지 않은
+설치는 영향이 없다.
+
 **#161 이전에 오브젝트를 빼앗긴 릴리스**는 업데이트가 `resource-conflict`(`owner` = 빼앗은 릴리스)로 거절된다.
 빼앗은 릴리스를 지우면 그 오브젝트, 즉 **피해 릴리스가 실제로 돌리던 워크로드도 함께 지워진다.** 지운 직후 피해
 릴리스를 같은 값으로 한 번 업데이트하면 다시 만들어진다. `owner` 가 어느 화면에도 없는 이름이면 강제 삭제

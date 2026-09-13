@@ -101,6 +101,10 @@ type Handlers struct {
 	// not yours) would lock all of them out of deploying while costing the
 	// caller nothing and sparing the apiserver nothing.
 	releaseWrite *rateLimiter
+
+	// demoPolicy holds demo accounts' rendered manifests to the demo's limits
+	// (#350). The zero value applies nothing.
+	demoPolicy demoPolicy
 }
 
 func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
@@ -124,6 +128,7 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 		demoStreams:    newStreamSlots(demoLogStreamsPerLogin),
 		streamLifetime: logStreamLifetime(cfg.LogStreamMaxLifetime),
 		releaseWrite:   newRateLimiter(30, 4096),
+		demoPolicy:     demoPolicyFrom(cfg),
 	}
 	noDemo := denyDemo(deps.DemoEmailDomain)
 

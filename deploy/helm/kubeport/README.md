@@ -1012,6 +1012,25 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
   templates demo visitors author outlive a reset once someone deploys from
   them, and a version a visitor publishes can read other visitors' Secrets
   through pod logs (#294). Drafts stay open. The reset CronJob does not need it.
+- `demo.policy` holds a demo account's release manifest to the demo's limits
+  on create, update and preview (#350): `jobBackoffLimit` (`2`, for Jobs and
+  CronJob job templates), `jobTTLSecondsAfterFinished` (`86400`, for a Job on
+  its own — a CronJob's jobs are bounded by `cronJobHistoryLimit` instead, so
+  the seed's failing nightly job stays visible) and `cronJobHistoryLimit` (`1`,
+  both the successful and the failed history). A limit the template leaves
+  unset is filled in, and the filled manifest is what is applied and stored; a
+  limit set higher is refused with 403 `demo-restricted` and a `demo_policy`
+  list, with nothing applied. `null` turns a rule off. `allowedImagePrefixes`
+  (empty by default, which allows any image) limits the images demo pods may
+  use, compared after normalizing (`busybox:1.36` is
+  `docker.io/library/busybox:1.36`); a refusal names the image, never the
+  allowed prefixes. If you set it, include the seed's images —
+  `ghcr.io/nginx/`, `docker.io/library/busybox` and `ghcr.io/does-not-exist/`
+  (the release that fails on purpose) — or the reset cannot re-seed. Accounts
+  outside `demo.emailDomain` are not affected, and a release created before the
+  policy takes it on its next update. The keys become
+  `KBP_DEMO_JOB_BACKOFF_LIMIT`, `KBP_DEMO_JOB_TTL_SECONDS`,
+  `KBP_DEMO_CRONJOB_HISTORY_LIMIT` and `KBP_DEMO_ALLOWED_IMAGE_PREFIXES`.
 - `demo.publicHealthCatalog=true` (off by default) makes the unauthenticated
   `/healthz?verbose=1` report `catalog.templates` (demo-owned published
   templates) and `catalog.last_seed` (UTC, the oldest of their `created_at`).

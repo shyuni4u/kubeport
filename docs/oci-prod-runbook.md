@@ -534,6 +534,11 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
 - **오너 RBAC**: 오너 Google 이메일의 cluster-admin 바인딩 이름은 `kubeport-owner-admin`
   (예전 이름 `kubeport-demo-admin` 은 이름과 달리 오너 바인딩이었음 — 삭제 전 subject 확인).
   데모 계정은 chart 의 `demo` ns RoleBinding 만 갖는다. 검증: `kubectl auth can-i create deployments --as=dex:demo-user@demo.kubeport -n default` → **no**.
+- **데모 계정의 매니페스트 상한**(#350, `demo.policy`): 데모 계정의 릴리스 생성·업데이트·미리보기에서 Job·CronJob job template
+  `backoffLimit` 2, 단독 Job `ttlSecondsAfterFinished` 86400, CronJob 성공·실패 history 1 — 비어 있으면 채우고, 더 크면
+  403 `demo-restricted`(`demo_policy[]`). 시드 `nightly-job` 은 채워지는 쪽이라 리셋이 막히지 않는다. 그 실패는
+  `ImagePullBackOff`(파드 Pending, Job Running)라 backoff·history 어느 쪽에도 세지 않아 실패 패널이 그대로 남는다(kind 확인). 이미지 허용 목록(`allowedImagePrefixes`)은 **라이브에서 끈다**(빈 목록, 2026-09-13 사용자 결정).
+  켜려면 시드 이미지 `ghcr.io/nginx/`·`docker.io/library/busybox`·`ghcr.io/does-not-exist/` 를 반드시 넣는다 — 빠지면 리셋의 재시드가 403 으로 실패한다.
 - **데모 계정의 템플릿 저작**: 기본은 **막혀 있다**(`POST /v1/templates`·버전 게시·사용 중단·해제 `.../versions/:v/publish`·`/deprecate`·`/undeprecate` → 403 `demo-restricted`).
   초안 작성·미리보기는 열려 있다. 게시까지 막는 이유는 #294 — 공용 데모 계정이 게시한 버전은 다른 방문자가 배포한 Secret 을 파드 로그로 읽을 수 있다. `undeprecate` 는 다시 게시하는 것이고, `deprecate` 는 한 방문자가 시드 템플릿을 리셋까지 배포 불가로 만들 수 있어 같이 막는다.
   데모 계정은 `kubeport-admin` 을 갖지만, 저작은 결과물이 방문자의 세션보다 오래 남고 남에게 보이는

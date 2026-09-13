@@ -66,6 +66,11 @@ func main() {
 		// one place holds the number rather than two that can drift.
 		LogStreamsPerCaller:  getenvInt("KBP_LOG_STREAMS_PER_CALLER", 0),
 		LogStreamMaxLifetime: getenvDuration("KBP_LOG_STREAM_MAX_LIFETIME", 0),
+
+		DemoJobBackoffLimit:            optionalLimit("KBP_DEMO_JOB_BACKOFF_LIMIT"),
+		DemoJobTTLSecondsAfterFinished: optionalLimit("KBP_DEMO_JOB_TTL_SECONDS"),
+		DemoCronJobHistoryLimit:        optionalLimit("KBP_DEMO_CRONJOB_HISTORY_LIMIT"),
+		DemoAllowedImagePrefixes:       imagePrefixes("KBP_DEMO_ALLOWED_IMAGE_PREFIXES"),
 	}
 
 	issuers, err := resolveIssuers(cfg)
@@ -82,6 +87,7 @@ func main() {
 				"Their templates stay out of real users' catalogs, but they persist past a demo reset " +
 				"once someone deploys from them, and a published version can read other visitors' Secrets through pod logs.")
 		}
+		logDemoPolicy(cfg)
 	}
 
 	if emails := os.Getenv("KBP_DEV_ADMIN_EMAILS"); emails != "" {

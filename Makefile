@@ -78,6 +78,17 @@ helm-lint:
 			|| { echo "demo quota guard: an empty $$key rendered (#348)"; exit 1; }; \
 	done
 	@echo "demo quota guard: ok"
+	@for key in demo.policy.jobBackoffLimit demo.policy.jobTTLSecondsAfterFinished demo.policy.cronJobHistoryLimit; do \
+		for bad in -1 1.5 abc; do \
+			helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
+				--set $$key=$$bad 2>&1 | grep -q "$$key must be a whole number" \
+				|| { echo "demo policy guard: $$key=$$bad rendered (#350)"; exit 1; }; \
+		done; \
+	done
+	@helm template kp $(HELM_CHART_DIR) -f $(HELM_CHART_DIR)/ci/test-values.yaml \
+		--set-json 'demo.policy.allowedImagePrefixes=["a,b"]' 2>&1 | grep -q "allowedImagePrefixes entries must be non-empty strings without commas" \
+		|| { echo "demo policy guard: an image prefix with a comma rendered (#350)"; exit 1; }
+	@echo "demo policy guard: ok"
 
 # Diff the rendered chart against the checked-in golden snapshot. Fails
 # (non-zero exit) if they differ — that is the CI signal.

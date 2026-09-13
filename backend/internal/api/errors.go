@@ -28,6 +28,10 @@ type Problem struct {
 	// version undeployable whatever the caller sends (#136). Same purpose as
 	// PinnedNamespace: the admin has to fix the template, not the user's input.
 	TemplateDefect *ProblemTemplateDefect `json:"template_defect,omitempty"`
+	// DemoPolicy lists where a demo account's manifest breaks the demo's
+	// limits (#350), on a demo-restricted 403, so a client can say what to
+	// change without parsing detail.
+	DemoPolicy []ProblemDemoPolicy `json:"demo_policy,omitempty"`
 }
 
 // problemOption sets an extension member on a Problem.

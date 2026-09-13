@@ -102,6 +102,13 @@ func (h *Handlers) PreviewRender(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
 		return
 	}
+	// The same demo limits a deploy applies (#350), so a demo account's
+	// preview shows the manifest its release would get, and refuses what the
+	// deploy would refuse.
+	rendered, passed := h.holdToDemoPolicy(c, "PreviewRender", rendered)
+	if !passed {
+		return
+	}
 	out := string(rendered)
 	if forRelease {
 		out = redactRenderedSecrets(out)
