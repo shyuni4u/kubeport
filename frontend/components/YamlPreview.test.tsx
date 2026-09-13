@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithIntl as render } from "@/tests/intl-test-utils";
 
+import { ErrorDetailProvider } from "./ErrorDetailProvider";
 import { YamlPreview } from "./YamlPreview";
 
 vi.mock("./MonacoPanel", () => ({
@@ -67,6 +68,28 @@ describe("YamlPreview when the preview is refused", () => {
     expect(screen.getByText(/req-77/)).toBeInTheDocument();
   });
 
+  // #6: the sentence already quotes the detail, so even at "raw" — where
+  // ProblemMessage unfolds the server's message — it is not printed twice.
+  it("does not repeat the detail at raw, and shows the kind there", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ title: "validation-error", status: 400, detail: "only-once-detail", request_id: "req-raw" }),
+        { status: 400 },
+      ),
+    );
+
+    render(
+      <ErrorDetailProvider initial="raw">
+        <YamlPreview uiState={uiState} />
+      </ErrorDetailProvider>,
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent?.match(/only-once-detail/g)).toHaveLength(1);
+    expect(alert).toHaveTextContent("400 validation-error");
+    expect(alert).toHaveTextContent("요청 ID: req-raw");
+  });
+
   // A body that is not a Problem — an HTML 502 from a proxy, an empty
   // response — still has to say something, and it must not be dumped raw.
   it("falls back to the status when the body is not a Problem", async () => {
@@ -76,7 +99,9 @@ describe("YamlPreview when the preview is refused", () => {
 
     render(<YamlPreview uiState={uiState} />);
 
-    expect(await screen.findByText(/502/)).toBeInTheDocument();
+    // The sentence names the status, and so does the copyable block (#6).
+    expect((await screen.findAllByText(/502/)).length).toBeGreaterThan(0);
+    expect(screen.getByRole("alert")).toHaveTextContent("HTTP 502");
     expect(screen.queryByText(/<html>/)).toBeNull();
   });
 

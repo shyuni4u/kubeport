@@ -11,7 +11,8 @@ import { UserFormPreview } from "@/components/UserFormPreview";
 import { EditorLayout } from "@/components/editor/EditorLayout";
 import { MetaRow, TemplateMeta } from "@/components/editor/MetaRow";
 import { BottomBar } from "@/components/editor/BottomBar";
-import { saveErrorMessage } from "@/components/editor/saveError";
+import { problemDetail, saveFailure } from "@/components/editor/saveError";
+import { ProblemMessage, type RequestFailure } from "@/components/ProblemMessage";
 import { findUnlabelledExposedField, stableStringify, useBeforeUnloadWhenDirty, useDirtyAgainstBaseline } from "@/components/editor/useDirtyGuard";
 import { YamlEditor } from "@/components/YamlEditor";
 import { useTemplateYamlValidation } from "@/components/editor/useTemplateYamlValidation";
@@ -172,9 +173,26 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
   );
   const markSaved = useDirtyAgainstBaseline(snapshot, dirty, onDirty);
 
+  // A refused request, kept with its body for ProblemMessage (#6). `err` stays
+  // for what this page says itself — a missing label, a schema it could not find.
+  const [failure, setFailure] = useState<RequestFailure | null>(null);
+  const tProblem = useTranslations("problem");
+
   async function addKind(k: KindRef) {
+    setFailure(null);
     const res = await fetch(`/api/v1/clusters/${encodeURIComponent(cluster)}/openapi/${k.gv}`);
-    if (!res.ok) { setErr(await res.text()); return; }
+    if (!res.ok) {
+      // Was the body as it came: a line of JSON where the sentence belongs.
+      const body = await res.text().catch(() => "");
+      setFailure({
+        message: t("errors.schemaLoad", { kind: k.kind, detail: problemDetail(body) }),
+        status: res.status,
+        body,
+        at: new Date().toISOString(),
+        omitDetail: true,
+      });
+      return;
+    }
     const doc = await res.json() as OpenAPISchemaDoc;
     const schema = findKindSchema(doc, k.group, k.version, k.kind);
     if (!schema) { setErr(t("schemaMissing", { kind: k.kind })); return; }
@@ -206,6 +224,7 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
 
   async function saveDraft() {
     setErr(null);
+    setFailure(null);
     // Every exposed field needs a label — it's what the end-user sees.
     const unlabelled = findUnlabelledExposedField(resources);
     if (unlabelled) { setErr(t("errors.missingLabel", { path: unlabelled })); return; }
@@ -226,7 +245,7 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
           ui_state: uiState,
         }),
       });
-      if (!res.ok) { setErr(await saveErrorMessage(t, res, { creating: true })); return; }
+      if (!res.ok) { setFailure(await saveFailure(t, res, { creating: true })); return; }
       markSaved();
       // The detail page is where the new draft gets published.
       router.push(`/templates/${meta.name}`);
@@ -237,6 +256,17 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
 
   if (!loaded) return <div>{t("loading")}</div>;
   if (clusters.length === 0) {
+    if (failure) {
+      return (
+        <ProblemMessage
+          message={failure.message}
+          status={failure.status}
+          body={failure.body}
+          at={failure.at}
+          omitDetail={failure.omitDetail}
+        />
+      );
+    }
     if (err) return <div className="text-red-600 dark:text-red-400 text-sm whitespace-pre">{err}</div>;
     return <div>{t("noClusters")}</div>;
   }
@@ -361,6 +391,16 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
         selectionEvent={selectionEvent}
       />
       {err && <div className="text-red-600 dark:text-red-400 text-sm whitespace-pre">{err}</div>}
+      {failure && (
+        <ProblemMessage
+          message={failure.message}
+          status={failure.status}
+          body={failure.body}
+          at={failure.at}
+          omitDetail={failure.omitDetail}
+          context={[[tProblem("template"), meta.name]]}
+        />
+      )}
       <BottomBar
         canSave={canSave}
         dirty={dirty}
@@ -411,6 +451,9 @@ function YamlModeNew({ dirty, onDirty }: ModeProps) {
   const [uispecYaml, setUispecYaml] = useState(STARTER_UISPEC);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // A refused save, kept with its body for ProblemMessage (#6).
+  const [failure, setFailure] = useState<RequestFailure | null>(null);
+  const tProblem = useTranslations("problem");
 
   useEffect(() => {
     (async () => {
@@ -449,6 +492,7 @@ function YamlModeNew({ dirty, onDirty }: ModeProps) {
 
   async function saveDraft() {
     setErr(null);
+    setFailure(null);
     // The list above is debounced; check the text actually being sent.
     const now = saveBlockedReason(validateTemplateYaml(resourcesYaml, uispecYaml));
     if (now) { setErr(now); return; }
@@ -468,7 +512,7 @@ function YamlModeNew({ dirty, onDirty }: ModeProps) {
           ui_spec_yaml: uispecYaml,
         }),
       });
-      if (!res.ok) { setErr(await saveErrorMessage(t, res, { creating: true })); return; }
+      if (!res.ok) { setFailure(await saveFailure(t, res, { creating: true })); return; }
       markSaved();
       // The detail page is where the new draft gets published.
       router.push(`/templates/${meta.name}`);
@@ -511,6 +555,16 @@ function YamlModeNew({ dirty, onDirty }: ModeProps) {
         </div>
       </details>
       {err && <div className="text-red-600 dark:text-red-400 text-sm whitespace-pre">{err}</div>}
+      {failure && (
+        <ProblemMessage
+          message={failure.message}
+          status={failure.status}
+          body={failure.body}
+          at={failure.at}
+          omitDetail={failure.omitDetail}
+          context={[[tProblem("template"), meta.name]]}
+        />
+      )}
       <BottomBar
         canSave={canSave}
         dirty={dirty}

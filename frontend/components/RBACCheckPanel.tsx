@@ -6,6 +6,7 @@ import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { groupOf, kindLabel } from "@/lib/kube-kinds";
 import { useKubeTermsStore } from "@/stores/kube-terms-store";
+import { useErrorDetail } from "./ErrorDetailProvider";
 
 /**
  * What the preflight can conclude about this deploy.
@@ -204,6 +205,10 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult, idleReason
   // terms (#39). The deploy form's user meets "ConfigMap" or "create" nowhere
   // else on the page.
   const kube = useKubeTermsStore((s) => s.showKubeTerms);
+  // At "raw" (#6) the apiserver's reason is shown under a denied row even with
+  // plain terms. Presentation only: the server sends a reason to a non-demo
+  // admin alone (#102), and an empty one shows nothing at any level.
+  const { level } = useErrorDetail();
   const tKinds = useTranslations("kinds");
   const kind = (r: CheckResult) => kindLabel(r.resource, kube, (key) => tKinds(key), r.apiVersion);
 
@@ -276,7 +281,7 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult, idleReason
                     />
                     <span className="min-w-0">
                       <span>{t("deniedRow", { resource: label, message })}</span>
-                      {kube && r.reason && (
+                      {(kube || level === "raw") && r.reason && (
                         <span className="block break-all font-mono text-muted-foreground">
                           {r.reason}
                         </span>

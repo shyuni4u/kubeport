@@ -4,21 +4,43 @@
 // portal-concept explanation instead of a raw JSON body.
 //
 // `t` is a `useTranslations("templates.editor")` instance.
+import type { RequestFailure } from "@/components/ProblemMessage";
 import { problemTitle } from "@/lib/problem";
 
 type Translator = (key: string, values?: Record<string, string | number>) => string;
 
-// `creating` marks POST /v1/templates — a brand-new template rather than a
-// version of an existing one. It changes what a demo refusal means (#180).
-export async function saveErrorMessage(
+type SaveOptions = { creating?: boolean };
+
+/**
+ * The failed save as ProblemMessage shows it (#6): the sentence below, the
+ * body as sent, and whether the sentence already quotes the server's message.
+ */
+export async function saveFailure(
   t: Translator,
   res: Response,
-  { creating = false }: { creating?: boolean } = {},
-): Promise<string> {
-  // The kind is read from the whole body; only the sentence shown is the detail.
+  opts: SaveOptions = {},
+): Promise<RequestFailure> {
   const body = (await res.text().catch(() => "")).trim();
+  const quotesDetail = res.status === 400 || ![403, 409, 413, 429].includes(res.status);
+  return {
+    message: saveMessageFor(t, res.status, body, opts),
+    status: res.status,
+    body,
+    at: new Date().toISOString(),
+    omitDetail: quotesDetail,
+  };
+}
+
+// `creating` marks POST /v1/templates — a brand-new template rather than a
+// version of an existing one. It changes what a demo refusal means (#180).
+export async function saveErrorMessage(t: Translator, res: Response, opts: SaveOptions = {}): Promise<string> {
+  return (await saveFailure(t, res, opts)).message;
+}
+
+function saveMessageFor(t: Translator, status: number, body: string, { creating = false }: SaveOptions): string {
+  // The kind is read from the whole body; only the sentence shown is the detail.
   const detail = problemDetail(body);
-  switch (res.status) {
+  switch (status) {
     case 409:
       return t("errors.draftExists");
     case 403:
@@ -50,7 +72,7 @@ export async function saveErrorMessage(
       // the one thing the author needs to know is that waiting fixes it.
       return t("errors.rateLimited");
     default:
-      return t("errors.generic", { status: res.status, detail });
+      return t("errors.generic", { status, detail });
   }
 }
 
@@ -58,7 +80,7 @@ export async function saveErrorMessage(
 // Problem document. Printed whole, the one sentence the author needs —
 // "fields[0] (path `…`) has no label" — was buried in JSON; the preview had the
 // same problem and #151 fixed it there. A body that is not a Problem is kept.
-function problemDetail(body: string): string {
+export function problemDetail(body: string): string {
   try {
     const p: unknown = JSON.parse(body);
     if (p && typeof p === "object" && typeof (p as { detail?: unknown }).detail === "string") {

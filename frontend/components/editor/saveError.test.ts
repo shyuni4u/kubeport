@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTranslator } from "next-intl";
-import { saveErrorMessage } from "./saveError";
+import { saveErrorMessage, saveFailure } from "./saveError";
 import { findUnlabelledExposedField } from "./useDirtyGuard";
 import ko from "@/messages/ko.json";
 
@@ -108,6 +108,26 @@ describe("saveErrorMessage", () => {
 
   it("falls back to a generic message with status + detail", async () => {
     expect(await saveErrorMessage(t, res(500, "boom"))).toBe("저장에 실패했습니다 (HTTP 500). boom");
+  });
+});
+
+// #6: the save pages render ProblemMessage, which needs the body as sent and
+// whether the sentence already quotes the server's message.
+describe("saveFailure", () => {
+  it("keeps the body, the status and when, and marks a quoted 400 detail", async () => {
+    const body = JSON.stringify({ title: "validation-error", status: 400, detail: "no label", request_id: "r-9" });
+    const f = await saveFailure(t, res(400, body));
+    expect(f.message).toBe("검증에 실패했습니다: no label");
+    expect(f.status).toBe(400);
+    expect(f.body).toBe(body);
+    expect(f.omitDetail).toBe(true);
+    expect(Number.isNaN(Date.parse(f.at))).toBe(false);
+  });
+
+  it("does not mark a sentence of its own as quoting the detail", async () => {
+    const f = await saveFailure(t, res(403, '{"title":"demo-restricted","status":403,"detail":"demo accounts cannot"}'));
+    expect(f.message).toBe(ko.templates.editor.errors.demoRestricted);
+    expect(f.omitDetail).toBe(false);
   });
 });
 

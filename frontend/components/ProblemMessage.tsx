@@ -1,9 +1,23 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useState } from "react";
 import { parseProblemBody, problemParts } from "@/lib/error-detail";
+import { ContactBlock } from "./ContactBlock";
 import { useErrorDetail } from "./ErrorDetailProvider";
+
+/**
+ * A refused request as a screen keeps it until it renders ProblemMessage (#6):
+ * the sentence the screen picked, the response as the API sent it, and when.
+ * `omitDetail` is set when the sentence already quotes the server's message —
+ * a validation failure the author has to read — so it is not shown twice.
+ */
+export type RequestFailure = {
+  message: string;
+  status: number;
+  body: string;
+  at: string;
+  omitDetail?: boolean;
+};
 
 /**
  * A refused request, shown at the viewer's error detail level (#6).
@@ -22,6 +36,7 @@ export function ProblemMessage({
   status,
   body,
   at,
+  omitDetail = false,
   context = [],
 }: {
   message: string;
@@ -29,6 +44,8 @@ export function ProblemMessage({
   body?: string;
   /** When the request failed, as an ISO string (fixed at failure, not at render). */
   at: string;
+  /** The sentence already quotes the server's message; do not repeat it. */
+  omitDetail?: boolean;
   /** Labelled values the screen already shows: cluster, namespace, release… */
   context?: ReadonlyArray<readonly [label: string, value: string]>;
 }) {
@@ -36,25 +53,14 @@ export function ProblemMessage({
   const { level } = useErrorDetail();
   const problem = parseProblemBody(body);
   const parts = problemParts(level, status, problem);
-  const [copied, setCopied] = useState(false);
+  const detail = omitDetail ? undefined : parts.detail;
 
   const facts: Array<readonly [string, string]> = [
     ...(problem?.requestId ? [[t("requestId"), problem.requestId] as const] : []),
     [t("time"), at],
     ...(status > 0 ? [[t("status"), problem?.title ? `${status} ${problem.title}` : String(status)] as const] : []),
-    ...context.filter(([, value]) => value !== ""),
+    ...context,
   ];
-  const copyText = facts.map(([label, value]) => `${label}: ${value}`).join("\n");
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(copyText);
-      setCopied(true);
-    } catch {
-      // No clipboard (plain http, a denied permission): the block stays on
-      // screen as selectable text.
-    }
-  }
 
   return (
     <div role="alert" className="flex flex-col gap-2 text-sm text-red-700 dark:text-red-400">
@@ -66,10 +72,10 @@ export function ProblemMessage({
           <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
             <dt className="text-muted-foreground">{t("kind")}</dt>
             <dd className="font-mono">{`${status} ${problem.title}`}</dd>
-            {parts.detail && (
+            {detail && (
               <>
                 <dt className="text-muted-foreground">{t("detail")}</dt>
-                <dd className="whitespace-pre-wrap break-words font-mono">{parts.detail}</dd>
+                <dd className="whitespace-pre-wrap break-words font-mono">{detail}</dd>
               </>
             )}
             {parts.extensions && (
@@ -89,19 +95,7 @@ export function ProblemMessage({
         </details>
       )}
 
-      <div className="rounded-md border border-border bg-muted px-3 py-2 text-xs text-foreground">
-        <div className="mb-1 flex items-center justify-between gap-2">
-          <span className="text-muted-foreground">{t("contactTitle")}</span>
-          <button
-            type="button"
-            onClick={copy}
-            className="rounded border border-border bg-card px-2 py-0.5 text-xs hover:bg-hover"
-          >
-            {copied ? t("copied") : t("copy")}
-          </button>
-        </div>
-        <pre className="whitespace-pre-wrap break-words font-mono">{copyText}</pre>
-      </div>
+      <ContactBlock facts={facts} />
     </div>
   );
 }

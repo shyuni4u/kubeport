@@ -1,5 +1,6 @@
 import { getTranslations } from "next-intl/server";
 import { ServerCrash, AlertTriangle } from "lucide-react";
+import { ContactBlock } from "./ContactBlock";
 import { ForceDeleteButton } from "./ForceDeleteButton";
 
 export type StaleStatus = "cluster-unreachable" | "resources-missing";
@@ -31,6 +32,7 @@ export async function ReleaseStaleBanner({
   isAdmin: boolean;
 }) {
   const t = await getTranslations("releases.stale");
+  const tProblem = await getTranslations("problem");
   const Icon = status === "cluster-unreachable" ? ServerCrash : AlertTriangle;
   return (
     <div className="flex gap-3 rounded-xl border border-amber-300/60 bg-amber-50 p-4 dark:border-amber-500/40 dark:bg-amber-500/10">
@@ -43,7 +45,21 @@ export async function ReleaseStaleBanner({
         {isAdmin ? (
           <ForceDeleteButton releaseId={releaseId} />
         ) : (
-          <p className="text-sm">{t("contactAdmin")}</p>
+          <>
+            <p className="text-sm">{t("contactAdmin")}</p>
+            {/*
+              "Contact your admin" said nothing about what to send (#6). The
+              admin clears this with a force delete by release id, so that and
+              what the banner already names are what the block carries.
+            */}
+            <ContactBlock
+              facts={[
+                [tProblem("releaseId"), releaseId],
+                [tProblem("cluster"), cluster],
+                [tProblem("state"), status],
+              ]}
+            />
+          </>
         )}
       </div>
     </div>

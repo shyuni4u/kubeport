@@ -7,6 +7,8 @@ import { useDebouncedCallback } from "use-debounce";
 
 import { DynamicForm, type UISpec } from "@/components/DynamicForm";
 import { PreviewErrorBoundary } from "@/components/PreviewErrorBoundary";
+import { ProblemMessage, type RequestFailure } from "@/components/ProblemMessage";
+import { parseProblemBody } from "@/lib/error-detail";
 import { normalizeUISpec } from "@/lib/ui-spec-to-zod";
 import { hasNoResources, type UIModeTemplate } from "@/components/YamlPreview";
 
@@ -44,7 +46,7 @@ export function UserFormPreview(props: Props) {
 
   // UI mode round-trips through the backend, so it genuinely needs state.
   const [fetched, setFetched] = useState<UISpec | null>(null);
-  const [fetchErr, setFetchErr] = useState<string | null>(null);
+  const [fetchErr, setFetchErr] = useState<RequestFailure | null>(null);
 
   const fetchPreview = useDebouncedCallback(async (state: UIModeTemplate) => {
     try {
@@ -54,14 +56,29 @@ export function UserFormPreview(props: Props) {
         body: JSON.stringify({ ui_state: state }),
       });
       if (!res.ok) {
-        setFetchErr(t("previewFailed", { status: res.status, detail: (await res.text()).trim() }));
+        // The sentence quotes the Problem's detail, not the body: printed whole
+        // it was a line of JSON (#6). The body goes to ProblemMessage.
+        const body = await res.text().catch(() => "");
+        const detail = parseProblemBody(body)?.detail ?? "";
+        setFetchErr({
+          message: t("previewFailed", { status: res.status, detail }),
+          status: res.status,
+          body,
+          at: new Date().toISOString(),
+          omitDetail: detail !== "",
+        });
         return;
       }
       const d = await res.json() as { ui_spec_yaml: string };
       setFetched(parseOrEmpty(d.ui_spec_yaml));
       setFetchErr(null);
     } catch (e) {
-      setFetchErr(e instanceof Error ? e.message : String(e));
+      setFetchErr({
+        message: e instanceof Error ? e.message : String(e),
+        status: 0,
+        body: "",
+        at: new Date().toISOString(),
+      });
     }
   }, 300);
 
@@ -86,10 +103,21 @@ export function UserFormPreview(props: Props) {
     return <div className="text-sm text-muted-foreground">{t("noResources")}</div>;
   }
 
-  const err = local ? (local.parseError && t("parseFailed", { detail: local.parseError })) : fetchErr;
+  const parseErr = local?.parseError ? t("parseFailed", { detail: local.parseError }) : null;
   const parsed = local ? local.spec : fetched;
 
-  if (err) return <div className="text-sm text-red-600 dark:text-red-400 whitespace-pre">{err}</div>;
+  if (parseErr) return <div className="text-sm text-red-600 dark:text-red-400 whitespace-pre">{parseErr}</div>;
+  if (!local && fetchErr) {
+    return (
+      <ProblemMessage
+        message={fetchErr.message}
+        status={fetchErr.status}
+        body={fetchErr.body}
+        at={fetchErr.at}
+        omitDetail={fetchErr.omitDetail}
+      />
+    );
+  }
   if (!parsed) return <div className="text-sm text-muted-foreground">{t("loading")}</div>;
 
   // The trust boundary (#164). Everything below — DynamicForm, its widgets,
