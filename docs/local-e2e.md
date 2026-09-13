@@ -2,7 +2,7 @@
 
 ## §0. 빠른 시작 — 어느 PC 에서든 (권장 경로)
 
-**원칙: Playwright e2e 는 로컬에서 먼저 돌린다.** CI(`playwright.yml`) 는 백스톱이다 — kind 를 매번 새로 만들어 느리고(≈5분) 가끔 인프라 플레이크가 난다. 스펙을 고치거나 배포 폼·에디터·릴리스 화면을 건드렸으면 푸시 전에 로컬에서 13개 스펙을 통과시킨다.
+**원칙: Playwright e2e 는 로컬에서 먼저 돌린다.** CI(`playwright.yml`) 는 백스톱이다 — kind 를 매번 새로 만들어 느리고(≈5분) 가끔 인프라 플레이크가 난다. 스펙을 고치거나 배포 폼·에디터·릴리스 화면을 건드렸으면 푸시 전에 로컬에서 스펙 전부를 통과시킨다 — `run.sh` 가 인자 없이 도는 `frontend/tests/e2e/*.spec.ts`(`playwright.config.ts` 의 `testDir`), 목록과 각 스펙이 덮는 것은 §9c.
 
 `scripts/e2e/` 가 §1~§9 를 코드로 옮긴 것이다. 전부 멱등이라 매 세션 그대로 다시 실행하면 된다. Git Bash(Windows)·WSL·macOS·Linux 공통 — `jq` 를 쓰지 않는다(node 로 대체).
 
@@ -44,7 +44,11 @@ a pod come up.
 
 - Docker Desktop (WSL2 integration on for Windows)
 - Go 1.26+, Node 20.9+ (Next 16's engines floor; CI runs 24), pnpm 10+
-- `atlas`, `kind` (`v0.23+`), `kubectl`
+- `atlas`, `kind`, `kubectl` — for `kind`, the version [dev-setup.md](dev-setup.md)
+  installs (`go install sigs.k8s.io/kind@…`), which is the one this flow is run
+  with. No script holds you to it: `scripts/e2e/doctor.sh` and `up.sh` only check
+  that `kind` is on PATH, and CI's kind jobs pin their own (`kind-action` in
+  `.github/workflows/playwright.yml` and `helm.yml`)
 - `jq` — only for the manual `curl` examples in §9. `scripts/e2e/*` do not use it
   (node instead), so the §0 path does not need it
 - `openssl`
@@ -516,7 +520,7 @@ ss -tlnp 2>/dev/null | grep ':6443' || echo "nothing on 6443"
    UPDATE clusters SET ca_bundle = :'ca' WHERE name='kind';
    SELECT name, length(ca_bundle) FROM clusters;
    EOF
-   # expect: ca_bundle ~1100 bytes for kindest/node v1.30
+   # expect: ca_bundle ~1100 bytes (kind's cluster CA PEM)
    ```
 
    The `-v ca="$KIND_CA"` flag binds the PEM blob to a psql variable, and
@@ -570,7 +574,7 @@ manual playbook.
 
 - **Self-signed cert.** Browsers need the one-time exception. `NODE_EXTRA_CA_CERTS` (Next.js) and `OIDC_CA_FILE` (Go) handle the server-side trust.
 
-- **kindest/node image.** Default pulled by kind v0.23 is k8s 1.30. That's the one that requires https OIDC. On older kind versions pinned to 1.29, plain http works but you then diverge from the current kind defaults.
+- **kindest/node image.** `up.sh` pins no node image, so the cluster runs whatever Kubernetes the installed kind defaults to — `kind version` names the binary, and that kind release's notes name its default `kindest/node`. Every default since kind v0.23 (k8s 1.30) wants an https OIDC issuer, which is why dex serves a self-signed cert here. An older kind pinned to 1.29 takes plain http, but then you are no longer testing what the scripts create.
 
 - **Restarting dex rotates its signing keys.** dex's `storage.type` is `memory`
   (see `deploy/docker/dex.yaml`) — it has no persisted key material, so every
