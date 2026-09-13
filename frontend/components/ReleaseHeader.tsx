@@ -3,6 +3,9 @@ import { StatusChip, statusChipVariantFromRelease } from "@/components/StatusChi
 import { KubeTermsToggle } from "@/components/KubeTermsToggle";
 import { DeleteReleaseButton } from "@/components/DeleteReleaseButton";
 import { ReleaseMeta } from "@/components/ReleaseMeta";
+import Link from "next/link";
+import { buttonVariants } from "@/components/ui/button";
+import { updateDeployPath } from "@/lib/update-release";
 
 export type ReleaseHeaderData = {
   id: string;
@@ -16,6 +19,7 @@ export type ReleaseHeaderData = {
 
 export async function ReleaseHeader({ data }: { data: ReleaseHeaderData }) {
   const t = await getTranslations("releases.status");
+  const tUpdate = await getTranslations("releases.update");
   // The status string comes from the backend (`healthy` / `warning` / `error` /
   // `unknown` / `cluster-unreachable` / `resources-missing`). next-intl throws
   // for missing keys, so a backend that ships a new status before the frontend
@@ -37,10 +41,24 @@ export async function ReleaseHeader({ data }: { data: ReleaseHeaderData }) {
         </StatusChip>
         <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2">
           <KubeTermsToggle />
-          {/* Stale releases (cluster gone / resources missing) can't be deleted the
-              normal way; ReleaseStaleBanner offers the admin force-delete instead. */}
+          {/* Stale releases (cluster gone / resources missing) can't be updated or
+              deleted the normal way; ReleaseStaleBanner offers the admin
+              force-delete instead. */}
           {data.status !== "cluster-unreachable" && data.status !== "resources-missing" && (
-            <DeleteReleaseButton releaseId={data.id} name={data.name} />
+            <>
+              {/* The way into the update form from a release with nothing wrong
+                  (#354) — ReleaseProblems only offers it under a problem. Pinned
+                  to the version the release runs: that page is the one that
+                  loads its current values, so a Secret is not silently reset to
+                  the ui-spec default (#296). */}
+              <Link
+                href={updateDeployPath(data.template.name, data.template.version, data.id)}
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+              >
+                {tUpdate("button")}
+              </Link>
+              <DeleteReleaseButton releaseId={data.id} name={data.name} />
+            </>
           )}
         </div>
       </div>
