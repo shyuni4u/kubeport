@@ -54,6 +54,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 function routedFetch(overrides: {
   ssar?: (body: Record<string, unknown>) => Response;
   releases?: () => Response;
+  render?: () => Response;
   clusters?: Array<{ name: string; default_namespace?: string | null }>;
 }) {
   return vi.fn(async (url: string, init?: RequestInit) => {
@@ -61,6 +62,7 @@ function routedFetch(overrides: {
       return jsonResponse({ clusters: overrides.clusters ?? [{ name: "dev" }] });
     }
     if (url.includes("/render")) {
+      if (overrides.render) return overrides.render();
       return jsonResponse({
         rendered_yaml: "apiVersion: apps/v1\nkind: Deployment\n",
       });
@@ -375,6 +377,76 @@ describe("DeployClient", () => {
 
   // #195: objects carrying this release's own name under another release's id.
   // "The release 'web' uses them" while deploying web would read as nonsense.
+  // #350: a demo account's manifest over the demo's limits. "No permission"
+  // sent a visitor to an admin for what can be a value in the form, and did not
+  // say which.
+  describe("a demo account over the demo's limits (#350)", () => {
+    function demoPolicy(violations: Array<Record<string, unknown>>) {
+      return () =>
+        jsonResponse(
+          {
+            title: "demo-restricted",
+            status: 403,
+            detail: "demo accounts cannot deploy this",
+            demo_policy: violations,
+          },
+          403,
+        );
+    }
+
+    it("names the image the demo does not allow", async () => {
+      const alert = await submitAndReadAlert(
+        demoPolicy([
+          { rule: "image-prefix", kind: "CronJob", name: "nightly", container: "job", field: "spec.jobTemplate.spec.template.spec.containers[0].image", got: "quay.io/evil/app:1" },
+        ]),
+      );
+      expect(alert).toHaveTextContent("quay.io/evil/app:1");
+      expect(alert).not.toHaveTextContent(/권한이 없습니다/);
+    });
+
+    it("names the demo's retry limit, and says there is more", async () => {
+      const alert = await submitAndReadAlert(
+        demoPolicy([
+          { rule: "job-backoff-limit", kind: "CronJob", name: "nightly", field: "spec.jobTemplate.spec.backoffLimit", limit: 2, got: 6 },
+          { rule: "cronjob-history-limit", kind: "CronJob", name: "nightly", field: "spec.failedJobsHistoryLimit", limit: 1, got: 5 },
+        ]),
+      );
+      expect(alert).toHaveTextContent(/실패한 작업을 2번까지만/);
+      expect(alert).toHaveTextContent(/이 밖에도 1곳이/);
+    });
+
+    it("does not invent a number for a failure policy that ignores failures", async () => {
+      const alert = await submitAndReadAlert(
+        demoPolicy([
+          { rule: "job-backoff-limit", kind: "Job", name: "retry", field: "spec.podFailurePolicy.rules[0].action", got: "Ignore" },
+        ]),
+      );
+      expect(alert).toHaveTextContent(/횟수에 세지 않고/);
+      expect(alert).not.toHaveTextContent(/null|undefined|NaN/);
+    });
+
+    it("still says no permission for a demo-restricted refusal without limits", async () => {
+      const alert = await submitAndReadAlert(() =>
+        jsonResponse({ title: "demo-restricted", status: 403, detail: "demo accounts cannot perform this action" }, 403),
+      );
+      expect(alert).toHaveTextContent(/권한이 없습니다/);
+    });
+
+    it("says why the preview is empty when the demo's limits refuse it", async () => {
+      vi.stubGlobal(
+        "fetch",
+        routedFetch({
+          render: demoPolicy([
+            { rule: "cronjob-history-limit", kind: "CronJob", name: "nightly", field: "spec.successfulJobsHistoryLimit", limit: 1, got: 3 },
+          ]),
+        }),
+      );
+      render(<DeployClient templateName="nightly-job" version={1} team={null} spec={spec} />);
+      expect(await screen.findByText(/끝난 실행 기록을 1개까지만/)).toBeInTheDocument();
+      expect(screen.queryByText("폼을 채우면 여기에 미리보기가 표시됩니다.")).not.toBeInTheDocument();
+    });
+  });
+
   it("says objects are an earlier same-name release's, not this one's", async () => {
     const alert = await submitAndReadAlert(() =>
       jsonResponse(

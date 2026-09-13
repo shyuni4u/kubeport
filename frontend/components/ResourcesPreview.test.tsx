@@ -120,6 +120,16 @@ metadata:
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
   });
 
+  // #350: a demo account's values the API will not preview. The "fill in the
+  // form" hint would read as if nothing were entered.
+  it("says why there is no preview when the API refused it", () => {
+    render(<ResourcesPreview renderedYaml={null} pending={false} refusal="데모 한도를 넘습니다." />);
+    expect(screen.getByText("데모 한도를 넘습니다.")).toBeInTheDocument();
+    expect(
+      screen.queryByText("폼을 채우면 여기에 미리보기가 표시됩니다."),
+    ).not.toBeInTheDocument();
+  });
+
   it("falls back to placeholder on malformed YAML (no crash)", () => {
     // parseAllDocuments is forgiving and rarely throws, but bracket-scalar mismatches can.
     // Even if it returns empty / invalid docs, the filter should eliminate them → placeholder.
