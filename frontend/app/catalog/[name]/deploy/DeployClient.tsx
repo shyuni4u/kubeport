@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { termLabel } from "@/lib/kube-term-map";
+import { formatPath, parseTemplatePath } from "@/lib/template-path";
 import {
   SINGLE_INSTANCE_RULES,
   releaseNameProblem,
@@ -71,7 +72,88 @@ type ProblemBody = {
   conflicts?: Array<{ owner?: unknown; owner_unknown?: unknown; same_name?: unknown }>;
   pinned_namespace?: unknown;
   template_defect?: unknown;
+  demo_policy?: unknown;
 };
+
+/** The first place a demo account's manifest goes past the demo's limits. */
+type DemoPolicyRefusal = {
+  rule: string;
+  limit: number | null;
+  got: string;
+  /** Where it is: the rendered object's kind and name, and the field in it. */
+  kind: string;
+  name: string;
+  field: string;
+  more: number;
+};
+
+/**
+ * How a render named the objects: as the template does, or — for a
+ * multi-instance template — after a release, whose name is `prefix` when it is
+ * known here.
+ */
+type ObjectNaming = { multiple: boolean; prefix: string | null };
+const TEMPLATE_NAMES: ObjectNaming = { multiple: false, prefix: null };
+
+/**
+ * A `demo-restricted` 403 that carries `demo_policy` (#350): the manifest these
+ * values render goes past a limit the demo sets for its accounts, which the
+ * template, or a value in the form, has to change. Null for any other body —
+ * a demo-restricted 403 without it is an action demo accounts may not take at
+ * all, which "no permission" already covers.
+ */
+function demoPolicyOf(p: ProblemBody | null): DemoPolicyRefusal | null {
+  if (p?.title !== "demo-restricted" || !Array.isArray(p.demo_policy) || p.demo_policy.length === 0) {
+    return null;
+  }
+  const first: unknown = p.demo_policy[0];
+  if (!first || typeof first !== "object") return null;
+  const v = first as { rule?: unknown; limit?: unknown; got?: unknown; kind?: unknown; name?: unknown; field?: unknown };
+  if (typeof v.rule !== "string") return null;
+  return {
+    rule: v.rule,
+    limit: typeof v.limit === "number" ? v.limit : null,
+    got: v.got === undefined || v.got === null ? "" : String(v.got),
+    kind: typeof v.kind === "string" ? v.kind : "",
+    name: typeof v.name === "string" ? v.name : "",
+    field: typeof v.field === "string" ? v.field : "",
+    more: p.demo_policy.length - 1,
+  };
+}
+
+/**
+ * The form field that holds a demo_policy entry's value, when the form holds
+ * it for certain.
+ *
+ * The response names the object as it was rendered, and a ui-spec path names
+ * it by selector, so a field is taken only when its selector can only mean that
+ * object (codex review): left out, which the backend accepts only for the one
+ * object of its kind; for a single-instance template, the rendered name
+ * itself; for a multi-instance one, only the name the render gave it,
+ * "<release>-<selector>" — an unprefixed name there may be another object's
+ * renamed one, and an update does not know its release name here. An index
+ * cannot be checked against a name, and a name that merely ends the same way
+ * may be another object, so those fall back to the template's wording —
+ * naming the wrong field is worse than sending the reader to an admin.
+ */
+function formFieldFor(
+  fields: UISpec["fields"],
+  dp: DemoPolicyRefusal,
+  naming: ObjectNaming,
+): UISpec["fields"][number] | undefined {
+  if (dp.kind === "" || dp.field === "") return undefined;
+  const target = parseTemplatePath(`${dp.kind}.${dp.field}`);
+  const keys = target ? formatPath(target.keys) : null;
+  if (keys === null) return undefined;
+  const matches = fields.filter((f) => {
+    const p = parseTemplatePath(f.path);
+    if (!p || p.kind !== dp.kind || formatPath(p.keys) !== keys) return false;
+    if (p.selector === "") return true;
+    if (!naming.multiple) return p.selector === dp.name;
+    return naming.prefix !== null && naming.prefix !== "" && dp.name === `${naming.prefix}-${p.selector}`;
+  });
+  return matches.length === 1 ? matches[0] : undefined;
+}
 
 function parseProblem(body: string): ProblemBody | null {
   try {
@@ -126,21 +208,76 @@ export function DeployClient({
   const kube = useKubeTermsStore((s) => s.showKubeTerms);
   const tTerms = useTranslations("releases.terms");
 
+  // What a demo account has to change when the manifest goes past the demo's
+  // limits (#350). "No permission" would send a visitor to an admin for what is
+  // often a value in the form, and says nothing about which one.
+  const demoPolicyMessage = useCallback(
+    (dp: DemoPolicyRefusal, submitted: boolean, naming: ObjectNaming): string => {
+      // 86400 seconds means nothing to a reader who does not count in seconds.
+      const duration = (seconds: number) =>
+        seconds > 0 && seconds % 3600 === 0
+          ? t("errors.durationHours", { count: seconds / 3600 })
+          : seconds > 0 && seconds % 60 === 0
+            ? t("errors.durationMinutes", { count: seconds / 60 })
+            : t("errors.durationSeconds", { count: seconds });
+      const parts: string[] = [];
+      if (dp.rule === "image-prefix" && dp.got !== "") {
+        parts.push(t("errors.demoPolicyImage", { image: dp.got }));
+      } else if (dp.rule === "job-backoff-limit" && dp.limit !== null) {
+        parts.push(t("errors.demoPolicyBackoff", { limit: dp.limit }));
+      } else if (dp.rule === "job-backoff-limit") {
+        // No limit is a podFailurePolicy rule that ignores failures: there is
+        // no number of retries to name.
+        parts.push(t("errors.demoPolicyRetryUncounted"));
+      } else if (dp.rule === "job-ttl" && dp.limit !== null) {
+        parts.push(t("errors.demoPolicyTtl", { duration: duration(dp.limit) }));
+      } else if (dp.rule === "cronjob-history-limit" && dp.limit !== null) {
+        parts.push(t("errors.demoPolicyHistory", { limit: dp.limit }));
+      } else {
+        parts.push(t("errors.demoPolicyOther"));
+      }
+      // A value the form holds is the visitor's to change, and saying which
+      // field beats a hedge; anything else is fixed by the template, where
+      // "change your input" would blame the one thing that is not wrong.
+      const field = formFieldFor(spec.fields, dp, naming);
+      if (field && dp.rule === "image-prefix") {
+        parts.push(t("errors.demoPolicyFixFieldImage", { label: field.label }));
+      } else if (field && dp.rule === "job-backoff-limit" && dp.limit === null) {
+        // A podFailurePolicy action the form exposes: no number to name, but
+        // still the visitor's to change (codex review).
+        parts.push(t("errors.demoPolicyFixFieldAction", { label: field.label }));
+      } else if (field && dp.limit !== null) {
+        parts.push(t("errors.demoPolicyFixFieldLimit", { label: field.label, limit: dp.limit }));
+      } else {
+        parts.push(t("errors.demoPolicyFixTemplate"));
+      }
+      if (dp.more > 0) parts.push(t("errors.demoPolicyMore", { count: dp.more }));
+      // A refused update leaves the running release as it was. A preview
+      // attempted nothing, so it does not say so.
+      if (submitted && isUpdate) parts.push(t("errors.demoPolicyUpdateUnchanged"));
+      return parts.join(" ");
+    },
+    [t, spec, isUpdate],
+  );
+
   // Map a failed response to a non-technical, localized message. The raw
   // backend text is preserved only as the Error `cause` (for logs / debugging)
   // and is never shown to the user. The body is read only for structured fields
   // that exist to be shown: the release holding a resource-conflict (#161),
-  // where "pick another name" cannot help, and a template object pinned to
-  // another namespace (#137) or a ui-spec field type kubeport does not know
-  // (#136), where "check your input" blames the one thing that is not wrong. An
-  // update gets its own wording, because an existing release cannot move to
-  // another area.
+  // where "pick another name" cannot help, a template object pinned to another
+  // namespace (#137) or a ui-spec field type kubeport does not know (#136),
+  // where "check your input" blames the one thing that is not wrong, and a demo
+  // account's manifest over the demo's limits (#350). An update gets its own
+  // wording, because an existing release cannot move to another area.
   const errorMessageForStatus = useCallback(
-    (status: number, body = ""): string => {
+    (status: number, body = "", naming: ObjectNaming = TEMPLATE_NAMES): string => {
       const problem = parseProblem(body);
       if (status === 400 && problem?.pinned_namespace) return t("errors.templateNamespace");
       if (status === 400 && problem?.template_defect) return t("errors.templateDefect");
-      if (status === 403) return t("errors.forbidden");
+      if (status === 403) {
+        const dp = demoPolicyOf(problem);
+        return dp ? demoPolicyMessage(dp, true, naming) : t("errors.forbidden");
+      }
       if (status === 409) {
         const held = resourceConflictOf(problem);
         if (held?.owner) {
@@ -169,7 +306,7 @@ export function DeployClient({
       if (status >= 500) return t("errors.server");
       return t("errors.generic");
     },
-    [t, isUpdate],
+    [t, isUpdate, demoPolicyMessage],
   );
 
   // Where the namespace field starts (#179): a demo session's own namespace,
@@ -191,6 +328,8 @@ export function DeployClient({
   // suggestion that no longer matches.
   const namespaceTouched = useRef(false);
   const [rendered, setRendered] = useState<string | null>(null);
+  // Why the last preview was refused, when that says what to change (#350).
+  const [previewRefusal, setPreviewRefusal] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   // A refused submit: the sentence this form picked, plus the response as the
@@ -329,13 +468,25 @@ export function DeployClient({
         if (inflight.current !== ctrl) return;
         if (!res.ok) {
           setRendered(null);
+          // A demo account's values over the demo's limits (#350) say so here,
+          // before submit does. Any other refusal still only clears the preview.
+          const dp = res.status === 403 ? demoPolicyOf(parseProblem(await res.text())) : null;
+          if (inflight.current !== ctrl) return;
+          setPreviewRefusal(
+            // The backend renders every multi-instance preview as release "preview".
+            dp ? demoPolicyMessage(dp, false, { multiple: nameRules.multiple, prefix: "preview" }) : null,
+          );
           return;
         }
         const body = (await res.json()) as { rendered_yaml: string };
         if (inflight.current !== ctrl) return;
         setRendered(body.rendered_yaml);
+        setPreviewRefusal(null);
       } catch {
-        if (inflight.current === ctrl) setRendered(null);
+        if (inflight.current === ctrl) {
+          setRendered(null);
+          setPreviewRefusal(null);
+        }
       } finally {
         if (inflight.current === ctrl) {
           inflight.current = null;
@@ -404,6 +555,7 @@ export function DeployClient({
       inflight.current = null;
       setFormInvalid(true);
       setRendered(null);
+      setPreviewRefusal(null);
       setPending(false);
     },
     [clearErr, preview],
@@ -446,7 +598,12 @@ export function DeployClient({
       // released only on failure — see the catch below for why.
       const fail = (status: number, body: string) => {
         setErr({
-          message: errorMessageForStatus(status, body),
+          // A multi-instance release names its objects after itself; an
+          // update's release name is not known here.
+          message: errorMessageForStatus(status, body, {
+            multiple: nameRules.multiple,
+            prefix: isUpdate ? null : meta.name,
+          }),
           status,
           body,
           at: new Date().toISOString(),
@@ -501,7 +658,7 @@ export function DeployClient({
         setSubmitting(false);
       }
     },
-    [updateReleaseId, version, templateName, meta, router, errorMessageForStatus],
+    [updateReleaseId, version, templateName, meta, router, errorMessageForStatus, nameRules, isUpdate],
   );
 
   return (
@@ -719,7 +876,12 @@ export function DeployClient({
         )}
       </div>
       <aside className="flex flex-col gap-3">
-        <ResourcesPreview renderedYaml={rendered} pending={pending} paused={formInvalid} />
+        <ResourcesPreview
+          renderedYaml={rendered}
+          pending={pending}
+          paused={formInvalid}
+          refusal={previewRefusal}
+        />
         {rbacPanelVisible && (
           <RBACCheckPanel
             cluster={meta.cluster}

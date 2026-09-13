@@ -9,6 +9,7 @@ import type { ErrorDetailLevel } from "@/lib/error-detail";
 
 import { DeployClient } from "./DeployClient";
 import type { UISpec } from "@/lib/ui-spec-to-zod";
+import type { ReleaseNameRules } from "@/lib/release-name";
 
 const pushMock = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -54,6 +55,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 function routedFetch(overrides: {
   ssar?: (body: Record<string, unknown>) => Response;
   releases?: () => Response;
+  render?: () => Response;
   clusters?: Array<{ name: string; default_namespace?: string | null }>;
 }) {
   return vi.fn(async (url: string, init?: RequestInit) => {
@@ -61,6 +63,7 @@ function routedFetch(overrides: {
       return jsonResponse({ clusters: overrides.clusters ?? [{ name: "dev" }] });
     }
     if (url.includes("/render")) {
+      if (overrides.render) return overrides.render();
       return jsonResponse({
         rendered_yaml: "apiVersion: apps/v1\nkind: Deployment\n",
       });
@@ -375,6 +378,251 @@ describe("DeployClient", () => {
 
   // #195: objects carrying this release's own name under another release's id.
   // "The release 'web' uses them" while deploying web would read as nonsense.
+  // #350: a demo account's manifest over the demo's limits. "No permission"
+  // sent a visitor to an admin for what can be a value in the form, and did not
+  // say which.
+  describe("a demo account over the demo's limits (#350)", () => {
+    function demoPolicy(violations: Array<Record<string, unknown>>) {
+      return () =>
+        jsonResponse(
+          {
+            title: "demo-restricted",
+            status: 403,
+            detail: "demo accounts cannot deploy this",
+            demo_policy: violations,
+          },
+          403,
+        );
+    }
+
+    it("names the image the demo does not allow", async () => {
+      const alert = await submitAndReadAlert(
+        demoPolicy([
+          { rule: "image-prefix", kind: "CronJob", name: "nightly", container: "job", field: "spec.jobTemplate.spec.template.spec.containers[0].image", got: "quay.io/evil/app:1" },
+        ]),
+      );
+      expect(alert).toHaveTextContent("quay.io/evil/app:1");
+      expect(alert).not.toHaveTextContent(/권한이 없습니다/);
+    });
+
+    it("names the demo's retry limit, and says there is more", async () => {
+      const alert = await submitAndReadAlert(
+        demoPolicy([
+          { rule: "job-backoff-limit", kind: "CronJob", name: "nightly", field: "spec.jobTemplate.spec.backoffLimit", limit: 2, got: 6 },
+          { rule: "cronjob-history-limit", kind: "CronJob", name: "nightly", field: "spec.failedJobsHistoryLimit", limit: 1, got: 5 },
+        ]),
+      );
+      expect(alert).toHaveTextContent(/실패한 작업을 2번까지만/);
+      expect(alert).toHaveTextContent(/이 밖에도 1곳이/);
+    });
+
+    it("does not invent a number for a failure policy that ignores failures", async () => {
+      const alert = await submitAndReadAlert(
+        demoPolicy([
+          { rule: "job-backoff-limit", kind: "Job", name: "retry", field: "spec.podFailurePolicy.rules[0].action", got: "Ignore" },
+        ]),
+      );
+      expect(alert).toHaveTextContent(/횟수에 세지 않고/);
+      expect(alert).not.toHaveTextContent(/null|undefined|NaN/);
+    });
+
+    it("sends a value the template fixes to an admin, not to the form", async () => {
+      const alert = await submitAndReadAlert(
+        demoPolicy([
+          { rule: "job-ttl", kind: "Job", name: "once", field: "spec.ttlSecondsAfterFinished", limit: 86400, got: 172800 },
+        ]),
+      );
+      expect(alert).toHaveTextContent(/끝난 작업을 24시간까지만/);
+      expect(alert).not.toHaveTextContent(/86400|86,400/);
+      expect(alert).toHaveTextContent(/관리자에게 템플릿 수정을 요청하세요/);
+    });
+
+    it("names the form field to change when the form holds the value", async () => {
+      const user = userEvent.setup();
+      vi.stubGlobal(
+        "fetch",
+        routedFetch({
+          releases: demoPolicy([
+            { rule: "job-backoff-limit", kind: "CronJob", name: "nightly", field: "spec.jobTemplate.spec.backoffLimit", limit: 2, got: 6 },
+          ]),
+        }),
+      );
+      const retrySpec: UISpec = {
+        fields: [
+          // Spelled differently from the response on purpose (#129).
+          { path: "CronJob[nightly].spec.jobTemplate.spec['backoffLimit']", label: "재시도 횟수", type: "integer", default: 6, required: true },
+        ],
+      };
+      render(<DeployClient templateName="nightly-job" version={1} team={null} spec={retrySpec} />);
+      await fillMeta(user);
+      const button = screen.getByRole("button", { name: /배포하기/ });
+      await waitFor(() => expect(button).toBeEnabled());
+      await user.click(button);
+      const alert = await screen.findByRole("alert");
+
+      expect(alert).toHaveTextContent("'재시도 횟수' 값을 2 이하로 바꾸세요");
+      expect(alert).not.toHaveTextContent(/관리자/);
+    });
+
+    // The response names the object as rendered; a ui-spec path names it by
+    // selector (codex review). A field is recommended only when its selector
+    // can only mean that object — otherwise the visitor would change a value
+    // that cannot lift the refusal.
+    describe("which form field holds the value", () => {
+      async function alertFor(
+        fields: UISpec["fields"],
+        violation: Record<string, unknown>,
+        nameRules?: ReleaseNameRules,
+      ) {
+        const user = userEvent.setup();
+        vi.stubGlobal("fetch", routedFetch({ releases: demoPolicy([violation]) }));
+        render(
+          <DeployClient templateName="batch" version={1} team={null} spec={{ fields }} nameRules={nameRules} />,
+        );
+        await fillMeta(user);
+        const button = screen.getByRole("button", { name: /배포하기/ });
+        await waitFor(() => expect(button).toBeEnabled());
+        await user.click(button);
+        return screen.findByRole("alert");
+      }
+      const retries = (path: string, label = "재시도 횟수") =>
+        ({ path, label, type: "integer", default: 1, required: true }) as const;
+      const onJob = (name: string) => ({
+        rule: "job-backoff-limit", kind: "Job", name, field: "spec.backoffLimit", limit: 2, got: 6,
+      });
+      const toAdmin = /관리자에게 템플릿 수정을 요청하세요/;
+
+      // The backend accepts a left-out selector only when the template has one
+      // object of that kind, so it can only be this one.
+      it("finds a field that leaves the selector out", async () => {
+        const alert = await alertFor([retries("Job.spec.backoffLimit")], onJob("once"));
+        expect(alert).toHaveTextContent("'재시도 횟수' 값을 2 이하로 바꾸세요");
+      });
+
+      it("finds a field on an object a new multi-instance release renamed", async () => {
+        const alert = await alertFor(
+          [retries("Job[once].spec.backoffLimit")],
+          // fillMeta names the release my-app.
+          onJob("my-app-once"),
+          { multiple: true, maxLength: 30, letterFirst: true },
+        );
+        expect(alert).toHaveTextContent("'재시도 횟수' 값을 2 이하로 바꾸세요");
+      });
+
+      // An action has no number to name, but a form that exposes it still
+      // lets the visitor lift the refusal (codex review).
+      it("names a failure-policy action the form holds", async () => {
+        const alert = await alertFor(
+          [{ path: "Job.spec.podFailurePolicy.rules[0].action", label: "실패 처리", type: "string", default: "Count", required: true }],
+          { rule: "job-backoff-limit", kind: "Job", name: "once", field: "spec.podFailurePolicy.rules[0].action", got: "Ignore" },
+        );
+        expect(alert).toHaveTextContent("'실패 처리' 을 실패를 무시하지 않는 값으로 바꾸세요");
+        expect(alert).not.toHaveTextContent(toAdmin);
+      });
+
+      // In a multi-instance release every object is renamed: "once" renders as
+      // my-app-once, so a Job[my-app-once] field is another Job (codex review).
+      it("does not take an unprefixed name for a multi-instance object", async () => {
+        const alert = await alertFor(
+          [retries("Job[my-app-once].spec.backoffLimit")],
+          onJob("my-app-once"),
+          { multiple: true, maxLength: 30, letterFirst: true },
+        );
+        expect(alert).not.toHaveTextContent(/재시도 횟수/);
+        expect(alert).toHaveTextContent(toAdmin);
+      });
+
+      // The backend renders a multi-instance preview as release "preview",
+      // whatever the name field holds.
+      it("finds the field in a multi-instance preview", async () => {
+        vi.stubGlobal("fetch", routedFetch({ render: demoPolicy([onJob("preview-once")]) }));
+        render(
+          <DeployClient
+            templateName="batch"
+            version={1}
+            team={null}
+            spec={{ fields: [retries("Job[once].spec.backoffLimit")] }}
+            nameRules={{ multiple: true, maxLength: 30, letterFirst: true }}
+          />,
+        );
+        expect(await screen.findByText(/'재시도 횟수' 값을 2 이하로 바꾸세요/)).toBeInTheDocument();
+      });
+
+      it("does not guess that an index means the object refused", async () => {
+        // The template may have another Job whose limit is fixed.
+        const alert = await alertFor([retries("Job[0].spec.backoffLimit")], onJob("second"));
+        expect(alert).not.toHaveTextContent(/재시도 횟수/);
+        expect(alert).toHaveTextContent(toAdmin);
+      });
+
+      it("does not read a name that only ends the same way as renamed", async () => {
+        const alert = await alertFor([retries("Job[once].spec.backoffLimit")], onJob("other-once"));
+        expect(alert).not.toHaveTextContent(/재시도 횟수/);
+        expect(alert).toHaveTextContent(toAdmin);
+      });
+
+      it("does not name a field on another object", async () => {
+        const alert = await alertFor([retries("Job[other].spec.backoffLimit")], onJob("once"));
+        expect(alert).not.toHaveTextContent(/재시도 횟수/);
+        expect(alert).toHaveTextContent(toAdmin);
+      });
+    });
+
+    // A release from before #350 meets the limits on its next update. "Cannot
+    // deploy" would leave the visitor wondering what happened to the one running.
+    it("says the running release is unchanged when an update is refused", async () => {
+      const user = userEvent.setup();
+      const base = routedFetch({});
+      const refused = demoPolicy([
+        { rule: "cronjob-history-limit", kind: "CronJob", name: "nightly", field: "spec.failedJobsHistoryLimit", limit: 1, got: 5 },
+      ]);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) =>
+          url.startsWith("/api/v1/releases/") ? refused() : base(url, init),
+        ),
+      );
+      render(
+        <DeployClient
+          templateName="nightly-job"
+          version={2}
+          team={null}
+          spec={spec}
+          updateReleaseId="rel-1"
+          initialValues={{ "spec.replicas": 1, "metadata.name": "nginx" }}
+        />,
+      );
+      const button = screen.getByRole("button", { name: /배포하기|업데이트/ });
+      await waitFor(() => expect(button).toBeEnabled());
+      await user.click(button);
+      const alert = await screen.findByRole("alert");
+
+      expect(alert).toHaveTextContent(/실행 기록을 1개까지만/);
+      expect(alert).toHaveTextContent(/지금 실행 중인 릴리스는 그대로입니다/);
+    });
+
+    it("still says no permission for a demo-restricted refusal without limits", async () => {
+      const alert = await submitAndReadAlert(() =>
+        jsonResponse({ title: "demo-restricted", status: 403, detail: "demo accounts cannot perform this action" }, 403),
+      );
+      expect(alert).toHaveTextContent(/권한이 없습니다/);
+    });
+
+    it("says why the preview is empty when the demo's limits refuse it", async () => {
+      vi.stubGlobal(
+        "fetch",
+        routedFetch({
+          render: demoPolicy([
+            { rule: "cronjob-history-limit", kind: "CronJob", name: "nightly", field: "spec.successfulJobsHistoryLimit", limit: 1, got: 3 },
+          ]),
+        }),
+      );
+      render(<DeployClient templateName="nightly-job" version={1} team={null} spec={spec} />);
+      expect(await screen.findByText(/끝난 실행 기록을 1개까지만/)).toBeInTheDocument();
+      expect(screen.queryByText("폼을 채우면 여기에 미리보기가 표시됩니다.")).not.toBeInTheDocument();
+    });
+  });
+
   it("says objects are an earlier same-name release's, not this one's", async () => {
     const alert = await submitAndReadAlert(() =>
       jsonResponse(

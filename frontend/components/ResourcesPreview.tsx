@@ -16,11 +16,18 @@ type Props = {
    * entered yet.
    */
   paused?: boolean;
+  /**
+   * Why the API would not preview these values, when it is something the
+   * reader can act on: a demo account's manifest over the demo's limits
+   * (#350). Shown instead of the "fill in the form" hint, which reads as if
+   * nothing were entered yet.
+   */
+  refusal?: string | null;
 };
 
 type Resource = { apiVersion: string; kind: string; name: string | null };
 
-export function ResourcesPreview({ renderedYaml, pending, paused = false }: Props) {
+export function ResourcesPreview({ renderedYaml, pending, paused = false, refusal = null }: Props) {
   const t = useTranslations("deploy.preview");
   const tKinds = useTranslations("kinds");
   const kube = useKubeTermsStore((s) => s.showKubeTerms);
@@ -63,9 +70,12 @@ export function ResourcesPreview({ renderedYaml, pending, paused = false }: Prop
         <KubeTermsToggle />
       </div>
       {pending && <p className="text-xs text-muted-foreground">{t("rendering")}</p>}
-      {!pending && resources.length === 0 && (
-        <p className="text-xs text-muted-foreground">{t(paused ? "invalid" : "empty")}</p>
-      )}
+      {!pending && resources.length === 0 &&
+        (refusal ? (
+          <p className="text-xs">{refusal}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">{t(paused ? "invalid" : "empty")}</p>
+        ))}
       {resources.length > 0 && (
         <ul className="flex flex-col gap-1">
           {resources.map((r, idx) => (
