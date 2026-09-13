@@ -17,6 +17,10 @@ type Labels struct {
 	TemplateVersion int
 	ReleaseID       string
 	AppliedBy       string
+	// Namespace is where the release goes. It is not stamped; a multi-instance
+	// template uses it to tell a clone source in the release's own namespace
+	// from one in another (#190). Empty for a preview.
+	Namespace string
 }
 
 // ValidateSpec parses the resources and ui-spec YAML pair and returns a
@@ -31,7 +35,8 @@ type Labels struct {
 // segments make that more likely, since they are the one part of the grammar
 // an admin writes by hand.
 func ValidateSpec(resourcesYAML, uiSpecYAML string) error {
-	if _, err := parseMultiDoc(resourcesYAML); err != nil {
+	docs, err := parseMultiDoc(resourcesYAML)
+	if err != nil {
 		return err
 	}
 	spec, err := parseSpec(uiSpecYAML)
@@ -76,6 +81,9 @@ func ValidateSpec(resourcesYAML, uiSpecYAML string) error {
 				return fmt.Errorf("fields[%d] (label %q, path `%s`) has an unusable pattern: it %s", i, f.Label, f.Path, prob.reason)
 			}
 		}
+	}
+	if spec.multiple() {
+		return validateMultiInstance(spec, docs)
 	}
 	return nil
 }
@@ -178,7 +186,16 @@ func Render(resourcesYAML, uiSpecYAML string, values json.RawMessage, l Labels) 
 
 	for _, d := range docs {
 		stringifyStringMaps(d)
-		stampLabels(d, l)
+	}
+	// After values, which find objects by the template's own names; before
+	// labels, so the release label goes on the renamed objects.
+	if spec.multiple() {
+		if err := renameForRelease(docs, l.ReleaseName, l.ReleaseID, l.Namespace); err != nil {
+			return nil, err
+		}
+	}
+	for _, d := range docs {
+		stampLabels(d, l, spec.multiple())
 	}
 
 	return marshalMultiDoc(docs)
@@ -270,7 +287,9 @@ func marshalMultiDoc(docs []map[string]any) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func stampLabels(obj map[string]any, l Labels) {
+// multiple is the template's instance mode (instances.go), which decides
+// whether a Job's pod template carries the release id.
+func stampLabels(obj map[string]any, l Labels, multiple bool) {
 	meta := ensureMap(obj, "metadata")
 	stampLabelsOnto(meta, l, true)
 	anns := ensureMap(meta, "annotations")
@@ -284,14 +303,18 @@ func stampLabels(obj map[string]any, l Labels) {
 	//
 	// Only metadata.labels, never spec.selector: a workload's selector is
 	// immutable, and adding a key to it would refuse every update of an
-	// existing release.
+	// existing release. A multi-instance template is the exception, and gets
+	// the release label in its selectors from its first render (instances.go).
 	if spec, ok := obj["spec"].(map[string]any); ok {
 		if tmpl, ok := spec["template"].(map[string]any); ok {
 			// A Job's pod template is immutable too, so a release with a Job
 			// applied before #195 could not be updated once the id appeared in
 			// it. The Job itself carries the id; its pods go without, and count
-			// by name the way every pod from before the id did.
-			stampLabelsOnto(ensureMap(tmpl, "metadata"), l, obj["kind"] != "Job")
+			// by name the way every pod from before the id did. A Job of a
+			// multi-instance template has no such history — it was created with
+			// the id — and its pods need it: that mode's selectors match the id
+			// (#190).
+			stampLabelsOnto(ensureMap(tmpl, "metadata"), l, obj["kind"] != "Job" || multiple)
 		}
 		// CronJob nests pod template under spec.jobTemplate.spec.template,
 		// which can change: it shapes the next Job, not a running one.

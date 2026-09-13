@@ -9,6 +9,8 @@ import { MonacoPanel } from "./MonacoPanel";
 import { ProblemMessage, type RequestFailure } from "./ProblemMessage";
 
 export interface UIModeTemplate {
+  /** The ui-spec's top-level `instances`, kept through the editor (#190). */
+  instances?: "single" | "multiple";
   resources: Array<{
     apiVersion: string;
     kind: string;

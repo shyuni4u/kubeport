@@ -161,6 +161,10 @@ func (b *containerBudget) spend(n int, path string) error {
 }
 
 type UIModeTemplate struct {
+	// Instances carries the ui-spec's top-level `instances` through the UI
+	// editor (#190). Without it, saving a multiple-instance template from the
+	// editor wrote a ui-spec of fields alone and silently made it single again.
+	Instances string       `json:"instances,omitempty"`
 	Resources []UIResource `json:"resources"`
 }
 
@@ -290,7 +294,13 @@ func SerializeUIMode(ui UIModeTemplate) (resourcesYAML, uiSpecYAML string, err e
 		buf: &specBuf, limit: maxSerializedBytes - capped.written,
 	})
 	specEnc.SetIndent(2)
-	if err := specEnc.Encode(map[string]any{"fields": allFields}); err != nil {
+	doc := map[string]any{"fields": allFields}
+	if ui.Instances != "" {
+		// Only when set, so a template that never chose keeps the ui-spec it
+		// always produced.
+		doc["instances"] = ui.Instances
+	}
+	if err := specEnc.Encode(doc); err != nil {
 		return "", "", err
 	}
 	if err := specEnc.Close(); err != nil {

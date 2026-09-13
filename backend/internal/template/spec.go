@@ -33,13 +33,18 @@ type Field struct {
 }
 
 type UISpec struct {
-	Fields []Field `yaml:"fields"`
+	// Instances is single (the default) or multiple; see instances.go (#190).
+	Instances string  `yaml:"instances"`
+	Fields    []Field `yaml:"fields"`
 }
 
 func parseSpec(src string) (UISpec, error) {
 	var s UISpec
 	if err := yaml.Unmarshal([]byte(src), &s); err != nil {
 		return UISpec{}, fmt.Errorf("ui-spec unmarshal: %w", err)
+	}
+	if err := checkInstances(s.Instances); err != nil {
+		return UISpec{}, err
 	}
 	for i := range s.Fields {
 		if s.Fields[i].Pattern == "" {

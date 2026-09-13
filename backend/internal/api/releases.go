@@ -210,6 +210,7 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		TemplateName:    r.Template,
 		TemplateVersion: r.Version,
 		AppliedBy:       u.Email,
+		Namespace:       r.Namespace,
 	}
 	rendered, err := template.Render(tv.ResourcesYaml, tv.UiSpecYaml, r.Values, labels)
 	if err != nil {

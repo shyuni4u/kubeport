@@ -131,6 +131,9 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 	if !requireDeployableVersion(c, tv, rel.TemplateName) {
 		return
 	}
+	if int32(req.Version) != rel.TemplateVersion && !h.sameInstanceMode(c, rel.TemplateVersionID, tv.UiSpecYaml) {
+		return
+	}
 
 	// Render with new values, stamped with the release's id (#195). Objects
 	// applied before the id existed gain it on this apply.
@@ -141,6 +144,7 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 		TemplateVersion: req.Version,
 		ReleaseID:       uid,
 		AppliedBy:       u.Email,
+		Namespace:       rel.Namespace,
 	})
 	if err != nil {
 		renderProblem(c, err)

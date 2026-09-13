@@ -503,6 +503,12 @@ func (h *Handlers) PublishVersion(c *gin.Context) {
 		return
 	}
 
+	// Checked again at publish: the draft was checked when written, but a
+	// version of the other mode may have been published since (#190).
+	if existing.Status == "draft" && !h.sameModeAsTemplate(c, c.Param("name"), existing.UiSpecYaml, existing.ID) {
+		return
+	}
+
 	var published store.TemplateVersion
 	var notDraft bool
 	err = h.deps.Store.WithTx(ctx, func(q *store.Queries) error {
@@ -579,6 +585,9 @@ func (h *Handlers) CreateTemplateVersion(c *gin.Context) {
 	// spec dry-run — same as CreateTemplate
 	if err := template.ValidateSpec(r.ResourcesYAML, r.UISpecYAML); err != nil {
 		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+		return
+	}
+	if !h.sameModeAsTemplate(c, c.Param("name"), r.UISpecYAML, pgtype.UUID{}) {
 		return
 	}
 
@@ -758,6 +767,9 @@ func (h *Handlers) UpdateTemplateVersion(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "validation-error", err.Error())
 		return
 	}
+	if !h.sameModeAsTemplate(c, name, finalSpec, tv.ID) {
+		return
+	}
 
 	updated, err := h.deps.Store.UpdateDraftTemplateVersion(c, params)
 	if err != nil {
@@ -832,6 +844,12 @@ func (h *Handlers) setVersionStatus(c *gin.Context, expected, newStatus string) 
 	if tv.Status != expected {
 		writeError(c, http.StatusConflict, "conflict",
 			"version is "+tv.Status+", expected "+expected)
+		return
+	}
+	// Undeprecating publishes a version again, so it keeps the template's
+	// instance mode as publishing does (#190, security review). A rollback past
+	// that check can leave a version of the other mode published meanwhile.
+	if newStatus == "published" && !h.sameModeAsTemplate(c, name, tv.UiSpecYaml, tv.ID) {
 		return
 	}
 	updated, err := h.deps.Store.SetTemplateVersionStatus(c, store.SetTemplateVersionStatusParams{
