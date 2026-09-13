@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
+import { ProblemMessage, type RequestFailure } from "@/components/ProblemMessage";
 
 // Normal-path delete for the release owner: tears the resources down in the
 // cluster and removes the DB record. The admin-only `ForceDeleteButton`
@@ -16,9 +17,10 @@ export function DeleteReleaseButton({
   name: string;
 }) {
   const t = useTranslations("releases.delete");
+  const tProblem = useTranslations("problem");
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<RequestFailure | null>(null);
 
   async function onClick() {
     if (busy) return;
@@ -28,14 +30,20 @@ export function DeleteReleaseButton({
     try {
       const res = await fetch(`/api/v1/releases/${releaseId}`, { method: "DELETE" });
       if (!res.ok) {
-        // Never surface the response body — it is raw backend / k8s text.
-        setError(res.status === 403 ? t("forbidden") : t("failed"));
+        // The sentence is ours; the body goes to ProblemMessage, which unfolds
+        // it only as far as the viewer's error detail level asks (#6).
+        setError({
+          message: res.status === 403 ? t("forbidden") : t("failed"),
+          status: res.status,
+          body: await res.text().catch(() => ""),
+          at: new Date().toISOString(),
+        });
         setBusy(false);
         return;
       }
       router.push("/releases");
     } catch {
-      setError(t("failed"));
+      setError({ message: t("failed"), status: 0, body: "", at: new Date().toISOString() });
       setBusy(false);
     }
   }
@@ -46,9 +54,16 @@ export function DeleteReleaseButton({
         {t("button")}
       </Button>
       {error && (
-        <span role="alert" className="text-sm text-destructive">
-          {error}
-        </span>
+        <ProblemMessage
+          message={error.message}
+          status={error.status}
+          body={error.body}
+          at={error.at}
+          context={[
+            [tProblem("release"), name],
+            [tProblem("releaseId"), releaseId],
+          ]}
+        />
       )}
     </div>
   );

@@ -10,7 +10,8 @@ import { UserFormPreview } from "@/components/UserFormPreview";
 import { EditorLayout } from "@/components/editor/EditorLayout";
 import { MetaRow, TemplateMeta } from "@/components/editor/MetaRow";
 import { BottomBar, UnsavedChangesStatus } from "@/components/editor/BottomBar";
-import { saveErrorMessage } from "@/components/editor/saveError";
+import { problemDetail, saveFailure } from "@/components/editor/saveError";
+import { ProblemMessage, type RequestFailure } from "@/components/ProblemMessage";
 import { findUnlabelledExposedField, stableStringify, useBeforeUnloadWhenDirty, useDirtyAgainstBaseline } from "@/components/editor/useDirtyGuard";
 import { YamlEditor } from "@/components/YamlEditor";
 import { useTemplateYamlValidation } from "@/components/editor/useTemplateYamlValidation";
@@ -125,6 +126,10 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
   const [initialState, setInitialState] = useState<UIModeTemplate | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // A refused request, kept with its body for ProblemMessage (#6). `err` stays
+  // for what this page says itself.
+  const [failure, setFailure] = useState<RequestFailure | null>(null);
+  const tProblem = useTranslations("problem");
 
   useEffect(() => {
     (async () => {
@@ -134,7 +139,16 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
           fetch(`/api/v1/templates/${name}`),
           fetch("/api/v1/clusters"),
         ]);
-        if (!vRes.ok) { setErr(await vRes.text()); return; }
+        if (!vRes.ok) {
+          const body = await vRes.text().catch(() => "");
+          setFailure({
+            message: t("errors.versionLoad", { version: v }),
+            status: vRes.status,
+            body,
+            at: new Date().toISOString(),
+          });
+          return;
+        }
         const ver = await vRes.json() as {
           authoring_mode: string;
           ui_state_json: UIModeTemplate;
@@ -205,6 +219,9 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
         setLoadDone(true);
       }
     })();
+    // `t` only words a failed load (#6). Re-running this on a locale switch
+    // would load the version again over the admin's edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, v]);
 
   useEffect(() => {
@@ -271,6 +288,7 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
 
   async function save() {
     setErr(null);
+    setFailure(null);
     if (!state) return;
     // Every exposed field needs a label — it's what the end-user sees.
     const unlabelled = findUnlabelledExposedField(
@@ -300,7 +318,16 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
           body: JSON.stringify(patchBody),
         });
         if (!patchRes.ok) {
-          setErr(t("errors.metaSave", { status: patchRes.status, detail: (await patchRes.text()).trim() }));
+          // The sentence quotes the Problem's detail rather than the whole
+          // body, which used to land here as a line of JSON (#6).
+          const body = (await patchRes.text().catch(() => "")).trim();
+          setFailure({
+            message: t("errors.metaSave", { status: patchRes.status, detail: problemDetail(body) }),
+            status: patchRes.status,
+            body,
+            at: new Date().toISOString(),
+            omitDetail: true,
+          });
           return;
         }
         // Stored, whatever the version write below does. A retry now compares
@@ -336,7 +363,7 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(req.body),
       });
-      if (!res.ok) { setErr(await saveErrorMessage(t, res)); return; }
+      if (!res.ok) { setFailure(await saveFailure(t, res)); return; }
       markSaved();
       router.push(`/templates/${name}`);
     } finally {
@@ -344,6 +371,18 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
     }
   }
 
+  if (failure && !state) {
+    return (
+      <ProblemMessage
+        message={failure.message}
+        status={failure.status}
+        body={failure.body}
+        at={failure.at}
+        omitDetail={failure.omitDetail}
+        context={[[tProblem("template"), `${name} v${v}`]]}
+      />
+    );
+  }
   if (err && !state) return <div className="text-red-600 dark:text-red-400 text-sm whitespace-pre">{err}</div>;
   if (!state) return <div>{t("loading")}</div>;
 
@@ -483,6 +522,18 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
         selectionEvent={selectionEvent}
       />
       {err && <div className="text-red-600 dark:text-red-400 text-sm mt-2 whitespace-pre">{err}</div>}
+      {failure && (
+        <div className="mt-2">
+          <ProblemMessage
+            message={failure.message}
+            status={failure.status}
+            body={failure.body}
+            at={failure.at}
+            omitDetail={failure.omitDetail}
+            context={[[tProblem("template"), `${name} v${v}`]]}
+          />
+        </div>
+      )}
       <BottomBar
         canSave={canSave}
         canPublish={canPublish}
@@ -512,6 +563,9 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
   const [status, setStatus] = useState<string>("");
   const [sourceAuthoringMode, setSourceAuthoringMode] = useState<string>("");
   const [err, setErr] = useState<string | null>(null);
+  // A refused request, kept with its body for ProblemMessage (#6).
+  const [failure, setFailure] = useState<RequestFailure | null>(null);
+  const tProblem = useTranslations("problem");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -519,7 +573,17 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
     (async () => {
       try {
         const res = await fetch(`/api/v1/templates/${name}/versions/${v}`);
-        if (!res.ok) { setErr(await res.text()); return; }
+        if (!res.ok) {
+          // Was the body as it came: a line of JSON where the sentence belongs (#6).
+          const body = await res.text().catch(() => "");
+          setFailure({
+            message: t("errors.versionLoad", { version: v }),
+            status: res.status,
+            body,
+            at: new Date().toISOString(),
+          });
+          return;
+        }
         const ver = await res.json() as { resources_yaml?: string; ui_spec_yaml?: string; status?: string; authoring_mode?: string };
         setResourcesYaml(ver.resources_yaml ?? "");
         setUispecYaml(ver.ui_spec_yaml ?? "");
@@ -531,6 +595,9 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
         setErr(e instanceof Error ? e.message : String(e));
       }
     })();
+    // `t` only words a failed load (#6). Re-running this on a locale switch
+    // would load the version again over the admin's edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, v]);
 
   const touch = () => onDirty(true);
@@ -556,6 +623,7 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
 
   async function save() {
     setErr(null);
+    setFailure(null);
     // The list below is debounced; check the text actually being sent.
     const now = saveBlockedReason(validateTemplateYaml(resourcesYaml, uispecYaml));
     if (now) { setErr(now); return; }
@@ -577,7 +645,7 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(req.body),
       });
-      if (!res.ok) { setErr(await saveErrorMessage(t, res)); return; }
+      if (!res.ok) { setFailure(await saveFailure(t, res)); return; }
       markSaved();
       router.push(`/templates/${name}`);
     } finally {
@@ -585,6 +653,18 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
     }
   }
 
+  if (failure && !loaded) {
+    return (
+      <ProblemMessage
+        message={failure.message}
+        status={failure.status}
+        body={failure.body}
+        at={failure.at}
+        omitDetail={failure.omitDetail}
+        context={[[tProblem("template"), `${name} v${v}`]]}
+      />
+    );
+  }
   if (err && !loaded) return <div className="text-red-600 dark:text-red-400 text-sm whitespace-pre">{err}</div>;
   if (!loaded) return <div>{t("loading")}</div>;
 
@@ -612,6 +692,16 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
         </div>
       </details>
       {err && <div className="text-red-600 dark:text-red-400 text-sm whitespace-pre">{err}</div>}
+      {failure && (
+        <ProblemMessage
+          message={failure.message}
+          status={failure.status}
+          body={failure.body}
+          at={failure.at}
+          omitDetail={failure.omitDetail}
+          context={[[tProblem("template"), `${name} v${v}`]]}
+        />
+      )}
       {/*
         Was a hand-rolled bg-green-600 button sitting next to the preview form's
         primary-coloured submit, so the fake action read louder than the real

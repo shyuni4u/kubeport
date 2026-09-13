@@ -70,7 +70,9 @@
     "release": "릴리스",
     "cluster": "클러스터",
     "namespace": "구역",
-    "name": "배포 이름"
+    "name": "배포 이름",
+    "releaseId": "릴리스 ID",
+    "state": "상태 판정"
   },
   "common": {
     "save": "저장",
@@ -292,7 +294,7 @@
       "forceDelete": {
         "button": "강제 삭제",
         "confirm": "이 릴리스의 DB 레코드만 삭제합니다. 클러스터에는 영향을 주지 않습니다. 계속하시겠습니까?",
-        "failed": "삭제 실패: {error}"
+        "failed": "강제 삭제하지 못했습니다."
       }
     }
   },
@@ -448,6 +450,8 @@
         "rateLimited": "요청이 너무 잦아 잠시 거절됐습니다. 편집 내용은 그대로 있으니 몇 초 뒤 다시 저장하세요.",
         "payloadTooLarge": "템플릿이 요청 한도(4 MiB)를 넘어 저장하지 못했습니다. 편집 내용은 그대로 있습니다. 같은 내용으로는 다시 저장해도 거절되니, 리소스를 줄이거나 템플릿을 나눈 뒤 저장하세요.",
         "metaSave": "템플릿 메타데이터 저장에 실패했습니다 (HTTP {status}). {detail}",
+        "schemaLoad": "{kind} 스키마를 불러오지 못했습니다. {detail}",
+        "versionLoad": "버전 {version} 을 불러오지 못했습니다.",
         "missingLabel": "노출 필드 {path} 에 라벨이 없습니다. 사용자 폼에는 이 라벨이 표시됩니다.",
         "preview": "미리보기를 만들지 못했습니다: {detail}",
         "previewNoDetail": "미리보기를 만들지 못했습니다 (HTTP {status}). 잠시 후 다시 시도하고, 계속되면 관리자에게 문의하세요.",

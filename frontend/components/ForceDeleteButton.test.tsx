@@ -66,13 +66,16 @@ describe("ForceDeleteButton", () => {
     expect(refreshMock).not.toHaveBeenCalled();
   });
 
+  // #6: the body used to be printed after "삭제 실패:" as it came — a whole
+  // Problem document. The sentence is ours now, and the body is unfolded only
+  // as far as the viewer's error detail level (friendly without a provider).
   it("shows error message on failed response and re-enables the button", async () => {
     confirmMock.mockReturnValue(true);
     fetchMock.mockResolvedValue(
-      new Response("forbidden: not admin", {
-        status: 403,
-        statusText: "Forbidden",
-      }),
+      new Response(
+        JSON.stringify({ title: "rbac-denied", status: 403, detail: "force delete requires admin", request_id: "req-fd" }),
+        { status: 403, statusText: "Forbidden" },
+      ),
     );
 
     render(<ForceDeleteButton releaseId="rel-1" />);
@@ -80,8 +83,12 @@ describe("ForceDeleteButton", () => {
     fireEvent.click(btn);
 
     await waitFor(() => {
-      expect(screen.getByText(/forbidden: not admin/)).toBeInTheDocument();
+      expect(screen.getByRole("alert")).toHaveTextContent("강제 삭제하지 못했습니다.");
     });
+    expect(screen.getByRole("alert")).toHaveTextContent("요청 ID: req-fd");
+    expect(screen.getByRole("alert")).toHaveTextContent("릴리스 ID: rel-1");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("force delete requires admin");
+    expect(screen.getByRole("alert")).not.toHaveTextContent('"title"');
     // No redirect on failure.
     expect(pushMock).not.toHaveBeenCalled();
     // Button must be re-enabled so user can retry / leave.

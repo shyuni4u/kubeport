@@ -124,7 +124,34 @@ describe("ReleaseStaleBanner", () => {
       cluster: "production-1",
       isAdmin: false,
     });
-    expect(screen.getByText(/production-1/)).toBeInTheDocument();
+    // The contact block names the cluster too, so look at the body sentence.
+    const body = screen.getAllByText(/production-1/).find((el) => el.tagName === "P");
+    expect(body).toBeInTheDocument();
+  });
+
+  // #6: "contact your admin" said nothing about what to send. The admin clears
+  // a stale release by id, so the block carries that and what the banner names.
+  it("gives a non-admin a copyable block with the release id, cluster and state", async () => {
+    await renderBanner({
+      status: "resources-missing",
+      releaseId: "rel-42",
+      cluster: "oci-a1",
+      isAdmin: false,
+    });
+    const block = screen.getByText(/릴리스 ID: rel-42/);
+    expect(block).toHaveTextContent("클러스터: oci-a1");
+    expect(block).toHaveTextContent("상태 판정: resources-missing");
+    expect(screen.getByRole("button", { name: "복사" })).toBeInTheDocument();
+  });
+
+  it("does not give an admin the block — they have the button", async () => {
+    await renderBanner({
+      status: "resources-missing",
+      releaseId: "rel-42",
+      cluster: "oci-a1",
+      isAdmin: true,
+    });
+    expect(screen.queryByText(/릴리스 ID: rel-42/)).toBeNull();
   });
 
   it("renders English body when locale=en", async () => {

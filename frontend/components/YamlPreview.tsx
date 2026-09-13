@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useDebouncedCallback } from "use-debounce";
 
+import { parseProblemBody } from "@/lib/error-detail";
 import { MonacoPanel } from "./MonacoPanel";
+import { ProblemMessage, type RequestFailure } from "./ProblemMessage";
 
 export interface UIModeTemplate {
   resources: Array<{
@@ -15,22 +17,24 @@ export interface UIModeTemplate {
   }>;
 }
 
-// A refused preview, reduced to what an admin can act on. `detail` is the
-// sentence that says what is wrong; the rest of the Problem — `type`,
-// `title`, the repeated status — is addressed to a program, and printing the
-// whole document buried the one line worth reading (#129).
-type PreviewError = { status: number; detail: string; requestId?: string };
+type Translator = (key: string, values?: Record<string, string | number>) => string;
 
-async function readPreviewError(res: Response): Promise<PreviewError> {
-  try {
-    const p = (await res.json()) as { detail?: string; request_id?: string };
-    if (typeof p?.detail === "string" && p.detail !== "") {
-      return { status: res.status, detail: p.detail, requestId: p.request_id };
-    }
-  } catch {
-    /* not a Problem — an HTML error page from a proxy, or an empty body */
-  }
-  return { status: res.status, detail: "" };
+// A refused preview, reduced to what an admin can act on. `detail` is the
+// sentence that says what is wrong, so it goes into the sentence; the rest of
+// the Problem — `type`, `title`, the repeated status — is addressed to a
+// program, and printing the whole document buried the one line worth reading
+// (#129). The body travels with it for ProblemMessage (#6), which unfolds the
+// rest at the viewer's level and keeps the request id copyable.
+async function readPreviewError(res: Response, t: Translator): Promise<RequestFailure> {
+  const body = await res.text().catch(() => "");
+  const detail = parseProblemBody(body)?.detail;
+  return {
+    message: detail ? t("preview", { detail }) : t("previewNoDetail", { status: res.status }),
+    status: res.status,
+    body,
+    at: new Date().toISOString(),
+    omitDetail: Boolean(detail),
+  };
 }
 
 // A UI-mode template with no resources has nothing to preview, and the server
@@ -47,7 +51,7 @@ export function YamlPreview({ uiState }: { uiState: UIModeTemplate }) {
   const tp = useTranslations("templates.editor.preview");
   const [resources, setResources] = useState("");
   const [uispec, setUISpec] = useState("");
-  const [err, setErr] = useState<PreviewError | null>(null);
+  const [err, setErr] = useState<RequestFailure | null>(null);
   const empty = hasNoResources(uiState);
 
   const runPreview = useDebouncedCallback(async (state: UIModeTemplate) => {
@@ -58,7 +62,7 @@ export function YamlPreview({ uiState }: { uiState: UIModeTemplate }) {
         body: JSON.stringify({ ui_state: state }),
       });
       if (!res.ok) {
-        setErr(await readPreviewError(res));
+        setErr(await readPreviewError(res, t));
         return;
       }
       const d = await res.json() as { resources_yaml: string; ui_spec_yaml: string };
@@ -67,7 +71,12 @@ export function YamlPreview({ uiState }: { uiState: UIModeTemplate }) {
       setErr(null);
     } catch (e) {
       // Never reached the server: no status and no Problem to read.
-      setErr({ status: 0, detail: e instanceof Error ? e.message : String(e) });
+      setErr({
+        message: t("preview", { detail: e instanceof Error ? e.message : String(e) }),
+        status: 0,
+        body: "",
+        at: new Date().toISOString(),
+      });
     }
   }, 300);
 
@@ -90,16 +99,13 @@ export function YamlPreview({ uiState }: { uiState: UIModeTemplate }) {
   return (
     <div className="space-y-3">
       {err && (
-        <div className="text-red-600 dark:text-red-400 text-sm space-y-1">
-          <p className="whitespace-pre-wrap break-all">
-            {err.detail ? t("preview", { detail: err.detail }) : t("previewNoDetail", { status: err.status })}
-          </p>
-          {err.requestId && (
-            <p className="text-xs text-muted-foreground">
-              {t("previewRequestId", { requestId: err.requestId })}
-            </p>
-          )}
-        </div>
+        <ProblemMessage
+          message={err.message}
+          status={err.status}
+          body={err.body}
+          at={err.at}
+          omitDetail={err.omitDetail}
+        />
       )}
       <div>
         <h3 className="text-xs font-semibold text-muted-foreground mb-1">resources.yaml</h3>
