@@ -185,15 +185,30 @@ sqlc version            # backend/ 코드 생성용 (backend 를 건드릴 때�
 docker compose -f deploy/docker/docker-compose.yml up -d
 docker compose -f deploy/docker/docker-compose.yml ps   # postgres, dex 가 Up (healthy)
 
-# 3. 백엔드 테스트 (위 compose 가 떠 있어야 internal/store·internal/auth 가 통과)
+# 3. 백엔드 테스트 (postgres 를 쓰는 internal/store·internal/api 는 위 compose 가 있어야 통과하고,
+#    internal/auth 의 dex 테스트는 dex 에 더해 아래 문단의 OIDC_ISSUER·OIDC_CA_FILE 이 있어야 skip 이 아니라 실제로 돈다)
 cd backend
 go test ./...
 ```
 
 모두 통과하면 개발 환경 OK.
 
-dex 가 안 뜬 상태로 `go test ./...` 를 돌리면 `internal/auth` 3건이 항상 실패한다 —
-환경이 깨진 게 아니라 인증서 선행 조건을 건너뛴 것이다.
+dex 가 안 뜬 상태(인증서를 만들지 않아 dex 가 못 뜬 새 클론 포함)로 `go test ./...` 를 돌리면
+`internal/auth` 의 dex 테스트는 실패하지 않고 **skip** 된다(`backend/internal/auth/verifier_test.go` 의
+`requireDex` — `go test -v ./internal/auth/...` 로 사유를 볼 수 있다). 그래서 초록이 인증 검증을 뜻하지는
+않는다. 위 2번의 인증서·compose 뒤에 CI(`.github/workflows/ci.yml`)와 같은 설정으로 한 번 확인한다:
+
+```bash
+# compose 의 dex 는 https 다. 테스트의 기본 issuer(http://localhost:5556)로는 닿지 않아 또 skip 된다.
+# host.docker.internal 이 127.0.0.1 로 풀려야 한다 — hosts 항목은 docs/local-e2e.md §1.
+cd backend
+OIDC_ISSUER=https://host.docker.internal:5556 \
+OIDC_CA_FILE=../deploy/docker/certs/dex.crt \
+KBP_REQUIRE_DEX=1 go test ./internal/auth/...
+```
+
+`KBP_REQUIRE_DEX=1` 은 dex 에 닿지 않을 때 skip 대신 실패하게 하고, `SKIP_OIDC` 와 함께 주면 에러다. 변수 전체는
+[docs/testing.md](testing.md) 의 환경 변수 표에 있다.
 
 ---
 
