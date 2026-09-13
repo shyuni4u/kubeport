@@ -266,6 +266,22 @@ func selectRelease(kind string, spec map[string]any, release string) {
 		if sel, ok := spec["selector"].(map[string]any); ok {
 			ensureMap(sel, "matchLabels")[releaseLabel] = release
 		}
+	case "Job":
+		selectManualJob(spec, release)
+	case "CronJob":
+		selectManualJob(mapAt(spec, "jobTemplate", "spec"), release)
+	}
+}
+
+// selectManualJob scopes a Job whose selector the template wrote itself
+// (manualSelector: true) to its release (codex review). Otherwise the apiserver
+// generates a selector unique to each Job, and the release label is not needed.
+func selectManualJob(jobSpec map[string]any, release string) {
+	if jobSpec == nil || jobSpec["manualSelector"] != true {
+		return
+	}
+	if sel, ok := jobSpec["selector"].(map[string]any); ok {
+		ensureMap(sel, "matchLabels")[releaseLabel] = release
 	}
 }
 

@@ -7,6 +7,8 @@ import { useDebouncedCallback } from "use-debounce";
 import { MonacoPanel } from "./MonacoPanel";
 
 export interface UIModeTemplate {
+  /** The ui-spec's top-level `instances`, kept through the editor (#190). */
+  instances?: "single" | "multiple";
   resources: Array<{
     apiVersion: string;
     kind: string;

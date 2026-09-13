@@ -31,6 +31,12 @@ export interface UIResource {
 }
 
 export interface UIModeState {
+  /**
+   * The ui-spec's top-level `instances` (#190), carried so saving from the UI
+   * editor keeps a multi-instance template multi-instance. Absent means the
+   * template never chose, and the saved ui-spec stays without the key.
+   */
+  instances?: "single" | "multiple";
   resources: UIResource[];
 }
 
@@ -100,6 +106,7 @@ function walkScalars(
 export function yamlToUIState(resourcesYaml: string, uiSpecYaml: string): YamlToUIResult {
   const warnings: string[] = [];
   const resources: UIResource[] = [];
+  let instances: UIModeState["instances"];
 
   // 1. Parse each document in resources.yaml into its own UIResource.
   const docs = parseAllDocuments(resourcesYaml);
@@ -150,7 +157,14 @@ export function yamlToUIState(resourcesYaml: string, uiSpecYaml: string): YamlTo
   //    "exposed" with the full UISpecEntry attached. Unmatched paths become
   //    warnings rather than silent drops.
   try {
-    const spec = parse(uiSpecYaml) as { fields?: UISpecEntry[] } | null;
+    const spec = parse(uiSpecYaml) as { fields?: UISpecEntry[]; instances?: unknown } | null;
+    // Dropping it would save the next version single-instance without a word,
+    // renaming nothing and unscoping the selectors (#190, codex review).
+    if (spec?.instances === "single" || spec?.instances === "multiple") {
+      instances = spec.instances;
+    } else if (spec?.instances !== undefined) {
+      warnings.push(`ui-spec instances is not single or multiple: ${String(spec.instances)}`);
+    }
     const entries = spec?.fields ?? [];
     for (const entry of entries) {
       // splitHead rather than a regex of its own. The copy that used to live
@@ -200,5 +214,5 @@ export function yamlToUIState(resourcesYaml: string, uiSpecYaml: string): YamlTo
     warnings.push(`ui-spec parse error: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  return { uiState: { resources }, warnings };
+  return { uiState: instances ? { instances, resources } : { resources }, warnings };
 }

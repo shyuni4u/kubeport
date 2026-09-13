@@ -241,6 +241,67 @@ spec:
 		"a claim template cloned from the template's own claim follows its new name")
 }
 
+// codex review: a Job with manualSelector: true keeps the selector the
+// template wrote, so two releases' Jobs would select each other's pods. The
+// release label is added there, for a CronJob's Job spec too. A Job whose
+// selector the apiserver generates is left alone.
+func TestRender_MultipleInstancesScopesManualJobSelectors(t *testing.T) {
+	resources := `
+apiVersion: batch/v1
+kind: Job
+metadata: { name: manual }
+spec:
+  manualSelector: true
+  selector: { matchLabels: { job: batch } }
+  template:
+    metadata: { labels: { job: batch } }
+    spec: { restartPolicy: Never, containers: [{ name: j, image: busybox }] }
+---
+apiVersion: batch/v1
+kind: Job
+metadata: { name: generated }
+spec:
+  template:
+    spec: { restartPolicy: Never, containers: [{ name: j, image: busybox }] }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: nightly }
+spec:
+  schedule: "0 3 * * *"
+  jobTemplate:
+    spec:
+      manualSelector: true
+      selector: { matchLabels: { job: nightly } }
+      template:
+        metadata: { labels: { job: nightly } }
+        spec: { restartPolicy: Never, containers: [{ name: j, image: busybox }] }
+`
+	out, err := template.Render(resources, "instances: multiple\nfields: []\n", json.RawMessage(`{}`),
+		template.Labels{ReleaseName: "rel", ReleaseID: "x"})
+	require.NoError(t, err)
+	byName := map[string]map[string]any{}
+	dec := yaml.NewDecoder(bytes.NewReader(out))
+	for {
+		var d map[string]any
+		if err := dec.Decode(&d); errors.Is(err, io.EOF) {
+			break
+		} else {
+			require.NoError(t, err)
+		}
+		byName[at(t, d, "metadata", "name").(string)] = d
+	}
+
+	require.Equal(t, map[string]any{"job": "batch", "kubeport.io/release": "rel"},
+		at(t, byName["rel-manual"], "spec", "selector", "matchLabels"))
+	require.Equal(t, "rel", at(t, byName["rel-manual"], "spec", "template", "metadata", "labels", "kubeport.io/release"),
+		"the Job's pods carry the label its selector now asks for")
+	require.Nil(t, byName["rel-generated"]["spec"].(map[string]any)["selector"],
+		"a generated selector is the apiserver's")
+	require.Equal(t, map[string]any{"job": "nightly", "kubeport.io/release": "rel"},
+		at(t, byName["rel-nightly"], "spec", "jobTemplate", "spec", "selector", "matchLabels"))
+}
+
 // The point of the mode: two releases in one namespace share no object name,
 // and neither's selectors match the other's pods.
 func TestRender_TwoReleasesOfAMultipleTemplateShareNothing(t *testing.T) {
