@@ -3,7 +3,6 @@ import { StatusChip, statusChipVariantFromRelease } from "@/components/StatusChi
 import { KubeTermsToggle } from "@/components/KubeTermsToggle";
 import { DeleteReleaseButton } from "@/components/DeleteReleaseButton";
 import { ReleaseMeta } from "@/components/ReleaseMeta";
-import { releaseStorage } from "@/lib/release-storage";
 
 export type ReleaseHeaderData = {
   id: string;
@@ -13,8 +12,6 @@ export type ReleaseHeaderData = {
   cluster: string;
   namespace: string;
   created_at?: string;
-  /** What was last applied; tells the delete confirmation about storage (#340). */
-  rendered_yaml?: string;
 };
 
 export async function ReleaseHeader({ data }: { data: ReleaseHeaderData }) {
@@ -43,11 +40,7 @@ export async function ReleaseHeader({ data }: { data: ReleaseHeaderData }) {
           {/* Stale releases (cluster gone / resources missing) can't be deleted the
               normal way; ReleaseStaleBanner offers the admin force-delete instead. */}
           {data.status !== "cluster-unreachable" && data.status !== "resources-missing" && (
-            <DeleteReleaseButton
-              releaseId={data.id}
-              name={data.name}
-              storage={releaseStorage(data.rendered_yaml)}
-            />
+            <DeleteReleaseButton releaseId={data.id} name={data.name} />
           )}
         </div>
       </div>

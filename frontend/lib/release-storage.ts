@@ -1,43 +1,41 @@
-import YAML from "yaml";
+/**
+ * What deleting a release does to its storage (#340), as the backend reads it
+ * from the cluster: `storage_on_delete` on
+ * `GET /v1/releases/{id}?include=storage_on_delete`.
+ *
+ * - `deleted`: a StatefulSet of the release deletes its claims with it
+ *   (`whenDeleted: Delete`), or the release holds claims the delete removes.
+ * - `kept`: the release has StatefulSets with claims, none of which deletes
+ *   them.
+ * - `none`: nothing of the release holds storage.
+ * - `unknown`: nothing could tell — the delete may still remove storage, so
+ *   the confirmation says it may.
+ *
+ * It is read from the cluster rather than from the last manifest, because an
+ * update does not prune: a StatefulSet a later version dropped is still there,
+ * and the delete still removes it and its claims.
+ */
+export type ReleaseStorage = "none" | "deleted" | "kept" | "unknown";
+
+/** Any value but the four the API documents reads as `unknown`. */
+export function releaseStorage(value: unknown): ReleaseStorage {
+  return value === "deleted" || value === "kept" || value === "none" || value === "unknown"
+    ? value
+    : "unknown";
+}
 
 /**
- * What deleting a release does to the storage its StatefulSets keep (#340).
- *
- * - `deleted`: a StatefulSet with volumeClaimTemplates has
- *   `persistentVolumeClaimRetentionPolicy.whenDeleted: Delete` — its claims,
- *   and under the usual reclaim policy their data, go with the release. The
- *   backend renders that by default.
- * - `kept`: StatefulSets with claims, none of which deletes them — the
- *   template chose Retain, or the release was last applied before the default.
- * - `none`: no StatefulSet storage, or nothing readable to tell.
- *
- * Read from the manifest the release was last applied with, not from its
- * template, so a release that has not been updated since the default reads as
- * it will actually behave.
+ * Asks the backend as the delete confirmation opens — not with the detail's own
+ * periodic refresh, which would spend cluster calls on every tick. A failed
+ * request is `unknown`: a warning that may be unneeded beats none.
  */
-export type ReleaseStorage = "none" | "deleted" | "kept";
-
-type StatefulSetShape = {
-  kind?: unknown;
-  spec?: {
-    volumeClaimTemplates?: unknown;
-    persistentVolumeClaimRetentionPolicy?: { whenDeleted?: unknown } | null;
-  } | null;
-};
-
-export function releaseStorage(renderedYaml: string | null | undefined): ReleaseStorage {
-  if (!renderedYaml) return "none";
-  let kept = false;
-  for (const doc of YAML.parseAllDocuments(renderedYaml)) {
-    if (doc.errors.length > 0) continue;
-    const obj = doc.toJS() as StatefulSetShape | null;
-    if (!obj || typeof obj !== "object" || obj.kind !== "StatefulSet") continue;
-    const claims = obj.spec?.volumeClaimTemplates;
-    if (!Array.isArray(claims) || claims.length === 0) continue;
-    // One StatefulSet that deletes is what the reader must hear about, even if
-    // another keeps its claims.
-    if (obj.spec?.persistentVolumeClaimRetentionPolicy?.whenDeleted === "Delete") return "deleted";
-    kept = true;
+export async function fetchStorageOnDelete(releaseId: string): Promise<ReleaseStorage> {
+  try {
+    const res = await fetch(`/api/v1/releases/${releaseId}?include=storage_on_delete`);
+    if (!res.ok) return "unknown";
+    const body = (await res.json()) as { storage_on_delete?: unknown };
+    return releaseStorage(body.storage_on_delete);
+  } catch {
+    return "unknown";
   }
-  return kept ? "kept" : "none";
 }

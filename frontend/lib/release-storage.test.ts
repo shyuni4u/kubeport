@@ -1,68 +1,47 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
-import { releaseStorage } from "./release-storage";
-
-const statefulSet = (policy: string) => `apiVersion: apps/v1
-kind: StatefulSet
-metadata: { name: db }
-spec:
-${policy}  volumeClaimTemplates:
-    - metadata: { name: data }
-      spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 1Gi } } }
-`;
-
-const service = `apiVersion: v1
-kind: Service
-metadata: { name: db }
-spec: { ports: [{ port: 80 }] }
-`;
+import { fetchStorageOnDelete, releaseStorage } from "./release-storage";
 
 describe("releaseStorage (#340)", () => {
-  it("is deleted when a StatefulSet's claims go with it", () => {
-    expect(releaseStorage(statefulSet("  persistentVolumeClaimRetentionPolicy: { whenDeleted: Delete }\n"))).toBe(
-      "deleted",
-    );
+  it("passes the verdicts the API documents", () => {
+    expect(releaseStorage("deleted")).toBe("deleted");
+    expect(releaseStorage("kept")).toBe("kept");
+    expect(releaseStorage("none")).toBe("none");
+    expect(releaseStorage("unknown")).toBe("unknown");
   });
 
-  it("is kept when the template retains them, or wrote no policy (applied before the default)", () => {
-    expect(releaseStorage(statefulSet("  persistentVolumeClaimRetentionPolicy: { whenDeleted: Retain }\n"))).toBe(
-      "kept",
-    );
-    expect(releaseStorage(statefulSet(""))).toBe("kept");
+  it("reads anything else as unknown, which warns the storage may go", () => {
+    expect(releaseStorage(undefined)).toBe("unknown");
+    expect(releaseStorage(null)).toBe("unknown");
+    expect(releaseStorage("")).toBe("unknown");
+    expect(releaseStorage("Deleted")).toBe("unknown");
+    expect(releaseStorage(true)).toBe("unknown");
+  });
+});
+
+describe("fetchStorageOnDelete (#340)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
-  it("says deleted when any one StatefulSet deletes, among several documents", () => {
-    const retain = statefulSet("  persistentVolumeClaimRetentionPolicy: { whenDeleted: Retain }\n");
-    const del = statefulSet("  persistentVolumeClaimRetentionPolicy: { whenDeleted: Delete }\n").replace(
-      "name: db",
-      "name: cache",
-    );
-    expect(releaseStorage([service, retain, del].join("---\n"))).toBe("deleted");
+  it("asks for the verdict with the opt-in query", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ storage_on_delete: "deleted" })));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchStorageOnDelete("rel-1")).resolves.toBe("deleted");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/releases/rel-1?include=storage_on_delete");
   });
 
-  it("is none without StatefulSet storage", () => {
-    expect(releaseStorage(service)).toBe("none");
-    expect(
-      releaseStorage(`apiVersion: apps/v1
-kind: StatefulSet
-metadata: { name: db }
-spec:
-  persistentVolumeClaimRetentionPolicy: { whenDeleted: Delete }
-  volumeClaimTemplates: []
-`),
-    ).toBe("none");
-    expect(
-      releaseStorage(`apiVersion: v1
-kind: PersistentVolumeClaim
-metadata: { name: data }
-spec: { accessModes: [ReadWriteOnce] }
-`),
-    ).toBe("none");
-  });
+  it("is unknown when the request fails, the body is not JSON, or the field is missing", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("nope", { status: 502 })));
+    await expect(fetchStorageOnDelete("rel-1")).resolves.toBe("unknown");
 
-  it("is none with nothing readable", () => {
-    expect(releaseStorage(undefined)).toBe("none");
-    expect(releaseStorage("")).toBe("none");
-    expect(releaseStorage("kind: StatefulSet\nspec: [unclosed")).toBe("none");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html>")));
+    await expect(fetchStorageOnDelete("rel-1")).resolves.toBe("unknown");
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "healthy" }))));
+    await expect(fetchStorageOnDelete("rel-1")).resolves.toBe("unknown");
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+    await expect(fetchStorageOnDelete("rel-1")).resolves.toBe("unknown");
   });
 });

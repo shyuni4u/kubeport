@@ -106,6 +106,12 @@ type fakeK8sApplier struct {
 	presence    k8s.Presence
 	presenceErr error
 
+	// storage is what StorageOnDelete reports, with storageErr alongside it;
+	// storageCalls counts the calls (#340).
+	storage      k8s.Storage
+	storageErr   error
+	storageCalls int
+
 	// applyErr makes ApplyAll fail after recording the YAML. deleteStall makes
 	// DeleteByRelease hang until its context ends, like a cluster that stopped
 	// answering between the apply and the cleanup (#282).
@@ -115,6 +121,11 @@ type fakeK8sApplier struct {
 
 func (f *fakeK8sApplier) ReleasePresence(context.Context, k8s.ReleaseRef, []byte) (k8s.Presence, error) {
 	return f.presence, f.presenceErr
+}
+
+func (f *fakeK8sApplier) StorageOnDelete(context.Context, k8s.ReleaseRef) (k8s.Storage, error) {
+	f.storageCalls++
+	return f.storage, f.storageErr
 }
 
 func (f *fakeK8sApplier) CheckApply(_ context.Context, ref k8s.ReleaseRef, _ []byte, creating bool) (k8s.ApplyCheck, error) {

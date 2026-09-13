@@ -1187,7 +1187,16 @@ paths:
         `status` is computed at request time from the cluster, not stored, so
         two calls can disagree without anything having been written. See the
         `status` enum for what each value means.
-      parameters: [{ $ref: "#/components/parameters/ReleaseID" }]
+      parameters:
+        - $ref: "#/components/parameters/ReleaseID"
+        - name: include
+          in: query
+          description: |
+            `storage_on_delete` adds that field (#340): what deleting the
+            release would do to its storage, read from the cluster with the
+            caller's token. It costs a list of the release's StatefulSets and
+            claims, so ask for it when about to delete, not on a refresh.
+          schema: { type: string, enum: [storage_on_delete] }
       responses:
         "200":
           description: OK
@@ -2526,6 +2535,30 @@ components:
           items: { $ref: "#/components/schemas/Instance" }
         status: { $ref: "#/components/schemas/ReleaseStatus" }
         created_at: { type: string, format: date-time }
+        storage_on_delete:
+          type: string
+          enum: [deleted, kept, none, unknown]
+          description: |
+            Only with `?include=storage_on_delete` (#340). What
+            `DELETE /v1/releases/{id}` would do to the release's storage, read
+            from the cluster with the same selectors the delete uses — not from
+            `rendered_yaml`, since an update does not prune and a StatefulSet a
+            later version dropped is still deleted with the release.
+
+            - `deleted`: one of the release's StatefulSets has
+              `volumeClaimTemplates` and
+              `persistentVolumeClaimRetentionPolicy.whenDeleted: Delete` — its
+              controller and the garbage collector remove the claims whatever
+              the caller's RBAC — or the release carries claims of its own the
+              delete removes.
+            - `kept`: it has StatefulSets with claims, and none deletes them.
+            - `none`: nothing of the release holds storage.
+            - `unknown`: the caller may not list the release's StatefulSets, or
+              the cluster could not be asked. Say the storage may be deleted.
+
+            A caller who may not list claims is still told about StatefulSets;
+            only claims carrying the release's labels directly are left out,
+            and those the same caller's delete cannot remove either.
 
     ReleaseStatus:
       type: string

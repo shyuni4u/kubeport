@@ -439,21 +439,37 @@ func (h *Handlers) GetRelease(c *gin.Context) {
 		return
 	}
 
+	// The delete confirmation asks for storage_on_delete as it opens (#340).
+	// The detail's periodic refresh does not ask, so it spends no cluster calls
+	// on it. Asked for and not answerable, it is "unknown", which the
+	// confirmation reads as "may be deleted".
+	storage := ""
+	if c.Query("include") == "storage_on_delete" {
+		storage = string(k8s.StorageUnknown)
+	}
+
 	u, ok := auth.UserFrom(ctx)
 	if !ok {
-		respondReleaseOverview(c, rel, nil, "unknown")
+		respondReleaseOverview(c, rel, nil, "unknown", storage)
 		return
 	}
 	cli, err := h.deps.K8sFactory.NewWithToken(rel.ClusterApiUrl, rel.ClusterCaBundle.String, u.IDToken)
 	if err != nil {
-		respondReleaseOverview(c, rel, nil, "cluster-unreachable")
+		respondReleaseOverview(c, rel, nil, "cluster-unreachable", storage)
 		return
 	}
 
 	ref := releaseRef(rel)
+	if storage != "" {
+		if s, err := cli.StorageOnDelete(ctx, ref); err == nil {
+			storage = string(s)
+		} else {
+			log.Printf("GetRelease storage_on_delete id=%s release=%s: %v", requestIDFrom(c), rel.ID, err)
+		}
+	}
 	instances, err := cli.ListInstances(ctx, ref)
 	if err != nil {
-		respondReleaseOverview(c, rel, nil, "cluster-unreachable")
+		respondReleaseOverview(c, rel, nil, "cluster-unreachable", storage)
 		return
 	}
 	if len(instances) == 0 {
@@ -463,14 +479,14 @@ func (h *Handlers) GetRelease(c *gin.Context) {
 		// deleted outside kubeport; a cluster that cannot tell leaves it unknown.
 		presence, err := cli.ReleasePresence(ctx, ref, []byte(rel.RenderedYaml))
 		if err == nil && presence == k8s.PresenceMissing {
-			respondReleaseOverview(c, rel, instances, "resources-missing")
+			respondReleaseOverview(c, rel, instances, "resources-missing", storage)
 			return
 		}
-		respondReleaseOverview(c, rel, instances, "unknown")
+		respondReleaseOverview(c, rel, instances, "unknown", storage)
 		return
 	}
 
-	respondReleaseOverview(c, rel, instances, "")
+	respondReleaseOverview(c, rel, instances, "", storage)
 }
 
 // stuckReasons do not clear by waiting. The kubelet retries them on a back-off
@@ -492,8 +508,9 @@ var stuckReasons = map[string]bool{
 // "resources-missing" / "unknown" for the no-auth fallback) — pass "" to
 // fall back to instance-derived `abstractStatus`. The instances field is
 // normalized to [] (never null) so JSON consumers can call .map / .reduce
-// without defensive coercion.
-func respondReleaseOverview(c *gin.Context, rel store.GetReleaseByIDRow, instances []k8s.Instance, statusOverride string) {
+// without defensive coercion. storage is storage_on_delete, included only when
+// it was asked for (non-empty).
+func respondReleaseOverview(c *gin.Context, rel store.GetReleaseByIDRow, instances []k8s.Instance, statusOverride, storage string) {
 	if instances == nil {
 		instances = []k8s.Instance{}
 	}
@@ -507,7 +524,7 @@ func respondReleaseOverview(c *gin.Context, rel store.GetReleaseByIDRow, instanc
 	if status == "" {
 		status = abstractStatus(instances)
 	}
-	c.JSON(http.StatusOK, gin.H{
+	body := gin.H{
 		"id": rel.ID, "name": rel.Name,
 		"template":        gin.H{"name": rel.TemplateName, "version": rel.TemplateVersion},
 		"cluster":         rel.ClusterName,
@@ -519,7 +536,11 @@ func respondReleaseOverview(c *gin.Context, rel store.GetReleaseByIDRow, instanc
 		"instances":       instances,
 		"status":          status,
 		"created_at":      rel.CreatedAt,
-	})
+	}
+	if storage != "" {
+		body["storage_on_delete"] = storage
+	}
+	c.JSON(http.StatusOK, body)
 }
 
 // abstractStatus derives a summary status from pod instances.
