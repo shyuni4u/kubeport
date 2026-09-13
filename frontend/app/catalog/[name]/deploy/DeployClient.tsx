@@ -113,40 +113,38 @@ function demoPolicyOf(p: ProblemBody | null): DemoPolicyRefusal | null {
   };
 }
 
-const indexSelector = /^\d+$/;
-
 /**
- * The form field that holds a demo_policy entry's value, when the form holds it.
+ * The form field that holds a demo_policy entry's value, when the form holds
+ * it for certain.
  *
- * The response names the object as it was rendered, and a ui-spec path need not
- * (codex review): its selector can be left out or be an index, and a
- * multi-instance release puts its own name and a "-" in front of every object's
- * name. So a field matches on kind and on the field path spelled canonically
- * (#129), and a selector that is a name must equal the rendered name or be its
- * end after that prefix. A field with no name to compare is taken only when it
- * is the one field at that kind and path: otherwise which object it means is a
- * guess, and naming the wrong field is worse than sending the reader to an
- * admin.
+ * The response names the object as it was rendered, and a ui-spec path names
+ * it by selector, so a field is taken only when its selector can only mean that
+ * object (codex review): left out, which the backend accepts only for the one
+ * object of its kind; the rendered name itself; or, for a new release of a
+ * multi-instance template, the release name and "-" in front of it. An index
+ * cannot be checked against a name, and a name that merely ends the same way
+ * may be another object, so those fall back to the template's wording —
+ * naming the wrong field is worse than sending the reader to an admin.
  */
-function formFieldFor(fields: UISpec["fields"], dp: DemoPolicyRefusal): UISpec["fields"][number] | undefined {
+function formFieldFor(
+  fields: UISpec["fields"],
+  dp: DemoPolicyRefusal,
+  releasePrefix: string | null,
+): UISpec["fields"][number] | undefined {
   if (dp.kind === "" || dp.field === "") return undefined;
   const target = parseTemplatePath(`${dp.kind}.${dp.field}`);
   const keys = target ? formatPath(target.keys) : null;
   if (keys === null) return undefined;
-  const candidates = fields.flatMap((f) => {
+  const matches = fields.filter((f) => {
     const p = parseTemplatePath(f.path);
-    return p && p.kind === dp.kind && formatPath(p.keys) === keys ? [{ f, selector: p.selector }] : [];
+    if (!p || p.kind !== dp.kind || formatPath(p.keys) !== keys) return false;
+    return (
+      p.selector === "" ||
+      p.selector === dp.name ||
+      (releasePrefix !== null && releasePrefix !== "" && dp.name === `${releasePrefix}-${p.selector}`)
+    );
   });
-  const named = candidates.filter(
-    ({ selector }) =>
-      selector !== "" &&
-      !indexSelector.test(selector) &&
-      (selector === dp.name || dp.name.endsWith(`-${selector}`)),
-  );
-  if (named.length === 1) return named[0].f;
-  if (named.length > 1) return undefined;
-  const [only] = candidates;
-  return candidates.length === 1 && (only.selector === "" || indexSelector.test(only.selector)) ? only.f : undefined;
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 function parseProblem(body: string): ProblemBody | null {
@@ -206,7 +204,7 @@ export function DeployClient({
   // limits (#350). "No permission" would send a visitor to an admin for what is
   // often a value in the form, and says nothing about which one.
   const demoPolicyMessage = useCallback(
-    (dp: DemoPolicyRefusal, submitted: boolean): string => {
+    (dp: DemoPolicyRefusal, submitted: boolean, releasePrefix: string | null): string => {
       // 86400 seconds means nothing to a reader who does not count in seconds.
       const duration = (seconds: number) =>
         seconds > 0 && seconds % 3600 === 0
@@ -233,7 +231,7 @@ export function DeployClient({
       // A value the form holds is the visitor's to change, and saying which
       // field beats a hedge; anything else is fixed by the template, where
       // "change your input" would blame the one thing that is not wrong.
-      const field = formFieldFor(spec.fields, dp);
+      const field = formFieldFor(spec.fields, dp, releasePrefix);
       if (field && dp.rule === "image-prefix") {
         parts.push(t("errors.demoPolicyFixFieldImage", { label: field.label }));
       } else if (field && dp.limit !== null) {
@@ -260,13 +258,13 @@ export function DeployClient({
   // account's manifest over the demo's limits (#350). An update gets its own
   // wording, because an existing release cannot move to another area.
   const errorMessageForStatus = useCallback(
-    (status: number, body = ""): string => {
+    (status: number, body = "", releasePrefix: string | null = null): string => {
       const problem = parseProblem(body);
       if (status === 400 && problem?.pinned_namespace) return t("errors.templateNamespace");
       if (status === 400 && problem?.template_defect) return t("errors.templateDefect");
       if (status === 403) {
         const dp = demoPolicyOf(problem);
-        return dp ? demoPolicyMessage(dp, true) : t("errors.forbidden");
+        return dp ? demoPolicyMessage(dp, true, releasePrefix) : t("errors.forbidden");
       }
       if (status === 409) {
         const held = resourceConflictOf(problem);
@@ -462,7 +460,9 @@ export function DeployClient({
           // before submit does. Any other refusal still only clears the preview.
           const dp = res.status === 403 ? demoPolicyOf(parseProblem(await res.text())) : null;
           if (inflight.current !== ctrl) return;
-          setPreviewRefusal(dp ? demoPolicyMessage(dp, false) : null);
+          setPreviewRefusal(
+            dp ? demoPolicyMessage(dp, false, nameRules.multiple && !updateReleaseId ? meta.name : null) : null,
+          );
           return;
         }
         const body = (await res.json()) as { rendered_yaml: string };
@@ -585,7 +585,8 @@ export function DeployClient({
       // released only on failure — see the catch below for why.
       const fail = (status: number, body: string) => {
         setErr({
-          message: errorMessageForStatus(status, body),
+          // A new multi-instance release names its objects after itself.
+          message: errorMessageForStatus(status, body, nameRules.multiple && !isUpdate ? meta.name : null),
           status,
           body,
           at: new Date().toISOString(),
@@ -640,7 +641,7 @@ export function DeployClient({
         setSubmitting(false);
       }
     },
-    [updateReleaseId, version, templateName, meta, router, errorMessageForStatus],
+    [updateReleaseId, version, templateName, meta, router, errorMessageForStatus, nameRules, isUpdate],
   );
 
   return (

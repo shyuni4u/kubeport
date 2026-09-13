@@ -9,6 +9,7 @@ import type { ErrorDetailLevel } from "@/lib/error-detail";
 
 import { DeployClient } from "./DeployClient";
 import type { UISpec } from "@/lib/ui-spec-to-zod";
+import type { ReleaseNameRules } from "@/lib/release-name";
 
 const pushMock = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -463,14 +464,21 @@ describe("DeployClient", () => {
       expect(alert).not.toHaveTextContent(/관리자/);
     });
 
-    // The response names the object as rendered; a ui-spec path may leave its
-    // selector out, use an index, or name an object a multi-instance release
-    // renamed (codex review). Which field it is must not become a guess.
+    // The response names the object as rendered; a ui-spec path names it by
+    // selector (codex review). A field is recommended only when its selector
+    // can only mean that object — otherwise the visitor would change a value
+    // that cannot lift the refusal.
     describe("which form field holds the value", () => {
-      async function alertFor(fields: UISpec["fields"], violation: Record<string, unknown>) {
+      async function alertFor(
+        fields: UISpec["fields"],
+        violation: Record<string, unknown>,
+        nameRules?: ReleaseNameRules,
+      ) {
         const user = userEvent.setup();
         vi.stubGlobal("fetch", routedFetch({ releases: demoPolicy([violation]) }));
-        render(<DeployClient templateName="batch" version={1} team={null} spec={{ fields }} />);
+        render(
+          <DeployClient templateName="batch" version={1} team={null} spec={{ fields }} nameRules={nameRules} />,
+        );
         await fillMeta(user);
         const button = screen.getByRole("button", { name: /배포하기/ });
         await waitFor(() => expect(button).toBeEnabled());
@@ -478,39 +486,46 @@ describe("DeployClient", () => {
         return screen.findByRole("alert");
       }
       const retries = (path: string, label = "재시도 횟수") =>
-        ({ path, label, type: "integer", default: 6, required: true }) as const;
+        ({ path, label, type: "integer", default: 1, required: true }) as const;
       const onJob = (name: string) => ({
         rule: "job-backoff-limit", kind: "Job", name, field: "spec.backoffLimit", limit: 2, got: 6,
       });
+      const toAdmin = /관리자에게 템플릿 수정을 요청하세요/;
 
+      // The backend accepts a left-out selector only when the template has one
+      // object of that kind, so it can only be this one.
       it("finds a field that leaves the selector out", async () => {
         const alert = await alertFor([retries("Job.spec.backoffLimit")], onJob("once"));
         expect(alert).toHaveTextContent("'재시도 횟수' 값을 2 이하로 바꾸세요");
       });
 
-      it("finds a field that selects by index", async () => {
-        const alert = await alertFor([retries("Job[0].spec.backoffLimit")], onJob("once"));
-        expect(alert).toHaveTextContent("'재시도 횟수' 값을 2 이하로 바꾸세요");
-      });
-
-      it("finds a field on an object a multi-instance release renamed", async () => {
-        const alert = await alertFor([retries("Job[once].spec.backoffLimit")], onJob("my-batch-once"));
-        expect(alert).toHaveTextContent("'재시도 횟수' 값을 2 이하로 바꾸세요");
-      });
-
-      it("does not pick between two fields it cannot tell apart", async () => {
+      it("finds a field on an object a new multi-instance release renamed", async () => {
         const alert = await alertFor(
-          [retries("Job[0].spec.backoffLimit", "첫 작업"), retries("Job[1].spec.backoffLimit", "둘째 작업")],
-          onJob("once"),
+          [retries("Job[once].spec.backoffLimit")],
+          // fillMeta names the release my-app.
+          onJob("my-app-once"),
+          { multiple: true, maxLength: 30, letterFirst: true },
         );
-        expect(alert).not.toHaveTextContent(/첫 작업|둘째 작업/);
-        expect(alert).toHaveTextContent(/관리자에게 템플릿 수정을 요청하세요/);
+        expect(alert).toHaveTextContent("'재시도 횟수' 값을 2 이하로 바꾸세요");
+      });
+
+      it("does not guess that an index means the object refused", async () => {
+        // The template may have another Job whose limit is fixed.
+        const alert = await alertFor([retries("Job[0].spec.backoffLimit")], onJob("second"));
+        expect(alert).not.toHaveTextContent(/재시도 횟수/);
+        expect(alert).toHaveTextContent(toAdmin);
+      });
+
+      it("does not read a name that only ends the same way as renamed", async () => {
+        const alert = await alertFor([retries("Job[once].spec.backoffLimit")], onJob("other-once"));
+        expect(alert).not.toHaveTextContent(/재시도 횟수/);
+        expect(alert).toHaveTextContent(toAdmin);
       });
 
       it("does not name a field on another object", async () => {
         const alert = await alertFor([retries("Job[other].spec.backoffLimit")], onJob("once"));
         expect(alert).not.toHaveTextContent(/재시도 횟수/);
-        expect(alert).toHaveTextContent(/관리자에게 템플릿 수정을 요청하세요/);
+        expect(alert).toHaveTextContent(toAdmin);
       });
     });
 
