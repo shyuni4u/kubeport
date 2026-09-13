@@ -80,6 +80,47 @@ describe("YamlPreview when the preview is refused", () => {
     expect(screen.queryByText(/<html>/)).toBeNull();
   });
 
+  // #332: a new UI-mode template starts with no resources, and the server's
+  // answer to an empty ui_state is go-yaml's `expected STREAM-START`. That was
+  // the first thing an admin saw on `/templates/new`, before doing anything.
+  it("sends nothing and shows an empty-state line when there are no resources", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ status: 400, detail: "yaml: expected STREAM-START", request_id: "r-1" }), {
+        status: 400,
+      }),
+    );
+
+    render(<YamlPreview uiState={{ resources: [] }} />);
+    await new Promise((r) => setTimeout(r, 400)); // past the 300ms debounce
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByText(/리소스를 추가하면/)).toBeInTheDocument();
+    expect(screen.queryByText(/STREAM-START/)).toBeNull();
+    expect(screen.queryByText(/만들지 못했습니다/)).toBeNull();
+  });
+
+  // Back to empty is the same state, and a request still waiting out the
+  // debounce for the last resource must not go out after it is gone.
+  it("goes back to the empty-state line when the last resource is removed", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ resources_yaml: "kind: ConfigMap\n", ui_spec_yaml: "fields: []\n" }), {
+        status: 200,
+      }),
+    );
+    const { rerender } = render(<YamlPreview uiState={uiState} />);
+    await waitFor(() => expect(screen.getAllByTestId("monaco")[0]).toHaveTextContent("kind: ConfigMap"));
+    const callsBefore = fetchMock.mock.calls.length;
+
+    // An edit that starts a debounced request, then the last resource goes.
+    rerender(<YamlPreview uiState={{ resources: [{ ...uiState.resources[0], name: "renamed" }] }} />);
+    rerender(<YamlPreview uiState={{ resources: [] }} />);
+    await new Promise((r) => setTimeout(r, 400));
+
+    expect(fetchMock.mock.calls.length).toBe(callsBefore);
+    expect(screen.getByText(/리소스를 추가하면/)).toBeInTheDocument();
+    expect(screen.queryByTestId("monaco")).toBeNull();
+  });
+
   it("clears the error once a later preview succeeds", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ title: "internal", status: 500, detail: "boom" }), { status: 500 }),

@@ -8,7 +8,7 @@ import { useDebouncedCallback } from "use-debounce";
 import { DynamicForm, type UISpec } from "@/components/DynamicForm";
 import { PreviewErrorBoundary } from "@/components/PreviewErrorBoundary";
 import { normalizeUISpec } from "@/lib/ui-spec-to-zod";
-import type { UIModeTemplate } from "@/components/YamlPreview";
+import { hasNoResources, type UIModeTemplate } from "@/components/YamlPreview";
 
 // UserFormPreview renders DynamicForm against a template's ui-spec so the
 // admin can see exactly what the end-user's deploy form will look like.
@@ -66,15 +66,25 @@ export function UserFormPreview(props: Props) {
   }, 300);
 
   const uiState = remote ? props.uiState : null;
+  // No resources, no request — see hasNoResources (#332).
+  const noResources = uiState !== null && hasNoResources(uiState);
   // Serialized so the effect re-runs on content change, not on identity change.
   const uiStateKey = uiState ? JSON.stringify(uiState) : null;
   useEffect(() => {
     if (!uiState) return;
+    if (noResources) {
+      fetchPreview.cancel();
+      return;
+    }
     fetchPreview(uiState);
     // uiState is covered by uiStateKey; depending on the object itself would
     // refire on every parent render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uiStateKey, fetchPreview]);
+
+  if (noResources) {
+    return <div className="text-sm text-muted-foreground">{t("noResources")}</div>;
+  }
 
   const err = local ? (local.parseError && t("parseFailed", { detail: local.parseError })) : fetchErr;
   const parsed = local ? local.spec : fetched;
