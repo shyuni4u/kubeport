@@ -881,7 +881,13 @@ export function DeployClient({
               at={err.at}
               context={[
                 [tProblem("template"), `${templateName} v${version}`],
-                ...(updateReleaseId ? [[tProblem("release"), updateReleaseId] as const] : []),
+                // The name the title showed, then the id support will look up (#359).
+                ...(updateReleaseId
+                  ? [
+                      [tProblem("release"), updateRelease?.name || updateReleaseId] as const,
+                      [tProblem("releaseId"), updateReleaseId] as const,
+                    ]
+                  : []),
                 [tProblem("cluster"), meta.cluster],
                 [tProblem("namespace"), meta.namespace],
                 ...(isUpdate ? [] : [[tProblem("name"), meta.name] as const]),

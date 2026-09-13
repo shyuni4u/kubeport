@@ -1395,6 +1395,40 @@ describe("DeployClient preview payload", () => {
       expect(screen.queryByText(/설정 바꾸기/)).toBeNull();
     });
 
+    // The failure's contact block used to say "릴리스: <uuid>" under a title
+    // that had just named the release; now it shows the name and the id.
+    it("names the release in the failure contact block, with its id beside it", async () => {
+      const user = userEvent.setup();
+      const base = routedFetch({});
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) =>
+          url === "/api/v1/releases/rel-1" && init?.method === "PUT"
+            ? jsonResponse({ type: "about:blank", title: "internal", status: 500, detail: "boom" }, 500)
+            : base(url, init),
+        ),
+      );
+      render(
+        <ErrorDetailProvider initial={"detailed" as ErrorDetailLevel}>
+          <DeployClient
+            templateName="web-app"
+            version={2}
+            team={null}
+            spec={spec}
+            updateReleaseId="rel-1"
+            updateRelease={{ name: "hello-web", version: 2 }}
+            initialValues={{ "spec.replicas": 1, "metadata.name": "nginx" }}
+          />
+        </ErrorDetailProvider>,
+      );
+      const button = screen.getByRole("button", { name: "바뀐 설정 적용" });
+      await waitFor(() => expect(button).toBeEnabled());
+      await user.click(button);
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(/릴리스: hello-web/);
+      expect(alert).toHaveTextContent(/릴리스 ID: rel-1/);
+    });
+
     it("falls back to the version wording when the release is not described", () => {
       vi.stubGlobal("fetch", routedFetch({}));
       render(
