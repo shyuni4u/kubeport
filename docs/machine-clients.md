@@ -487,11 +487,18 @@ dry-run·apply 나 종류마다 DeleteCollection 을 부르는 가장 비싼 경
 **릴리스 삭제(`DELETE /v1/releases/{id}`)는 StatefulSet 저장소의 데이터까지 지운다**([#340](https://github.com/shyuni4u/kubeport/issues/340)).
 렌더가 `volumeClaimTemplates` 가 있는 StatefulSet 에 `persistentVolumeClaimRetentionPolicy.whenDeleted: Delete` 를
 기본으로 넣기 때문이다 — 컨트롤러가 만든 PVC 에는 릴리스 라벨이 없어, 예전에는 릴리스를 지워도 PVC 가 남고 같은
-이름으로 다시 배포한 릴리스가 이전 데이터를 그대로 붙였다. PVC 는 클러스터의 가비지 컬렉터가 지우므로 호출자에게
-PVC 삭제 권한이 없어도 지워지고, PV 의 reclaim 정책이 `Delete`(대부분의 동적 프로비저너 기본값)면 디스크 데이터도
-사라진다. **되돌릴 수 없다.** 데이터를 남기려면 템플릿이 `whenDeleted: Retain` 을 직접 쓰거나 필드로 노출한다 — 명시한
-값은 덮어쓰지 않는다. 이 기본값 이전에 배포된 릴리스는 **다음 업데이트 때** 정책이 붙고, 그 전에 지운 릴리스의 PVC
-(`<claim>-<statefulset>-<n>`)는 저절로 사라지지 않으니 `kubectl -n <ns> get pvc` 로 찾아 정리한다.
+이름으로 다시 배포한 릴리스가 이전 데이터를 그대로 붙였다. 이 정책이면 StatefulSet 이 **이름이
+`<claim>-<statefulset>-<n>` 과 맞고 다른 컨트롤러가 소유하지 않은 PVC 전부**(컨트롤러가 만든 것만이 아니라 먼저 있던
+것까지)를 소유하고, 클러스터의 가비지 컬렉터가 함께 지운다. 그래서 호출자에게 PVC 삭제 권한이 없어도 지워지고, PV 의
+reclaim 정책이 `Delete`(대부분의 동적 프로비저너 기본값)면 디스크 데이터도 사라진다. **되돌릴 수 없다.** 데이터를
+남기려면 템플릿이 `whenDeleted: Retain` 을 직접 쓰거나 필드로 노출한다 — 명시한 값은 덮어쓰지 않는다.
+
+먼저 있던 PVC 를 그렇게 넘겨받아 지우지 않도록, **릴리스 생성(`POST /v1/releases`)은 그 이름의 PVC 가 이미 있으면
+`409 resource-conflict`** 로 거절한다(`conflicts[]` 의 `kind` 가 `PersistentVolumeClaim`, 라벨이 없으니 `owner` 는 보통
+빈 문자열). 순번은 지금 replicas 와 무관하게 전부 본다. PVC 를 list 할 수 없는 호출자(데모 사용자 계정)는 검사하지
+못하고 통과한다. 업데이트는 검사하지 않는다 — 그 이름의 PVC 는 이미 그 릴리스의 파드가 붙이고 있다. 이 기본값 이전에
+배포된 릴리스는 **다음 업데이트 때** 정책이 붙고, 그 전에 지운 릴리스의 PVC 는 저절로 사라지지 않는다. 같은
+StatefulSet·claim 이름으로 새로 배포하려면 `kubectl -n <ns> get pvc` 로 찾아 먼저 정리한다.
 
 **로그 스트림은 동시에 열어 둘 수 있는 개수에도 상한이 있다**([#169](https://github.com/shyuni4u/kubeport/issues/169)).
 위 버킷은 스트림을 **여는** 횟수만 센다 — 한 번 열린 스트림은 몇 시간을 붙들고 있어도 토큰을 더 쓰지

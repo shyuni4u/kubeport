@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -226,7 +227,103 @@ func (c *Client) CheckApply(ctx context.Context, rel ReleaseRef, multiDoc []byte
 			return out, fmt.Errorf("check %s: %w", ref, err)
 		}
 	}
+	if creating {
+		if err := c.checkClaims(ctx, namespace, objs, &out); err != nil {
+			return out, err
+		}
+	}
 	return out, nil
+}
+
+var claimsGVR = schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumeclaims"}
+
+// checkClaims adds the claims a new release's StatefulSets would take over.
+//
+// They are not in the manifest, so the loop above never sees them. A
+// StatefulSet whose claims go with it (whenDeleted: Delete, which Render
+// defaults, #340) makes its controller the owner of every claim named
+// <claim>-<statefulset>-<ordinal> that no other controller owns — including
+// one that was there before the release. Deleting the release then deletes
+// that claim, and with the usual reclaim policy its volume: a claim an earlier
+// release of the same name kept, one another release chose to retain, or one
+// made outside kubeport. Before the default the same collision only mounted
+// the other data; now it destroys it, so on a create any such claim is a
+// conflict.
+//
+// Every ordinal counts, not just the StatefulSet's current replicas, so
+// scaling the release up later cannot reach a claim this check let through. An
+// update skips the check: the claims under those names are, as far as anyone
+// can tell, the release's own — its pods already mount them.
+//
+// One list serves every StatefulSet. A caller who may not list claims — the
+// demo's user account — cannot be checked, and those names are Unverified, as
+// for any unreadable object.
+func (c *Client) checkClaims(ctx context.Context, namespace string, objs []*unstructured.Unstructured, out *ApplyCheck) error {
+	prefixes := claimPrefixes(objs)
+	if len(prefixes) == 0 {
+		return nil
+	}
+	claims, err := c.dyn.Resource(claimsGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
+	switch {
+	case apierrors.IsForbidden(err):
+		for _, p := range prefixes {
+			out.Unverified = append(out.Unverified, ObjectRef{Kind: "PersistentVolumeClaim", Name: p + "<ordinal>", Namespace: namespace})
+		}
+		return nil
+	case err != nil:
+		return fmt.Errorf("check claims: %w", err)
+	}
+	for _, claim := range claims.Items {
+		for _, p := range prefixes {
+			if ordinal, ok := strings.CutPrefix(claim.GetName(), p); ok && isOrdinal(ordinal) {
+				out.Conflicts = append(out.Conflicts, Conflict{
+					ObjectRef: ObjectRef{Kind: "PersistentVolumeClaim", Name: claim.GetName(), Namespace: namespace},
+					Owner:     claim.GetLabels()[ReleaseLabel],
+				})
+				break
+			}
+		}
+	}
+	return nil
+}
+
+// claimPrefixes is "<claim>-<statefulset>-" for every claim template of a
+// StatefulSet in objs whose claims are deleted with it. The ordinal after the
+// prefix is what tells data-db-0 (claim data of db) from data-db-x-0 (claim
+// data of db-x).
+func claimPrefixes(objs []*unstructured.Unstructured) []string {
+	var prefixes []string
+	for _, o := range objs {
+		if gvk := o.GroupVersionKind(); gvk.Group != "apps" || gvk.Kind != "StatefulSet" || o.GetName() == "" {
+			continue
+		}
+		if when, _, _ := unstructured.NestedString(o.Object, "spec", "persistentVolumeClaimRetentionPolicy", "whenDeleted"); when != "Delete" {
+			continue
+		}
+		templates, _, _ := unstructured.NestedSlice(o.Object, "spec", "volumeClaimTemplates")
+		for _, t := range templates {
+			m, ok := t.(map[string]any)
+			if !ok {
+				continue
+			}
+			if name, _, _ := unstructured.NestedString(m, "metadata", "name"); name != "" {
+				prefixes = append(prefixes, name+"-"+o.GetName()+"-")
+			}
+		}
+	}
+	return prefixes
+}
+
+func isOrdinal(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 type probeResult int

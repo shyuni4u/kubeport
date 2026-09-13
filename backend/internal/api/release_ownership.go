@@ -167,6 +167,12 @@ func conflictDetail(conflicts []k8s.Conflict, update bool) string {
 			parts = append(parts, fmt.Sprintf("%s (release %s)", cf.ObjectRef.String(), strconv.Quote(cf.Owner)))
 		case cf.OwnerUnknown:
 			parts = append(parts, cf.ObjectRef.String()+" (exists, but this account cannot read who holds it)")
+		case cf.Kind == "PersistentVolumeClaim":
+			// Claims a StatefulSet's controller made carry no release label, so an
+			// unlabelled one may well be kubeport's, left by an earlier release
+			// (#340). The release's StatefulSet would take it over and delete it
+			// with the release.
+			parts = append(parts, cf.ObjectRef.String()+" (storage this release's StatefulSet would take over and delete with it: left by an earlier release, or made outside kubeport)")
 		default:
 			parts = append(parts, cf.ObjectRef.String()+" (not created by kubeport)")
 		}

@@ -13,8 +13,12 @@ package template
 //
 // persistentVolumeClaimRetentionPolicy can change, so an existing release takes
 // it on its next update. With Delete the controller makes the StatefulSet the
-// claims' owner and the garbage collector removes them — which also reaches a
-// caller that may not delete claims itself, as the demo's user account cannot.
+// owner of every claim named <claim>-<statefulset>-<ordinal> that no other
+// controller owns — not only the ones it created — and the garbage collector
+// removes them with it. That also reaches a caller that may not delete claims
+// itself, as the demo's user account cannot. Because a claim that was there
+// first would be taken too, a new release refuses to deploy over one
+// (k8s.CheckApply).
 //
 // A default, not an override: a template that writes whenDeleted, or exposes
 // it as a field, keeps the data it asked to keep. whenScaled is left to the

@@ -1281,12 +1281,20 @@ paths:
         **This includes the data in a StatefulSet's storage** (#340). Rendering
         gives a StatefulSet with `volumeClaimTemplates` the retention policy
         `persistentVolumeClaimRetentionPolicy.whenDeleted: Delete` unless the
-        template writes `whenDeleted` itself, so the claims its controller
-        created are removed with it by the cluster's garbage collector —
+        template writes `whenDeleted` itself. The StatefulSet then owns every
+        claim named `<claim>-<statefulset>-<ordinal>` that no other controller
+        owns, and the cluster's garbage collector removes them with it —
         whether or not the caller may delete claims — and, under the usual
-        `Delete` reclaim policy, so is the volume. It cannot be undone. A
-        release applied before this default takes it on its next update; one
-        deleted before that leaves its claims behind as before.
+        `Delete` reclaim policy, their volumes. It cannot be undone.
+
+        A claim under such a name that exists before the release would be
+        taken over the same way, so `POST /v1/releases` refuses it with 409
+        `resource-conflict` (`kind: PersistentVolumeClaim` in `conflicts`) when
+        the caller may list claims; a caller who may not is not checked. A
+        release applied before this default takes it on its next update. One
+        deleted before that leaves its claims behind, and a later release
+        whose StatefulSet and claim names match refuses to deploy until they
+        are removed.
       parameters:
         - $ref: "#/components/parameters/ReleaseID"
         - name: force
