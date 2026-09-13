@@ -103,3 +103,44 @@ describe("version-pinned deploy page, updating a release", () => {
     expect(el.props.updateReleaseId).toBeUndefined();
   });
 });
+
+// #190 — the pinned version's objects decide what a new release's name may be.
+describe("version-pinned deploy page, name rules", () => {
+  const resources = "kind: Service\nmetadata:\n  name: web\n---\nkind: CronJob\nmetadata:\n  name: nightly-backup\n";
+
+  function routeVersion(uiSpec: string, email: string, release?: () => Response) {
+    apiFetch.mockImplementation(async (path) => {
+      if (path === "/v1/templates/web-app/versions/2") {
+        return json(200, { ui_spec_yaml: uiSpec, resources_yaml: resources, owning_team_name: null });
+      }
+      if (path === `/v1/releases/${ID}` && release) return release();
+      if (path === "/v1/me") return json(200, { email });
+      return json(404);
+    });
+  }
+
+  it("hands a new release's form the multi-instance version's limits and a demo name within them", async () => {
+    routeVersion("instances: multiple\nfields: []\n", "demo-user@demo.kubeport");
+    const el = await render();
+    expect(el.props.nameRules).toEqual({ multiple: true, maxLength: 37, letterFirst: true });
+    const name = el.props.defaultName as string;
+    expect(name).toMatch(/^web-app-[a-z0-9]{4}$/);
+    expect(name.length).toBeLessThanOrEqual(37);
+  });
+
+  it("keeps a single-instance version's rules", async () => {
+    routeVersion("fields: []\n", "someone@example.com");
+    const el = await render();
+    expect(el.props.nameRules).toEqual({ multiple: false, maxLength: 63, letterFirst: false });
+    expect(el.props.defaultName).toBe("");
+  });
+
+  it("prefills no name for an update, which keeps the one it has", async () => {
+    routeVersion("instances: multiple\nfields: []\n", "demo-user@demo.kubeport", () =>
+      json(200, { template: { name: "web-app", version: 2 }, values_json: {} }),
+    );
+    const el = await render(ID);
+    expect(el.type).toBe(DeployClient);
+    expect(el.props.defaultName).toBe("");
+  });
+});

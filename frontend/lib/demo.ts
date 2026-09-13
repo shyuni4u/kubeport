@@ -52,6 +52,6 @@ export function withDemoSuffix(
     s += pool[Math.floor(rand() * pool.length)];
   }
   // Room for "-" and the suffix.
-  base = base.slice(0, rules.maxLength - (s.length + 1)).replace(/-+$/, "");
+  base = base.slice(0, Math.max(0, rules.maxLength - (s.length + 1))).replace(/-+$/, "");
   return base ? `${base}-${s}` : s;
 }

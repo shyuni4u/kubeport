@@ -55,10 +55,17 @@ export function releaseNameRules(uiSpecYaml: string, resourcesYaml: string): Rel
   let maxLength = RELEASE_NAME_MAX_LENGTH;
   let letterFirst = false;
   // A document that does not parse is the backend's to refuse; the form keeps
-  // what the ones that do parse say.
+  // what the ones that do parse say. toJS throws on its own too — on more
+  // aliases than the library will expand, which Go's parser accepts — and this
+  // runs in the deploy page's server component, where a throw is a 500.
   for (const doc of YAML.parseAllDocuments(resourcesYaml)) {
     if (doc.errors.length > 0) continue;
-    const obj = doc.toJS() as { kind?: unknown; metadata?: { name?: unknown } } | null;
+    let obj: { kind?: unknown; metadata?: { name?: unknown } } | null;
+    try {
+      obj = doc.toJS() as typeof obj;
+    } catch {
+      continue;
+    }
     const kind = obj?.kind;
     const name = obj?.metadata?.name;
     if (typeof kind !== "string" || typeof name !== "string" || name === "") continue;

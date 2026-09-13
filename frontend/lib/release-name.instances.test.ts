@@ -53,6 +53,18 @@ describe("releaseNameRules", () => {
     });
   });
 
+  // Code review: the library refuses to expand this many aliases, and the
+  // deploy page computes the rules on the server, where a throw is a 500.
+  it("skips a document with more aliases than the library expands", () => {
+    const aliases = Array.from({ length: 150 }, (_, i) => `  k${i}: *v\n`).join("");
+    const bomb = `kind: ConfigMap\nmetadata:\n  name: settings\ndata:\n  a: &v x\n${aliases}---\nkind: Service\nmetadata:\n  name: web\n`;
+    expect(releaseNameRules(MULTIPLE, bomb)).toEqual({
+      multiple: true,
+      maxLength: 59,
+      letterFirst: true,
+    });
+  });
+
   it("does not fail the page on YAML it cannot read", () => {
     expect(releaseNameRules("instances: [", resources)).toEqual(SINGLE_INSTANCE_RULES);
     expect(releaseNameRules(MULTIPLE, "kind: [")).toEqual({
