@@ -1335,6 +1335,14 @@ paths:
         deleted before that leaves its claims behind, and a later release
         whose StatefulSet and claim names match refuses to deploy until they
         are removed.
+
+        If the cluster refuses to delete objects the release still has, the
+        answer is 403 `rbac-denied` naming the refused resources, and the
+        database row is kept (#380). Whatever the caller could delete is gone;
+        once its RBAC allows the rest, the same request finishes the delete. A
+        refusal on a resource the release has nothing of is not counted, and
+        neither is one the caller may not even list. Any other cluster failure
+        is 502 `k8s-error`, also with the row kept.
       parameters:
         - $ref: "#/components/parameters/ReleaseID"
         - name: force
@@ -2129,7 +2137,7 @@ components:
         direction.
       enum:
         - unauthenticated   # 401 — no/invalid token or session
-        - rbac-denied       # 403 — kubeport's own check refused
+        - rbac-denied       # 403 — kubeport's own check, or the cluster's RBAC, refused
         - demo-restricted   # 403 — the demo gate; scope in the Forbidden response.
                             # Also a demo account's manifest that breaks the
                             # demo's limits, with `demo_policy` (#350).

@@ -189,11 +189,16 @@ func (e *DeleteForbiddenError) Error() string {
 // Job's pods carry no id (its pod template is immutable), so an orphaned pod
 // would outlive the release under its name alone.
 //
-// applied is the manifest the release was last applied with. A refusal on a
-// resource it uses fails the delete with a DeleteForbiddenError (#380): those
-// objects are still in the cluster, and a nil here let the caller drop the
-// release row and leave them with nothing pointing at them. A refusal on a
-// resource it does not use is skipped, as is a NotFound on any.
+// A refusal on a resource the release still has objects of fails the delete
+// with a DeleteForbiddenError (#380): those objects are still in the cluster,
+// and a nil here let the caller drop the release row and leave them with
+// nothing pointing at them. applied is the manifest the release was last
+// applied with; a resource it lists counts without asking. An update does not
+// prune, so a resource it does not list can still hold the release's objects
+// (an earlier version's, or one a failed update applied): that one is listed
+// on the same selector, and counts if anything comes back. Nothing there, or
+// a list refused too — a demo Role, which has neither verb on resources a
+// release never used — is skipped, as is a NotFound on any.
 func (c *Client) DeleteByRelease(ctx context.Context, ref ReleaseRef, applied []byte) error {
 	namespace := ref.Namespace
 	if ref.UID == "" {
@@ -217,16 +222,22 @@ func (c *Client) DeleteByRelease(ctx context.Context, ref ReleaseRef, applied []
 				switch {
 				case apierrors.IsNotFound(err):
 					// Already gone.
-				case apierrors.IsForbidden(err) && used[r.GroupResource()]:
-					if len(refused) == 0 || refused[len(refused)-1] != r.Resource {
+				case apierrors.IsForbidden(err):
+					has, listErr := used[r.GroupResource()], error(nil)
+					if !has {
+						// RBAC-scoped callers (e.g. demo accounts, see
+						// deploy/helm/kubeport/templates/demo-rbac.yaml) may lack
+						// access to resources this release never used (no
+						// networking group, no daemonsets/pvc, ...). Skipped
+						// unless the release has objects there after all.
+						has, listErr = c.releaseHas(ctx, r, namespace, sel)
+					}
+					switch {
+					case listErr != nil:
+						errs = append(errs, listErr)
+					case has && (len(refused) == 0 || refused[len(refused)-1] != r.Resource):
 						refused = append(refused, r.Resource)
 					}
-				case apierrors.IsForbidden(err):
-					// RBAC-scoped callers (e.g. demo accounts, see
-					// deploy/helm/kubeport/templates/demo-rbac.yaml) may lack
-					// access to resource groups/kinds this release never used
-					// (no networking group, no daemonsets/pvc, ...). Nothing of
-					// the release can be there to leave behind.
 				default:
 					errs = append(errs, fmt.Errorf("delete %s: %w", r.Resource, err))
 				}
@@ -234,6 +245,21 @@ func (c *Client) DeleteByRelease(ctx context.Context, ref ReleaseRef, applied []
 		}
 	}
 	return deleteResult(errs, refused)
+}
+
+// releaseHas reports whether any object of r in namespace matches sel, for a
+// delete of it the cluster refused. A list refused too, or not found, cannot
+// say: false, as before #380. Any other failure is returned.
+func (c *Client) releaseHas(ctx context.Context, r schema.GroupVersionResource, namespace, sel string) (bool, error) {
+	list, err := c.dyn.Resource(r).Namespace(namespace).
+		List(ctx, metav1.ListOptions{LabelSelector: sel, Limit: 1})
+	switch {
+	case apierrors.IsForbidden(err) || apierrors.IsNotFound(err):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("list %s after a refused delete: %w", r.Resource, err)
+	}
+	return len(list.Items) > 0, nil
 }
 
 // deleteResult is the refusals alone as a DeleteForbiddenError, so a caller

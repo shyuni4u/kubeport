@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
@@ -85,7 +86,11 @@ func TestPluralize_UnknownKindReturnsEmpty(t *testing.T) {
 // fail the whole release delete.
 func TestDeleteByRelease_ToleratesForbiddenAndNotFound(t *testing.T) {
 	scheme := runtime.NewScheme()
-	dyn := dynamicfake.NewSimpleDynamicClient(scheme)
+	// The refused ingresses are not in the manifest, so the delete lists them to
+	// see whether the release has any there (it has none).
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+		{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"}: "IngressList",
+	})
 
 	dyn.PrependReactor("delete-collection", "ingresses", func(action clientgotesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewForbidden(
@@ -167,6 +172,54 @@ func TestDeleteByRelease_NotFoundOnAResourceTheReleaseUsesIsFine(t *testing.T) {
 
 	ref := k8s.ReleaseRef{Namespace: "default", Name: "rel-1", UID: "11111111-1111-1111-1111-111111111111"}
 	require.NoError(t, k8s.NewForTest(dyn).DeleteByRelease(context.Background(), ref, deploymentAndConfigMap))
+}
+
+// Code review of #380: an update does not prune, so the release can still have
+// objects of a kind its stored manifest no longer lists (an earlier version's,
+// or one a failed update applied). A refused delete there is asked about with
+// a list on the same selector: objects found are refused, nothing found or a
+// list refused too (a demo Role, which has neither) is skipped as before.
+func TestDeleteByRelease_ARefusalOutsideTheManifestCountsWhenItsObjectsAreThere(t *testing.T) {
+	daemonset := func(uid string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "apps/v1", "kind": "DaemonSet",
+			"metadata": map[string]any{"name": "agent", "namespace": "default",
+				"labels": map[string]any{k8s.ReleaseLabel: "rel-1", k8s.ReleaseUIDLabel: uid}},
+		}}
+	}
+	const uid = "11111111-1111-1111-1111-111111111111"
+	listKinds := map[schema.GroupVersionResource]string{{Group: "apps", Version: "v1", Resource: "daemonsets"}: "DaemonSetList"}
+	for name, tc := range map[string]struct {
+		objs       []runtime.Object
+		listDenied bool
+		manifest   []byte
+		refused    bool
+	}{
+		"its objects are there":                  {objs: []runtime.Object{daemonset(uid)}, manifest: deploymentAndConfigMap, refused: true},
+		"another release's are, not its own":     {objs: []runtime.Object{daemonset("22222222-2222-2222-2222-222222222222")}, manifest: deploymentAndConfigMap},
+		"nothing is there":                       {manifest: deploymentAndConfigMap},
+		"the list is refused too":                {objs: []runtime.Object{daemonset(uid)}, listDenied: true, manifest: deploymentAndConfigMap},
+		"no manifest, and its objects are there": {objs: []runtime.Object{daemonset(uid)}, refused: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, tc.objs...)
+			dyn.PrependReactor("delete-collection", "daemonsets", forbid("daemonsets"))
+			if tc.listDenied {
+				dyn.PrependReactor("list", "daemonsets", forbid("daemonsets"))
+			}
+
+			ref := k8s.ReleaseRef{Namespace: "default", Name: "rel-1", UID: uid}
+			err := k8s.NewForTest(dyn).DeleteByRelease(context.Background(), ref, tc.manifest)
+
+			if !tc.refused {
+				require.NoError(t, err)
+				return
+			}
+			fe, ok := err.(*k8s.DeleteForbiddenError)
+			require.True(t, ok, "got %T: %v", err, err)
+			require.Equal(t, []string{"daemonsets"}, fe.Resources)
+		})
+	}
 }
 
 // A refusal next to another failure is not only a refusal: the other one may
