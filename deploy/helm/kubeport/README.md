@@ -673,6 +673,21 @@ deleted release frees its name while objects it could not delete still carry
 it, and one apiserver registered under two cluster names lets two releases
 share a name and namespace.
 
+Every object a release applies carries the labels `kubeport.io/managed=true`,
+`kubeport.io/release`, `kubeport.io/release-uid`, `kubeport.io/template` and
+`kubeport.io/template-version`, and the annotations `kubeport.io/release-id`,
+`kubeport.io/applied-by` (the email of whoever applied it) and
+`kubeport.io/applied-at` (RFC 3339, UTC) — `backend/internal/template/render.go`.
+To see everything kubeport manages (`all` leaves out ConfigMaps, Secrets and
+PVCs, so name them):
+
+```bash
+kubectl get all,cm,secret,pvc -A -l kubeport.io/managed=true -L kubeport.io/release,kubeport.io/release-uid
+```
+
+A `release-uid` that matches no release in the UI is an orphan — left behind by
+a force delete, for example.
+
 - **Existing releases keep working unchanged.** A release whose last applied
   YAML has no id counts objects without one as its own by name — for status,
   logs, update and delete — and gains the id the next time it is updated. After
@@ -1050,7 +1065,15 @@ htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
 - `demo-admin`/`demo-user` `Role`s + `RoleBinding`s scoped to that namespace,
   plus a cluster-scoped `ClusterRole`/`ClusterRoleBinding` granting
   `selfsubjectaccessreviews` (create) — the RBAC panel needs this even for
-  non-admin demo users.
+  non-admin demo users. **`demo-user` is narrower than `demo-admin`**
+  (`templates/demo-rbac.yaml`): it covers pods, pods/log, services,
+  configmaps, events, deployments, statefulsets, replicasets, jobs and
+  cronjobs, but not daemonsets, persistentvolumeclaims or serviceaccounts, and
+  it may write Secrets without reading them back. Neither Role has
+  `networking.k8s.io`. So a template visitors deploy — the seed fixtures
+  included — must stay within `demo-user`'s kinds, or the same change widens
+  the Role. The reset's preflight does not check this; a template outside it
+  fails only when a visitor deploys it.
 - A `demo-reset` `CronJob` (`demo.resetSchedule`, default daily at 21:00 UTC,
   read in `demo.resetTimeZone`) that
   wipes all objects in the demo namespace — PersistentVolumeClaims included, so

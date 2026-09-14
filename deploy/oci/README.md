@@ -186,7 +186,10 @@ OCI Always Free 정책상 7일간 CPU 95p < 20% AND network < 20% AND memory < 2
 
 ### 6.2. Boot Volume backup policy
 
-OCI 콘솔 → Compute → Instances → `kubeport` → 좌측 Resources → **Boot volume** 클릭 → **Backup policy** → Edit → **Bronze** (주간, 4주 보존, Always Free 한도 내).
+OCI 콘솔 → Compute → Instances → `kubeport` → 좌측 Resources → **Boot volume** 클릭 → **Backup policy** 에
+**커스텀 주간 정책**을 만들어 연결한다: 주간 증분, 28일 보존(최대 4개 — Always Free 백업 5개 한도 안). 라이브는
+`kubeport-weekly-4w` 이다(runbook §6). ⚠️ Oracle 기본 **Bronze 는 쓰지 않는다** — 월간·연간 장기 보존이 들어 있어
+무료 한도를 넘는다.
 
 이게 boot volume 뿐 아니라 local-path PVC 가 거기 안에 있으므로 Postgres 데이터도 같이 보존.
 

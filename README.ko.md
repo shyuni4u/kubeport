@@ -225,7 +225,7 @@ NODE_EXTRA_CA_CERTS="$PWD/../deploy/docker/certs/dex.crt" pnpm dev
 
 ```bash
 # Unit + integration (compose 기동 상태 필요 — 테스트가 그 Postgres 와 dex 를 쓴다)
-cd backend && go test -p 1 ./...
+(cd backend && go test -p 1 ./...)
 # -p 1: 패키지들이 공유 테스트 DB 를 이름 패턴으로 정리해서, 병렬이면 서로의 행을 지운다.
 # `make test` 는 -p 1 없이 같은 것을 돈다.
 

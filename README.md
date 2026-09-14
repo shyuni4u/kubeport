@@ -245,7 +245,7 @@ For a full browser → deploy-to-kind walkthrough — self-signed dex cert, Wind
 
 ```bash
 # Unit + integration (compose must be up — the tests use its Postgres and dex)
-cd backend && go test -p 1 ./...
+(cd backend && go test -p 1 ./...)
 # -p 1: packages clean the shared test database by name and would delete each
 # other's rows in parallel. `make test` runs the same without it.
 
