@@ -6,8 +6,8 @@ API 계약 자체는 [`backend/api/openapi.yaml`](../backend/api/openapi.yaml) �
 
 > **요약을 먼저:** 로컬 개발 환경에서는 dex 의 password grant 로 토큰을 얻어 바로 호출할 수 있다(§2, 검증됨).
 > **운영 환경에서 실사용자 권한으로 쓸 비대화형 경로는 아직 없다**(§3) — 데모 dex 를 통한 데모 범위
-> 자동화만 가능하다. 클러스터 등록 같은 운영자 1회성 작업은 §4 의 우회 경로를 쓴다. 장기 해법은
-> [issue #34](https://github.com/shyuni4u/kubeport/issues/34).
+> 자동화만 가능하다. 클러스터 등록 같은 운영자 1회성 작업은 §4 의 우회 경로를 쓴다. 실사용자 권한의
+> 비대화형 경로는 아직 설계 결정이 필요한 과제다(§3 끝).
 
 ---
 
@@ -144,7 +144,8 @@ curl -ks -X POST https://host.docker.internal:5556/token \
 - k8s 쪽 권한도 `demo` 네임스페이스로 묶여 있다(`templates/demo-rbac.yaml`).
 
 그래서 **데모 범위의 스모크 자동화는 가능하고, 실사용자 권한으로 운영을 자동화하는 경로는 여전히
-없다.** 후자가 [issue #34](https://github.com/shyuni4u/kubeport/issues/34) 의 내용이고, 후보 해법 두 가지는:
+없다.** 절차를 문서로 남기자던 [#34](https://github.com/shyuni4u/kubeport/issues/34) 는 이 문서로 닫혔지만 경로 자체는
+아직 없고, 후보 해법 두 가지는:
 
 1. **서비스 계정 토큰(장수명 API key)을 `/v1` 에 도입** — `Authorization: Bearer kbp_...` 를
    `requireAuth` 가 함께 받도록. 다만 kubeport 의 보안 모델은 "사용자 토큰을 k8s 로 그대로 포워딩"
@@ -266,6 +267,44 @@ dry-run create 로 존재 여부만 확인해, 있으면 `owner` 없이 `owner_u
 템플릿 오브젝트가 릴리스와 다른 `metadata.namespace` 를 박고 있으면 `400 validation-error` 에 `pinned_namespace`
 (`kind`·`name`·`namespace`)가 붙는다([#137](https://github.com/shyuni4u/kubeport/issues/137)). 요청이 아니라
 **템플릿**을 고쳐야 하는 경우라, 이 필드가 있으면 "입력값을 확인하라" 고 안내하지 말 것.
+
+**템플릿 이름은 경로 세그먼트이자 라벨 값이다**([#369](https://github.com/shyuni4u/kubeport/issues/369)).
+`POST /v1/templates` 의 `name` 은 RFC 1123 hostname 이면서 Kubernetes 라벨 값이어야 한다 — 영문자·숫자·하이픈·점으로
+**63자까지**, 영문자나 숫자로 시작하고 끝나며 점 바로 뒤도 영문자나 숫자다(`openapi.yaml` 의
+`pattern: ^[a-zA-Z0-9](-*\.?[a-zA-Z0-9])*$`, `maxLength: 63` — 릴리스 이름과 같은 규칙). 어기면 `400 validation-error` 다.
+이름은 릴리스가 만드는 모든 오브젝트의 `kubeport.io/template` 라벨이 되고, 만든 뒤에는 바꿀 수 없다. 이 규칙 이전에
+만들어진 이름은 그대로 두며 그 라우트도 계속 제공한다.
+
+**템플릿 하나는 오브젝트 50개까지다**([#281](https://github.com/shyuni4u/kubeport/issues/281)). `resources_yaml` 의 비어 있지
+않은 문서가 50개를 넘으면 템플릿·버전 저장이 `400 validation-error` 이고, 배포 때도 같은 검사를 한다. 릴리스 적용이
+apply lock 을 쥔 시간 안에 끝나야 하기 때문이다. 오브젝트를 덜어내거나 템플릿을 나눈다.
+
+**릴리스를 읽으면 Secret 값은 가려진다**([#196](https://github.com/shyuni4u/kubeport/issues/196)).
+`GET /v1/releases/{id}` 의 `values_json` 에서 Secret 의 `data`·`stringData` 로 가는 경로의 값, 그리고 `rendered_yaml`
+안의 그 값은 `"<redacted>"` 로 온다. 받은 값을 **같은 `version`** 으로 `PUT /v1/releases/{id}` 에 그대로 돌려보내면 가려진
+Secret 은 저장된 값을 유지하고, 다른 값을 보내면 바뀐다. **다른 `version` 으로 옮기면서 `"<redacted>"` 를 보내면 `400`** 이다
+— 저장값을 다른 버전의 규칙으로 검사하면 그 값이 규칙에 맞는지가 드러나기 때문에, Secret 값을 다시 넣어야 한다.
+`POST /v1/templates/{name}/render` 에 `release_id` 를 함께 보내면 `"<redacted>"` 를 그 릴리스의 저장값으로 렌더하고 결과에서
+다시 가린다.
+
+**한 구역에 같은 템플릿을 여러 번 — ui-spec 의 `instances`**([#190](https://github.com/shyuni4u/kubeport/issues/190)).
+키가 없거나 `single` 이면 오브젝트가 템플릿이 준 이름 그대로 적용되므로, 같은 구역의 두 번째 릴리스는 `409 resource-conflict`
+다. `instances: multiple` 버전은 모든 오브젝트 이름을 `<릴리스>-<원래이름>` 으로 바꾸고, 템플릿 안의 참조(파드 볼륨·envFrom·
+env valueFrom·imagePullSecrets·StatefulSet serviceName·Ingress 백엔드와 TLS·PVC 복제 원본)를 새 이름으로 고치며, Service
+selector 와 워크로드 `matchLabels` 에 `kubeport.io/release`·`kubeport.io/release-uid` 를 더해 릴리스끼리 파드를 공유하지 않게 한다.
+
+- **저장**할 때 `400 validation-error`: 모르는 `instances` 값, multiple 에서 `metadata.name` 을 노출하는 필드, 30자를 넘는
+  오브젝트 이름.
+- **배포**할 때 `400 validation-error`: 바뀐 이름이 그 kind 의 이름 규칙(63자, CronJob 은 52자, Service 는 영문 소문자로 시작 등)을
+  어기게 만드는 릴리스 이름. `detail` 이 그 kind 에 들어갈 수 있는 릴리스 이름의 최대 길이를 알려 준다.
+- **모드는 템플릿 단위로 고정된다.** 게시·deprecated 버전과 모드가 다른 버전의 생성·초안 수정·게시·되돌리기(undeprecate)는
+  `400` 이다. 초안만 있는 템플릿의 첫 게시는 어느 모드든 된다.
+- `PUT /v1/releases/{id}` 로 `single` 과 `multiple` 버전 사이를 옮기면 `400` 이고 아무것도 적용하지 않는다(키 없음과 `single`
+  은 같은 모드다).
+
+**팀 멤버 추가(`POST /v1/teams/{id}/members`)의 404 는 `title` 로 둘이 갈린다**([#370](https://github.com/shyuni4u/kubeport/issues/370)).
+`not-found` 는 그 팀이 없다는 뜻이고, `user-not-found` 는 그 이메일로 한 번도 로그인한 사람이 없다는 뜻이다. kubeport 는 초대를
+보낼 수 없으니, 후자는 그 사람이 먼저 한 번 로그인해야 풀린다.
 
 **데모 계정의 매니페스트에는 설치가 정한 상한이 걸린다**([#350](https://github.com/shyuni4u/kubeport/issues/350)).
 데모 도메인 신원이 릴리스를 생성·업데이트하거나 미리보기(`POST /v1/templates/:name/render`)를 부르면, 렌더된
@@ -575,8 +614,8 @@ StatefulSet·claim 이름으로 새로 배포하려면 `kubectl -n <ns> get pvc`
   HTML 이다. `Content-Type` 이 `application/json` 인 413 만 `payload-too-large` 로 읽는다. 자가호스팅 운영자는 차트 README
   "Cloud-specific values" 의 `proxy-body-size` 설정을 본다. 라이브(`kubeport.enzo.kr`, k3s Traefik)는 인그레스 한도가 없다.
 
-**비인증 호출은 JSON 401 이다 — 단, [#24](https://github.com/shyuni4u/kubeport/issues/24) 수정이 배포된
-리비전부터.** 그 이전 리비전의 BFF 는 `/api/auth/login` 으로 **307** 을 보낸다.
+**비인증 호출은 JSON 401 이다**([#24](https://github.com/shyuni4u/kubeport/issues/24)). #24 이전 리비전의 BFF 는
+`/api/auth/login` 으로 **307** 을 보냈다.
 
 ```json
 {"type":"https://kubeport.io/errors/unauthenticated","title":"unauthenticated","status":401,"detail":"..."}
@@ -625,7 +664,13 @@ k8s authorizer 는 `RBAC: allowed by ClusterRoleBinding "..." of ClusterRole "..
 5분 전체를 소비한다.
 
 **목록은 페이지네이션 메타가 없다.** `total` 도 `next` 도 없어서 "다음 페이지가 있나"는 한 페이지가 꽉
-찼는지로 추측해야 한다. 템플릿 목록은 아예 페이지네이션이 없다(#58).
+찼는지로 추측해야 한다. 템플릿 목록은 아예 페이지네이션이 없다(#58). `GET /v1/releases` 의 `limit` 은 1–200(기본 50)이고,
+범위 밖이거나 숫자가 아니면 거절하지 않고 기본값을 쓰므로 응답만으로는 무엇이 적용됐는지 알 수 없다.
+
+**목록 필터는 서버가 받는다**([#74](https://github.com/shyuni4u/kubeport/issues/74)). `GET /v1/templates` 는 `search`(이름·표시
+이름 부분일치)·`tag`(반복하면 모두 가진 것만)·`status`(`published`·`deprecated`·`draft`), `GET /v1/releases` 는 `limit`·`offset`·
+`cluster`·`namespace`·`template` 이다. 릴리스 필터는 `limit`/`offset` 보다 먼저 적용된다. **적히지 않은 쿼리 파라미터는 무시하지
+않고 `400 validation-error`** 다 — 오타 난 필터가 조용히 전체 목록을 돌려주지 않게 하려는 것이다.
 
 **BFF 가 직접 답하는 응답 7가지.** `/api/v1/*` 로 붙는 경우(§1 의 B 경로), 아래는 Go API 까지 가지 않고
 Next.js Route Handler 가 만든다. 499 를 뺀 여섯은 같은 `Problem` 스키마다.
@@ -647,5 +692,4 @@ Next.js Route Handler 가 만든다. 499 를 뺀 여섯은 같은 `Problem` 스�
 - [`backend/api/openapi.yaml`](../backend/api/openapi.yaml) — API 계약
 - [docs/local-e2e.md](local-e2e.md) — 로컬 스택 전체 세우기
 - [deploy/helm/kubeport/README.md](../deploy/helm/kubeport/README.md) — 설치와 설치 후 필수 단계
-- [#34](https://github.com/shyuni4u/kubeport/issues/34) 비대화형 토큰 ·
-  [#25](https://github.com/shyuni4u/kubeport/issues/25) MCP 서버
+- [docs/api-agent-backlog.md](api-agent-backlog.md) — 아직 없는 기계 클라이언트 표면(MCP 서버·upsert·멱등키·페이지네이션 메타 등)
