@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import ko from "@/messages/ko.json";
 import { SidebarBody } from "./SidebarBody";
@@ -37,12 +37,14 @@ describe("SidebarBody cluster picker", () => {
 
   it("renders no picker and requests no clusters without a session", async () => {
     await renderBody(false);
-    // Give a mounted picker's effect the chance to run before asserting.
-    await new Promise((r) => setTimeout(r, 0));
+    // Flush any pending effects and updates, so a mounted picker would have
+    // fetched by now.
+    await act(async () => {});
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.queryByLabelText(ko.shell.currentCluster)).not.toBeInTheDocument();
     expect(screen.queryByText(ko.shell.noClusters)).not.toBeInTheDocument();
-    // The nav itself is still there.
+    // The nav itself is still there. The server translations mock returns the
+    // key, so the link reads "catalog".
     expect(screen.getByRole("link", { name: "catalog" })).toBeInTheDocument();
   });
 
