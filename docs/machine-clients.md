@@ -289,8 +289,9 @@ Secret 은 저장된 값을 유지하고, 다른 값을 보내면 바뀐다. **�
 placeholder 를 보낸 그대로 검사하므로, 버전을 옮기는 미리보기에는 Secret 값을 다시 넣어야 한다 — `PUT` 과 같은 이유다.
 
 **한 구역에 같은 템플릿을 여러 번 — ui-spec 의 `instances`**([#190](https://github.com/shyuni4u/kubeport/issues/190)).
-키가 없거나 `single` 이면 오브젝트가 템플릿이 준 이름 그대로 적용되므로, 같은 구역의 두 번째 릴리스는 `409 resource-conflict`
-다. `instances: multiple` 버전은 모든 오브젝트 이름을 `<릴리스>-<원래이름>` 으로 바꾸고, 템플릿 안의 참조(파드 볼륨·envFrom·
+키가 없거나 `single` 이면 오브젝트가 템플릿이 준 이름 그대로 적용되므로, 이름이 고정된 템플릿의 같은 구역 두 번째 릴리스는
+`409 resource-conflict` 다(`metadata.name` 을 필드로 노출한 `single` 템플릿은 릴리스마다 다른 이름을 받아 한 구역에 공존할 수 있다 —
+배포 시 소유권 검사(#161)가 그 이름을 지킨다). `instances: multiple` 버전은 모든 오브젝트 이름을 `<릴리스>-<원래이름>` 으로 바꾸고, 템플릿 안의 참조(파드 볼륨·envFrom·
 env valueFrom·imagePullSecrets·StatefulSet serviceName·Ingress 백엔드와 TLS·PVC 복제 원본)를 새 이름으로 고치며, Service
 selector 와 워크로드 `matchLabels` 에 `kubeport.io/release`·`kubeport.io/release-uid` 를 더해 릴리스끼리 파드를 공유하지 않게 한다.
 
