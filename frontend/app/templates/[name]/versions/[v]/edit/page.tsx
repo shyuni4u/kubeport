@@ -136,8 +136,8 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
     (async () => {
       try {
         const [vRes, tRes, cRes] = await Promise.all([
-          fetch(`/api/v1/templates/${name}/versions/${v}`),
-          fetch(`/api/v1/templates/${name}`),
+          fetch(`/api/v1/templates/${encodeURIComponent(name)}/versions/${v}`),
+          fetch(`/api/v1/templates/${encodeURIComponent(name)}`),
           fetch("/api/v1/clusters"),
         ]);
         if (!vRes.ok) {
@@ -313,7 +313,7 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
         }
       }
       if (Object.keys(patchBody).length > 0) {
-        const patchRes = await fetch(`/api/v1/templates/${name}`, {
+        const patchRes = await fetch(`/api/v1/templates/${encodeURIComponent(name)}`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(patchBody),
@@ -350,12 +350,12 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
       // 2) Either PATCH the draft in place or POST a new version.
       const req = saveAsPatch
         ? {
-            url: `/api/v1/templates/${name}/versions/${v}`,
+            url: `/api/v1/templates/${encodeURIComponent(name)}/versions/${v}`,
             method: "PATCH",
             body: { ui_state: state },
           }
         : {
-            url: `/api/v1/templates/${name}/versions`,
+            url: `/api/v1/templates/${encodeURIComponent(name)}/versions`,
             method: "POST",
             body: { authoring_mode: "ui", ui_state: state },
           };
@@ -366,7 +366,7 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
       });
       if (!res.ok) { setFailure(await saveFailure(t, res)); return; }
       markSaved();
-      router.push(`/templates/${name}`);
+      router.push(`/templates/${encodeURIComponent(name)}`);
     } finally {
       setSaving(false);
     }
@@ -436,7 +436,7 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
       // it, and meets a save button that stays off with no reason given (#184).
       <div role="note" className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100 px-3 py-2 text-xs text-amber-900">
         {t("convert.yamlDraftInspector")}{" "}
-        <a href={`/templates/${name}/versions/${v}/edit?mode=yaml`} className="underline">
+        <a href={`/templates/${encodeURIComponent(name)}/versions/${v}/edit?mode=yaml`} className="underline">
           {t("convert.editInYaml")}
         </a>
       </div>
@@ -586,7 +586,7 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`/api/v1/templates/${name}/versions/${v}`);
+        const res = await fetch(`/api/v1/templates/${encodeURIComponent(name)}/versions/${v}`);
         if (!res.ok) {
           // Was the body as it came: a line of JSON where the sentence belongs (#6).
           const body = await res.text().catch(() => "");
@@ -645,12 +645,12 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
     try {
       const req = isDraft
         ? {
-            url: `/api/v1/templates/${name}/versions/${v}`,
+            url: `/api/v1/templates/${encodeURIComponent(name)}/versions/${v}`,
             method: "PATCH",
             body: { resources_yaml: resourcesYaml, ui_spec_yaml: uispecYaml },
           }
         : {
-            url: `/api/v1/templates/${name}/versions`,
+            url: `/api/v1/templates/${encodeURIComponent(name)}/versions`,
             method: "POST",
             body: { authoring_mode: "yaml", resources_yaml: resourcesYaml, ui_spec_yaml: uispecYaml },
           };
@@ -661,7 +661,7 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
       });
       if (!res.ok) { setFailure(await saveFailure(t, res)); return; }
       markSaved();
-      router.push(`/templates/${name}`);
+      router.push(`/templates/${encodeURIComponent(name)}`);
     } finally {
       setSaving(false);
     }

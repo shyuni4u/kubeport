@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useTranslations } from "next-intl";
 import { X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { templateNameProblem } from "@/lib/template-name";
 
 export type TemplateMeta = {
   name: string;
@@ -37,6 +38,10 @@ export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Prop
   const t = useTranslations("templates.editor.meta");
   const [tagInput, setTagInput] = useState("");
   const lockAll = readOnly === true;
+  // A name the API would refuse says so while it is typed (#369). A locked name
+  // is an existing template's, which may predate the rule and still works.
+  const nameInvalid = !nameLocked && !lockAll && templateNameProblem(meta.name) === "format";
+  const nameMessageId = useId();
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted px-4 py-2">
@@ -47,6 +52,8 @@ export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Prop
           placeholder={t("namePlaceholder")}
           value={meta.name}
           disabled={nameLocked || lockAll}
+          aria-invalid={nameInvalid || undefined}
+          aria-describedby={nameInvalid ? nameMessageId : undefined}
           onChange={(e) => onChange({ ...meta, name: e.target.value })}
         />
       </label>
@@ -120,6 +127,11 @@ export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Prop
           />
         )}
       </div>
+      {nameInvalid && (
+        <p id={nameMessageId} className="basis-full text-xs text-destructive">
+          {t("nameInvalid")}
+        </p>
+      )}
     </div>
   );
 }

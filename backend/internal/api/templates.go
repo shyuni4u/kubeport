@@ -19,7 +19,13 @@ import (
 )
 
 type createTemplateReq struct {
-	Name          string   `json:"name"           binding:"required"`
+	// Name is one path segment in every template route, so it holds to the rule
+	// release names have (#369): an RFC 1123 hostname. openapi.yaml documents
+	// this binding's regex as the TemplateName pattern, and
+	// TestOpenAPISpec_TemplateNamePatternIsTheBinding holds the two together. A
+	// name with "/" used to be created and then unreachable: no route could read,
+	// change, deploy or delete it.
+	Name          string   `json:"name"           binding:"required,hostname_rfc1123"`
 	DisplayName   string   `json:"display_name"   binding:"required"`
 	Description   string   `json:"description"`
 	Tags          []string `json:"tags"`
@@ -668,11 +674,11 @@ func (h *Handlers) DeprecateVersion(c *gin.Context) {
 // the column. authoring_mode is intentionally not patchable (drafts keep
 // their original mode — see UpdateDraftTemplateVersion comment).
 type updateVersionReq struct {
-	ResourcesYAML *string                   `json:"resources_yaml"`
-	UISpecYAML    *string                   `json:"ui_spec_yaml"`
-	UIState       *template.UIModeTemplate  `json:"ui_state"`
-	MetadataYAML  *string                   `json:"metadata_yaml"`
-	Notes         *string                   `json:"notes"`
+	ResourcesYAML *string                  `json:"resources_yaml"`
+	UISpecYAML    *string                  `json:"ui_spec_yaml"`
+	UIState       *template.UIModeTemplate `json:"ui_state"`
+	MetadataYAML  *string                  `json:"metadata_yaml"`
+	Notes         *string                  `json:"notes"`
 }
 
 // UpdateTemplateVersion patches the content of a draft version in place.

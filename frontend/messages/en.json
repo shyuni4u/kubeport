@@ -521,7 +521,8 @@
       },
       "meta": {
         "name": "Name",
-        "namePlaceholder": "Template name (slug)",
+        "namePlaceholder": "Template name (e.g. web-app)",
+        "nameInvalid": "Use letters, digits and hyphens, starting with a letter or digit (dots may split it into parts of up to 63 characters each). The name goes into the address as is and cannot be changed later.",
         "displayName": "Display name",
         "team": "Team",
         "addTag": "Add tag",
