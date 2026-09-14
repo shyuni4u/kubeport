@@ -19,7 +19,15 @@ import (
 )
 
 type createTemplateReq struct {
-	Name          string   `json:"name"           binding:"required"`
+	// Name is one path segment in every template route and the
+	// kubeport.io/template label on every object a release creates, so it holds
+	// to the rule release names have (#369): an RFC 1123 hostname here, and a
+	// label value in templateNameProblem. openapi.yaml documents the two as the
+	// TemplateName pattern and maxLength, and
+	// TestOpenAPISpec_TemplateNamePatternIsTheRule holds the document to them. A
+	// name with "/" used to be created and then unreachable: no route could read,
+	// change, deploy or delete it.
+	Name          string   `json:"name"           binding:"required,hostname_rfc1123"`
 	DisplayName   string   `json:"display_name"   binding:"required"`
 	Description   string   `json:"description"`
 	Tags          []string `json:"tags"`
@@ -39,6 +47,10 @@ type createTemplateReq struct {
 func (h *Handlers) CreateTemplate(c *gin.Context) {
 	var r createTemplateReq
 	if !bindJSON(c, &r) {
+		return
+	}
+	if problem := templateNameProblem(r.Name); problem != "" {
+		writeError(c, http.StatusBadRequest, "validation-error", problem)
 		return
 	}
 
@@ -668,11 +680,11 @@ func (h *Handlers) DeprecateVersion(c *gin.Context) {
 // the column. authoring_mode is intentionally not patchable (drafts keep
 // their original mode — see UpdateDraftTemplateVersion comment).
 type updateVersionReq struct {
-	ResourcesYAML *string                   `json:"resources_yaml"`
-	UISpecYAML    *string                   `json:"ui_spec_yaml"`
-	UIState       *template.UIModeTemplate  `json:"ui_state"`
-	MetadataYAML  *string                   `json:"metadata_yaml"`
-	Notes         *string                   `json:"notes"`
+	ResourcesYAML *string                  `json:"resources_yaml"`
+	UISpecYAML    *string                  `json:"ui_spec_yaml"`
+	UIState       *template.UIModeTemplate `json:"ui_state"`
+	MetadataYAML  *string                  `json:"metadata_yaml"`
+	Notes         *string                  `json:"notes"`
 }
 
 // UpdateTemplateVersion patches the content of a draft version in place.

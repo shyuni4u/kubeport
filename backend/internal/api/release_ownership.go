@@ -43,6 +43,20 @@ func releaseTargetProblem(namespace, name string) string {
 	return ""
 }
 
+// templateNameProblem is the rest of the release-name rule for a template name,
+// past the create binding's hostname_rfc1123 (#369). The name is also the
+// kubeport.io/template label on every object a release creates, and a label
+// value stops at 63 characters and ends with a letter or digit, so a name that
+// breaks it was created and then refused by the apiserver on every deploy.
+// It returns "" when the name is usable. Like releaseTargetProblem, the message
+// does not repeat the value.
+func templateNameProblem(name string) string {
+	if errs := validation.IsValidLabelValue(name); len(errs) > 0 {
+		return "name cannot be used as a template name, because it becomes a label value: " + strings.Join(errs, "; ")
+	}
+	return ""
+}
+
 // checkOwnership asks the cluster whether rendered can be applied as release
 // without taking anything over, and answers the request itself when it
 // cannot. It reports whether the caller should go on to apply. ctx bounds the

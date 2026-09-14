@@ -472,7 +472,7 @@ export function DeployClient({
       setPending(true);
       try {
         const res = await fetch(
-          `/api/v1/templates/${templateName}/render?version=${version}`,
+          `/api/v1/templates/${encodeURIComponent(templateName)}/render?version=${version}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },

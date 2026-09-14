@@ -54,7 +54,7 @@ export default async function TemplatesPage() {
             <tr key={tpl.name} className="border-t">
               <td className="p-2">
                 <Link
-                  href={`/templates/${tpl.name}`}
+                  href={`/templates/${encodeURIComponent(tpl.name)}`}
                   className="text-link"
                 >
                   {tpl.display_name}

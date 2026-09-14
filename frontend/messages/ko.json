@@ -521,7 +521,8 @@
       },
       "meta": {
         "name": "이름",
-        "namePlaceholder": "템플릿 이름 (slug)",
+        "namePlaceholder": "템플릿 이름 (예: web-app)",
+        "nameInvalid": "이름은 영문자·숫자·하이픈·점으로 63자까지 쓰고, 영문자나 숫자로 시작하고 끝나야 합니다(점 바로 뒤도 영문자나 숫자). 이름은 주소에 그대로 들어가고, 만든 뒤에는 바꿀 수 없습니다.",
         "displayName": "표시 이름",
         "team": "팀",
         "addTag": "태그 추가",

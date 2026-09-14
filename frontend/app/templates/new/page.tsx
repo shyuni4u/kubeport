@@ -10,6 +10,7 @@ import { YamlPreview, UIModeTemplate } from "@/components/YamlPreview";
 import { UserFormPreview } from "@/components/UserFormPreview";
 import { EditorLayout } from "@/components/editor/EditorLayout";
 import { MetaRow, TemplateMeta } from "@/components/editor/MetaRow";
+import { templateNameProblem } from "@/lib/template-name";
 import { InstancesToggle } from "@/components/editor/InstancesToggle";
 import { BottomBar } from "@/components/editor/BottomBar";
 import { problemDetail, saveFailure } from "@/components/editor/saveError";
@@ -218,7 +219,9 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
     })),
   }), [instances, resources]);
 
-  const canSave = meta.name.trim().length > 0 && resources.length > 0 && !saving;
+  // A name the API refuses keeps save off, with the reason beside it (#369).
+  const nameBlocked = templateNameProblem(meta.name) === "format" ? t("meta.nameInvalid") : undefined;
+  const canSave = meta.name.trim().length > 0 && !nameBlocked && resources.length > 0 && !saving;
   // Plan 4 Task 7 scope: Publish is not part of the create flow; a newly
   // created template version always starts as `draft` and is published from
   // the template detail page. We expose the button disabled here so the
@@ -252,7 +255,7 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
       if (!res.ok) { setFailure(await saveFailure(t, res, { creating: true })); return; }
       markSaved();
       // The detail page is where the new draft gets published.
-      router.push(`/templates/${meta.name}`);
+      router.push(`/templates/${encodeURIComponent(meta.name)}`);
     } finally {
       setSaving(false);
     }
@@ -413,6 +416,7 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
         canSave={canSave}
         dirty={dirty}
         canPublish={canPublish}
+        blockedReason={nameBlocked}
         saving={saving}
         publishing={publishing}
         onSave={saveDraft}
@@ -482,7 +486,9 @@ function YamlModeNew({ dirty, onDirty }: ModeProps) {
   const validation = useTemplateYamlValidation(resourcesYaml, uispecYaml);
   const saveBlockedReason = useSaveBlockedReason();
   const blockedReason = saveBlockedReason(validation);
-  const canSave = meta.name.trim().length > 0 && !saving && !blockedReason;
+  // A name the API refuses keeps save off, with the reason beside it (#369).
+  const nameBlocked = templateNameProblem(meta.name) === "format" ? t("meta.nameInvalid") : undefined;
+  const canSave = meta.name.trim().length > 0 && !nameBlocked && !saving && !blockedReason;
   const touch = () => onDirty(true);
   // Everything a save sends, so undoing an edit back to the starter clears the
   // mark (#274).
@@ -523,7 +529,7 @@ function YamlModeNew({ dirty, onDirty }: ModeProps) {
       if (!res.ok) { setFailure(await saveFailure(t, res, { creating: true })); return; }
       markSaved();
       // The detail page is where the new draft gets published.
-      router.push(`/templates/${meta.name}`);
+      router.push(`/templates/${encodeURIComponent(meta.name)}`);
     } finally {
       setSaving(false);
     }
@@ -577,7 +583,7 @@ function YamlModeNew({ dirty, onDirty }: ModeProps) {
         canSave={canSave}
         dirty={dirty}
         canPublish={false}
-        blockedReason={blockedReason}
+        blockedReason={nameBlocked ?? blockedReason}
         saving={saving}
         onSave={saveDraft}
         onPublish={() => {}}
