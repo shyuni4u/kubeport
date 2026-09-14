@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { apiFetch } from "@/lib/api-server";
+import { apiPathSegment } from "@/lib/api-path";
 import { ActionForm, type ActionState } from "@/components/ActionForm";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { HelpHint } from "@/components/HelpHint";
@@ -29,9 +30,13 @@ export default async function TeamDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  // The param arrives decoded: a `?`, `#` or `/` from `%3F`·`%23`·`%2F` would
+  // send this page's calls — and its add-member form — to another route (#374).
+  const tid = apiPathSegment(id);
+  if (tid === null) notFound();
   const t = await getTranslations("admin.teams");
   const [membersRes, teamsRes, meRes] = await Promise.all([
-    apiFetch(`/v1/teams/${id}/members`),
+    apiFetch(`/v1/teams/${tid}/members`),
     apiFetch(`/v1/teams`),
     apiFetch("/v1/me"),
   ]);
@@ -54,7 +59,7 @@ export default async function TeamDetailPage({
 
   async function addMember(_prev: ActionState, formData: FormData): Promise<ActionState> {
     "use server";
-    const res = await apiFetch(`/v1/teams/${id}/members`, {
+    const res = await apiFetch(`/v1/teams/${tid}/members`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -69,8 +74,15 @@ export default async function TeamDetailPage({
 
   async function removeMember(_prev: ActionState, formData: FormData): Promise<ActionState> {
     "use server";
-    const uid = formData.get("user_id");
-    const res = await apiFetch(`/v1/teams/${id}/members/${uid}`, { method: "DELETE" });
+    // The field is a hidden input, but a server action takes whatever is posted.
+    const raw = formData.get("user_id");
+    const uid = typeof raw === "string" ? apiPathSegment(raw) : null;
+    if (uid === null) {
+      const te = await getTranslations("admin.teams.errors");
+      console.error("[admin/teams] remove member refused: user_id is not one path segment");
+      return { error: te("generic", { status: 400 }) };
+    }
+    const res = await apiFetch(`/v1/teams/${tid}/members/${uid}`, { method: "DELETE" });
     if (!res.ok) return actionError("remove member", res);
     revalidatePath(`/admin/teams/${id}`);
     return {};

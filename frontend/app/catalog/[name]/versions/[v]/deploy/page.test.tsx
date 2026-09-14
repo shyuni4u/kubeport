@@ -54,6 +54,37 @@ function render(updateReleaseId?: string) {
 
 beforeEach(() => apiFetch.mockReset());
 
+// #374 — the name param arrives decoded; a `/` or `..` in it would put the
+// page's API calls on another /v1 route.
+describe("version-pinned deploy page, the name in API paths", () => {
+  function renderNamed(name: string, updateReleaseId?: string) {
+    return VersionPinnedDeployPage({
+      params: Promise.resolve({ name, v: "2" }),
+      searchParams: Promise.resolve(updateReleaseId === undefined ? {} : { updateReleaseId }),
+    }) as Promise<ReactElement<Record<string, unknown>>>;
+  }
+
+  it.each(["..", "a/b", `../releases/${ID}`, "a\\b"])(
+    "refuses %j before asking the API",
+    async (name) => {
+      apiFetch.mockResolvedValue(json(200, {}));
+      await expect(renderNamed(name)).rejects.toThrow("NOT_FOUND");
+      await expect(renderNamed(name, ID)).rejects.toThrow("NOT_FOUND");
+      expect(apiFetch).not.toHaveBeenCalled();
+    },
+  );
+
+  // #375 keeps names from before its rule working.
+  it.each([
+    ["WebApp", "/v1/templates/WebApp/versions/2"],
+    ["web app", "/v1/templates/web%20app/versions/2"],
+  ])("still asks for a template named %j, as one encoded segment", async (name, path) => {
+    apiFetch.mockResolvedValue(json(404));
+    await expect(renderNamed(name)).rejects.toThrow("NOT_FOUND");
+    expect(apiFetch).toHaveBeenCalledWith(path);
+  });
+});
+
 // #296 (a)
 describe("version-pinned deploy page, updating a release", () => {
   it("starts the form from the release's values", async () => {

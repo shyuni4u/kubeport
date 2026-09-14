@@ -1,6 +1,8 @@
 import { Suspense } from "react";
+import { notFound } from "next/navigation";
 
 import { apiFetch } from "@/lib/api-server";
+import { isReleaseId } from "@/lib/update-release";
 import { ReleaseAppliedNotice } from "@/components/ReleaseAppliedNotice";
 import { ReleaseAutoRefresh } from "@/components/ReleaseAutoRefresh";
 import { ReleaseHeader, type ReleaseHeaderData } from "@/components/ReleaseHeader";
@@ -17,6 +19,9 @@ export default async function ReleaseDetailLayout({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  // A release id is a UUID; anything else in the decoded param could be a `?`,
+  // `#` or `/` that sends the call to another route (#374).
+  if (!isReleaseId(id)) notFound();
   // Fetch release + caller identity in parallel — the stale banner needs both
   // to decide between admin (force-delete button) and non-admin (contact-admin
   // hint) variants.

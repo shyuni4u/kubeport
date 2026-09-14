@@ -1,4 +1,7 @@
+import { notFound } from "next/navigation";
+
 import { apiFetch } from "@/lib/api-server";
+import { isReleaseId } from "@/lib/update-release";
 import { releaseReadFailed } from "@/lib/release-read";
 import { MetricCards } from "@/components/MetricCards";
 import { InstancesHeading } from "@/components/InstancesHeading";
@@ -21,6 +24,9 @@ export default async function ReleaseOverviewPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  // A release id is a UUID; anything else in the decoded param could be a `?`,
+  // `#` or `/` that sends the call to another route (#374).
+  if (!isReleaseId(id)) notFound();
   const res = await apiFetch(`/v1/releases/${id}`);
   if (!res.ok) releaseReadFailed(res.status, id);
   const d = (await res.json()) as ReleaseOverview;
