@@ -372,6 +372,7 @@ Plan 13 데모 모드 마무리 시점에 사용자 화면 용어(카탈로그 /
 | 테마·에러 표시 (#150 #155 #6) | 채택. 라이트/다크/시스템, 에러 표시 friendly/detailed/raw | #330 #336 |
 | UI 에디터의 YAML 미리보기 (Plan 2 스펙 §8.1) | 서버 `POST /v1/templates/preview` 가 권위 직렬화한다 | 클라이언트·서버에 직렬화기를 둘 두지 않는다 |
 | UI state 의 클러스터 (Plan 2 스펙 §8.2) | UI state 에 클러스터 이름을 저장하지 않는다(세션 로컬 힌트만) | 템플릿이 특정 클러스터에 묶이지 않게 |
+| 세션 토큰·CSRF (초기 스펙 §10 신뢰 모델) | 브라우저에는 httpOnly 세션 쿠키(세션 id)만 두고, OIDC id/refresh 토큰은 DB `sessions` 에 AES-256-GCM(`APP_ENCRYPTION_KEY_B64`)으로 암호화해 둔다. CSRF 는 SameSite=Lax + 상태 변경 라우트의 Origin 검사로 막는다 | 토큰이 브라우저 JS·저장소에 닿지 않게(§10 BFF, `frontend/lib/session.ts`), 별도 CSRF 토큰 없이 단일 origin 전제로 막는다(`lib/request-origin.ts`) |
 | 데모 팀 (Plan 13 인계 §E) | 데모용 팀을 만들지 않고 데모 템플릿은 글로벌 | demo-admin 은 팀 관리가 막혀 있고 팀이 데모 흐름에 기여하지 않는다 |
 | 템플릿 이름 규칙 (#369) | 릴리스 이름과 같은 규칙(RFC 1123 hostname + 라벨 값, 63자). DB CHECK 는 넣지 않는다 — 규칙 이전 이름이 라이브에 있는지 확인할 수 없어서. 규칙 이전 이름의 화면·라우트는 계속 열린다 | #375 #376 |
 
