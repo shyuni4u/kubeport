@@ -100,7 +100,7 @@ export default async function TeamDetailPage({
       <h2 className="font-semibold mb-2">{t("membersHeading")}</h2>
       <table className="w-full bg-card border rounded text-sm mb-6">
         <thead className="text-xs text-muted-foreground">
-          <tr><th scope="col" className="p-2 text-left">{t("colEmail")}</th><th scope="col" className="p-2 text-left">{t("colRole")}</th><th scope="col" className="p-2"></th></tr>
+          <tr><th scope="col" className="p-2 text-left">{t("colEmail")}</th><th scope="col" className="p-2 text-left">{t("colRole")}</th><th scope="col" className="p-2"><span className="sr-only">{t("colActions")}</span></th></tr>
         </thead>
         <tbody>
           {(members ?? []).map(m => (

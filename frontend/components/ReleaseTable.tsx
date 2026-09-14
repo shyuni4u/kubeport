@@ -109,51 +109,51 @@ export function ReleaseTable({ rows }: { rows: ReleaseRow[] }) {
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       <div className="overflow-x-auto" data-testid="release-table-scroll">
         <table className="w-full min-w-max text-sm">
-        <thead className="bg-muted text-xs text-muted-foreground">
-          <tr>
-            <th scope="col" className="px-4 py-3 text-left font-medium">{t("name")}</th>
-            <th scope="col" className="px-4 py-3 text-left font-medium">{t("template")}</th>
-            <th scope="col" className="px-4 py-3 text-left font-medium">
-              {t("namespace")}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => {
-            const status = statuses[r.id];
-            const marked = status && MARKED.has(status) ? status : null;
-            return (
-              <tr key={r.id} className="border-t border-border transition hover:bg-hover">
-                {/*
-                  The chip sits beside the name rather than in a column of its
-                  own: healthy rows then look exactly as they do today, and a
-                  broken one is visible without opening it.
-                */}
-                <td className="px-4 py-3">
-                  <span className="flex items-center gap-2">
-                    <Link
-                      href={`/releases/${r.id}`}
-                      className="font-medium text-link hover:underline"
-                    >
-                      {r.name}
-                    </Link>
-                    {marked && (
-                      <StatusChip variant={statusChipVariantFromRelease(marked)}>
-                        {tStatus(marked)}
-                      </StatusChip>
-                    )}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">
-                  {r.template_name}@v{r.template_version}
-                </td>
-                <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                  {r.namespace}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
+          <thead className="bg-muted text-xs text-muted-foreground">
+            <tr>
+              <th scope="col" className="px-4 py-3 text-left font-medium">{t("name")}</th>
+              <th scope="col" className="px-4 py-3 text-left font-medium">{t("template")}</th>
+              <th scope="col" className="px-4 py-3 text-left font-medium">
+                {t("namespace")}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const status = statuses[r.id];
+              const marked = status && MARKED.has(status) ? status : null;
+              return (
+                <tr key={r.id} className="border-t border-border transition hover:bg-hover">
+                  {/*
+                    The chip sits beside the name rather than in a column of its
+                    own: healthy rows then look exactly as they do today, and a
+                    broken one is visible without opening it.
+                  */}
+                  <td className="px-4 py-3">
+                    <span className="flex items-center gap-2">
+                      <Link
+                        href={`/releases/${r.id}`}
+                        className="font-medium text-link hover:underline"
+                      >
+                        {r.name}
+                      </Link>
+                      {marked && (
+                        <StatusChip variant={statusChipVariantFromRelease(marked)}>
+                          {tStatus(marked)}
+                        </StatusChip>
+                      )}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {r.template_name}@v{r.template_version}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                    {r.namespace}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
         </table>
       </div>
     </div>
