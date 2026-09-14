@@ -41,7 +41,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 >   - **업데이트 흐름** (#345 #356 #361 #367): 다중 인스턴스 에디터·배포 폼 ③(#190 완료), 릴리스 상세 헤더에 "설정 바꾸기" 진입(#354), 도착 제목 "'<릴리스>' 설정 바꾸기"(#359), 적용 뒤 한 번 뜨는 안내(`?applied=1`, #362).
 >   - **주간 점검** (#372 #373 #375 #376): dev 의존성 critical 도 CI audit 게이트(#371 — `--prod` 스텝과 별도), 없는 팀 멤버 추가 404(#370), **템플릿 이름 = 릴리스 이름 규칙**(RFC 1123 + 라벨 값 63자, DB CHECK 없음·규칙 이전 이름은 계속 열림, #369), 서버 페이지·`apiFetch` 가 디코딩된 파라미터로 다른 `/v1` 라우트에 새지 않게(#374 — `lib/api-path.ts` 공유 세그먼트 규칙).
 >   - **문서·설치** (#360 #365 #366): 리셋 preflight 가 등록 안 된 `demo.cluster` 에서 아무것도 지우지 않고 멈춤(#363), dex 없으면 auth 테스트는 skip(#364).
->   - **브라우저 검증 인계**: 로그인이 필요한 확인은 인계 이슈(#329 #337 #368)로 **"Home PC" 세션**(Playwright `--isolated`)이 돌린다. #368 은 09-14 전 항목 통과, 거기서 나온 #377(비로그인 랜딩의 `/api/v1/clusters` 401)은 후속.
+>   - **브라우저 검증 인계**: 로그인이 필요한 확인은 인계 이슈(#329 #337 #368)로 **"Home PC" 세션**(Playwright `--isolated`)이 돌린다. #368 은 09-14 전 항목 통과, 거기서 나온 #377(비로그인 랜딩의 `/api/v1/clusters` 401)은 #378 로 고쳤다.
 > - **데모 비밀번호 회전은 2단계다** — `helm upgrade` 로 끝나지 않는다. Dex 가 `storage: memory` 라 재시작 시 서명 키가 바뀌고, apiserver 의 JWKS 캐시를 비우지 않으면 **로그인은 되는데 클러스터 호출이 전부 401** 이다. 2026-09-10 에 이걸로 데모가 5분간 멈췄고, 그때 `/healthz` 는 초록이었다. [runbook §5 "데모 모드 운영"](docs/oci-prod-runbook.md#데모-모드-운영-plan-13-2026-09-08-롤아웃-완료).
 > - **주의**: 공인 IP `168.107.55.95` 는 ephemeral(stop/start 시 변경). **SSH 키 경로는 머신마다 다르다** — 키를 만든 머신은 `~/.ssh/oci_kuberport`, gpg 번들로 복원한 머신은 `~/.ssh/kuberport-oci/oci_kuberport`. 둘 다 정상이니 통일하지 말고 [runbook §1 "SSH 키 위치"](docs/oci-prod-runbook.md#ssh-키-위치--두-곳-다-정상이다-68) 로 확인할 것 (`kuberport` 표기 자체는 아래 "확정된 결정" 표 — 고치지 말 것). 재배포·RBAC·롤백은 runbook.
 
@@ -69,7 +69,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 | 15 | _(미작성)_ | ⏳ planned | **기록 자동화.** 릴리스 노트 → 블로그, Playwright 데모 영상 자동 녹화, 주간 트래픽 지표 → docs/README. 스펙 §4.3. |
 | 16 | pr-reviewers | ✅ merged (PR #22·#59·#65) | **PR 리뷰어 시스템.** `/pr-review` 로컬 스킬 — 페르소나 에이전트(2026-09-10 부터 `ai-reviewer` 비활성) + 매니저 + `gh pr create` 훅. 스펙: [pr-reviewers-design](docs/superpowers/specs/2026-09-08-pr-reviewers-design.md). |
 
-참고 — 초기 설계 결정은 [brainstorming-summary](docs/brainstorming-summary.md) §1~12·§15 와 [ADR](docs/decisions/) 에 있다. 실행이 끝난 플랜 문서와 초기 스펙 초안(initial-design·plan2-admin-ux-design)은 2026-09-14 문서 정리에서 삭제했다 — 필요하면 git 이력에서 본다.
+참고 — 설계 결정은 [brainstorming-summary](docs/brainstorming-summary.md) 전체(§1~8 은 '확정 결정 상세' 아래, §9~15 는 각 절)와 [ADR](docs/decisions/) 에 있다. 실행이 끝난 플랜 문서와 초기 스펙 초안(initial-design·plan2-admin-ux-design)은 2026-09-14 문서 정리에서 삭제한다 — 삭제 뒤에는 git 이력에서 본다.
 
 새 플랜은 `docs/superpowers/plans/` 에 쓰고 `superpowers:subagent-driven-development` 또는 `superpowers:executing-plans` 로 실행한다. **실행이 끝나면 플랜 문서는 지우고** 이 표에 상태와 PR 번호만 남긴다(지난 기획서가 쌓여 지금과 다른 설명이 남는 것을 막는다). 실행 전 **별도 워크트리** 생성 권장 (각 플랜이 frontend/backend 양쪽 건드림 — 현재 docs 워크트리에 섞지 말 것).
 
@@ -102,7 +102,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 | Backend | DB | SQLite (dev) / Postgres (prod) |
 | Backend | DB 마이그레이션 | `atlas` |
 | Backend | 배포 | Docker image + Helm chart, **k8s Pod로 실행** |
-| Frontend | 프레임워크 | **Next.js 15 (App Router)** |
+| Frontend | 프레임워크 | **Next.js 16 (App Router)** — 결정 당시 15 |
 | Frontend | 스타일 | Tailwind + shadcn/ui |
 | Frontend | YAML 에디터 | Monaco (`dynamic import`) |
 | Frontend | 폼 | React Hook Form + Zod |
@@ -127,6 +127,7 @@ kubeport/
 ├── frontend/                ← Next.js App Router (BFF route handlers, messages/{ko,en}.json)
 ├── deploy/                  ← helm/kubeport(차트·README), docker(compose + dex), oci(부트스트랩·kubeport-deploy)
 ├── scripts/                 ← compose.sh, test-db.sh, e2e/(doctor·up·seed·run)
+├── .github/workflows/       ← ci(필수 4체크)·build-images·deploy(main 머지 → 라이브)·playwright·helm
 ├── docs/                    ← runbook·machine-clients·testing·dev-setup·local-e2e·brainstorming-summary·decisions(ADR)
 └── .claude/                 ← agents(리뷰 페르소나), skills(pr-review), hooks, worktrees(세션 작업 공간)
 ```
