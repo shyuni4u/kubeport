@@ -57,7 +57,7 @@ describe("serverApiUrl", () => {
     "/v1/templates/web-app/versions/2/publish",
     "/v1/templates/web%20app",
     "/v1/templates/%252e%252e",
-    "/v1/releases?limit=50&offset=0",
+    "/v1/templates/%3F",
     "/v1/teams/3f2c1a9e-8b7d-4c6e-9f10-1a2b3c4d5e6f/members",
   ])("requests %j as given", (path) => {
     expect(serverApiUrl(BASE, path)).toBe(`${BASE}${path}`);
@@ -79,6 +79,19 @@ describe("serverApiUrl", () => {
     // An unencoded character the parser would escape: the path was not built
     // from encoded segments.
     "/v1/templates/web app",
+    // Security review: a raw `?`, `#` or `%2F` cuts the path short or, once Gin
+    // decodes it, splits a segment — no dot-segment needed. No caller sends a
+    // query, so any `?` is refused.
+    "/v1/teams/T1#/members",
+    "/v1/teams/?/members",
+    "/v1/teams/T1?x/members",
+    "/v1/releases?limit=50&offset=0",
+    "/v1/releases/..%2F..%2Fteams",
+    "/v1/releases/x%2flogs",
+    "/v1/releases/x%5Clogs",
+    "/v1/teams//members",
+    "/v1/teams/",
+    "/v1/releases?",
   ])("refuses %j", (path) => {
     expect(serverApiUrl(BASE, path)).toBeNull();
   });

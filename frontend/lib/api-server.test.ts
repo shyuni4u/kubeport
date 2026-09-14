@@ -41,13 +41,16 @@ describe("apiFetch", () => {
     });
   });
 
-  // #374 — every server-side call, whatever built its path. The team and
-  // release pages put their id params in unchecked; this is what stops a `..`
-  // there too.
+  // #374 — the last line for every server-side call, whatever built its path.
+  // The pages check their own params first; this catches a path a later page
+  // builds without doing so: a dot-segment, or a raw `?`, `#` or `%2F` that
+  // cuts the path short or splits a segment once Gin decodes it.
   it.each([
     `/v1/templates/../releases/${ID}`,
     `/v1/teams/../releases/${ID}/members`,
     `/v1/releases/%2e%2e/templates/web-app`,
+    "/v1/teams/?/members",
+    `/v1/releases/${ID}%2Flogs`,
     "/healthz",
   ])("refuses %j without reading the session or calling the API", async (path) => {
     const res = await apiFetch(path, { method: "DELETE" });

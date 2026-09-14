@@ -40,10 +40,22 @@ export function versionSegment(value: FormDataEntryValue | null): string | null 
  * with it and fetch() sends it to `/v1/releases/<id>`. So the path the URL
  * parser makes of it has to be the path given — a collapsed `..` or `%2e%2e`,
  * a `\` turned into `/`, or an unencoded character the parser escapes all make
- * the two differ. The query string is not part of the comparison.
+ * the two differ.
+ *
+ * A raw value that reached the path unencoded can also cut it short without
+ * any dot-segment (security review): a `?` or `#` from `%3F`/`%23` ends the
+ * path there, so `/v1/teams/T1?x/members` requests `/v1/teams/T1` — another
+ * route, with what followed moved into the query. No apiFetch caller sends a
+ * query or a fragment, so a path carrying either is refused outright; a caller
+ * that needs a query should get its own parameter, kept apart from the path.
+ * An empty segment or a trailing `/` is refused too (`/v1/teams/` is redirected
+ * by Gin to `/v1/teams`). Gin routes on the decoded path, so a `%2F` or `%5C`
+ * would become a separator there; a value encoded with encodeURIComponent
+ * carries `%252F`, never `%2F`, so both are refused as well.
  */
 export function serverApiUrl(base: string, path: string): string | null {
-  if (!path.startsWith("/v1/")) return null;
+  if (!path.startsWith("/v1/") || path.includes("?") || path.includes("#")) return null;
+  if (path.endsWith("/") || path.includes("//") || /%2f|%5c/i.test(path)) return null;
   let root: URL;
   let parsed: URL;
   try {
@@ -53,7 +65,8 @@ export function serverApiUrl(base: string, path: string): string | null {
     return null;
   }
   const basePath = root.pathname.replace(/\/$/, "");
-  const pathname = path.split(/[?#]/, 1)[0];
-  if (parsed.origin !== root.origin || parsed.pathname !== `${basePath}${pathname}`) return null;
+  if (parsed.origin !== root.origin || parsed.pathname !== `${basePath}${path}` || parsed.search !== "") {
+    return null;
+  }
   return `${base}${path}`;
 }
