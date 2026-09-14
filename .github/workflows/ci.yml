@@ -216,9 +216,14 @@ jobs:
   audit:
     # Separate job on purpose: the advisory database changes without anyone
     # touching this repo, so a new finding must not look like a test failure.
-    # Gated at critical and --prod only — high is currently 2 (browserslist and
-    # dompurify, both transitive and both waiting on upstream), so gating there
-    # would mean a permanently red job nobody reads.
+    # Gated at critical only, twice: production dependencies, and everything
+    # including dev (#371). Dev is not in the image, but a critical there hits
+    # the machines that run it (a vitest critical sat here unseen because the
+    # gate was --prod only). High is not gated: as of 2026-09-14 it is 2 in
+    # --prod (browserslist) and 20 in all, every one transitive under eslint,
+    # eslint-config-next, shadcn, jsdom or @vitejs/plugin-react and waiting on
+    # those to move, so gating there would mean a permanently red job nobody
+    # reads. The summary step below still lists them.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -234,6 +239,11 @@ jobs:
       - run: cd frontend && pnpm install --frozen-lockfile
       - name: Audit production dependencies
         run: cd frontend && pnpm audit --prod --audit-level critical
+      - name: Audit all dependencies, dev included, at critical
+        # Runs even when the step above failed, so one run shows whether dev
+        # has a critical of its own.
+        if: ${{ !cancelled() }}
+        run: cd frontend && pnpm audit --audit-level critical
       - name: Report everything else in the step summary
         # `|| true` into the log means nobody reads it. The summary is on the
         # run page, so a new high shows up next to the green check instead of
@@ -241,7 +251,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "### pnpm audit (informational — gate above is --prod critical)"
+            echo "### pnpm audit (informational — gates above are critical, --prod and all)"
             echo '```'
             (cd frontend && pnpm audit) || true
             echo '```'
