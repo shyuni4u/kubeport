@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"kubeport/internal/api"
@@ -206,4 +207,27 @@ func TestTeams_Members_ListRequiresMembershipOrAdmin(t *testing.T) {
 	// Now alice should be able to list
 	w = do(t, userR, http.MethodGet, "/v1/teams/"+tid+"/members", nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}
+
+// Issue #370. A well-formed id of a team that does not exist tripped the
+// membership foreign key and answered 500 internal; openapi.yaml documents
+// 404 not-found for it. The user exists, so user-not-found is not what answers.
+func TestTeams_Members_AddToMissingTeamIsNotFound(t *testing.T) {
+	s := testStore(t)
+	adminR := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: s})
+
+	suffix := randSuffix()
+	email := "alice-" + suffix + "@example.com"
+	_, err := s.UpsertUser(context.Background(), store.UpsertUserParams{
+		OidcSubject: "stub-" + suffix,
+		Email:       store.PgText(email),
+		DisplayName: store.PgText("Test User"),
+	})
+	require.NoError(t, err)
+
+	w := do(t, adminR, http.MethodPost, "/v1/teams/"+uuid.NewString()+"/members",
+		bytes.NewReader([]byte(`{"email":"`+email+`","role":"editor"}`)))
+
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+	require.Equal(t, "not-found", problemShape(t, w.Body.String()).Title)
 }
