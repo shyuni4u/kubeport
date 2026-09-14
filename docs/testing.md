@@ -17,6 +17,7 @@
 | **Integration** | `scripts/compose.sh` 의 postgres + dex | `internal/store`·`internal/api` (postgres), `internal/auth` (dex) | 10ms–1s | 외부 SUT 하나(DB, OIDC)와의 계약 검증 |
 | **kind** | kind 클러스터 + dex id_token | `internal/k8s`, `internal/api/openapi_proxy_test.go` | 초 | 실제 apiserver 에 대한 적용·OpenAPI 프록시 |
 | **e2e** | 전체 스택 — compose + Go API + Next.js + kind | `frontend/tests/e2e/*.spec.ts` (Playwright), `backend/e2e` (`e2e` 빌드 태그) | 수십 초~분 | 사용자 시나리오 흐름 검증 |
+| **수동 QA** | 라이브 데모(`https://kubeport.enzo.kr`) + 데모 계정. §D(게시·팀·멀티 클러스터)는 로컬 스택([local-e2e.md §0](local-e2e.md)) + `deploy/docker/dex.yaml` 정적 계정 | [`docs/qa-checklist.md`](qa-checklist.md) | 분~시간 | 자동 테스트가 못 보는 화면 흐름·문구를 사람 눈으로 확인 |
 
 **원칙:**
 - 외부 SUT 에 닿지 못하면 skip 하는 테스트에는 CI 에서 그 skip 을 실패로 바꾸는 스위치가 함께 있어야 한다 — dex 는 `KBP_REQUIRE_DEX=1`, kind 는 `KBP_REQUIRE_KIND=1`(§4, §6). skip 만 있으면 배선이 끊겨도 초록이다. postgres 는 아직 skip 경로가 없어 컴포즈가 필요하다(§6).

@@ -367,6 +367,7 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
 - **Integration** (로컬 compose: postgres + dex) — 현재 기본. 예: `internal/store/*_test.go`
 - **e2e** (Playwright, 로컬 kind) — **로컬에서 먼저 돌린다**: `scripts/e2e/doctor.sh` → `up.sh` → `backend.sh`/`frontend.sh` → `seed.sh` → `run.sh` ([docs/local-e2e.md §0](docs/local-e2e.md)). 어느 PC 에서든 같은 순서, 전부 멱등. CI `playwright.yml` 은 백스톱(느리고 가끔 kind 플레이크).
 - **CI** — `.github/workflows/ci.yml` 이 모든 PR 에서 backend(compose + atlas + `go test -p 1 ./...`)·frontend(`pnpm typecheck`/`lint`/`test`)·`pnpm audit`·훅 테스트를 돌린다. e2e 는 `playwright.yml`, 차트는 `helm.yml`.
+- **수동 QA** — 라이브 데모를 사람이(또는 로그인 가능한 인계 세션이) 따라가는 체크리스트: [docs/qa-checklist.md](docs/qa-checklist.md). 데모 계정으로 막힌 흐름(§D — 게시·팀·멀티 클러스터)은 로컬 스택에서 본다. 로그인이 필요한 배포 검증은 인계 이슈로 "Home PC" 세션이 돌린다.
 
 **여러 세션이 도는 머신에서는** 아래 대신 [멀티 세션 절](#공용-머신에서-테스트)의 세션별 DB 형태를 쓴다.
 
