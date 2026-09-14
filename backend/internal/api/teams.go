@@ -8,12 +8,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"kubeport/internal/auth"
 	"kubeport/internal/store"
 )
+
+const pgForeignKeyViolation = "23503"
 
 type createTeamReq struct {
 	Name        string `json:"name" binding:"required,min=1"`
@@ -149,6 +152,16 @@ func (h *Handlers) AddTeamMember(c *gin.Context) {
 	if !bindJSON(c, &r) {
 		return
 	}
+	// A well-formed id of no team used to reach the insert, trip the
+	// membership foreign key and answer 500 (#370).
+	if _, err := h.deps.Store.GetTeamByID(c, tid); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(c, http.StatusNotFound, "not-found", "team not found")
+			return
+		}
+		internalError(c, "AddTeamMember", err)
+		return
+	}
 	target, err := h.deps.Store.GetUserByEmail(c, store.PgText(r.Email))
 	if err != nil {
 		writeError(c, http.StatusNotFound, "user-not-found",
@@ -161,6 +174,17 @@ func (h *Handlers) AddTeamMember(c *gin.Context) {
 		Role:   r.Role,
 	})
 	if err != nil {
+		// The team or the user was deleted between its lookup and this insert.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
+			if pgErr.ConstraintName == "tm_team_fk" {
+				writeError(c, http.StatusNotFound, "not-found", "team not found")
+			} else {
+				writeError(c, http.StatusNotFound, "user-not-found",
+					"user must have logged in at least once before being added to a team")
+			}
+			return
+		}
 		internalError(c, "AddTeamMember", err)
 		return
 	}
