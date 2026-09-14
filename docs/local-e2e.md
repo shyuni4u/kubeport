@@ -462,8 +462,8 @@ backend process. Never set this env in prod.
 - `/templates/<name>/versions/<v>/edit?mode=ui` is stuck on
   "스키마 로딩 중…" forever.
 - Sidebar cluster picker still lists the dead cluster as if healthy
-  (no reachability check yet — sidebar trusts the DB row; Stage 2
-  reconciler will surface this, see CLAUDE.md plan 9).
+  (the sidebar trusts the DB row; a reconciler that would notice is
+  deferred — CLAUDE.md Plan 12).
 - Frontend log shows `502` on `/api/v1/clusters/<name>/openapi/...`.
 
 **Why it happens.** kind keeps cluster metadata in `~/.kube/config` and Docker
@@ -548,11 +548,12 @@ ss -tlnp 2>/dev/null | grep ':6443' || echo "nothing on 6443"
 
 **Stale releases left behind.** Releases that pointed to the previous instance
 of the cluster (e.g. `test-web` from earlier sessions) are still in the DB. Their
-k8s resources are gone with the old cluster. Until [Plan 8](superpowers/plans/2026-04-28-plan8-release-stale-cleanup.md)
-ships an admin-only force-delete UI, your options are:
+k8s resources are gone with the old cluster, and the release page says so with
+a `resources-missing` banner once the new cluster answers. Your options are:
 
-- **Redeploy the same release name on the new cluster.** The DB row stays and
-  the new k8s resources match the existing labels.
+- **Force-delete it as an admin** — the banner's button, or
+  `DELETE /v1/releases/<id>?force=true` — which removes the row without calling
+  the cluster.
 - **Manually delete the row** after confirming it's actually orphaned:
   `scripts/compose.sh exec -T postgres psql -U kubeport -d kubeport -c "DELETE FROM releases WHERE name='<name>';"`
 
@@ -560,8 +561,8 @@ ships an admin-only force-delete UI, your options are:
 (`kind delete cluster --name kubeport`) — `docker stop` of the control-plane is
 also fine (`docker start` brings it back), but a hard kill (host reboot, Docker
 Desktop crash) often leaves the container in `Exited (127)` and the only
-reliable recovery is delete + recreate. Plan 9 (deferred) will add a
-reconciliation loop that detects this drift automatically; for now it's a
+reliable recovery is delete + recreate. A reconciliation loop that notices
+this drift on its own is deferred (CLAUDE.md Plan 12); until then it's a
 manual playbook.
 
 ## Known limits

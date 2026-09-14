@@ -13,23 +13,23 @@
 
 | 레이어 | 외부 의존 | 위치 예 | 실행 속도 | 목적 |
 |--------|-----------|---------|-----------|------|
-| **Unit** | 없음 | `internal/api/routes_test.go` (`TestHealthz`), 향후 `internal/template/*_test.go` (render 순수 로직) | ms | 순수 함수·라우팅·렌더링 로직 검증 |
-| **Integration** | `deploy/docker/docker-compose.yml` (postgres, 향후 dex) | `internal/store/store_test.go`, 향후 `internal/auth/*_test.go` | 10ms–1s | 외부 SUT 하나(DB, OIDC, k8s)와의 계약 검증 |
-| **e2e** | Full stack — compose + Go API + Next.js + kind 클러스터 | 향후 `test/e2e/` (Task 22) | 수십 초 | 사용자 시나리오 흐름 검증 |
+| **Unit** | 없음 | `internal/template/*_test.go` (렌더·ui-spec 순수 로직), `internal/api/routes_test.go` (`TestHealthz`) | ms | 순수 함수·라우팅·렌더링 로직 검증 |
+| **Integration** | `scripts/compose.sh` 의 postgres + dex | `internal/store`·`internal/api` (postgres), `internal/auth` (dex) | 10ms–1s | 외부 SUT 하나(DB, OIDC)와의 계약 검증 |
+| **kind** | kind 클러스터 + dex id_token | `internal/k8s`, `internal/api/openapi_proxy_test.go` | 초 | 실제 apiserver 에 대한 적용·OpenAPI 프록시 |
+| **e2e** | 전체 스택 — compose + Go API + Next.js + kind | `frontend/tests/e2e/*.spec.ts` (Playwright), `backend/e2e` (`e2e` 빌드 태그) | 수십 초~분 | 사용자 시나리오 흐름 검증 |
 
 **원칙:**
-- 한 패키지에 단위+통합 테스트가 공존해도 괜찮지만, 통합 테스트는 **외부 SUT 접속 실패 시 `t.Skip`** 을 호출해야 한다 (아직 미구현 — §6 참조).
-- k8s 가 필요한 테스트(Task 12+)는 `kind` / `k3d` 를 기대한다. CI 는 `setup-kind-action` 을 쓸 계획(향후 Task 23 논의).
+- 외부 SUT 에 닿지 못하면 skip 하는 테스트에는 CI 에서 그 skip 을 실패로 바꾸는 스위치가 함께 있어야 한다 — dex 는 `KBP_REQUIRE_DEX=1`, kind 는 `KBP_REQUIRE_KIND=1`(§4, §6). skip 만 있으면 배선이 끊겨도 초록이다. postgres 는 아직 skip 경로가 없어 컴포즈가 필요하다(§6).
+- kind 계열 테스트는 `KIND_API` 가 없으면 skip 한다(`openapi_proxy_test.go` 는 `KIND_CA`·`DEX_TOKEN` 까지 본다). CI 에서는 `playwright.yml` 이 kind 클러스터를 등록한 뒤 이 값을 주입해 돌린다.
 
 ## 3. 사전 조건
 
-### 3.1 Unit 만 실행
+### 3.1 외부 의존 없는 패키지만 실행
 
-준비물 없음.
+준비물 없음. `-short` 규약은 두지 않았다 — 외부 의존이 없는 패키지를 골라 돈다.
 ```bash
-cd backend && go test -short ./...
+cd backend && go test ./internal/template/...
 ```
-> `-short` 플래그 규약은 **현재 미적용**. 통합 테스트에 `if testing.Short() { t.Skip() }` 를 도입하면 즉시 작동 (§6 TODO).
 
 ### 3.2 Integration 실행 (현재 기본)
 
@@ -49,9 +49,10 @@ scripts/compose.sh down        # 데이터 유지
 scripts/compose.sh down -v     # pgdata 볼륨까지 삭제
 ```
 
-### 3.3 e2e (Task 22 에서 도입)
+### 3.3 e2e
 
-미정. `test/e2e/` 안에 compose 기반 플로우 러너 + kind 클러스터 부트스트랩 예정.
+- **브라우저(Playwright)** — `scripts/e2e/` 가 compose·kind·백엔드·프론트·시드를 세우고 `frontend/tests/e2e/*.spec.ts` 를 돈다. 순서와 함정은 [docs/local-e2e.md §0](local-e2e.md). CI 는 `playwright.yml`.
+- **백엔드 happy path** — `make e2e`. `KBP_KIND_API` 에 kind apiserver 주소가 없으면 skip 한다(`backend/e2e/e2e_test.go`, `e2e` 빌드 태그).
 
 ### 3.4 세션·워크트리별 테스트 DB (`scripts/test-db.sh`)
 
@@ -102,12 +103,13 @@ out=$(scripts/test-db.sh) && eval "$out" && echo "$TEST_DATABASE_URL" && (cd bac
 | 이름 | 기본값 | 목적 |
 |------|--------|------|
 | `TEST_DATABASE_URL` | `postgres://kubeport:kubeport@localhost:5432/kubeport?sslmode=disable` | 통합 테스트 DB DSN. CI 에서 주입 가능. 로컬에서 세션이 여럿이면 `out=$(scripts/test-db.sh) && eval "$out"` 로 세션별 DB 를 가리킨다 (§3.4) |
-| `TEST_DEX_ISSUER` (예정, Task 7) | `http://localhost:5556` | OIDC 테스트용 dex 이슈어 |
-| `TEST_KUBECONFIG` (예정, Task 12) | `$HOME/.kube/config` | k8s 테스트용 kubeconfig |
 | `OIDC_ISSUER` | `http://localhost:5556` | `internal/auth` 가 붙을 dex. HTTPS dex 는 `https://host.docker.internal:5556` |
 | `OIDC_CA_FILE` | (없음) | 자체서명 dex 인증서 경로 (`deploy/docker/certs/dex.crt`) |
 | `KBP_REQUIRE_DEX` | (없음) | `1` 이면 dex 미기동 시 skip 대신 FAIL. **CI 전용** — 없으면 조용히 skip 되어 초록이 되므로 |
 | `SKIP_OIDC` | (없음) | 값이 있으면 dex 기반 테스트를 무조건 skip. `KBP_REQUIRE_DEX=1` 과 함께 주면 에러 |
+| `KIND_API` · `KIND_CA` · `DEX_TOKEN` | (없음) | kind 계열 테스트가 붙을 apiserver 주소·CA·dex id_token. `openapi_proxy_test.go` 는 셋 중 하나라도 없으면 skip 하고, `internal/k8s` 는 `KIND_API` 만 보고 skip 한다 — `KIND_API` 만 주고 `DEX_TOKEN` 을 빼면 skip 이 아니라 인증 실패로 FAIL 한다(`internal/k8s` 는 `KIND_CA` 를 쓰지 않는다) |
+| `KBP_REQUIRE_KIND` | (없음) | `1` 이면 위 값이 없을 때 skip 대신 FAIL. **CI(`playwright.yml`) 전용** — `KBP_REQUIRE_DEX` 와 같은 이유 |
+| `KBP_KIND_API` | (없음) | `backend/e2e` 가 쓸 kind apiserver 주소. 없으면 e2e 전체 skip |
 
 ## 5. 관례
 
@@ -130,37 +132,19 @@ clusterName  := "test-" + stamp
 - 통합 테스트 파일은 대상 패키지의 `_test.go` 안에 두고, external test package(`package xxx_test`) 를 써서 API 경계로 접근한다.
 
 ### 5.4 tear-down
-- DB: 현재는 정리하지 않는다(유니크 키가 매번 다르므로 쌓여도 무해). pgdata 는 `down -v` 로 초기화.
-- 향후 k8s: 각 테스트가 고유 네임스페이스에서 생성·삭제를 완결시켜야 한다.
+- DB: `internal/api` 의 `TestMain` 이 스위트 끝에 이름 접미사 패턴으로 행을 지우고(§3.4), 테스트가 만든 클러스터는 각 테스트 끝에 지운다(#304). 그 밖의 행은 유니크 키가 매번 달라 쌓여도 무해하다. pgdata 는 `scripts/compose.sh down -v` 로 초기화한다.
 
 ## 6. 알려진 갭 / TODO
 
 - [~] **Integration 테스트 skip 경로 — dex 만 구현.** `internal/auth` 는 `requireDex()`(`verifier_test.go`)가 dex 도달성을 프로브해 skip 하므로, 인증서 없는 새 클론에서도 `go test ./...` 가 초록이다. **postgres 경로는 아직 미구현** — `TEST_DATABASE_URL` 없고 `localhost:5432` 접속 실패 시 `internal/store`·`internal/api` 가 connection error 로 FAIL 한다. 같은 방식(`NewStore` 호출 전 `pgxpool.Ping` 프로브 + `t.Skip`)으로 맞출 것.
-- [ ] **`-short` 플래그 미적용.** 모든 통합 테스트에 `if testing.Short() { t.Skip(...) }` 가 없다.
-- [x] **CI 파이프라인** — `.github/workflows/ci.yml` (2026-09-09 추가). backend(compose + atlas + `go test -p 1 ./...`, `KBP_REQUIRE_DEX=1`) / frontend(`pnpm typecheck`·`lint`·`test`) / `pnpm audit` / 훅 테스트 4개 job.
+- [x] **CI 파이프라인** — `.github/workflows/ci.yml` (2026-09-09 추가). backend(compose + atlas + `go vet` + `go test -p 1 ./...`, `KBP_REQUIRE_DEX=1`) / frontend(`pnpm typecheck`·`lint`·`test`·`build`) / audit / 훅 테스트 4개 job.
+- [x] **audit 는 critical 에서 두 번 막는다** (#372). `pnpm audit --prod --audit-level critical` 과, dev 까지 포함한 `pnpm audit --audit-level critical`. dev 의존성은 이미지에 들어가지 않지만 그걸 돌리는 머신을 친다 — `--prod` 만 막던 동안 vitest 의 critical 이 보이지 않았다. high 는 막지 않고 실행 요약에만 적는다. 전부 eslint·shadcn·jsdom 같은 도구의 전이 의존이라, 막으면 아무도 안 읽는 늘 빨간 잡이 된다.
 - [x] **빌드 태그는 skip 이 아니라 실명(失明)이다** (#121, 2026-09-10). `//go:build` 가 붙은 파일은 컴파일러에게 **안 보이므로**, 조용히 썩고 "Skipped Go tests" 요약에도 안 잡힌다 — skip 과 결정적으로 다른 점이다. `openapi_proxy_test.go` 는 `integration` 태그를 뗐다(`kindAvail()` 이 `testStore(t)` 보다 **먼저** 호출되므로 이 파일의 두 테스트는 postgres 없이도 skip 된다 — 태그 제거가 새 클론을 더 빨갛게 만들지 않는다. 다만 `go test ./...` 전체는 위 `[~]` 항목대로 여전히 컴포즈가 필요하다). `backend/e2e` 는 `TestMain` 이 compose 와 서버를 띄우므로 `e2e` 태그를 유지하되 `go vet -tags=<발견된 태그> ./...` 로 **컴파일만** 검증한다. 태그 목록은 `ci.yml` 이 소스에서 **스캔**한다 — 손으로 적은 목록은 코드에서 멀어지고, 그 드리프트가 #121 의 정체였다.
 - [x] **kind 필요 테스트는 playwright.yml 이 실제로 돌린다** (#121). 그전에는 ci.yml 주석이 "playwright.yml 이 게이트" 라고 적어 뒀지만 그 워크플로에 `go test` 가 한 줄도 없었다 — `openapi_proxy`·`internal/k8s` 는 **어디서도 실행된 적이 없다.** 이제 클러스터 등록 직후(시더 앞) `KIND_API`/`KIND_CA`/`DEX_TOKEN` 을 주입해 돌린다.
 - [x] **`KBP_REQUIRE_KIND=1` 은 kind 계열 skip 을 실패로 바꾼다** — `KBP_REQUIRE_DEX` 와 같은 논리다. 스스로 skip 하는 테스트는 배선이 끊겨도 초록이라 **게이트가 아니게 된다.** 스위치를 워크플로의 테스트 이름 목록이 아니라 **테스트 코드**(`kindAvail()`, `client_test.go`)에 둔 것이 핵심이다 — 새 kind 테스트는 `kindAvail()` 을 부르는 순간 자동으로 게이트에 들어오고, 이름이 바뀌거나 지워지면 스스로 빠진다. 워크플로에 목록을 두면 그 목록이 또 코드에서 멀어진다.
 - [ ] **패키지 병렬 실행 불가.** `internal/api` 의 `TestMain` 이 이름 패턴으로 공유 DB 를 정리하는데 `internal/store` 가 같은 타임스탬프 접미사를 쓴다 → 동시 실행 시 서로의 픽스처를 지운다. CI 는 `-p 1` 로 우회 중이며, 근본 해결은 패키지별 스키마 분리 또는 접미사 네임스페이싱. **세션 간** 충돌(같은 머신의 여러 세션이 공유 DB `kubeport` 를 쓰는 경우)은 `scripts/test-db.sh` 의 세션별 DB 로 해소됐다(§3.4) — 세션 **안의** 패키지 병렬은 여전히 불가.
 - [ ] **schema.hcl ↔ schema.sql 드리프트 가드 없음.** atlas 로 regen 후 `git diff --exit-code schema.sql` 을 CI 가 돌려야 한다.
 
-## 7. 태스크별 테스트 프리리퀴짓 매트릭스
+## 7. 코드 리뷰와의 관계
 
-플랜(`docs/superpowers/plans/2026-04-16-mvp-1-vertical-slice.md`) 기준, 각 태스크가 필요로 하는 외부 SUT.
-
-| Task | 레이어 | 외부 의존 | 메모 |
-|------|--------|-----------|------|
-| 2 Gin /healthz | Unit | 없음 | `TestHealthz` |
-| 5–6 sqlc store | Integration | postgres | `TestUpsertUser`, `TestInsertClusterAndTemplate` |
-| 7 OIDC verifier | Integration | dex (password grant 로 토큰 발급) | `enablePasswordDB: true` 필수 |
-| 8 auth middleware | Integration | dex (또는 테스트용 가짜 JWT signer) | verifier 재사용 |
-| 9 clusters API | Integration | postgres | |
-| 10 template render | Unit | 없음 | 순수 Go, I/O 없음 |
-| 11 template CRUD | Integration | postgres | |
-| 12 k8s client | Integration | kind 또는 k3d 클러스터 + dex | **opt-in** (`KUBEPORT_K8S_TEST=1` 제안) |
-| 13–14 releases | Integration | kind + postgres | |
-| 22 e2e | e2e | 모두 | 별도 디렉터리 |
-
-## 8. Codex Review Gate 와의 관계
-
-세션 Stop 훅에 `/codex:review` 가 연동되어 있다 (`.claude/plugins/.../hooks.json`). 파일 수정이 있는 턴의 종료 시 자동 리뷰가 돈다. 리뷰는 **테스트를 대체하지 않는다** — TDD 로 녹색 / 빨간색을 먼저 확보하고, Codex 리뷰는 그 위에서 디자인·보안·성능 관점을 추가로 본다.
+리뷰는 **테스트를 대체하지 않는다.** PR 마다 `/codex:review` 를 돌리고, `gh pr create` 는 `/pr-review` 기록이 없으면 훅(`.claude/hooks/require-pr-review.mjs`)이 막는다 — 절차는 CLAUDE.md "코드 리뷰". TDD 로 녹색 / 빨간색을 먼저 확보하고, 리뷰는 그 위에서 디자인·보안·성능 관점을 추가로 본다.

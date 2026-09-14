@@ -186,7 +186,10 @@ OCI Always Free 정책상 7일간 CPU 95p < 20% AND network < 20% AND memory < 2
 
 ### 6.2. Boot Volume backup policy
 
-OCI 콘솔 → Compute → Instances → `kubeport` → 좌측 Resources → **Boot volume** 클릭 → **Backup policy** → Edit → **Bronze** (주간, 4주 보존, Always Free 한도 내).
+OCI 콘솔 → Compute → Instances → `kubeport` → 좌측 Resources → **Boot volume** 클릭 → **Backup policy** 에
+**커스텀 주간 정책**을 만들어 연결한다: 주간 증분, 28일 보존(최대 4개 — Always Free 백업 5개 한도 안). 라이브는
+`kubeport-weekly-4w` 이다(runbook §6). ⚠️ Oracle 기본 **Bronze 는 쓰지 않는다** — 월간·연간 장기 보존이 들어 있어
+무료 한도를 넘는다.
 
 이게 boot volume 뿐 아니라 local-path PVC 가 거기 안에 있으므로 Postgres 데이터도 같이 보존.
 
@@ -540,20 +543,20 @@ main 머지 → build-images·CI(같은 sha 둘 다 성공) → `.github/workflo
 > 아래 raw helm 은 **값을 바꿀 때**(§7.6 데모 설정 등)만 쓰고, 그때도
 > `flock -w 600 /run/lock/kubeport-deploy.lock helm upgrade ...` 로 같은 락을 잡는다.
 
-이미지 태그 갱신 시 (스크립트가 없는 VM 에서의 예전 절차):
+값만 바꾸는 `helm upgrade` 는 이미지 태그를 건드리지 않는다:
 
 ```bash
-# VM 에서. 차트 사본(~/kubeport-chart/kubeport)을 먼저 main 과 동기화:
-#   (로컬) git archive origin/main deploy/helm/kubeport deploy/oci | ssh ... 'mkdir -p ~/kubeport-src && tar -x -C ~/kubeport-src && cp -r ~/kubeport-src/deploy/helm/kubeport/. ~/kubeport-chart/kubeport/'
-helm upgrade kubeport ~/kubeport-chart/kubeport \
+# VM 에서. 차트 사본(~/kubeport-chart/kubeport)은 배포 스크립트가 배포한 sha 로 맞춰 둔다(.deployed-sha)
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+flock -w 600 /run/lock/kubeport-deploy.lock \
+  helm upgrade kubeport ~/kubeport-chart/kubeport \
   --namespace kubeport \
   --reset-then-reuse-values \
-  --set images.backend.tag=$NEW_SHA \
-  --set images.frontend.tag=$NEW_SHA
+  --set <바꿀 키>=<값>
 ```
 
 `--reset-then-reuse-values` 가 첫 install 의 secret 들과 데모 모드(`dex.*`/`demo.*`) 값을 유지하면서
-새 차트 기본값도 반영한다. §7.6 의 최초 `--set` 목록을 한 번만 주면 이후 업그레이드에서는 다시 줄 필요가 없다.
+그 차트의 기본값도 반영한다. §7.6 의 최초 `--set` 목록을 한 번만 주면 이후 업그레이드에서는 다시 줄 필요가 없다.
 **`-f values-oci-phase2.yaml` 은 업그레이드에 주지 않는다** — 빈 시크릿·플레이스홀더 `host` 가 릴리스 값을
 덮어써 실패한다 (§7.6 주의 참조). `--reuse-values` 없이 `-f` 만 쓰면 데모 모드가 **꺼진다**. backend Pod 의 `migrate` initContainer 가 매번 `atlas schema apply` 를 다시 돌리므로 schema 변경도 자동 반영.
 
@@ -569,6 +572,6 @@ helm upgrade kubeport ~/kubeport-chart/kubeport \
 
 ## See also
 
-- [Plan 10 — OCI Phase 2 직행 부트스트랩](../../docs/superpowers/plans/2026-06-24-plan10-oci-phase2-bootstrap.md)
+- Plan 10(OCI Phase 2 직행 부트스트랩) — 경과는 [CLAUDE.md](../../CLAUDE.md) 플랜 표, 지금의 운영은 [docs/oci-prod-runbook.md](../../docs/oci-prod-runbook.md)
 - [ADR 0003 — Hosting decision tree](../../docs/decisions/0003-hosting-oci-always-free.md)
 - [Helm chart README](../helm/kubeport/README.md)

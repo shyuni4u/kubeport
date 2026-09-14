@@ -55,6 +55,13 @@ fields:
 
 **릴리스(release)** 는 템플릿 버전 한 개를 특정 클러스터 + 네임스페이스에 배포한 인스턴스다. 릴리스는 템플릿 버전에 pin 된다(Helm / ArgoCD 방식). 관리자가 새 버전을 발행해도 동작 중인 릴리스는 계속 돌아가고, "업데이트 가능" 알림만 뜬다.
 
+모든 템플릿에 걸리는 규칙이 몇 가지 있고, 어기면 API 가 거절한다:
+
+- **이름** — RFC 1123 hostname 이면서 Kubernetes 라벨 값이어야 한다: 영문자·숫자, `-`·`.` 는 그 사이에만, 63자까지. 릴리스가 만드는 모든 오브젝트의 `kubeport.io/template` 라벨이 되기 때문이다. 이 규칙 이전에 만든 템플릿은 이름이 바뀌거나 다시 거절되지 않는다. 단 규칙을 어기는 이름은 원래도 배포 때 apiserver 가 거절했으므로, 그런 템플릿은 올바른 이름으로 다시 만든다.
+- **오브젝트는 50개까지** — `resources.yaml` 기준으로 저장할 때와 배포할 때 모두 검사한다. 릴리스 적용이 네임스페이스 락을 쥐는 시간 안에 끝나야 해서다.
+- **네임스페이스당 릴리스 하나 — ui-spec 이 `instances: multiple` 이 아니면.** multiple 이면 모든 오브젝트 이름이 `<릴리스>-<이름>` 이 되고, 템플릿 안의 참조가 새 이름을 따라가며, selector 가 릴리스까지 가려서 같은 템플릿을 나란히 여러 번 띄울 수 있다. 오브젝트 이름은 30자까지, `metadata.name` 은 노출할 수 없고, 버전을 게시하면 그 모드는 템플릿에 고정된다.
+- **릴리스를 지우면 StatefulSet 이 만든 저장소도 지워진다.** `volumeClaimTemplates` 가 있는 StatefulSet 은 템플릿이 `Retain` 을 쓰지 않는 한 `persistentVolumeClaimRetentionPolicy.whenDeleted: Delete` 로 렌더된다. 네임스페이스에 이미 있는 PVC 를 넘겨받게 되는 배포는 409 로 거절된다.
+
 ## 아키텍처 한눈에
 
 ```
@@ -67,10 +74,10 @@ Browser ── Next.js (k8s Pod, BFF) ── Go API (in k8s) ── Target k8s c
 
 - **프론트엔드**: Next.js 16 (App Router), Tailwind + shadcn/ui, YAML 은 Monaco, 동적 폼은 React Hook Form + Zod. Go API 와 같은 Helm chart 안의 k8s `Deployment` 로 배포 — `helm install` 한 번으로 스택 전체가 올라간다.
 - **백엔드**: Go 1.26+, Gin, `client-go`, `sqlc`, `atlas`, `coreos/go-oidc`.
-- **데이터**: 운영은 PostgreSQL 16 (개발은 SQLite), OIDC + httpOnly 쿠키 세션, 리프레시 토큰은 저장 시 암호화.
+- **데이터**: PostgreSQL 16 (로컬 개발은 docker compose 로 띄운다), OIDC + httpOnly 쿠키 세션, 리프레시 토큰은 저장 시 암호화.
 - **보안 모델**: 앱은 UX 레이어일 뿐이다. 모든 k8s 쓰기는 로그인한 사용자의 OIDC id_token 으로 수행되므로, 실제 허용 여부는 Kubernetes RBAC 가 결정한다.
 
-전체 내용: [docs/superpowers/specs/2026-04-16-initial-design.md](docs/superpowers/specs/2026-04-16-initial-design.md).
+결정과 그 이유: [docs/brainstorming-summary.md](docs/brainstorming-summary.md). 네 화면의 설계: [프론트엔드 디자인 스펙](docs/superpowers/specs/2026-04-19-frontend-design-spec.md).
 
 ## 클러스터에 설치하기
 
@@ -89,10 +96,22 @@ helm install kubeport deploy/helm/kubeport --namespace kubeport --create-namespa
   --set postgres.password=$(openssl rand -hex 24)
 ```
 
+이 `--set` 시크릿은 셸 히스토리와 `ps` 에 남는다. 계속 쓸 설치본이라면 파일로 넘긴다:
+[Keeping secrets off the command line](deploy/helm/kubeport/README.md#keeping-secrets-off-the-command-line).
+
 `ingress.className` 은 클러스터에 맞는 값으로 바꾼다 — GKE `gce`, EKS `alb`,
-nginx-ingress `nginx`, k3s `traefik`. 차트 기본값이 `traefik` 이라, traefik 이 없는
-클러스터에서는 Ingress 가 만들어지되 **어떤 컨트롤러도 잡지 않는다.** 에러는 안 나고
-주소만 영원히 비어 있다.
+nginx-ingress `nginx`, k3s `traefik`. 차트 기본값은 `traefik` 이다. traefik 이 없는
+클러스터에서 기본값 그대로면 `no matches for kind "Middleware"` 로 **설치가 실패한다** —
+차트의 http→https 리다이렉트가 Traefik 오브젝트라서다(#268). TLS 까지 끈 경우에는 에러가
+전혀 안 난다: Ingress 는 만들어지지만 어떤 컨트롤러도 잡지 않아 주소가 계속 비어 있다.
+어느 쪽이든 고칠 것은 CRD 가 아니라 class 다.
+
+ingress-nginx 라면
+`--set-string 'ingress.annotations.nginx\.ingress\.kubernetes\.io/proxy-body-size=4m'` 도
+준다(작은따옴표가 셸로부터 역슬래시를 지켜, Helm 이 점을 애노테이션 이름의 일부로 읽는다).
+kubeport 는 요청 본문을 4 MiB 까지 받는데 nginx 기본 한도는 1m 이라, 이 값이 없으면 1~4 MiB
+사이의 템플릿·요청이 kubeport 에 닿기 전에 nginx 의 HTML 413 으로 거절된다. Traefik(k3s)은
+기본 한도가 없다.
 
 이 명령은 `latest` 태그를 설치한다. 계속 쓸 설치본이라면
 `--set images.backend.tag=sha-<7> --set images.frontend.tag=sha-<7>` 를 붙인다 —
@@ -214,13 +233,19 @@ NODE_EXTRA_CA_CERTS="$PWD/../deploy/docker/certs/dex.crt" pnpm dev
 ## 테스트 실행
 
 ```bash
-# Unit + integration (compose 기동 상태 필요, backend/CLAUDE.md 참조)
-make test                      # == cd backend && go test ./...
+# Unit + integration (compose 기동 상태 필요 — 테스트가 그 Postgres 와 dex 를 쓴다)
+(cd backend && go test -p 1 ./...)
+# -p 1: 패키지들이 공유 테스트 DB 를 이름 패턴으로 정리해서, 병렬이면 서로의 행을 지운다.
+# `make test` 는 -p 1 없이 같은 것을 돈다.
 
-# End-to-end (kind 클러스터 필요 — docs/local-e2e.md 참조)
+# 백엔드 End-to-end (kind 클러스터 필요 — docs/local-e2e.md 참조)
 export KBP_KIND_API=https://127.0.0.1:6443
 make e2e
 ```
+
+브라우저 e2e(compose + kind 위의 Playwright)는 스크립트가 따로 있다:
+[docs/local-e2e.md §0](docs/local-e2e.md). 테스트 레이어·사전 조건·세션별 테스트 DB 는
+[docs/testing.md](docs/testing.md).
 
 ## 필수 도구
 
@@ -245,30 +270,26 @@ make e2e
 
 OS 별 설치 절차와 Windows 경로 함정은 [docs/dev-setup.md](docs/dev-setup.md).
 
-## 로드맵
+## 현황과 로드맵
 
-작업은 각자 동작 가능한 소프트웨어를 배달하는 세 개의 Plan 으로 쪼개진다:
-
-| # | Plan | 내용 | 링크 |
-|---|------|------|------|
-| 1 | **Vertical slice** | OIDC 로그인, YAML 모드 템플릿 CRUD, 배포 폼, 릴리스 목록·개요 | [plan](docs/superpowers/plans/2026-04-16-mvp-1-vertical-slice.md) ✅ |
-| 2 | **Admin UX** | UI 모드 에디터(트리 + 메타 + 라이브 프리뷰), publish/deprecate, 버전 히스토리, 팀 | [plan](docs/superpowers/plans/2026-04-18-mvp-2-admin-ux.md) ✅ |
-| 3 | **User observability** | 릴리스 로그(SSE), 이벤트, settings 탭, 업데이트 마이그레이션, 자가호스팅용 Helm chart | 출시 완료 — Plan 4~13 은 [CLAUDE.md](CLAUDE.md) ✅ |
-
-MVP 이후로 미룬 것: CRD 지원, Git 연동 템플릿, 팀/RBAC UI, Helm chart 임포트, 릴리스 히스토리.
+플랜별로 무엇이 출시됐고 무엇이 보류인지는 [CLAUDE.md](CLAUDE.md) 의 플랜 표에서, 진행 중인 일은
+이슈 트래커에서 본다. 지금 보류 중인 것: CRD 지원, Git 연동 템플릿, Helm chart 임포트, 릴리스
+히스토리, 클러스터 drift 를 감시하는 백그라운드 reconciler(지금은 릴리스를 읽을 때 drift 를 판정한다).
 
 ## 디렉터리 구조
 
 ```
 kubeport/
-├── backend/                          # Go API (Plan 1)
-├── frontend/                         # Next.js (Plan 1)
-├── deploy/docker/                    # 로컬 compose (Plan 1)
+├── backend/                          # Go API
+├── frontend/                         # Next.js BFF + UI
+├── deploy/docker/                    # 로컬 compose (Postgres + dex)
 ├── deploy/helm/                      # Helm chart (운영 설치용)
+├── deploy/oci/                       # 라이브 설치본의 부트스트랩·배포 스크립트
+├── scripts/                          # 로컬 e2e·compose·테스트 DB 도우미
 ├── docs/
-│   ├── superpowers/specs/            # 디자인 스펙
-│   ├── superpowers/plans/            # 구현 계획
+│   ├── superpowers/specs/            # 지금도 쓰는 디자인 스펙
 │   ├── decisions/                    # ADR (필요 시 추가)
+│   ├── oci-prod-runbook.md           # 라이브 설치본 운영
 │   └── brainstorming-summary.md      # 결정의 근거
 ├── CLAUDE.md                         # Claude Code 세션 진입점
 └── README.md
@@ -276,9 +297,9 @@ kubeport/
 
 ## 컨텍스트 빠르게 찾기
 
-- **뭐라도 만들고 싶다** → [CLAUDE.md](CLAUDE.md) 읽고, `docs/superpowers/plans/` 의 현재 플랜으로.
+- **뭐라도 만들고 싶다** → [CLAUDE.md](CLAUDE.md) 읽고, 열린 이슈로.
 - **특정 결정의 이유가 궁금하다** → [docs/brainstorming-summary.md](docs/brainstorming-summary.md).
-- **시스템 전체 그림을 보고 싶다** → [docs/superpowers/specs/2026-04-16-initial-design.md](docs/superpowers/specs/2026-04-16-initial-design.md).
+- **시스템 전체 그림을 보고 싶다** → [CLAUDE.md](CLAUDE.md) 의 기술 스택·아키텍처 경계, 그리고 [프론트엔드 디자인 스펙](docs/superpowers/specs/2026-04-19-frontend-design-spec.md).
 - **로컬에서 돌려보고 싶다** → 위의 "빠른 시작".
 - **스크립트로 API 를 호출하고 싶다** → 계약은 [backend/api/openapi.yaml](backend/api/openapi.yaml), 인증 방법은 [docs/machine-clients.md](docs/machine-clients.md).
 
