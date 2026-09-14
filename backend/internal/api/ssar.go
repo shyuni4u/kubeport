@@ -134,7 +134,8 @@ func (h *Handlers) CheckSelfSubjectAccess(c *gin.Context) {
 	})
 	if err != nil {
 		// 502 matches the "upstream k8s failed" semantics used in releases.go
-		// (ApplyAll / DeleteByRelease errors also surface as 502).
+		// (ApplyAll errors surface as 502, and DeleteByRelease's too unless the
+		// cluster only refused the release's own resources, which is 403, #380).
 		upstreamError(c, "CheckSelfSubjectAccess", err)
 		return
 	}

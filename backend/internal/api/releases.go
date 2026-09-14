@@ -328,7 +328,7 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		// this release's id (ref is not NameOnly): an unstamped object with the
 		// same name is an earlier release's.
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), releaseCleanupK8sTimeout)
-		if delErr := cli.DeleteByRelease(cleanupCtx, ref); delErr != nil {
+		if delErr := cli.DeleteByRelease(cleanupCtx, ref, rendered); delErr != nil {
 			log.Printf("rollback: failed to delete k8s resources for release %s: %v", r.Name, delErr)
 		}
 		cancel()
@@ -626,7 +626,17 @@ func (h *Handlers) DeleteRelease(c *gin.Context) {
 		}
 		// A release not updated since #195 also has its unstamped objects
 		// deleted (see releaseRef); any other keeps its hands off them.
-		if err := cli.DeleteByRelease(ctx, releaseRef(rel)); err != nil {
+		if err := cli.DeleteByRelease(ctx, releaseRef(rel), []byte(rel.RenderedYaml)); err != nil {
+			// The cluster refusing the release's own resources is an RBAC
+			// verdict, not a gateway failure (#380): a retry will not clear
+			// it. The row stays either way, so the objects still left keep a
+			// release pointing at them and an admin can still force-delete.
+			if refused, ok := err.(*k8s.DeleteForbiddenError); ok {
+				logWithheld(c, "DeleteRelease: delete resources", err)
+				writeError(c, http.StatusForbidden, "rbac-denied",
+					"the cluster refused deleting this release's "+strings.Join(refused.Resources, ", "))
+				return
+			}
 			upstreamError(c, "DeleteRelease: delete resources", err)
 			return
 		}

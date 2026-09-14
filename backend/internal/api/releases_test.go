@@ -97,6 +97,8 @@ type fakeK8sApplier struct {
 	// deleteCalls records each DeleteByRelease's release id and whether the
 	// release was NameOnly (#195).
 	deleteCalls []deleteCall
+	// deleteApplied records the manifest each DeleteByRelease was given (#380).
+	deleteApplied []string
 	// stampCalls records each StampLeftBehind (#195).
 	stampCalls []stampCall
 
@@ -158,7 +160,8 @@ type deleteCall struct {
 	NameOnly bool
 }
 
-func (f *fakeK8sApplier) DeleteByRelease(ctx context.Context, ref k8s.ReleaseRef) error {
+func (f *fakeK8sApplier) DeleteByRelease(ctx context.Context, ref k8s.ReleaseRef, applied []byte) error {
+	f.deleteApplied = append(f.deleteApplied, string(applied))
 	f.deleteCalls = append(f.deleteCalls, deleteCall{UID: ref.UID, NameOnly: ref.NameOnly})
 	if f.deleteStall {
 		<-ctx.Done()
@@ -922,4 +925,44 @@ func TestReleases_Delete_NoForce_K8sFails_PreservesDB(t *testing.T) {
 	// Row preserved.
 	w = do(t, r, http.MethodGet, "/v1/releases/"+id, nil)
 	require.Equal(t, http.StatusOK, w.Code, "row should still exist after k8s delete failure")
+}
+
+// #380: the cluster refusing to delete the kinds the release has is an RBAC
+// verdict, not a gateway failure: 403 rbac-denied, a kind a client stops
+// retrying on. The row stays, so the workload still has a release pointing at
+// it and an admin can still force-delete.
+func TestReleases_Delete_NoForce_K8sForbidden_Is403AndPreservesDB(t *testing.T) {
+	r, applier, _ := newTestRouterWithFactory(t)
+	clusterName := seedCluster(t, r)
+	tplName := seedPublishedTemplate(t, r)
+	id := seedReleaseAdmin(t, r, clusterName, tplName, "k8sforbid")
+
+	applier.deleteErr = &k8s.DeleteForbiddenError{Resources: []string{"deployments"}}
+
+	w := do(t, r, http.MethodDelete, "/v1/releases/"+id, nil)
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"rbac-denied"`)
+	require.Contains(t, w.Body.String(), "deployments", "the detail names what was refused")
+	require.NotEmpty(t, applier.deleteApplied, "the delete was told what the release was applied with")
+	require.Contains(t, applier.deleteApplied[len(applier.deleteApplied)-1], "kind:")
+
+	w = do(t, r, http.MethodGet, "/v1/releases/"+id, nil)
+	require.Equal(t, http.StatusOK, w.Code, "row should still exist after a refused delete")
+}
+
+// A refusal mixed with another failure stays the retryable 502.
+func TestReleases_Delete_NoForce_K8sForbiddenAndOtherFailure_Is502(t *testing.T) {
+	r, applier, _ := newTestRouterWithFactory(t)
+	clusterName := seedCluster(t, r)
+	tplName := seedPublishedTemplate(t, r)
+	id := seedReleaseAdmin(t, r, clusterName, tplName, "k8smixed")
+
+	applier.deleteErr = errors.Join(errors.New("boom"), &k8s.DeleteForbiddenError{Resources: []string{"configmaps"}})
+
+	w := do(t, r, http.MethodDelete, "/v1/releases/"+id, nil)
+	require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "k8s-error")
+
+	w = do(t, r, http.MethodGet, "/v1/releases/"+id, nil)
+	require.Equal(t, http.StatusOK, w.Code)
 }

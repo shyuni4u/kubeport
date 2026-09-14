@@ -55,7 +55,9 @@ func releaseSelectors(ref ReleaseRef) []string {
 // not show it; the same selectors DeleteByRelease uses do (security review).
 //
 // Claims carrying the release's labels are deleted by DeleteByRelease itself,
-// with the caller's token, and a refused delete-collection is skipped there.
+// with the caller's token. A refused delete-collection is skipped there only
+// when none of the release's claims can be there: when they can, the whole
+// delete is refused and nothing is lost (#380).
 // Whether the caller may delete them is a separate grant from whether it may
 // list them (codex review), so the cluster is asked (claimDeletion), once:
 //   - claims listed: deleted if it may delete them; left to the StatefulSets'

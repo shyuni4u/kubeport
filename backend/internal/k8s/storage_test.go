@@ -244,7 +244,7 @@ func TestStorageOnDelete_ListsStatefulSetsByTheSelectorsDeleteByReleaseDeletesBy
 		cli := k8s.NewForTest(dyn)
 		_, err := cli.StorageOnDelete(context.Background(), storageRef(nameOnly))
 		require.NoError(t, err)
-		require.NoError(t, cli.DeleteByRelease(context.Background(), storageRef(nameOnly)))
+		require.NoError(t, cli.DeleteByRelease(context.Background(), storageRef(nameOnly), nil))
 		require.NotEmpty(t, listed)
 		require.Equal(t, deleted, listed, "nameOnly=%v", nameOnly)
 	}
