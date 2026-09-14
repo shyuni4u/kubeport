@@ -3,11 +3,11 @@ import { MobileSidebarShell } from "./MobileSidebarShell";
 import { SidebarBody } from "./SidebarBody";
 import type { Role } from "@/lib/role";
 
-export async function MobileSidebar({ role }: { role: Role }) {
+export async function MobileSidebar({ role, signedIn }: { role: Role; signedIn: boolean }) {
   const t = await getTranslations("shell");
   return (
     <MobileSidebarShell triggerLabel={t("openMenu")}>
-      <SidebarBody role={role} />
+      <SidebarBody role={role} signedIn={signedIn} />
     </MobileSidebarShell>
   );
 }

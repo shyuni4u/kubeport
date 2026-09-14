@@ -51,10 +51,10 @@ export async function AppShell({
     <KubeTermsProvider isAdmin={role === "admin"}>
       <ErrorDetailProvider initial={errorDetail}>
       <div className="flex min-h-screen bg-background">
-        <Sidebar role={role} />
+        <Sidebar role={role} signedIn={me !== null} />
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-6">
-            <MobileSidebar role={role} />
+            <MobileSidebar role={role} signedIn={me !== null} />
             <div className="flex-1" />
             <ErrorDetailSwitch />
             <ThemeSwitch initial={theme} />

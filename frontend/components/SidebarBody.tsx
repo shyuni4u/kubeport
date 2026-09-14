@@ -18,7 +18,7 @@ const NAV_BY_ROLE: Record<Role, Array<{ href: string; key: NavKey }>> = {
   ],
 };
 
-export async function SidebarBody({ role }: { role: Role }) {
+export async function SidebarBody({ role, signedIn }: { role: Role; signedIn: boolean }) {
   const t = await getTranslations("shell.nav");
   const nav = NAV_BY_ROLE[role];
   return (
@@ -33,9 +33,15 @@ export async function SidebarBody({ role }: { role: Role }) {
           <SidebarNavItem key={item.href} href={item.href} label={t(item.key)} />
         ))}
       </nav>
-      <div className="border-t border-sidebar-border p-4">
-        <ClusterPicker />
-      </div>
+      {/* The picker lists clusters on mount, which needs a session. Without
+          one it only earned a 401 in the console and "no clusters registered"
+          for a visitor (#377), so it isn't mounted and nothing is requested.
+          signedIn comes from the server, not from a failed fetch. */}
+      {signedIn && (
+        <div className="border-t border-sidebar-border p-4">
+          <ClusterPicker />
+        </div>
+      )}
     </>
   );
 }
