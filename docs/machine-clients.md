@@ -284,8 +284,9 @@ apply lock 을 쥔 시간 안에 끝나야 하기 때문이다. 오브젝트를 
 안의 그 값은 `"<redacted>"` 로 온다. 받은 값을 **같은 `version`** 으로 `PUT /v1/releases/{id}` 에 그대로 돌려보내면 가려진
 Secret 은 저장된 값을 유지하고, 다른 값을 보내면 바뀐다. **다른 `version` 으로 옮기면서 `"<redacted>"` 를 보내면 `400`** 이다
 — 저장값을 다른 버전의 규칙으로 검사하면 그 값이 규칙에 맞는지가 드러나기 때문에, Secret 값을 다시 넣어야 한다.
-`POST /v1/templates/{name}/render` 에 `release_id` 를 함께 보내면 `"<redacted>"` 를 그 릴리스의 저장값으로 렌더하고 결과에서
-다시 가린다.
+`POST /v1/templates/{name}/render` 에 `release_id` 를 함께 보내면(그 릴리스를 읽을 수 있는 호출자만), 렌더하는 버전이
+**그 릴리스의 현재 버전일 때만** `"<redacted>"` 를 저장값으로 바꿔 렌더하고 결과에서 다시 가린다. 다른 버전(`?version=N`)이면
+placeholder 를 보낸 그대로 검사하므로, 버전을 옮기는 미리보기에는 Secret 값을 다시 넣어야 한다 — `PUT` 과 같은 이유다.
 
 **한 구역에 같은 템플릿을 여러 번 — ui-spec 의 `instances`**([#190](https://github.com/shyuni4u/kubeport/issues/190)).
 키가 없거나 `single` 이면 오브젝트가 템플릿이 준 이름 그대로 적용되므로, 같은 구역의 두 번째 릴리스는 `409 resource-conflict`
@@ -664,8 +665,9 @@ k8s authorizer 는 `RBAC: allowed by ClusterRoleBinding "..." of ClusterRole "..
 5분 전체를 소비한다.
 
 **목록은 페이지네이션 메타가 없다.** `total` 도 `next` 도 없어서 "다음 페이지가 있나"는 한 페이지가 꽉
-찼는지로 추측해야 한다. 템플릿 목록은 아예 페이지네이션이 없다(#58). `GET /v1/releases` 의 `limit` 은 1–200(기본 50)이고,
-범위 밖이거나 숫자가 아니면 거절하지 않고 기본값을 쓰므로 응답만으로는 무엇이 적용됐는지 알 수 없다.
+찼는지로 추측해야 한다. 템플릿 목록은 아예 페이지네이션이 없다(#58). `GET /v1/releases` 의 `limit` 은 1–200(기본 50),
+`offset` 은 0 이상(기본 0)이고, 범위 밖이거나 숫자가 아니면 거절하지 않고 기본값을 쓰므로 응답만으로는 무엇이 적용됐는지 알 수 없다
+— 파라미터 **이름**이 틀리면 아래처럼 400 이지만 **값**이 틀리면 조용히 기본값이다.
 
 **목록 필터는 서버가 받는다**([#74](https://github.com/shyuni4u/kubeport/issues/74)). `GET /v1/templates` 는 `search`(이름·표시
 이름 부분일치)·`tag`(반복하면 모두 가진 것만)·`status`(`published`·`deprecated`·`draft`), `GET /v1/releases` 는 `limit`·`offset`·
