@@ -55,6 +55,13 @@ End users see a form with two fields (plus a release name). Everything else in `
 
 A **release** is one deployment of a template version into a specific cluster + namespace. Releases are pinned to a template version (Helm/ArgoCD-style). When the admin publishes a new version, running releases keep working and get an "update available" nudge.
 
+A few rules hold for every template, and the API refuses one that breaks them:
+
+- **Name** — an RFC 1123 hostname that is also a Kubernetes label value: letters and digits, with `-` or `.` only between them, 63 characters at most. It becomes the `kubeport.io/template` label on everything a release creates. Templates named before this rule keep working.
+- **At most 50 objects** in `resources.yaml`, checked on save and again on deploy, so a release's apply fits in the time it holds its namespace lock.
+- **One release per namespace, unless the ui-spec says `instances: multiple`.** Then every object is named `<release>-<name>`, the template's own references follow the new names, and selectors also match the release, so the same template can run twice side by side. Object names stay at 30 characters or fewer, `metadata.name` cannot be exposed, and once a version is published the mode belongs to the template.
+- **Deleting a release deletes the storage its StatefulSets claimed.** A StatefulSet with `volumeClaimTemplates` is rendered with `persistentVolumeClaimRetentionPolicy.whenDeleted: Delete` unless the template writes `Retain`. A deploy whose StatefulSet would take over claims already in the namespace is refused with 409.
+
 ## Architecture at a glance
 
 ```
@@ -67,10 +74,10 @@ Browser ── Next.js (k8s Pod, BFF) ── Go API (in k8s) ── Target k8s c
 
 - **Frontend**: Next.js 16 (App Router), Tailwind + shadcn/ui, Monaco for YAML, React Hook Form + Zod for dynamic forms. Shipped as a k8s `Deployment` alongside the Go API in the same Helm chart — one `helm install` boots the whole stack.
 - **Backend**: Go 1.26+, Gin, `client-go`, `sqlc`, `atlas`, `coreos/go-oidc`.
-- **Data**: PostgreSQL 16 in prod (SQLite for dev); OIDC + httpOnly cookie session, refresh tokens encrypted at rest.
+- **Data**: PostgreSQL 16 (local development runs it in docker compose); OIDC + httpOnly cookie session, refresh tokens encrypted at rest.
 - **Security model**: the app is a UX layer. Every k8s write is performed with the signed-in user's OIDC id_token, so Kubernetes RBAC decides what actually happens.
 
-Full details: [docs/superpowers/specs/2026-04-16-initial-design.md](docs/superpowers/specs/2026-04-16-initial-design.md).
+Decisions and the reasons behind them: [docs/brainstorming-summary.md](docs/brainstorming-summary.md). The four screens: [frontend design spec](docs/superpowers/specs/2026-04-19-frontend-design-spec.md).
 
 ## Install on your cluster
 
@@ -88,6 +95,10 @@ helm install kubeport deploy/helm/kubeport --namespace kubeport --create-namespa
   --set auth.appEncryptionKeyB64=$(openssl rand -base64 32) \
   --set postgres.password=$(openssl rand -hex 24)
 ```
+
+Those `--set` secrets land in your shell history and in `ps`. For an install you
+intend to keep, pass them from files instead: [Keeping secrets off the command
+line](deploy/helm/kubeport/README.md#keeping-secrets-off-the-command-line).
 
 Set `ingress.className` to your cluster's class — GKE `gce`, EKS `alb`,
 nginx-ingress `nginx`, k3s `traefik`. The chart's default is `traefik`. On a
@@ -233,13 +244,19 @@ For a full browser → deploy-to-kind walkthrough — self-signed dex cert, Wind
 ## Running tests
 
 ```bash
-# Unit + integration (compose must be up; see backend/CLAUDE.md)
-make test                      # equivalent: cd backend && go test ./...
+# Unit + integration (compose must be up — the tests use its Postgres and dex)
+cd backend && go test -p 1 ./...
+# -p 1: packages clean the shared test database by name and would delete each
+# other's rows in parallel. `make test` runs the same without it.
 
-# End-to-end happy path (requires a kind cluster — see docs/local-e2e.md)
+# Backend end-to-end happy path (requires a kind cluster — see docs/local-e2e.md)
 export KBP_KIND_API=https://127.0.0.1:6443
 make e2e
 ```
+
+Browser end-to-end (Playwright against compose + kind) has its own scripts:
+[docs/local-e2e.md §0](docs/local-e2e.md). Layers, prerequisites and per-session
+test databases: [docs/testing.md](docs/testing.md).
 
 ## Prerequisites
 
@@ -266,30 +283,28 @@ no-Ingress path in [the chart README](deploy/helm/kubeport/README.md#try-it-firs
 Setup per OS, and the traps that come with Windows paths, are in
 [docs/dev-setup.md](docs/dev-setup.md).
 
-## Roadmap
+## Status and roadmap
 
-Work is split into three plans that each ship usable software:
-
-| # | Plan | Ships | Link |
-|---|------|-------|------|
-| 1 | **Vertical slice** | OIDC login, YAML-mode template CRUD, deploy form, release list & overview | [plan](docs/superpowers/plans/2026-04-16-mvp-1-vertical-slice.md) ✅ |
-| 2 | **Admin UX** | UI-mode editor (tree + meta + live preview), publish/deprecate, version history, teams | [plan](docs/superpowers/plans/2026-04-18-mvp-2-admin-ux.md) ✅ |
-| 3 | **User observability** | Release logs (SSE), events, settings tabs, update-available migration, Helm chart for self-hosting | shipped — see [CLAUDE.md](CLAUDE.md) for plans 4-13 ✅ |
-
-Deferred beyond the MVP: CRD support, Git-backed templates, team/RBAC UI, Helm chart import, release history.
+What each plan shipped, and what is still deferred, is tracked in the plan table
+in [CLAUDE.md](CLAUDE.md); open work is in the issue tracker. Deferred for now:
+CRD support, Git-backed templates, Helm chart import, release history, and a
+background reconciler that watches clusters for drift (today drift is detected
+when a release is read).
 
 ## Repository layout
 
 ```
 kubeport/
-├── backend/                          # Go API (Plan 1)
-├── frontend/                         # Next.js (Plan 1)
-├── deploy/docker/                    # local compose (Plan 1)
+├── backend/                          # Go API
+├── frontend/                         # Next.js BFF + UI
+├── deploy/docker/                    # local compose (Postgres + dex)
 ├── deploy/helm/                      # Helm chart (production install)
+├── deploy/oci/                       # bootstrap + deploy scripts for the live install
+├── scripts/                          # local e2e, compose and test-DB helpers
 ├── docs/
-│   ├── superpowers/specs/            # design specs
-│   ├── superpowers/plans/            # implementation plans
+│   ├── superpowers/specs/            # design specs still in use
 │   ├── decisions/                    # ADRs (added as needs arise)
+│   ├── oci-prod-runbook.md           # operating the live install
 │   └── brainstorming-summary.md      # why-behind-every-decision
 ├── CLAUDE.md                         # session entry point for Claude Code
 └── README.md
@@ -297,9 +312,9 @@ kubeport/
 
 ## How to find context fast
 
-- **I want to build something** → read [CLAUDE.md](CLAUDE.md) then the current plan in `docs/superpowers/plans/`.
+- **I want to build something** → read [CLAUDE.md](CLAUDE.md), then the open issues.
 - **I want to understand a decision** → [docs/brainstorming-summary.md](docs/brainstorming-summary.md).
-- **I want the full system picture** → [docs/superpowers/specs/2026-04-16-initial-design.md](docs/superpowers/specs/2026-04-16-initial-design.md).
+- **I want the full system picture** → the stack and architecture boundaries in [CLAUDE.md](CLAUDE.md), and the [frontend design spec](docs/superpowers/specs/2026-04-19-frontend-design-spec.md).
 - **I want to run things locally** → "Quick start" above.
 - **I want to call the API from a script** → [backend/api/openapi.yaml](backend/api/openapi.yaml) for the contract, [docs/machine-clients.md](docs/machine-clients.md) for how to authenticate.
 

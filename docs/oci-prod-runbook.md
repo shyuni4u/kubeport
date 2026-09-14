@@ -530,6 +530,8 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
   kubectl -n kubeport logs "job/$JOB" -c seed -f    # 마지막 줄 `seed-demo: done`
   ```
   wipe 단계가 `demo` ns 의 configmap 을 전부 지우므로 `kube-root-ca.crt deleted` 가 찍히는 건 정상(자동 재생성).
+  PVC 도 지운다(#349) — 방문자가 배포한 StatefulSet 의 데이터가 리셋을 넘기지 않게. 그사이 쌓이는 양은
+  `demo` 쿼터가 `demo.quota.storage`·`demo.quota.persistentVolumeClaims` 로 막는다.
   **시드 릴리스 구성을 바꾸는 배포 뒤에는 이 수동 실행이 필수다** (§3-2).
 - **오너 RBAC**: 오너 Google 이메일의 cluster-admin 바인딩 이름은 `kubeport-owner-admin`
   (예전 이름 `kubeport-demo-admin` 은 이름과 달리 오너 바인딩이었음 — 삭제 전 subject 확인).
@@ -645,6 +647,7 @@ port-forward 로 밖에서 잡는다.
 | 로그아웃을 누르면 "로그아웃하지 못했습니다. 아직 로그인된 상태입니다" 알림이 뜨고 화면이 그대로 | 거의 항상 로그아웃 라우트의 origin 검사 거부(403 `cross-origin request rejected`)다 — 서버 로그엔 안 남으니 브라우저 개발자도구 Network 탭의 `POST /api/auth/logout` 응답으로 확인한다. **다시 눌러도 안 풀린다.** 브라우저가 보는 origin 이 허용목록(§4)에 없는 것이므로, 도메인을 추가했거나 **TLS 를 클러스터 밖에서 종료하면서 `tls.enabled=false`** 로 뒀다면 `frontend.publicOrigins` 에 실제 https origin 을 넣고 `helm upgrade`. 응답이 403 이 아니라 네트워크 오류면 프록시 origin(§4) 을 본다. (#166 이전에는 실패해도 `/` 로 가서 성공처럼 보였다) |
 | 로그인 후 `/` 로 되돌아오고 "로그인하지 못했습니다" 배너 | 콜백이 `?login_error=` 로 돌려보낸 것. 원인은 화면에 안 나오므로 `kubectl logs -n kubeport deploy/kubeport-frontend \| grep '\[auth/callback\]'` 확인. `cancelled` = 사용자가 동의화면에서 취소, `expired` = 10분 state 쿠키 만료, `failed` = IdP/DB 오류. 로그에 `suspicious=true` 면 state/nonce 불일치 — 콜백 위조·재생 시도일 수 있다 |
 | 데모 로그인 후 배포 401/403 | k3s `auth.yaml` 에 Dex issuer 있는지, prefix `dex:` 와 RoleBinding subject 일치하는지 |
+| backend 로그에 `discovery failed … (will retry on first use)`, 그 IdP 로그인만 401 | IdP(Google·Dex) discovery 는 기동을 막지 않고 첫 사용 때 다시 시도한다(시도당 5초, 실패는 10초 동안 캐시 — `internal/auth/multi.go`). 그래서 Dex 가 늦게 떠도 backend 는 Ready 이고 `/healthz` 도 200 이다. 닿을 때까지 그 IdP 로 들어온 요청만 401 이다. Dex 는 파드에서 닿는지 확인한다 — 노드에서 닿는 것은 근거가 아니다(§5 `demo.resetHostAliasIP`) |
 | 데모 계정 배포 폼이 "데모에서는 … 까지만" / "이 이미지를 쓸 수 없습니다" 로 거절 | RBAC 이 아니라 데모 매니페스트 상한(`demo.policy`, #350)이다 — 응답은 403 `demo-restricted` + `demo_policy[]`. 폼 항목이면 값을 낮추고, 템플릿에 고정된 값이면 템플릿의 `backoffLimit`·`ttlSecondsAfterFinished`·history limit 을 상한 이하로 고치거나 해당 키를 `null` 로 끄고 배포(values 변경은 PM 경로) |
 | "템플릿이 안 보여요" / 버전 상세 403·404 | 대부분 publish 누락이다. 초안은 소유자에게만 보인다(전역=`kubeport-admin`, 팀=그 팀 멤버). admin 토큰으로 `GET /v1/templates/<name>/versions` 를 호출해 draft 만 있는지 먼저 확인. **published 인데도 404 라면 데모 경계다**(#238) — 데모 계정에겐 데모 계정이 만들지 않은 템플릿이, 데모가 아닌 비관리자에겐 데모 템플릿이 없는 것과 같은 404 로 보인다. 운영자(데모 아닌 admin) 토큰은 이 경계를 통과하므로 재현에 쓰지 않는다. 변경 경로(`PATCH /v1/templates/<name>`, 버전 생성·수정·삭제, publish·deprecate·undeprecate)도 같다(#244) — 템플릿이 있는데 404 면 데모 경계이거나 한 번도 게시되지 않은 남의 초안이고, 사유가 담긴 403 은 볼 수 있는 템플릿에만 온다. 재현은 데모 계정 토큰이나 팀 비멤버 토큰으로 한다. 단 데모 계정 토큰의 publish·deprecate·undeprecate 는 템플릿을 찾기 전에 403 `demo-restricted` 로 거절되므로(#294), 이 세 경로의 재현은 팀 비멤버 토큰으로 한다 |
 
@@ -653,12 +656,9 @@ port-forward 로 밖에서 잡는다.
 - **SSH 키 회전** — 공인 IP 노출 + 키가 OCI capacity 폴링 GHA 시크릿에 있음. 안전 절차:
   새 키 생성 → `authorized_keys` 에 추가 → 새 키 접속 검증 → 구 키 제거 → gpg 번들/GHA 시크릿 갱신.
 - **공인 IP reserved 전환** — stop/start 대비. 전환 시 IP 변경 → DNS·인증서 재발급(유지보수 창 필요).
-- ~~**RBAC 스코프 축소** — 데모 cluster-admin → 네임스페이스 스코프 role.~~ **완료** — 데모 사용자는
-  chart 의 네임스페이스(`demo`) 스코프 RoleBinding 사용, 오너만 cluster-admin (§5-3).
 
 ## See also
 - [deploy/oci/README.md](../deploy/oci/README.md) — 최초 부트스트랩 절차
 - [ADR 0003](decisions/0003-hosting-oci-always-free.md) — 호스팅 결정
 - [docs/local-e2e.md](local-e2e.md) — 로컬(kind+dex) 등가 셋업
-- [Plan 10](superpowers/plans/2026-06-24-plan10-oci-phase2-bootstrap.md) — Phase 2 플랜
-- [docs/plan13-handoff.md](plan13-handoff.md) — 데모 모드(Plan 13) 프로덕션 롤아웃·후속 과제 인계 체크리스트
+- [CLAUDE.md](../CLAUDE.md) 플랜 표 — Plan 10(OCI 부트스트랩)·Plan 13(데모 모드, PR #2) 의 경과. 데모 모드 운영은 위 §5 "데모 모드 운영"

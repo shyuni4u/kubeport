@@ -18,6 +18,7 @@ kubeport 로컬 개발에 필요한 툴 체인과, Windows에서 자주 부딪�
 | Docker 컨테이너 파일 변경이 호스트에 반영 안 됨 / 극도로 느림 | `/mnt/c/...` WSL ↔ Windows 파일시스템 경유 |
 | `docker compose up` 에서 postgres 포트 충돌 | 로컬 Postgres 서비스가 이미 실행 중 |
 | `atlas` / `kubectl` / `pnpm` "command not found" | PATH 미설정, 또는 Windows 쪽 설치와 WSL 쪽 설치가 섞임 |
+| Windows 에서 `go test` 가 테스트 바이너리를 실행하는 단계에서 막힘 | Windows Application Control 이 `%TEMP%` 에 만들어진 테스트 바이너리를 차단(`internal/k8s` 에서 목격). 우회: `go test -c -o .\pkg.test.exe ./internal/k8s` 로 리포 안에 빌드한 뒤 `.\pkg.test.exe` |
 
 ---
 
@@ -212,19 +213,7 @@ KBP_REQUIRE_DEX=1 go test ./internal/auth/...
 
 ---
 
-## 5. Devcontainer (향후)
-
-`.devcontainer/devcontainer.json` 추가를 검토 중(아직 없음). 목표:
-
-- VS Code에서 "Reopen in Container" 한 번으로 Go + Node + pnpm + atlas + kubectl 버전 고정 환경이 뜸.
-- 신규 기기에서 클론 직후 툴 수동 설치 0.
-- CI 와 동일한 이미지 기반 → "내 머신에선 되던데" 제거.
-
-`deploy/docker/docker-compose.yml` 은 이미 있으므로(postgres + dex), devcontainer 는 그 위에 얹으면 된다.
-
----
-
-## 6. 흔한 함정 체크리스트
+## 5. 흔한 함정 체크리스트
 
 - [ ] 리포가 OneDrive/iCloud 동기화 경로 밖에 있는가
 - [ ] 경로에 공백·한글·비ASCII 문자가 없는가
@@ -236,8 +225,8 @@ KBP_REQUIRE_DEX=1 go test ./internal/auth/...
 
 ---
 
-## 7. 관련 문서
+## 6. 관련 문서
 
-- 전체 기술 스택: [CLAUDE.md](../CLAUDE.md)
-- 아키텍처: [docs/superpowers/specs/2026-04-16-initial-design.md](superpowers/specs/2026-04-16-initial-design.md)
-- Plan 1 (Task 1 저장소 초기화, Task 4 docker-compose): [docs/superpowers/plans/2026-04-16-mvp-1-vertical-slice.md](superpowers/plans/2026-04-16-mvp-1-vertical-slice.md)
+- 전체 기술 스택·아키텍처 경계: [CLAUDE.md](../CLAUDE.md)
+- 테스트 레이어·세션별 테스트 DB: [docs/testing.md](testing.md)
+- 브라우저 → kind 배포까지 로컬 e2e: [docs/local-e2e.md](local-e2e.md)

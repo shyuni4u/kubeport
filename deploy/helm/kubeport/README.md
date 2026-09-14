@@ -5,7 +5,7 @@ optional in-cluster Postgres, an Ingress, an optional cert-manager
 Certificate, and an `atlas schema apply` initContainer that runs ahead of
 the backend container on every Pod start.
 
-Target environments — k3s (Phase 1/2/3 per [ADR 0003](../../../docs/decisions/0003-hosting-oci-always-free.md))
+Target environments — k3s (the live install runs on OCI A1, per [ADR 0003](../../../docs/decisions/0003-hosting-oci-always-free.md))
 and any conformant Kubernetes cluster with cert-manager + an Ingress
 controller. Cloud-neutrality is by design: only `ingress.className`,
 `postgres.storage.storageClassName`, the public host, and the OIDC issuer URL
@@ -700,6 +700,59 @@ share a name and namespace.
     FROM clusters GROUP BY 1 HAVING count(*) > 1;
   ```
 
+### Behaviour changes when upgrading past #312
+
+A template may hold at most 50 objects. Saving one with more is refused (400
+`validation-error`), and so is deploying, updating or previewing a version saved
+before the cap — before the namespace lock is taken or the cluster is called. A
+template that size could not finish an update inside the lock's 60 seconds
+anyway; split it.
+
+### Behaviour changes when upgrading past #340
+
+**Deleting a release now deletes the PersistentVolumeClaims its StatefulSets
+created — and, under the usual reclaim policy, their data.** A StatefulSet with
+`volumeClaimTemplates` is rendered with
+`persistentVolumeClaimRetentionPolicy.whenDeleted: Delete` unless the template
+sets `whenDeleted` itself; `Retain` keeps the claims.
+
+- **An existing release gets the policy at its next update.** Deleted before
+  that, it leaves its claims behind as before.
+- **A deploy whose StatefulSet would take over claims already in the namespace
+  is refused** with 409 `resource-conflict` (`kind: PersistentVolumeClaim`).
+  With `Delete`, the StatefulSet controller adopts every unowned claim whose
+  name matches `<claim>-<statefulset>-<ordinal>` and deletes it with the
+  release. Delete the leftover claims if their data is not needed, deploy to
+  another namespace, or use `Retain`. A caller that cannot list PVCs is not
+  checked.
+- **The release page's delete confirmation says whether storage goes with it.**
+- With `demo.enabled=true`, the reset also deletes the demo namespace's claims,
+  and the demo quota caps storage (`demo.quota.storage`,
+  `demo.quota.persistentVolumeClaims`) — see [Demo mode (Dex)](#demo-mode-dex).
+
+### Behaviour changes when upgrading past #190
+
+A ui-spec may now set `instances: multiple`. Such a version names every object
+`<release>-<name>`, points the template's own references at the new names, and
+adds the release to Service and workload selectors, so one namespace can hold
+several releases of the template. Without the key a template is `single` and
+renders as before.
+
+- **A template's versions share one mode.** Creating, updating, publishing or
+  undeprecating a version of the other mode is refused (400), and so is moving
+  a release between modes on update. Make a new template for the other mode.
+- **Rolling back to an image from before #190 renders multiple versions as
+  single**, so their Services select other releases' pods. Deprecate published
+  multiple versions before such a rollback; the live install's procedure is in
+  `docs/oci-prod-runbook.md` §3-0.
+
+### Behaviour changes when upgrading past #369
+
+A new template's name must be an RFC 1123 hostname that is also a label value —
+letters and digits, `-` or `.` only between them, 63 characters at most — or
+the create is 400 `validation-error`. Templates created before the upgrade keep
+their names and keep being served.
+
 ## Uninstall
 
 ```bash
@@ -715,7 +768,7 @@ kubectl --namespace kubeport delete pvc -l app.kubernetes.io/instance=kubeport
 
 | Mode | Set | Where |
 |---|---|---|
-| Chart-managed (dev / Phase 1) | `auth.create=true`, plus `auth.appEncryptionKeyB64` / `auth.oidcClientSecret` / `postgres.password` via `--set` | Chart writes a `<release>-auth` Secret with `DATABASE_URL`, `APP_ENCRYPTION_KEY_B64`, `OIDC_CLIENT_SECRET` — plus `DEMO_OIDC_CLIENT_SECRET` when `dex.enabled=true` |
+| Chart-managed (dev, or a single-node install) | `auth.create=true`, plus `auth.appEncryptionKeyB64` / `auth.oidcClientSecret` / `postgres.password` via `--set` or `--set-file` | Chart writes a `<release>-auth` Secret with `DATABASE_URL`, `APP_ENCRYPTION_KEY_B64`, `OIDC_CLIENT_SECRET` — plus `DEMO_OIDC_CLIENT_SECRET` when `dex.enabled=true` |
 | External (recommended for prod) | `auth.create=false`, `auth.existingSecret=<name>` | You provide a Secret named `<name>` with the same keys; e.g. via `sealed-secrets` or `external-secrets`, or by hand as in [Keeping secrets off the command line](#keeping-secrets-off-the-command-line) |
 
 **With `dex.enabled=true`, the external Secret needs a fourth key:
@@ -744,14 +797,14 @@ away from printing your encryption key into a terminal or a CI log.
 
 | Mode | Set | Notes |
 |---|---|---|
-| Embedded (single-node demo) | `postgres.embedded=true` (default) | StatefulSet + headless Service + PVC. Backups not handled by chart — see ADR 0003 §"Phase 2" |
+| Embedded (single-node demo) | `postgres.embedded=true` (default) | StatefulSet + headless Service + PVC. Backups are not handled by the chart — the live install backs up the node's boot volume and can add a `pg_dump` cron ([deploy/oci/README.md](../../oci/README.md) §6.2–6.3) |
 | External | `postgres.embedded=false`, `postgres.externalUrl=postgres://...` | Use a managed PG (Cloud SQL, RDS) for prod. `externalUrl` is read at chart-render time and baked into the auth Secret unless `auth.create=false` (in which case provide it in your external Secret) |
 
 ### Cloud-specific values (Ingress + StorageClass)
 
 | Cluster | `ingress.className` | `postgres.storage.storageClassName` |
 |---|---|---|
-| k3s (Phase 1/2/3) | `traefik` | `local-path` |
+| k3s | `traefik` | `local-path` |
 | GKE | `gce` | `standard-rwo` |
 | EKS | `alb` (with [ALB controller](https://github.com/kubernetes-sigs/aws-load-balancer-controller)) | `gp3` |
 | AKS | `azure-application-gateway` | `default` |
@@ -1153,7 +1206,7 @@ For a real install on a kind cluster, follow the kind-smoke job in
 
 ## See also
 
-- [Plan 9 — Helm chart MVP](../../../docs/superpowers/plans/2026-04-29-plan9-helm-chart.md)
+- Plan 9 (Helm chart MVP) — its history is in the plan table of [CLAUDE.md](../../../CLAUDE.md)
 - [ADR 0001](../../../docs/decisions/0001-frontend-deployment-helm-over-vercel.md) — frontend in same Helm chart as backend
 - [ADR 0003](../../../docs/decisions/0003-hosting-oci-always-free.md) — 3-Phase hosting decision tree
 - [docs/deploy/images.md](../../../docs/deploy/images.md) — multi-arch image build pipeline
