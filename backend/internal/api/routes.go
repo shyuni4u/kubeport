@@ -17,7 +17,9 @@ type K8sApplier interface {
 	ApplyAll(ctx context.Context, ns string, yaml []byte) error
 	// Release methods take a k8s.ReleaseRef — name and database id: the name
 	// alone is not an identity (#195).
-	DeleteByRelease(ctx context.Context, ref k8s.ReleaseRef) error
+	// applied is the manifest the release was last applied with: a refusal to
+	// delete a resource it uses fails the delete (#380).
+	DeleteByRelease(ctx context.Context, ref k8s.ReleaseRef, applied []byte) error
 	ListInstances(ctx context.Context, ref k8s.ReleaseRef) ([]k8s.Instance, error)
 	// StreamLogs follows the named pods. since holds where each pod picks up;
 	// a pod with no entry starts from the beginning of its container log (#172).

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -159,6 +160,17 @@ func MVPResourceNames() []string {
 	return out
 }
 
+// DeleteForbiddenError is a release delete the cluster refused on resources the
+// release was applied with (#380): their objects are still there. Resources are
+// the plural resource names, each once, in the order they were tried.
+type DeleteForbiddenError struct {
+	Resources []string
+}
+
+func (e *DeleteForbiddenError) Error() string {
+	return "delete refused for " + strings.Join(e.Resources, ", ") + ": forbidden"
+}
+
 // DeleteByRelease deletes the release's MVP resources: those carrying its name
 // and its id (#195). Selecting on the name alone also deleted objects of
 // another release that shares the name — one under another registration of
@@ -176,36 +188,82 @@ func MVPResourceNames() []string {
 // Background propagation: batch/v1 Jobs orphan their pods by default, and a
 // Job's pods carry no id (its pod template is immutable), so an orphaned pod
 // would outlive the release under its name alone.
-func (c *Client) DeleteByRelease(ctx context.Context, ref ReleaseRef) error {
+//
+// applied is the manifest the release was last applied with. A refusal on a
+// resource it uses fails the delete with a DeleteForbiddenError (#380): those
+// objects are still in the cluster, and a nil here let the caller drop the
+// release row and leave them with nothing pointing at them. A refusal on a
+// resource it does not use is skipped, as is a NotFound on any.
+func (c *Client) DeleteByRelease(ctx context.Context, ref ReleaseRef, applied []byte) error {
 	namespace := ref.Namespace
 	if ref.UID == "" {
 		return errors.New("delete by release: no release id")
 	}
+	used := resourcesIn(applied)
 	// Shared with StorageOnDelete, whose warning has to be about exactly what
 	// this deletes (#340).
 	selectors := releaseSelectors(ref)
 	background := metav1.DeletePropagationBackground
 	opts := metav1.DeleteOptions{PropagationPolicy: &background}
 	errs := make([]error, 0, len(mvpResources))
+	var refused []string
 	for _, r := range mvpResources {
 		for _, sel := range selectors {
 			if err := ctx.Err(); err != nil {
-				return errors.Join(append(errs, err)...)
+				return deleteResult(append(errs, err), refused)
 			}
 			if err := c.dyn.Resource(r).Namespace(namespace).
 				DeleteCollection(ctx, opts, metav1.ListOptions{LabelSelector: sel}); err != nil {
-				// RBAC-scoped callers (e.g. demo accounts, see
-				// deploy/helm/kubeport/templates/demo-rbac.yaml) may lack access
-				// to resource groups/kinds this release never actually used
-				// (no networking group, no daemonsets/pvc, ...). Skip those
-				// instead of failing the whole release delete; a resource that's
-				// simply already gone is likewise not an error here.
-				if apierrors.IsForbidden(err) || apierrors.IsNotFound(err) {
-					continue
+				switch {
+				case apierrors.IsNotFound(err):
+					// Already gone.
+				case apierrors.IsForbidden(err) && used[r.GroupResource()]:
+					if len(refused) == 0 || refused[len(refused)-1] != r.Resource {
+						refused = append(refused, r.Resource)
+					}
+				case apierrors.IsForbidden(err):
+					// RBAC-scoped callers (e.g. demo accounts, see
+					// deploy/helm/kubeport/templates/demo-rbac.yaml) may lack
+					// access to resource groups/kinds this release never used
+					// (no networking group, no daemonsets/pvc, ...). Nothing of
+					// the release can be there to leave behind.
+				default:
+					errs = append(errs, fmt.Errorf("delete %s: %w", r.Resource, err))
 				}
-				errs = append(errs, fmt.Errorf("delete %s: %w", r.Resource, err))
 			}
 		}
 	}
-	return errors.Join(errs...)
+	return deleteResult(errs, refused)
+}
+
+// deleteResult is the refusals alone as a DeleteForbiddenError, so a caller
+// can tell an RBAC verdict from a failure a retry may clear; with any other
+// failure, all of them joined.
+func deleteResult(errs []error, refused []string) error {
+	if len(refused) == 0 {
+		return errors.Join(errs...)
+	}
+	forbidden := &DeleteForbiddenError{Resources: refused}
+	if len(errs) == 0 {
+		return forbidden
+	}
+	return errors.Join(append(errs, forbidden)...)
+}
+
+// resourcesIn is the set of MVP resources a manifest's documents are. A
+// manifest that does not parse, or none at all, names none: every refusal is
+// then skipped, as before #380.
+func resourcesIn(manifest []byte) map[schema.GroupResource]bool {
+	objs, err := splitYAML(manifest)
+	if err != nil {
+		return nil
+	}
+	used := make(map[schema.GroupResource]bool, len(objs))
+	for _, o := range objs {
+		gvk := o.GroupVersionKind()
+		if plural := pluralize(gvk.Kind); plural != "" {
+			used[schema.GroupResource{Group: gvk.Group, Resource: plural}] = true
+		}
+	}
+	return used
 }
