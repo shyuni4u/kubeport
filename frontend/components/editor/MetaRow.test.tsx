@@ -7,7 +7,7 @@ import { MetaRow } from "./MetaRow";
 // #369: a template name is one path segment in every template route. A name
 // the API would refuse says so while it is typed, not as a 400 on save.
 describe("MetaRow template name", () => {
-  const nameMessage = /영문자·숫자·하이픈으로 쓰고/;
+  const nameMessage = /영문자·숫자·하이픈·점으로 63자까지/;
 
   it("says what a name may be when the typed one would be refused", () => {
     render(<MetaRow meta={{ name: "my/app", tags: [] }} onChange={vi.fn()} />);

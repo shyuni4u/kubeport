@@ -19,10 +19,12 @@ import (
 )
 
 type createTemplateReq struct {
-	// Name is one path segment in every template route, so it holds to the rule
-	// release names have (#369): an RFC 1123 hostname. openapi.yaml documents
-	// this binding's regex as the TemplateName pattern, and
-	// TestOpenAPISpec_TemplateNamePatternIsTheBinding holds the two together. A
+	// Name is one path segment in every template route and the
+	// kubeport.io/template label on every object a release creates, so it holds
+	// to the rule release names have (#369): an RFC 1123 hostname here, and a
+	// label value in templateNameProblem. openapi.yaml documents the two as the
+	// TemplateName pattern and maxLength, and
+	// TestOpenAPISpec_TemplateNamePatternIsTheRule holds the document to them. A
 	// name with "/" used to be created and then unreachable: no route could read,
 	// change, deploy or delete it.
 	Name          string   `json:"name"           binding:"required,hostname_rfc1123"`
@@ -45,6 +47,10 @@ type createTemplateReq struct {
 func (h *Handlers) CreateTemplate(c *gin.Context) {
 	var r createTemplateReq
 	if !bindJSON(c, &r) {
+		return
+	}
+	if problem := templateNameProblem(r.Name); problem != "" {
+		writeError(c, http.StatusBadRequest, "validation-error", problem)
 		return
 	}
 

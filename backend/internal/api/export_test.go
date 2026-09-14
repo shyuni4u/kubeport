@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"time"
 
 	"github.com/gin-gonic/gin/binding"
@@ -15,9 +16,16 @@ func SetReleaseCleanupK8sTimeout(d time.Duration) (restore func()) {
 	return func() { releaseCleanupK8sTimeout = prev }
 }
 
-// ValidateCreateTemplateName runs the create request's own binding on a name,
-// with the rest of the request filled in validly, so a test can hold
-// openapi.yaml's TemplateName pattern to it (#369).
+// ValidateCreateTemplateName runs everything CreateTemplate holds a name to —
+// the request's own binding, with the rest of it filled in validly, and then
+// templateNameProblem — so a test can hold openapi.yaml's TemplateName rule to
+// the server (#369).
 func ValidateCreateTemplateName(name string) error {
-	return binding.Validator.ValidateStruct(&createTemplateReq{Name: name, DisplayName: "x", AuthoringMode: "yaml"})
+	if err := binding.Validator.ValidateStruct(&createTemplateReq{Name: name, DisplayName: "x", AuthoringMode: "yaml"}); err != nil {
+		return err
+	}
+	if problem := templateNameProblem(name); problem != "" {
+		return errors.New(problem)
+	}
+	return nil
 }

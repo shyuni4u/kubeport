@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { templateNameProblem } from "@/lib/template-name";
+import { TEMPLATE_NAME_MAX_LENGTH, templateNameProblem } from "@/lib/template-name";
 
 export type TemplateMeta = {
   name: string;
@@ -51,6 +51,7 @@ export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Prop
           className="w-48 text-sm"
           placeholder={t("namePlaceholder")}
           value={meta.name}
+          maxLength={TEMPLATE_NAME_MAX_LENGTH}
           disabled={nameLocked || lockAll}
           aria-invalid={nameInvalid || undefined}
           aria-describedby={nameInvalid ? nameMessageId : undefined}

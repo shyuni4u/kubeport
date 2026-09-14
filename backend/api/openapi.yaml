@@ -1715,14 +1715,17 @@ components:
       in: path
       required: true
       description: |
-        An RFC 1123 hostname — letters, digits and hyphens, in dot-separated
-        parts that each start with a letter or digit and run to at most 63
-        characters — the rule release names have. Creating a template refuses
-        any other name with 400 `validation-error` (#369). A template created
-        before that may hold another name; its routes still serve it.
+        An RFC 1123 hostname that is also a Kubernetes label value — at most 63
+        letters, digits, hyphens and dots, starting and ending with a letter or
+        digit, with one right after each dot — the rule release names have. It
+        becomes the `kubeport.io/template` label on every object a release
+        creates. Creating a template refuses any other name with 400
+        `validation-error` (#369). A template created before that may hold
+        another name; its routes still serve it.
       schema:
         type: string
-        pattern: '^([a-zA-Z0-9]{1}[a-zA-Z0-9-]{0,62}){1}(\.[a-zA-Z0-9]{1}[a-zA-Z0-9-]{0,62})*?$'
+        maxLength: 63
+        pattern: '^[a-zA-Z0-9](-*\.?[a-zA-Z0-9])*$'
     VersionNumber:
       name: v
       in: path
@@ -2356,11 +2359,14 @@ components:
       properties:
         name:
           type: string
-          pattern: '^([a-zA-Z0-9]{1}[a-zA-Z0-9-]{0,62}){1}(\.[a-zA-Z0-9]{1}[a-zA-Z0-9-]{0,62})*?$'
+          maxLength: 63
+          pattern: '^[a-zA-Z0-9](-*\.?[a-zA-Z0-9])*$'
           description: |
-            One path segment in every template route, so it holds to the rule
-            release names have: an RFC 1123 hostname (#369). Anything else is
-            400 `validation-error`. It cannot be changed after the template is
+            One path segment in every template route, and the
+            `kubeport.io/template` label on every object a release creates, so
+            it holds to the rule release names have: an RFC 1123 hostname that
+            is also a label value (#369). Anything else is 400
+            `validation-error`. It cannot be changed after the template is
             created.
         display_name: { type: string }
         description: { type: string }
