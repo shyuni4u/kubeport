@@ -57,7 +57,7 @@ fields:
 
 모든 템플릿에 걸리는 규칙이 몇 가지 있고, 어기면 API 가 거절한다:
 
-- **이름** — RFC 1123 hostname 이면서 Kubernetes 라벨 값이어야 한다: 영문자·숫자, `-`·`.` 는 그 사이에만, 63자까지. 릴리스가 만드는 모든 오브젝트의 `kubeport.io/template` 라벨이 되기 때문이다. 이 규칙 이전에 만든 이름은 계속 동작한다.
+- **이름** — RFC 1123 hostname 이면서 Kubernetes 라벨 값이어야 한다: 영문자·숫자, `-`·`.` 는 그 사이에만, 63자까지. 릴리스가 만드는 모든 오브젝트의 `kubeport.io/template` 라벨이 되기 때문이다. 이 규칙 이전에 만든 템플릿은 이름이 바뀌거나 다시 거절되지 않는다. 단 규칙을 어기는 이름은 원래도 배포 때 apiserver 가 거절했으므로, 그런 템플릿은 올바른 이름으로 다시 만든다.
 - **오브젝트는 50개까지** — `resources.yaml` 기준으로 저장할 때와 배포할 때 모두 검사한다. 릴리스 적용이 네임스페이스 락을 쥐는 시간 안에 끝나야 해서다.
 - **네임스페이스당 릴리스 하나 — ui-spec 이 `instances: multiple` 이 아니면.** multiple 이면 모든 오브젝트 이름이 `<릴리스>-<이름>` 이 되고, 템플릿 안의 참조가 새 이름을 따라가며, selector 가 릴리스까지 가려서 같은 템플릿을 나란히 여러 번 띄울 수 있다. 오브젝트 이름은 30자까지, `metadata.name` 은 노출할 수 없고, 버전을 게시하면 그 모드는 템플릿에 고정된다.
 - **릴리스를 지우면 StatefulSet 이 만든 저장소도 지워진다.** `volumeClaimTemplates` 가 있는 StatefulSet 은 템플릿이 `Retain` 을 쓰지 않는 한 `persistentVolumeClaimRetentionPolicy.whenDeleted: Delete` 로 렌더된다. 네임스페이스에 이미 있는 PVC 를 넘겨받게 되는 배포는 409 로 거절된다.
@@ -100,9 +100,18 @@ helm install kubeport deploy/helm/kubeport --namespace kubeport --create-namespa
 [Keeping secrets off the command line](deploy/helm/kubeport/README.md#keeping-secrets-off-the-command-line).
 
 `ingress.className` 은 클러스터에 맞는 값으로 바꾼다 — GKE `gce`, EKS `alb`,
-nginx-ingress `nginx`, k3s `traefik`. 차트 기본값이 `traefik` 이라, traefik 이 없는
-클러스터에서는 Ingress 가 만들어지되 **어떤 컨트롤러도 잡지 않는다.** 에러는 안 나고
-주소만 영원히 비어 있다.
+nginx-ingress `nginx`, k3s `traefik`. 차트 기본값은 `traefik` 이다. traefik 이 없는
+클러스터에서 기본값 그대로면 `no matches for kind "Middleware"` 로 **설치가 실패한다** —
+차트의 http→https 리다이렉트가 Traefik 오브젝트라서다(#268). TLS 까지 끈 경우에는 에러가
+전혀 안 난다: Ingress 는 만들어지지만 어떤 컨트롤러도 잡지 않아 주소가 계속 비어 있다.
+어느 쪽이든 고칠 것은 CRD 가 아니라 class 다.
+
+ingress-nginx 라면
+`--set-string 'ingress.annotations.nginx\.ingress\.kubernetes\.io/proxy-body-size=4m'` 도
+준다(작은따옴표가 셸로부터 역슬래시를 지켜, Helm 이 점을 애노테이션 이름의 일부로 읽는다).
+kubeport 는 요청 본문을 4 MiB 까지 받는데 nginx 기본 한도는 1m 이라, 이 값이 없으면 1~4 MiB
+사이의 템플릿·요청이 kubeport 에 닿기 전에 nginx 의 HTML 413 으로 거절된다. Traefik(k3s)은
+기본 한도가 없다.
 
 이 명령은 `latest` 태그를 설치한다. 계속 쓸 설치본이라면
 `--set images.backend.tag=sha-<7> --set images.frontend.tag=sha-<7>` 를 붙인다 —

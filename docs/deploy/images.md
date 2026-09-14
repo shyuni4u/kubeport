@@ -99,9 +99,15 @@ docker run --rm -e LISTEN_ADDR=:8080 kubeport-backend:dev
 클러스터에는 Helm chart 로 올린다. 이미지 좌표는 `images.backend`·`images.frontend` 이고, 계속 쓸
 설치본은 태그를 `sha-<7>` 로 핀한다 — [deploy/helm/kubeport/README.md](../../deploy/helm/kubeport/README.md).
 
-런타임 환경변수는 차트가 values 에서 만든다. 차트 없이 띄울 때의 전체 목록과 각 값의 의미는
-[docs/local-e2e.md](../local-e2e.md) §7(backend)·§8(frontend) 이 기준이다 — 목록을 여기 따로 두면
-그쪽이 바뀔 때 어긋난다.
+런타임 환경변수는 차트가 values 에서 만든다. 차트 없이 띄울 때는 차트가 렌더한 backend·frontend
+Deployment 의 `env`·ConfigMap 이 기준이다 — 목록을 여기 따로 두면 차트가 바뀔 때 어긋난다:
+
+```bash
+helm template kubeport deploy/helm/kubeport -f deploy/helm/kubeport/ci/test-values.yaml
+```
+
+[docs/local-e2e.md](../local-e2e.md) §7(backend)·§8(frontend) 은 로컬 개발에 필요한 최소 세트다. 그중
+`KBP_DEMO_*`·`DEMO_*` 는 데모 모드 전용이라 자가호스팅에서는 뺀다.
 
 ## 트러블슈팅
 

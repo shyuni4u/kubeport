@@ -20,7 +20,7 @@
 
 **원칙:**
 - 외부 SUT 에 닿지 못하면 skip 하는 테스트에는 CI 에서 그 skip 을 실패로 바꾸는 스위치가 함께 있어야 한다 — dex 는 `KBP_REQUIRE_DEX=1`, kind 는 `KBP_REQUIRE_KIND=1`(§4, §6). skip 만 있으면 배선이 끊겨도 초록이다. postgres 는 아직 skip 경로가 없어 컴포즈가 필요하다(§6).
-- kind 계열 테스트는 `KIND_API`·`KIND_CA`·`DEX_TOKEN` 이 없으면 skip 한다. CI 에서는 `playwright.yml` 이 kind 클러스터를 등록한 뒤 이 값을 주입해 돌린다.
+- kind 계열 테스트는 `KIND_API` 가 없으면 skip 한다(`openapi_proxy_test.go` 는 `KIND_CA`·`DEX_TOKEN` 까지 본다). CI 에서는 `playwright.yml` 이 kind 클러스터를 등록한 뒤 이 값을 주입해 돌린다.
 
 ## 3. 사전 조건
 
@@ -107,7 +107,7 @@ out=$(scripts/test-db.sh) && eval "$out" && echo "$TEST_DATABASE_URL" && (cd bac
 | `OIDC_CA_FILE` | (없음) | 자체서명 dex 인증서 경로 (`deploy/docker/certs/dex.crt`) |
 | `KBP_REQUIRE_DEX` | (없음) | `1` 이면 dex 미기동 시 skip 대신 FAIL. **CI 전용** — 없으면 조용히 skip 되어 초록이 되므로 |
 | `SKIP_OIDC` | (없음) | 값이 있으면 dex 기반 테스트를 무조건 skip. `KBP_REQUIRE_DEX=1` 과 함께 주면 에러 |
-| `KIND_API` · `KIND_CA` · `DEX_TOKEN` | (없음) | kind 계열 테스트(`internal/k8s`, `openapi_proxy_test.go`)가 붙을 apiserver 주소·CA·dex id_token. 하나라도 없으면 skip |
+| `KIND_API` · `KIND_CA` · `DEX_TOKEN` | (없음) | kind 계열 테스트가 붙을 apiserver 주소·CA·dex id_token. `openapi_proxy_test.go` 는 셋 중 하나라도 없으면 skip 하고, `internal/k8s` 는 `KIND_API` 만 보고 skip 한다 — `KIND_API` 만 주고 `DEX_TOKEN` 을 빼면 skip 이 아니라 인증 실패로 FAIL 한다(`internal/k8s` 는 `KIND_CA` 를 쓰지 않는다) |
 | `KBP_REQUIRE_KIND` | (없음) | `1` 이면 위 값이 없을 때 skip 대신 FAIL. **CI(`playwright.yml`) 전용** — `KBP_REQUIRE_DEX` 와 같은 이유 |
 | `KBP_KIND_API` | (없음) | `backend/e2e` 가 쓸 kind apiserver 주소. 없으면 e2e 전체 skip |
 

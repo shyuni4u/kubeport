@@ -57,7 +57,7 @@ A **release** is one deployment of a template version into a specific cluster + 
 
 A few rules hold for every template, and the API refuses one that breaks them:
 
-- **Name** — an RFC 1123 hostname that is also a Kubernetes label value: letters and digits, with `-` or `.` only between them, 63 characters at most. It becomes the `kubeport.io/template` label on everything a release creates. Templates named before this rule keep working.
+- **Name** — an RFC 1123 hostname that is also a Kubernetes label value: letters and digits, with `-` or `.` only between them, 63 characters at most. It becomes the `kubeport.io/template` label on everything a release creates. Templates created before this rule are not renamed or refused again — though a name that breaks it was already failing on deploy, so recreate such a template under a valid name.
 - **At most 50 objects** in `resources.yaml`, checked on save and again on deploy, so a release's apply fits in the time it holds its namespace lock.
 - **One release per namespace, unless the ui-spec says `instances: multiple`.** Then every object is named `<release>-<name>`, the template's own references follow the new names, and selectors also match the release, so the same template can run twice side by side. Object names stay at 30 characters or fewer, `metadata.name` cannot be exposed, and once a version is published the mode belongs to the template.
 - **Deleting a release deletes the storage its StatefulSets claimed.** A StatefulSet with `volumeClaimTemplates` is rendered with `persistentVolumeClaimRetentionPolicy.whenDeleted: Delete` unless the template writes `Retain`. A deploy whose StatefulSet would take over claims already in the namespace is refused with 409.
