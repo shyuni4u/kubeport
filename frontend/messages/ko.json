@@ -218,6 +218,7 @@
     },
     "instances": {
       "logsLink": "로그 →",
+      "logsColumn": "로그",
       "empty": "지금 실행 중인 인스턴스가 없습니다. 예약 작업이라면 다음 실행 때 나타납니다.",
       "emptyWithNotice": "실행 중인 인스턴스가 없습니다. 위 안내를 확인해 주세요."
     },
@@ -636,6 +637,7 @@
       "membersHeading": "멤버",
       "colEmail": "이메일",
       "colRole": "역할",
+      "colActions": "작업",
       "removeMember": "제거",
       "addMemberHeading": "새 멤버 추가",
       "emailLabel": "이메일",

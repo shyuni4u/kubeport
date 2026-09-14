@@ -88,7 +88,11 @@ export function InstancesTable({
           <TableHead>{L("instanceId")}</TableHead>
           <TableHead>{L("status")}</TableHead>
           <TableHead>{L("restarts")}</TableHead>
-          <TableHead className="w-20"></TableHead>
+          {/* The column holds each row's logs link. Its header is not shown,
+              but a screen reader still announces it with every cell (#379). */}
+          <TableHead className="w-20">
+            <span className="sr-only">{tInstances("logsColumn")}</span>
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>

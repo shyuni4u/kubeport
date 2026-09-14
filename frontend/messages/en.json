@@ -218,6 +218,7 @@
     },
     "instances": {
       "logsLink": "Logs →",
+      "logsColumn": "Logs",
       "empty": "No instances are running right now. For a scheduled job, they appear at its next run.",
       "emptyWithNotice": "No running instances. See the notice above."
     },
@@ -636,6 +637,7 @@
       "membersHeading": "Members",
       "colEmail": "Email",
       "colRole": "Role",
+      "colActions": "Actions",
       "removeMember": "Remove",
       "addMemberHeading": "Add a new member",
       "emailLabel": "Email",

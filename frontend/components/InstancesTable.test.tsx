@@ -31,6 +31,25 @@ describe("InstancesTable", () => {
     expect(row?.className).not.toMatch(/hover:bg-muted/);
   });
 
+  // #379: a header that is empty tells a screen reader nothing about the cells
+  // under it, scope or not. The logs column's header is visually hidden, not
+  // missing.
+  it("names every column header, the logs column included", () => {
+    render(
+      <InstancesTable
+        releaseId="abc"
+        instances={[{ name: "pod-1", phase: "Running", ready: true, restarts: 0 }]}
+      />,
+    );
+    const headers = screen.getAllByRole("columnheader");
+    expect(headers).toHaveLength(4);
+    for (const th of headers) {
+      expect(th).toHaveAttribute("scope", "col");
+      expect(th.textContent?.trim()).not.toBe("");
+    }
+    expect(screen.getByRole("columnheader", { name: "로그" })).toBeInTheDocument();
+  });
+
   it("renders instance rows with logs link", () => {
     render(
       <InstancesTable

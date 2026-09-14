@@ -52,6 +52,30 @@ describe("ReleaseTable", () => {
     expect(screen.queryByRole("table")).toBeNull();
   });
 
+  // #379: headers without `scope` left a screen reader unable to tie a cell to
+  // its column (WCAG 1.3.1).
+  it("marks every header as a column header", () => {
+    vi.stubGlobal("fetch", statusFetch({}));
+    render(<ReleaseTable rows={rows} />);
+    const headers = screen.getAllByRole("columnheader");
+    expect(headers).toHaveLength(3);
+    for (const th of headers) expect(th).toHaveAttribute("scope", "col");
+  });
+
+  // #379: the wrapper clipped with `overflow-hidden`, so on a phone the columns
+  // were cut off instead of scrolling. The scroll now lives inside the rounded
+  // box, and the table keeps its content width so there is something to scroll.
+  it("lets the table scroll sideways inside the rounded box", () => {
+    vi.stubGlobal("fetch", statusFetch({}));
+    render(<ReleaseTable rows={rows} />);
+    const table = screen.getByRole("table");
+    const scroller = screen.getByTestId("release-table-scroll");
+    expect(scroller).toHaveClass("overflow-x-auto");
+    expect(scroller).toContainElement(table);
+    expect(table).toHaveClass("min-w-max");
+    expect(scroller.parentElement).toHaveClass("overflow-hidden", "rounded-xl");
+  });
+
   it("renders a row per release without a status column", () => {
     vi.stubGlobal("fetch", statusFetch({}));
     render(<ReleaseTable rows={rows} />);

@@ -74,6 +74,9 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
   return (
     <th
       data-slot="table-head"
+      // A column header unless the caller says otherwise (`scope="row"`), so a
+      // screen reader can tie each cell to its header (WCAG 1.3.1, #379).
+      scope="col"
       className={cn(
         "h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0",
         className
