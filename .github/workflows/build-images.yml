@@ -107,8 +107,10 @@ jobs:
     # A hung build fails fast instead of holding deploys for the 6-hour default
     # (#381). deploy.yml ships a main commit only after this run succeeds for
     # it, and on 2026-09-08 the arm64 frontend build hung under QEMU for 80+
-    # minutes before it was cancelled (the rerun took 16). Runs on main take
-    # 2-10 minutes, so 30 leaves room for a cold cache without letting a hang sit.
+    # minutes before it was cancelled (the rerun took 16). Green runs take 3-13
+    # minutes (slowest: 16, frontend arm64). A timed-out run saves no cache, so
+    # re-running a genuinely slow build times out again: raise this instead of
+    # re-running if a green build ever needs more than ~25.
     timeout-minutes: 30
     # ghcr.io push. Only a push event logs in and pushes (see `Log in to GHCR`
     # and `push:` below); a PR or dispatch run still receives this token,
