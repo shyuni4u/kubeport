@@ -7,7 +7,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 
 **🟢 라이브 배포 완료 — https://kubeport.enzo.kr** (OCI Always Free A1, Phase 2 직행). Plan 0~10 실행 완료: 프론트 재설계(0~7) + drift 회수(8) + Helm chart(9) + **OCI 부트스트랩·helm install·Google OIDC·실제 k8s 배포 인프라(10)**. 운영 지식은 반드시 [docs/oci-prod-runbook.md](docs/oci-prod-runbook.md) 참조.
 
-> **▶ 현재 상태 (2026-09-13)** — 데모 가능 상태. 완료 삭제하며 갱신할 것.
+> **▶ 현재 상태 (2026-09-14)** — 데모 가능 상태. 완료 삭제하며 갱신할 것.
 > - **라이브 버전은 여기 적지 않는다** — 적을 때마다 썩었다(09-10 에 "rev 15 `c9b1404`" 라고 적힌 동안 실제로는 `7d63336` 이 떠 있었다). `curl -s https://kubeport.enzo.kr/api/healthz` 의 `version` 이 답이고(응답에 `version` 이 없으면 아직 #199 배포 이전이니 runbook §3-3 의 `helm history`·이미지 태그로 본다), 리비전 이력은 [runbook §3-3](docs/oci-prod-runbook.md#3-3-배포-확인) 의 `helm history`. 재배포 절차·함정은 [runbook §3](docs/oci-prod-runbook.md#3-재배포-이미지-갱신).
 > - **실제 k8s 배포까지 동작**: k3s 가 Google OIDC 신뢰 + RBAC 바인딩 + 클러스터 `oci-a1` 등록 (runbook §5). backend 가 사용자 Google 토큰을 k8s API 로 포워딩.
 > - **로그인/로그아웃 정상**, admin 부트스트랩(`auth.devAdminEmails`). **운영 하드닝**: idle-reclaim ping(GHA 10분) + 주간 백업 정책 + 만료 세션 자동 정리.
@@ -32,10 +32,16 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 >   - **보안** (#269 #273 #284 #287 #299 #280 #314 #265 #261 #263): 세션·OIDC state 쿠키에 `__Host-`(배포 시 전원 재로그인), 앱·Dex http→https(`ingress.httpsRedirect`), CSP enforce + 보안 헤더를 차트 values 로(`frontend.securityHeaders`, 급하면 `cspMode=report-only`), OpenAPI 는 데모=데모 group/version·템플릿 편집 권한자=전체·그 외=내장 group(#124 #283), 릴리스 읽기에서 Secret 값 가림(#196), 데모 계정은 템플릿 생성·게시·deprecate·undeprecate 가 403(#294 — `demo.allowTemplateCreate` 로 opt-in), dex 만 켠 설치는 렌더 거절(#253), build-images 액션 SHA 고정.
 >   - **릴리스 식별·동시성** (#245 #279 #271 #308 #312 #318): 오브젝트를 이름 + DB id(`kubeport.io/release-uid`)로 식별(#195), 같은 네임스페이스의 소유권 검사·적용은 advisory lock(전용 풀, #191), 템플릿당 오브젝트 50개(#281), 리셋은 비데모 릴리스가 쥔 버전만 남기고 fixture 가 아닌 게시 버전을 deprecate(#306). **리셋 시드 방식이 바뀌어 09-13 에 PM 이 리셋 Job 을 1회 수동 실행해 확인했다.**
 >   - **폼 값 규칙** (#310 #317 #320 #322 #324 #327 #328 #335 #338 #342): 미리보기는 제출과 같은 파싱 값을 보낸다(#322). 필수는 비우면 거부, 기본값 있는 선택 필드는 비우면 키를 빼 기본값, 기본값 없는 선택 필드는 `""` 유지(#334 사용자 결정 b), 가려진 Secret 은 "기존 값 유지", 필수 enum 은 라디오·선택 enum 은 "선택 안 함". 랜딩 비교 위젯도 같은 규칙.
->   - **기능** (#330 #336 #339 #343 #315): 라이트/다크/시스템 테마(쿠키 `kbp_theme`, 서버가 `<html>` 클래스를 정해 깜빡임 없음, #155 #150), 에러 표시 단계 friendly/detailed/raw(쿠키 `kbp_error_detail`, values `frontend.errorDetail`, 원문 출처는 응답 본문뿐, #6), 다중 인스턴스 ①+②(ui-spec `instances: multiple`, #190 — **이 커밋 이전으로 롤백하기 전에 게시된 multiple 버전을 deprecate**, runbook §3-0, 프론트 ③ 남음), `instance=all` 로그도 파드별 커서로 재개(#172).
+>   - **기능** (#330 #336 #339 #343 #315): 라이트/다크/시스템 테마(쿠키 `kbp_theme`, 서버가 `<html>` 클래스를 정해 깜빡임 없음, #155 #150), 에러 표시 단계 friendly/detailed/raw(쿠키 `kbp_error_detail`, values `frontend.errorDetail`, 원문 출처는 응답 본문뿐, #6), 다중 인스턴스 ①+②(ui-spec `instances: multiple`, #190 — **이 커밋 이전으로 롤백하기 전에 게시된 multiple 버전을 deprecate**, runbook §3-0, 프론트 ③ 은 #345 로 완료), `instance=all` 로그도 파드별 커서로 재개(#172).
 >   - **UI·API 기타** (#264 #267 #272 #276 #278 #292 #333 #302 #266 #275 #290 #285 #277 #291): 에디터 미저장 표시·되돌리면 해제·YAML 문법/스키마 검증·빈 템플릿은 미리보기 요청 안 함, 용어 스위치 시작값을 서버가 역할로, 시각에 앱 로케일·`UTC+9`, 배포 폼 에러 경계, 4 MiB 초과 413, 숨긴 템플릿 배포는 404·목록 API 는 모르는 쿼리 400, 코어와 이름 같은 CRD 권한 구분, 데모 로그인별 로그 스트림 상한, ui-spec pattern 을 저장 시 검증.
 >   - **CI·테스트·로컬** (#289 #297 #300 #307 #295 #311 #293 #301 #305 #313): 절대 시간 성능 테스트를 증가율로, 테스트 클러스터 정리로 409 플레이크 제거, 로컬 dex 는 루프백 publish·hosts 경고, 설치 문서가 시크릿을 커맨드라인에 두지 않음.
->   - **운영 메모**: 머지 뒤 워크트리 폴더가 "busy" 로 안 지워지면 codex `app-server-broker` 노드 프로세스가 그 워크트리를 cwd 로 붙잡은 것이다 — `Get-CimInstance Win32_Process | ? { $_.CommandLine -match 'worktrees[\\/]<이름>' }` 로 찾아 중지. 로그인이 필요한 브라우저 검증은 인계 이슈(#329·#337)로 다른 PC 에서 돌린다(공용 PC 의 Chrome 확장은 데모 비밀번호를 입력하지 않는다).
+>   - **운영 메모**: 머지 뒤 워크트리 폴더가 "busy" 로 안 지워지면 codex `app-server-broker` 노드 프로세스가 그 워크트리를 cwd 로 붙잡은 것이다 — `Get-CimInstance Win32_Process | ? { $_.CommandLine -match 'worktrees[\\/]<이름>' }` 로 찾아 중지. 로그인이 필요한 브라우저 검증은 인계 이슈(#329·#337·#368)로 다른 PC("Home PC" 세션)에서 돌린다(공용 PC 의 Chrome 확장은 데모 비밀번호를 입력하지 않는다).
+> - **2026-09-13 늦게~09-14 머지분** — 폼·데모 한도 후속과 **주간 점검(`weekly-audit` 라벨) 이슈 처리**. 주제별로:
+>   - **데이터·데모 한도** (#346 #347 #349 #351 #352 #353): StatefulSet PVC 는 릴리스와 함께 삭제(템플릿이 Retain 명시 가능, 삭제 확인에 데이터 삭제 안내, #340 사용자 결정 b1), 리셋이 PVC 도 지우고 demo 쿼터에 스토리지·ephemeral-storage 상한(#348), 데모 호출자에게만 Job 정책·이미지 허용목록(기본 끔, #350 — 셀프호스팅 기본값에 섞지 않는다), 배포 폼이 한도 거절을 "무엇을 바꿀지" 로 알려 준다.
+>   - **업데이트 흐름** (#345 #356 #361 #367): 다중 인스턴스 에디터·배포 폼 ③(#190 완료), 릴리스 상세 헤더에 "설정 바꾸기" 진입(#354), 도착 제목 "'<릴리스>' 설정 바꾸기"(#359), 적용 뒤 한 번 뜨는 안내(`?applied=1`, #362).
+>   - **주간 점검** (#372 #373 #375 #376): dev 의존성 critical 도 CI audit 게이트(#371 — `--prod` 스텝과 별도), 없는 팀 멤버 추가 404(#370), **템플릿 이름 = 릴리스 이름 규칙**(RFC 1123 + 라벨 값 63자, DB CHECK 없음·규칙 이전 이름은 계속 열림, #369), 서버 페이지·`apiFetch` 가 디코딩된 파라미터로 다른 `/v1` 라우트에 새지 않게(#374 — `lib/api-path.ts` 공유 세그먼트 규칙).
+>   - **문서·설치** (#360 #365 #366): 리셋 preflight 가 등록 안 된 `demo.cluster` 에서 아무것도 지우지 않고 멈춤(#363), dex 없으면 auth 테스트는 skip(#364).
+>   - **브라우저 검증 인계**: 로그인이 필요한 확인은 인계 이슈(#329 #337 #368)로 **"Home PC" 세션**(Playwright `--isolated`)이 돌린다. #368 은 09-14 전 항목 통과, 거기서 나온 #377(비로그인 랜딩의 `/api/v1/clusters` 401)은 #378 로 고쳤다.
 > - **데모 비밀번호 회전은 2단계다** — `helm upgrade` 로 끝나지 않는다. Dex 가 `storage: memory` 라 재시작 시 서명 키가 바뀌고, apiserver 의 JWKS 캐시를 비우지 않으면 **로그인은 되는데 클러스터 호출이 전부 401** 이다. 2026-09-10 에 이걸로 데모가 5분간 멈췄고, 그때 `/healthz` 는 초록이었다. [runbook §5 "데모 모드 운영"](docs/oci-prod-runbook.md#데모-모드-운영-plan-13-2026-09-08-롤아웃-완료).
 > - **주의**: 공인 IP `168.107.55.95` 는 ephemeral(stop/start 시 변경). **SSH 키 경로는 머신마다 다르다** — 키를 만든 머신은 `~/.ssh/oci_kuberport`, gpg 번들로 복원한 머신은 `~/.ssh/kuberport-oci/oci_kuberport`. 둘 다 정상이니 통일하지 말고 [runbook §1 "SSH 키 위치"](docs/oci-prod-runbook.md#ssh-키-위치--두-곳-다-정상이다-68) 로 확인할 것 (`kuberport` 표기 자체는 아래 "확정된 결정" 표 — 고치지 말 것). 재배포·RBAC·롤백은 runbook.
 
@@ -45,27 +51,27 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 
 | # | 플랜 | 상태 | 범위 |
 |---|---|---|---|
-| 0 | [frontend-foundation](docs/superpowers/plans/2026-04-19-frontend-foundation.md) | ✅ merged (PR #16) | 패키지·shadcn·Vitest·RoleBadge·StatusChip·TopBar 재편·Providers·Zustand·MonacoPanel |
-| 1 | [catalog-redesign](docs/superpowers/plans/2026-04-19-catalog-redesign.md) | ✅ merged (PR #17) | `/catalog` + CatalogCard + 검색/태그 필터 + 아이콘 맵 |
-| 2 | [release-detail-redesign](docs/superpowers/plans/2026-04-19-release-detail-redesign.md) | ✅ merged (PR #18) | 중첩 라우트 + 개요·로그 탭 + **SSE 백엔드 추가** + k8s 용어 토글. UpdateAvailableBadge 는 Plan 3 으로 이월 (`current_version` 정수 필드·`?updateReleaseId=` 라우트 의존). |
-| 3 | [deploy-form-redesign](docs/superpowers/plans/2026-04-19-deploy-form-redesign.md) | ✅ merged (PR #19) | **백엔드 3개 엔드포인트** (render/PUT releases/SSAR) + shadcn DynamicForm + RBAC 패널 + 업데이트 플로우 |
-| 4 | [admin-editor-redesign](docs/superpowers/plans/2026-04-19-admin-editor-redesign.md) | ✅ merged (PR #20) | ResizablePanelGroup + MetaRow + BottomBar + SchemaTree 배지 + FieldInspector enum values + ?mode=ui\|yaml 분기 |
-| 5 | [backend-meta-normalization](docs/superpowers/plans/2026-04-19-backend-meta-normalization.md) | ✅ merged (PR #21) | **MVP 전 필수 정리** — `/v1/templates/:name` JOIN 확장, `values_json` RawMessage, `PATCH /v1/templates/:name` 신설, 배포 폼 클러스터 드롭다운. Plan 3·4 구현 중 발견된 백엔드 구멍들. |
-| 6 | [post-mvp-stabilization](docs/superpowers/plans/2026-04-22-post-mvp-stabilization.md) | ✅ merged (PR #27) | 첫 실제 브라우저 테스트에서 발견된 버그·UX 갭 정리 — 레거시 `/templates/[name]/edit` 제거, 상세 페이지 permission-aware UI + `+ 새 버전`·`삭제`, `/templates/new` + version-edit 모드 탭, yaml→UI 변환 + 사용자 폼 preview, 릴리스 리스트 `상태` 컬럼 제거. **백엔드 추가**: `PATCH`/`DELETE /v1/templates/:name/versions/:v` (drafts-only), core-API openapi 경로 수정, `ui_state_json` RawMessage, `TestMain` cleanup. |
-| 7 | [plan7-visual-refresh](docs/superpowers/plans/2026-04-22-plan7-visual-refresh.md) | ✅ merged (PR #28) | **비주얼 리프레시 + i18n(ko/en) — 기능·라우트·백엔드 변경 없음.** Figma 레퍼런스(`nDP3cHNKf5Cjo6F2HU1EVv`) 기반 디자인 토큰 재정의 + `AppShell`(좌측 사이드바 + 얇은 탑바) 도입 + `CatalogCard`/`ReleaseTable`/`RoleBadge`/`StatusChip`/`MetricCards` 비주얼 리프레시 + `next-intl` 로 사용자향 문자열 외부화 + 로케일 토글 UI. |
-| 8 | [plan8-release-stale-cleanup](docs/superpowers/plans/2026-04-28-plan8-release-stale-cleanup.md) | ✅ merged (PR #35) | **DB ↔ k8s drift 회수 (Stage 1).** `GetRelease` 가 `cluster-unreachable` / `resources-missing` 분리 (read-time, DB write 없음). `DELETE /v1/releases/:id?force=true` (admin 전용) 로 k8s 호출 건너뛰고 DB row 만 정리. 릴리스 상세에 explainer 배너 — 일반 사용자에겐 "관리자에게 문의", admin 에겐 강제 삭제 버튼. ko/en i18n. **Stage 2 (reconcile loop, SA 토큰, DB 컬럼) 는 Plan 12 (deferred) 로 분리.** |
-| 9 | [plan9-helm-chart](docs/superpowers/plans/2026-04-29-plan9-helm-chart.md) | ✅ 라이브 사용 중 | **Helm chart MVP — Plan 10 의 하드 블로커.** `deploy/helm/kubeport/` 단일 chart 에 backend / frontend / 옵셔널 in-cluster Postgres / Ingress / cert-manager Certificate / atlas migration Job 구성. 클라우드 중립 (Ingress class · StorageClass · 도메인만 values 분기). CI: `helm lint` + golden snapshot + kind smoke. 코드 변경 없음 (chart 만 추가). 추정 공수 2.5–3 영업일. |
-| 10 | [plan10-oci-phase2-bootstrap](docs/superpowers/plans/2026-06-24-plan10-oci-phase2-bootstrap.md) | ✅ 실행 완료 (2026-08-20) | **OCI Phase 2 직행 부트스트랩 — 라이브 `kubeport.enzo.kr`.** OCI A1(춘천) + 도메인 + cert-manager/Let's Encrypt + Google OAuth + helm install. **추가로 실제 배포 활성화**: k3s Google OIDC 신뢰 + iptables pod/service CIDR + RBAC + 클러스터 `oci-a1` 등록. 운영·롤백·함정: [oci-prod-runbook](docs/oci-prod-runbook.md) + [deploy/oci/README §7](deploy/oci/README.md). GCP Phase 1 은 OCI capacity 조기 확보로 **건너뜀**. |
+| 0 | frontend-foundation | ✅ merged (PR #16) | 패키지·shadcn·Vitest·RoleBadge·StatusChip·TopBar 재편·Providers·Zustand·MonacoPanel |
+| 1 | catalog-redesign | ✅ merged (PR #17) | `/catalog` + CatalogCard + 검색/태그 필터 + 아이콘 맵 |
+| 2 | release-detail-redesign | ✅ merged (PR #18) | 중첩 라우트 + 개요·로그 탭 + **SSE 백엔드 추가** + k8s 용어 토글. UpdateAvailableBadge 는 Plan 3 으로 이월 (`current_version` 정수 필드·`?updateReleaseId=` 라우트 의존). |
+| 3 | deploy-form-redesign | ✅ merged (PR #19) | **백엔드 3개 엔드포인트** (render/PUT releases/SSAR) + shadcn DynamicForm + RBAC 패널 + 업데이트 플로우 |
+| 4 | admin-editor-redesign | ✅ merged (PR #20) | ResizablePanelGroup + MetaRow + BottomBar + SchemaTree 배지 + FieldInspector enum values + ?mode=ui\|yaml 분기 |
+| 5 | backend-meta-normalization | ✅ merged (PR #21) | **MVP 전 필수 정리** — `/v1/templates/:name` JOIN 확장, `values_json` RawMessage, `PATCH /v1/templates/:name` 신설, 배포 폼 클러스터 드롭다운. Plan 3·4 구현 중 발견된 백엔드 구멍들. |
+| 6 | post-mvp-stabilization | ✅ merged (PR #27) | 첫 실제 브라우저 테스트에서 발견된 버그·UX 갭 정리 — 레거시 `/templates/[name]/edit` 제거, 상세 페이지 permission-aware UI + `+ 새 버전`·`삭제`, `/templates/new` + version-edit 모드 탭, yaml→UI 변환 + 사용자 폼 preview, 릴리스 리스트 `상태` 컬럼 제거. **백엔드 추가**: `PATCH`/`DELETE /v1/templates/:name/versions/:v` (drafts-only), core-API openapi 경로 수정, `ui_state_json` RawMessage, `TestMain` cleanup. |
+| 7 | plan7-visual-refresh | ✅ merged (PR #28) | **비주얼 리프레시 + i18n(ko/en) — 기능·라우트·백엔드 변경 없음.** Figma 레퍼런스(`nDP3cHNKf5Cjo6F2HU1EVv`) 기반 디자인 토큰 재정의 + `AppShell`(좌측 사이드바 + 얇은 탑바) 도입 + `CatalogCard`/`ReleaseTable`/`RoleBadge`/`StatusChip`/`MetricCards` 비주얼 리프레시 + `next-intl` 로 사용자향 문자열 외부화 + 로케일 토글 UI. |
+| 8 | plan8-release-stale-cleanup | ✅ merged (PR #35) | **DB ↔ k8s drift 회수 (Stage 1).** `GetRelease` 가 `cluster-unreachable` / `resources-missing` 분리 (read-time, DB write 없음). `DELETE /v1/releases/:id?force=true` (admin 전용) 로 k8s 호출 건너뛰고 DB row 만 정리. 릴리스 상세에 explainer 배너 — 일반 사용자에겐 "관리자에게 문의", admin 에겐 강제 삭제 버튼. ko/en i18n. **Stage 2 (reconcile loop, SA 토큰, DB 컬럼) 는 Plan 12 (deferred) 로 분리.** |
+| 9 | plan9-helm-chart | ✅ 라이브 사용 중 | **Helm chart MVP — Plan 10 의 하드 블로커.** `deploy/helm/kubeport/` 단일 chart 에 backend / frontend / 옵셔널 in-cluster Postgres / Ingress / cert-manager Certificate / atlas migration Job 구성. 클라우드 중립 (Ingress class · StorageClass · 도메인만 values 분기). CI: `helm lint` + golden snapshot + kind smoke. 코드 변경 없음 (chart 만 추가). 추정 공수 2.5–3 영업일. |
+| 10 | plan10-oci-phase2-bootstrap | ✅ 실행 완료 (2026-08-20) | **OCI Phase 2 직행 부트스트랩 — 라이브 `kubeport.enzo.kr`.** OCI A1(춘천) + 도메인 + cert-manager/Let's Encrypt + Google OAuth + helm install. **추가로 실제 배포 활성화**: k3s Google OIDC 신뢰 + iptables pod/service CIDR + RBAC + 클러스터 `oci-a1` 등록. 운영·롤백·함정: [oci-prod-runbook](docs/oci-prod-runbook.md) + [deploy/oci/README §7](deploy/oci/README.md). GCP Phase 1 은 OCI capacity 조기 확보로 **건너뜀**. |
 | 11 | [docs/local-e2e.md §9c](docs/local-e2e.md) | 🚧 1차 (2026-09-08) | **e2e 확장.** 로컬/CI kind 대상 스펙 3개 추가 — `05-user-deploy`(폼 검증·RBAC 거부 문장·배포·삭제), `06-admin-draft-save`(미저장 가드·PATCH 저장), `07-error-pages`(not-found). **남은 것**: 라이브 OCI smoke(`demo` ns 검증 릴리스 생성·삭제는 2026-09-10 부터 상시 위임 — "멀티 세션 운영"), 클러스터 끊김·drift 회수 케이스(kind 에서 재현 방법 필요). |
 | 12 | _(미작성)_ | ⏳ deferred | **Stage 2 — release reconciler** (구 Plan 9). 백그라운드 루프로 클러스터 헬스 + 리소스 존재 검증, ServiceAccount 토큰 기반 무인 인증, DB 컬럼(`releases.observed_status`, `last_observed_at`) 추가, leader election. 클러스터 수가 늘거나 다중 페일오버 필요 시 우선. 추정 공수 4–5 영업일. |
-| 13 | [plan13-demo-mode](docs/superpowers/plans/2026-09-07-plan13-demo-mode.md) | ✅ 라이브 (PR #2, 2026-09-08 롤아웃) | **데모 모드.** Dex 데모 IdP + 데모 계정 2개(관리자/사용자) + 시드(템플릿 3·릴리스 2) + 리셋 CronJob(현재 하루 1회) + k3s 구조화 인증(Google+Dex) 전환 스크립트. 스펙: [self-improving-loop-design](docs/superpowers/specs/2026-09-07-self-improving-loop-design.md) §4.1. |
+| 13 | plan13-demo-mode | ✅ 라이브 (PR #2, 2026-09-08 롤아웃) | **데모 모드.** Dex 데모 IdP + 데모 계정 2개(관리자/사용자) + 시드(템플릿 3·릴리스 2) + 리셋 CronJob(현재 하루 1회) + k3s 구조화 인증(Google+Dex) 전환 스크립트. 스펙: [self-improving-loop-design](docs/superpowers/specs/2026-09-07-self-improving-loop-design.md) §4.1. |
 | 14 | _(미작성)_ | ⏳ planned | **UX 루프.** Sentry + Umami 계측 → role-review v2(브라우저) → 주간 Routine(이슈만) → `agent-go` 라벨 → claude-code-action draft PR → 결과 로그. 스펙 §4.2. |
 | 15 | _(미작성)_ | ⏳ planned | **기록 자동화.** 릴리스 노트 → 블로그, Playwright 데모 영상 자동 녹화, 주간 트래픽 지표 → docs/README. 스펙 §4.3. |
-| 16 | [pr-reviewers](docs/superpowers/plans/2026-09-08-pr-reviewers.md) | ✅ merged (PR #22·#59·#65) | **PR 리뷰어 시스템.** `/pr-review` 로컬 스킬 — 페르소나 에이전트(2026-09-10 부터 `ai-reviewer` 비활성) + 매니저 + `gh pr create` 훅. 스펙: [pr-reviewers-design](docs/superpowers/specs/2026-09-08-pr-reviewers-design.md). |
+| 16 | pr-reviewers | ✅ merged (PR #22·#59·#65) | **PR 리뷰어 시스템.** `/pr-review` 로컬 스킬 — 페르소나 에이전트(2026-09-10 부터 `ai-reviewer` 비활성) + 매니저 + `gh pr create` 훅. 스펙: [pr-reviewers-design](docs/superpowers/specs/2026-09-08-pr-reviewers-design.md). |
 
-참고 — 초기 디자인: [2026-04-16-initial-design.md](docs/superpowers/specs/2026-04-16-initial-design.md), Plan 2 Admin UX: [2026-04-18-plan2-admin-ux-design.md](docs/superpowers/specs/2026-04-18-plan2-admin-ux-design.md).
+참고 — 설계 결정은 [brainstorming-summary](docs/brainstorming-summary.md) 전체(§1~8 은 '확정 결정 상세' 아래, §9~15 는 각 절)와 [ADR](docs/decisions/) 에 있다. 실행이 끝난 플랜 문서와 초기 스펙 초안(initial-design·plan2-admin-ux-design)은 2026-09-14 문서 정리에서 삭제한다 — 삭제 뒤에는 git 이력에서 본다.
 
-각 플랜은 `superpowers:subagent-driven-development` 또는 `superpowers:executing-plans` 로 실행. 실행 전 **별도 워크트리** 생성 권장 (각 플랜이 frontend/backend 양쪽 건드림 — 현재 docs 워크트리에 섞지 말 것).
+새 플랜은 `docs/superpowers/plans/` 에 쓰고 `superpowers:subagent-driven-development` 또는 `superpowers:executing-plans` 로 실행한다. **실행이 끝나면 플랜 문서는 지우고** 이 표에 상태와 PR 번호만 남긴다(지난 기획서가 쌓여 지금과 다른 설명이 남는 것을 막는다). 실행 전 **별도 워크트리** 생성 권장 (각 플랜이 frontend/backend 양쪽 건드림 — 현재 docs 워크트리에 섞지 말 것).
 
 ## 확정된 결정 (요약)
 
@@ -96,7 +102,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 | Backend | DB | SQLite (dev) / Postgres (prod) |
 | Backend | DB 마이그레이션 | `atlas` |
 | Backend | 배포 | Docker image + Helm chart, **k8s Pod로 실행** |
-| Frontend | 프레임워크 | **Next.js 15 (App Router)** |
+| Frontend | 프레임워크 | **Next.js 16 (App Router)** — 결정 당시 15 |
 | Frontend | 스타일 | Tailwind + shadcn/ui |
 | Frontend | YAML 에디터 | Monaco (`dynamic import`) |
 | Frontend | 폼 | React Hook Form + Zod |
@@ -105,7 +111,7 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 | 통신 | 패턴 | **BFF** — Browser → Next.js Route Handler → Go API → k8s API |
 | 레포 | 구성 | 단일 레포, `backend/` `frontend/` `deploy/` 분리 |
 | 운영 호스팅 | 인프라 | **3-Phase 결정 트리** (근거: [ADR 0003](docs/decisions/0003-hosting-oci-always-free.md)) — **Phase 2 타겟**: OCI Always Free `VM.Standard.A1.Flex` (ARM Ampere, 4 OCPU / 24GB), $0 영구. **Phase 1 부트스트랩** (OCI A1 capacity 대기 중): GCP 90일 무료 크레딧 + `e2-medium` (서울). **Phase 3 last-resort** (OCI 끝까지 안 잡힘): Hetzner CAX21, €7/월 ([ADR 0002](docs/decisions/0002-production-hosting-hetzner-k3s.md), superseded but preserved). 공통: k3s single-node, cert-manager + Let's Encrypt, Cloudflare DNS, `ghcr.io` 멀티아치(`linux/amd64+arm64`). |
-| 운영 호스팅 | CI/CD | GitHub Actions (빌드·푸시) → 초기: ssh + `helm upgrade`. 장기: ArgoCD (GitOps, pull 기반) |
+| 운영 호스팅 | CI/CD | GitHub Actions — main 머지 → `build-images`·`CI` 초록 → `deploy.yml` 이 ssh 로 `kubeport-deploy` (runbook §3-0). 장기: ArgoCD (GitOps, pull 기반) |
 
 **아키텍처 경계 원칙**
 - 비즈니스 로직은 Go 백엔드에만. Next.js Route Handler는 **"인증 쿠키 관리 + 얇은 프록시"** 역할만.
@@ -116,15 +122,14 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 
 ```
 kubeport/
-├── CLAUDE.md                              ← 이 파일 (세션 진입점)
-├── docs/
-│   ├── brainstorming-summary.md           ← 브레인스토밍 결정 요약
-│   ├── dev-setup.md                       ← 개발 환경 설정 가이드
-│   ├── deploy/
-│   │   └── images.md                      ← 컨테이너 이미지 멀티아치 빌드/푸시 (GHA + 로컬)
-│   ├── superpowers/
-│   │   └── specs/                         ← 디자인 스펙 (다음 단계에 생성)
-│   └── decisions/                         ← ADR (필요 시 생성)
+├── CLAUDE.md                ← 이 파일 (세션 진입점)
+├── backend/                 ← Go API (gin, sqlc, atlas 스키마 migrations/schema.hcl, api/openapi.yaml)
+├── frontend/                ← Next.js App Router (BFF route handlers, messages/{ko,en}.json)
+├── deploy/                  ← helm/kubeport(차트·README), docker(compose + dex), oci(부트스트랩·kubeport-deploy)
+├── scripts/                 ← compose.sh, test-db.sh, e2e/(doctor·up·seed·run)
+├── .github/workflows/       ← ci(필수 4체크)·build-images·deploy(main 머지 → 라이브)·playwright·helm
+├── docs/                    ← runbook·machine-clients·testing·dev-setup·local-e2e·brainstorming-summary·decisions(ADR)
+└── .claude/                 ← agents(리뷰 페르소나), skills(pr-review), hooks, worktrees(세션 작업 공간)
 ```
 
 ## 세션 시작 시: 개발 환경 먼저 확인
@@ -153,7 +158,7 @@ macOS/Linux 는 그냥 Homebrew/apt 로 설치. 자세한 단계·검증 커맨�
 
 ## 작업 시 규칙
 
-- **코드 스캐폴딩 금지**: 디자인 스펙 작성 + 사용자 승인 전까지 코드 파일 생성 금지 (`package.json`, `go.mod`, `src/` 등).
+- **큰 기능은 스펙 먼저**: 새 영역(새 플랜급 기능)은 디자인 스펙 작성 + 사용자 승인 뒤 구현한다. 결함 수정·기존 기능 보강은 이슈 단위로 바로 진행.
 - **새 디자인 스펙**: `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` 경로로 작성.
 - **새 결정이 나오면**: `docs/brainstorming-summary.md`를 먼저 업데이트. 큰 결정은 `docs/decisions/`에 ADR 추가.
 - **브레인스토밍 재개 시**: 이 파일과 `docs/brainstorming-summary.md`를 먼저 읽고 시작.
@@ -386,14 +391,6 @@ cd backend && go test ./...
 - **관리자(Admin)** — 템플릿 작성자. k8s 숙련자 가정.
 - **일반 사용자(User)** — 템플릿 소비자. k8s 지식 없을 수 있음.
 - **ui-spec** — 템플릿의 어떤 경로를 사용자에게 어떤 이름/타입으로 노출할지 선언하는 오버레이.
-
-## 남은 브레인스토밍 토픽
-
-1. Visual Companion 사용 여부
-2. 아키텍처 (컴포넌트, 데이터 흐름, 데이터 모델)
-3. 기술 스택 (백엔드 / 프론트엔드 / DB)
-4. UI 목업 (관리자 템플릿 에디터, 사용자 카탈로그 / 배포 폼 / 릴리스 상세)
-5. 앱 자체의 배포 모델 (Helm chart? Docker compose? 단일 바이너리?)
 
 ## 레퍼런스 제품
 

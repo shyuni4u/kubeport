@@ -154,11 +154,11 @@
 
 **배제한 대안**: Node.js/TypeScript backend — kubernetes-client 라이브러리가 client-go 대비 덜 성숙 (특히 Watch/Informer), 그리고 v1.1 CRD 지원 시 Go의 dynamic client 이점이 큼.
 
-### 프론트엔드: Next.js 15
+### 프론트엔드: Next.js (결정 당시 15, 현재 16)
 
 | 영역 | 결정 | 이유 |
 |------|------|------|
-| 프레임워크 | **Next.js 15 (App Router)** | Route Handler 로 BFF 구현, 미들웨어 auth guard, `output: 'standalone'` 로 컨테이너화 용이 |
+| 프레임워크 | **Next.js App Router** (결정 당시 15, 현재 16) | Route Handler 로 BFF 구현, 미들웨어 auth guard, `output: 'standalone'` 로 컨테이너화 용이 |
 | 스타일 | Tailwind + shadcn/ui | 빠른 레이아웃 + 접근성 좋은 컴포넌트 |
 | YAML 에디터 | Monaco Editor | VSCode와 같은 엔진, `dynamic import`로 SSR 우회 |
 | 폼 라이브러리 | React Hook Form + Zod | ui-spec → 동적 폼 생성에 적합 |
@@ -356,10 +356,26 @@ Plan 13 데모 모드 마무리 시점에 사용자 화면 용어(카탈로그 /
 
 ---
 
-## 미해결 (다음 브레인스토밍 토픽)
+## 15. 결정 모음 (2026-09-12~14)
 
-1. UI 목업 — 템플릿 해부도 / 관리자 템플릿 편집기(YAML/UI 토글) / 사용자 카탈로그 / 배포 폼 / 릴리스 상세
-2. 데이터 모델 상세 — Template, Release, Cluster, User 테이블 스키마 + 관계
-3. API 디자인 개요 — 주요 엔드포인트
-4. 디자인 스펙 문서 작성 — `docs/superpowers/specs/YYYY-MM-DD-initial-design.md`
-5. **OIDC IdP 선택** — Google OAuth vs 자가호스팅 Keycloak (ADR 예정)
+멀티 세션 운영 중 이슈에서 사용자가 고른 방향과, 2026-09-14 문서 정리에서 삭제하는 초기 스펙·인계 문서에만 있던 결정 근거. 구현은 괄호 안 PR, 계약 서술은 [machine-clients.md](machine-clients.md)·차트 README 가 정본이다.
+
+| 주제 | 결정 | 근거·구현 |
+|---|---|---|
+| OpenAPI 스키마 노출 범위 (#283) | **(b)** 템플릿 편집 권한자만 전체, 데모는 데모 group/version, 그 외는 내장 group | 편집기에 필요한 사람만 CRD 전체를 본다 (#124 #283) |
+| 데모 계정의 템플릿 쓰기 (#294) | 데모 계정은 템플릿 생성·게시·deprecate·undeprecate 가 403. `demo.allowTemplateCreate` 로만 opt-in | §14 opt-in 원칙 적용 |
+| 템플릿당 오브젝트 수 (#281 #312) | 50개 상한 | 렌더·적용 비용 상한 |
+| 선택 필드를 비웠을 때 (#334) | **(b)** 기본값 있는 선택 필드는 키를 빼 기본값을 쓴다. 기본값 없는 선택 필드는 `""` 유지. 필수는 비우면 거부 | 폼·미리보기·랜딩 위젯이 같은 규칙 (#335 #338) |
+| StatefulSet PVC (#340) | **(b1)** 릴리스와 함께 기본 삭제, 템플릿이 Retain 을 명시할 수 있다. 삭제 확인 화면이 데이터 삭제를 알린다 | 같은 이름 재배포에 이전 데이터가 붙던 문제 (#346 #347 #349) |
+| 데모 네임스페이스 한도 (#348 #350) | 매니페스트 정책은 데모 호출자에게만 적용(`demo.policy`: Job backoff 2·TTL 86400·CronJob 이력 1, 이미지 허용목록 `demo.policy.allowedImagePrefixes` 는 기본 빈 값 = 끔, 라이브도 끔). ephemeral-storage·스토리지 상한은 demo 네임스페이스 쿼터(`demo.quota`·`demo.limits`)라 누가 배포하든 걸린다 | §14 — 셀프호스팅 기본값에 데모 제한을 섞지 않는다 (#351 #352 #353) |
+| 다중 인스턴스 (#190) | 채택. ui-spec `instances: multiple` | 롤백 주의는 runbook §3-0 (#308 #345) |
+| 테마·에러 표시 (#150 #155 #6) | 채택. 라이트/다크/시스템, 에러 표시 friendly/detailed/raw | #330 #336 |
+| UI 에디터의 YAML 미리보기 (Plan 2 스펙 §8.1) | 서버 `POST /v1/templates/preview` 가 권위 직렬화한다 | 클라이언트·서버에 직렬화기를 둘 두지 않는다 |
+| UI state 의 클러스터 (Plan 2 스펙 §8.2) | UI state 에 클러스터 이름을 저장하지 않는다(세션 로컬 힌트만) | 템플릿이 특정 클러스터에 묶이지 않게 |
+| 세션 토큰·CSRF (초기 스펙 §10 신뢰 모델) | 브라우저에는 httpOnly 세션 쿠키(세션 id)만 두고, OIDC id/refresh 토큰은 DB `sessions` 에 AES-256-GCM(`APP_ENCRYPTION_KEY_B64`)으로 암호화해 둔다. CSRF 는 SameSite=Lax + 상태 변경 라우트의 Origin 검사로 막는다 | 토큰이 브라우저 JS·저장소에 닿지 않게(§10 BFF, `frontend/lib/session.ts`), 별도 CSRF 토큰 없이 단일 origin 전제로 막는다(`lib/request-origin.ts`) |
+| 데모 팀 (Plan 13 인계 §E) | 데모용 팀을 만들지 않고 데모 템플릿은 글로벌 | demo-admin 은 팀 관리가 막혀 있고 팀이 데모 흐름에 기여하지 않는다 |
+| 템플릿 이름 규칙 (#369) | 릴리스 이름과 같은 규칙(RFC 1123 hostname + 라벨 값, 63자). DB CHECK 는 넣지 않는다 — 규칙 이전 이름이 라이브에 있는지 확인할 수 없어서. 규칙 이전 이름의 화면·라우트는 계속 열린다 | #375 #376 |
+
+---
+
+초기 브레인스토밍의 미해결 토픽(UI 목업·데이터 모델·API·초기 스펙·IdP)은 Plan 0~10 과 ADR 로 모두 결론이 났다 — IdP 는 Google OIDC + 데모용 Dex (Plan 10·13).
