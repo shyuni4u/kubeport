@@ -56,8 +56,8 @@
 
 - `CLAUDE.md` — 기술 스택 표의 Frontend 배포 행
 - `docs/brainstorming-summary.md` — 기술 스택 표 + 선택 근거 문단
-- `docs/superpowers/specs/2026-04-16-initial-design.md` — 4.1 아키텍처, 5.4 배포, 7.1 다이어그램, 11.1~11.2 배포 모델, 상단 버전 (v0.1 → v0.2)
-- `docs/superpowers/plans/2026-04-16-mvp-1-vertical-slice.md` — Architecture 문장, Task 15의 Next.js 설정
+- 초기 디자인 스펙 — 4.1 아키텍처, 5.4 배포, 7.1 다이어그램, 11.1~11.2 배포 모델, 상단 버전 (v0.1 → v0.2). 2026-09 기획 문서 정리로 삭제 — git 이력에 남음
+- MVP 1 구현 플랜 — Architecture 문장, Task 15의 Next.js 설정. 2026-09 기획 문서 정리로 삭제 — git 이력에 남음
 - `README.md` — Architecture at a glance
 - `.gitignore` — `frontend/.vercel/` 제거
 

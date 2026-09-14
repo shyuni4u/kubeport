@@ -5,7 +5,7 @@
 | 버전 | 0.1 |
 | 날짜 | 2026-04-19 |
 | 범위 | 4 화면 (Admin UI 에디터, User 카탈로그, User 배포 폼, User 릴리스 상세) |
-| 선행 문서 | [초기 디자인](2026-04-16-initial-design.md), [Plan 2 Admin UX](2026-04-18-plan2-admin-ux-design.md) |
+| 선행 문서 | 초기 디자인·Plan 2 Admin UX 스펙 — 2026-09 기획 문서 정리로 삭제(`git log --diff-filter=D --name-only -- docs/superpowers/specs` 로 찾는다). 제품 결정은 [brainstorming-summary](../../brainstorming-summary.md), API·에러 계약은 `backend/api/openapi.yaml` 과 [machine-clients](../../machine-clients.md), 차트 운영은 `deploy/helm/kubeport/README.md` 에 있다 |
 
 이 문서의 역할: **구현 타겟을 못 박는 단일 소스**. 픽셀 단위 디자인 가이드가 아니라 "어떤 컴포넌트를 쓰고, 어떤 레이아웃으로 배치하고, 어떤 상태를 관리하는지"를 Claude Code가 섹션별로 읽고 작업할 수 있게 정리.
 
