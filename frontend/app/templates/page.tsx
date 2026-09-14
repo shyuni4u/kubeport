@@ -34,9 +34,9 @@ export default async function TemplatesPage() {
       <table className="w-full bg-card border rounded">
         <thead className="text-xs text-muted-foreground">
           <tr>
-            <th className="p-2 text-left">{t("colName")}</th>
-            <th className="p-2 text-left">{t("colVersion")}</th>
-            <th className="p-2 text-left">{t("colDescription")}</th>
+            <th scope="col" className="p-2 text-left">{t("colName")}</th>
+            <th scope="col" className="p-2 text-left">{t("colVersion")}</th>
+            <th scope="col" className="p-2 text-left">{t("colDescription")}</th>
           </tr>
         </thead>
         <tbody>

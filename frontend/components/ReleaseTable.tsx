@@ -102,13 +102,18 @@ export function ReleaseTable({ rows }: { rows: ReleaseRow[] }) {
     );
   }
   return (
+    // The border and rounded corners stay on the outer box, which still clips;
+    // the scroll lives one level in. On a phone the three columns no longer fit,
+    // and `overflow-hidden` alone cut them off or crushed them instead of
+    // letting the reader scroll sideways (#379).
     <div className="overflow-hidden rounded-xl border border-border bg-card">
-      <table className="w-full text-sm">
+      <div className="overflow-x-auto" data-testid="release-table-scroll">
+        <table className="w-full min-w-max text-sm">
         <thead className="bg-muted text-xs text-muted-foreground">
           <tr>
-            <th className="px-4 py-3 text-left font-medium">{t("name")}</th>
-            <th className="px-4 py-3 text-left font-medium">{t("template")}</th>
-            <th className="px-4 py-3 text-left font-medium">
+            <th scope="col" className="px-4 py-3 text-left font-medium">{t("name")}</th>
+            <th scope="col" className="px-4 py-3 text-left font-medium">{t("template")}</th>
+            <th scope="col" className="px-4 py-3 text-left font-medium">
               {t("namespace")}
             </th>
           </tr>
@@ -149,7 +154,8 @@ export function ReleaseTable({ rows }: { rows: ReleaseRow[] }) {
             );
           })}
         </tbody>
-      </table>
+        </table>
+      </div>
     </div>
   );
 }
