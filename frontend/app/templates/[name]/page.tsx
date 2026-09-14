@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { apiFetch } from "@/lib/api-server";
+import { apiPathSegment, versionSegment } from "@/lib/api-path";
 import { ActionForm, type ActionState } from "@/components/ActionForm";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { problemTitle } from "@/lib/problem";
@@ -36,16 +37,28 @@ async function actionError(what: string, res: Response): Promise<ActionState> {
   return { error: te("generic", { status: res.status }) };
 }
 
+// A version field that is not a positive integer never reaches the API (#374).
+// The page only renders real versions, so this answers a hand-made post.
+async function badVersion(what: string): Promise<ActionState> {
+  const te = await getTranslations("templates.detail.errors");
+  console.error(`[templates] ${what} refused: version is not a positive integer`);
+  return { error: te("generic", { status: 400 }) };
+}
+
 export default async function TemplateDetail({
   params,
 }: {
   params: Promise<{ name: string }>;
 }) {
   const { name } = await params;
+  // The param arrives decoded, so `%2F`·`%2e%2e` in the URL are `/`·`..` here
+  // and would walk every API call below onto another /v1 route (#374).
+  const seg = apiPathSegment(name);
+  if (seg === null) notFound();
   const tr = await getTranslations("templates");
   const [tRes, vsRes, meRes] = await Promise.all([
-    apiFetch(`/v1/templates/${name}`),
-    apiFetch(`/v1/templates/${name}/versions`),
+    apiFetch(`/v1/templates/${seg}`),
+    apiFetch(`/v1/templates/${seg}/versions`),
     apiFetch(`/v1/me`),
   ]);
   // 404 covers both "no such template" and "not visible to this caller" —
@@ -80,8 +93,9 @@ export default async function TemplateDetail({
   // crash screen in production, hiding the actual 403/409 from the admin.
   async function publish(_prev: ActionState, formData: FormData): Promise<ActionState> {
     "use server";
-    const version = formData.get("version") as string;
-    const res = await apiFetch(`/v1/templates/${name}/versions/${version}/publish`, { method: "POST" });
+    const version = versionSegment(formData.get("version"));
+    if (version === null) return badVersion("publish");
+    const res = await apiFetch(`/v1/templates/${seg}/versions/${version}/publish`, { method: "POST" });
     if (!res.ok) return actionError("publish", res);
     revalidatePath(`/templates/${name}`);
     return {};
@@ -89,8 +103,9 @@ export default async function TemplateDetail({
 
   async function deprecate(_prev: ActionState, formData: FormData): Promise<ActionState> {
     "use server";
-    const version = formData.get("version") as string;
-    const res = await apiFetch(`/v1/templates/${name}/versions/${version}/deprecate`, { method: "POST" });
+    const version = versionSegment(formData.get("version"));
+    if (version === null) return badVersion("deprecate");
+    const res = await apiFetch(`/v1/templates/${seg}/versions/${version}/deprecate`, { method: "POST" });
     if (!res.ok) return actionError("deprecate", res);
     revalidatePath(`/templates/${name}`);
     return {};
@@ -98,8 +113,9 @@ export default async function TemplateDetail({
 
   async function undeprecate(_prev: ActionState, formData: FormData): Promise<ActionState> {
     "use server";
-    const version = formData.get("version") as string;
-    const res = await apiFetch(`/v1/templates/${name}/versions/${version}/undeprecate`, { method: "POST" });
+    const version = versionSegment(formData.get("version"));
+    if (version === null) return badVersion("undeprecate");
+    const res = await apiFetch(`/v1/templates/${seg}/versions/${version}/undeprecate`, { method: "POST" });
     if (!res.ok) return actionError("undeprecate", res);
     revalidatePath(`/templates/${name}`);
     return {};
@@ -109,8 +125,9 @@ export default async function TemplateDetail({
   // (defense-in-depth — the UI only renders this button for drafts anyway).
   async function deleteDraft(_prev: ActionState, formData: FormData): Promise<ActionState> {
     "use server";
-    const version = formData.get("version") as string;
-    const res = await apiFetch(`/v1/templates/${name}/versions/${version}`, { method: "DELETE" });
+    const version = versionSegment(formData.get("version"));
+    if (version === null) return badVersion("delete draft");
+    const res = await apiFetch(`/v1/templates/${seg}/versions/${version}`, { method: "DELETE" });
     if (!res.ok) return actionError("delete draft", res);
     revalidatePath(`/templates/${name}`);
     return {};

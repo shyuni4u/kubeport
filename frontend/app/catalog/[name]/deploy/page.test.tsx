@@ -102,6 +102,30 @@ describe("unversioned deploy page, updating a release", () => {
   });
 });
 
+// #374 — the name param arrives decoded, so `%2F`·`%2e%2e` in the URL are
+// `/`·`..` here and would put the page's API calls on another /v1 route.
+describe("unversioned deploy page, the name in API paths", () => {
+  it.each(["..", "a/b", `../releases/${ID}`, "a\\b"])(
+    "refuses %j before asking the API",
+    async (name) => {
+      apiFetch.mockResolvedValue(json(200, {}));
+      await expect(render(name)).rejects.toThrow("NOT_FOUND");
+      await expect(render(name, ID)).rejects.toThrow("NOT_FOUND");
+      expect(apiFetch).not.toHaveBeenCalled();
+    },
+  );
+
+  // #375 keeps names from before its rule working.
+  it.each([
+    ["WebApp", "/v1/templates/WebApp"],
+    ["web app", "/v1/templates/web%20app"],
+  ])("still asks for a template named %j, as one encoded segment", async (name, path) => {
+    apiFetch.mockResolvedValue(json(404));
+    await expect(render(name)).rejects.toThrow("NOT_FOUND");
+    expect(apiFetch).toHaveBeenCalledWith(path);
+  });
+});
+
 // #190 — the form holds a new release's name to what a multi-instance
 // version's objects leave, read from the version's own resources.
 describe("unversioned deploy page, name rules", () => {

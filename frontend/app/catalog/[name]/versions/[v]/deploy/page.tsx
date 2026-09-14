@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api-server";
+import { apiPathSegment } from "@/lib/api-path";
 import { isDemoEmail, withDemoSuffix } from "@/lib/demo";
 import { notFound, redirect } from "next/navigation";
 import YAML from "yaml";
@@ -26,12 +27,17 @@ export default async function VersionPinnedDeployPage({
   const { name, v } = await params;
   const { updateReleaseId } = await searchParams;
 
+  // The param arrives decoded; a `/` or `..` in it would walk the API calls
+  // below onto another /v1 route (#374).
+  const seg = apiPathSegment(name);
+  if (seg === null) notFound();
+
   const version = Number(v);
   if (!Number.isFinite(version) || !Number.isInteger(version) || version <= 0) {
     notFound();
   }
 
-  const verRes = await apiFetch(`/v1/templates/${name}/versions/${version}`);
+  const verRes = await apiFetch(`/v1/templates/${seg}/versions/${version}`);
   if (!verRes.ok) notFound();
   const ver = (await verRes.json()) as {
     ui_spec_yaml?: string;

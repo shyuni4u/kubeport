@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api-server";
+import { apiPathSegment } from "@/lib/api-path";
 import { demoNamespaceFor, isDemoEmail, withDemoSuffix } from "@/lib/demo";
 import { notFound, redirect } from "next/navigation";
 import YAML from "yaml";
@@ -29,6 +30,10 @@ export default async function DeployPage({
 }) {
   const { name } = await params;
   const { updateReleaseId } = await searchParams;
+  // The param arrives decoded; a `/` or `..` in it would walk the API calls
+  // below onto another /v1 route (#374).
+  const seg = apiPathSegment(name);
+  if (seg === null) notFound();
 
   // This route cannot start an update (#296): it renders the template's
   // current version with no release values, so an update begun here — only
@@ -52,13 +57,13 @@ export default async function DeployPage({
     redirect(updateDeployPath(read.templateName, read.version, updateReleaseId));
   }
 
-  const tRes = await apiFetch(`/v1/templates/${name}`);
+  const tRes = await apiFetch(`/v1/templates/${seg}`);
   if (!tRes.ok) notFound();
   const t = (await tRes.json()) as TemplateDetail;
   if (t.current_version == null) notFound();
 
   const vRes = await apiFetch(
-    `/v1/templates/${name}/versions/${t.current_version}`,
+    `/v1/templates/${seg}/versions/${t.current_version}`,
   );
   if (!vRes.ok) notFound();
   const v = (await vRes.json()) as TemplateVersion;
