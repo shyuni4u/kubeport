@@ -123,6 +123,8 @@ main push → build-images (sha-<7> 이미지 push)  ┐
   deploy 런은 build-images·CI 완료 **양쪽**에서 트리거되고, 실행 시점에 그 sha 의 두 워크플로 **최신 push 런**을 본다:
   한쪽이 아직 돌면 `Skipped` notice(나머지 완료가 다시 트리거한다), 한쪽이라도 success 가 아니면 **빨간 deploy 런**
   (`build-images not green` / `CI not green`) — main 을 고치거나 플레이크면 그 워크플로를 re-run 하면 초록 완료가 배포한다.
+  build-images 가 `build` 잡의 `timeout-minutes: 30`(#381)에 걸리면 `failure` 가 아니라 `cancelled` 로 끝나고 deploy 런에는
+  `ended 'completed cancelled'` 로 찍힌다 — 이것도 re-run 대상이다(§7).
   둘 다 끝나면 트리거도 두 번이라, 라이브 `version` 이 이미 그 sha 면 두 번째는 `already live` 로 건너뛴다.
 
 - **지금 라이브가 어느 커밋인가**: `curl -s https://kubeport.enzo.kr/api/healthz | jq -r .version` —
@@ -636,6 +638,7 @@ port-forward 로 밖에서 잡는다.
 | deploy 워크플로가 `Version not live` | helm 은 끝났는데 `/api/healthz` 의 version 이 안 바뀐다. `kubeport-deploy status` 로 이미지 태그, 파드·ingress 확인 (§3-3). `version` 필드가 생기기 전 빌드를 배포한 거라면(관리자 키로 그 빌드까지 롤백한 뒤에만 가능) dispatch 에 `verify_version=false` |
 | deploy 런이 `Skipped` notice 로 초록 | 셋 중 하나다(notice 문구로 구분, §3-0). `newer than` — 그 사이 main 이 더 나아갔고 새 커밋의 런들이 함께 올린다. `has not finished` — 같은 sha 의 build-images/CI 중 다른 쪽이 아직 돈다. 성공하면 그 완료가 다시 트리거하고, 실패하면 `report-failure` job 의 빨간 런이 따로 뜬다 — 뒤따르는 런이 아무것도 없으면 Actions 에서 그 sha 의 build-images/CI 런을 직접 본다. `already live` — 두 트리거 중 먼저 온 쪽이 이미 배포했다 |
 | deploy 런이 빨강 — `CI not green` / `build-images not green`(deploy job), 또는 `report-failure` job | 그 main 커밋의 CI(또는 빌드)가 success 가 아니라 **배포하지 않았다** — 라이브는 이전 커밋 그대로. 먼저 끝난 쪽이 실패하면 deploy job 이, 나중에 끝난 쪽이 실패하면 report-failure job 이 빨갛게 된다. 합쳐진 두 PR 이 main 에서만 깨지는 경우가 전형이다(#202). main 을 고치는 PR 을 머지하면 그 커밋이 배포된다. 플레이크면 그 워크플로 런을 re-run — 초록 완료가 deploy 를 다시 트리거한다. main CI 는 커밋마다 끝까지 돌므로 re-run 이 HEAD 의 CI 를 취소하지 않는다 |
+| build-images 런이 `cancelled` 이고 잡 annotation 이 `The job has exceeded the maximum execution time of 30m0s` | 사람이 취소한 게 아니라 `build` 잡의 `timeout-minutes: 30`(#381)에 걸린 것이다 — 대개 arm64 빌드가 QEMU 에서 멈춘 경우다. main 런은 concurrency 가 run_id 별이라 다른 머지가 취소하지 않으므로, main 에서 `cancelled` 는 누가 눌렀거나 이 타임아웃이다. **배포하지 않았다** — 라이브는 이전 커밋 그대로. 그 런을 re-run(`gh run rerun <databaseId>`)하면 초록 완료가 deploy 를 다시 트리거한다. 재실행도 30분에 걸리면 플레이크가 아니다 — 타임아웃된 시도는 GHA 캐시를 남기지 않아 재실행도 캐시 없이 시작하므로 빌드가 실제로 30분을 넘는 것이다. `timeout-minutes` 를 올리는 PR 을 낸다 |
 | 새 파드가 `ImagePullBackOff` | 존재하지 않는 태그로 upgrade 했다. §3-1 로 태그부터 확인하고 `helm rollback kubeport <이전rev> -n kubeport` |
 | backend 파드에 `kubectl exec` 이 `failed to exec in container` | 이미지에 셸이 없다. 정상이다 — port-forward 로 밖에서 잡는다 (§6 "Go API 를 직접 찔러 보기") |
 | `/api/v1/<경로>` 가 404·405 대신 401 | 설계된 동작이다. BFF 세션 게이트가 라우팅보다 먼저다 ([machine-clients.md §5](machine-clients.md#5-호출할-때-알아두면-좋은-것)). `/api/v1` 루트만 예외로 세션 검사 없이 404 |
