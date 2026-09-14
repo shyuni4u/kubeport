@@ -30,3 +30,30 @@ export function apiPathSegment(value: string): string | null {
 export function versionSegment(value: FormDataEntryValue | null): string | null {
   return typeof value === "string" && /^[1-9][0-9]{0,9}$/.test(value) ? value : null;
 }
+
+/**
+ * The Go API URL apiFetch requests for `path`, or null when that request would
+ * not be for `path` itself under `/v1/` (#374).
+ *
+ * One check for every server-side call, whatever built the path. A `/v1/`
+ * prefix alone is not enough: `/v1/templates/../releases/<id>` still starts
+ * with it and fetch() sends it to `/v1/releases/<id>`. So the path the URL
+ * parser makes of it has to be the path given — a collapsed `..` or `%2e%2e`,
+ * a `\` turned into `/`, or an unencoded character the parser escapes all make
+ * the two differ. The query string is not part of the comparison.
+ */
+export function serverApiUrl(base: string, path: string): string | null {
+  if (!path.startsWith("/v1/")) return null;
+  let root: URL;
+  let parsed: URL;
+  try {
+    root = new URL(base);
+    parsed = new URL(`${base}${path}`);
+  } catch {
+    return null;
+  }
+  const basePath = root.pathname.replace(/\/$/, "");
+  const pathname = path.split(/[?#]/, 1)[0];
+  if (parsed.origin !== root.origin || parsed.pathname !== `${basePath}${pathname}`) return null;
+  return `${base}${path}`;
+}

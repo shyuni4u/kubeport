@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { apiPathSegment, isSafePathSegment, versionSegment } from "./api-path";
+import { apiPathSegment, isSafePathSegment, serverApiUrl, versionSegment } from "./api-path";
 
 // #374 — server pages put decoded route params into Go API paths.
 describe("apiPathSegment", () => {
@@ -45,5 +45,50 @@ describe("versionSegment", () => {
   it("refuses a missing field and a file", () => {
     expect(versionSegment(null)).toBeNull();
     expect(versionSegment(new File(["1"], "v.txt"))).toBeNull();
+  });
+});
+
+// #374 — apiFetch's own check, for every server-side call whatever built its path.
+describe("serverApiUrl", () => {
+  const BASE = "http://kubeport-backend:8080";
+
+  it.each([
+    "/v1/me",
+    "/v1/templates/web-app/versions/2/publish",
+    "/v1/templates/web%20app",
+    "/v1/templates/%252e%252e",
+    "/v1/releases?limit=50&offset=0",
+    "/v1/teams/3f2c1a9e-8b7d-4c6e-9f10-1a2b3c4d5e6f/members",
+  ])("requests %j as given", (path) => {
+    expect(serverApiUrl(BASE, path)).toBe(`${BASE}${path}`);
+  });
+
+  it.each([
+    // Outside /v1/ altogether.
+    "/healthz",
+    "v1/me",
+    "/v1",
+    "//evil.example/v1/me",
+    // Still under /v1/ once collapsed, but not the route the path names — the
+    // prefix alone would let these through.
+    "/v1/templates/../releases/3f2c1a9e-8b7d-4c6e-9f10-1a2b3c4d5e6f",
+    "/v1/templates/%2e%2e/releases/3f2c1a9e-8b7d-4c6e-9f10-1a2b3c4d5e6f",
+    "/v1/templates/web-app/versions/./1",
+    "/v1/%2e%2e/healthz",
+    "/v1/templates/a\\..\\releases",
+    // An unencoded character the parser would escape: the path was not built
+    // from encoded segments.
+    "/v1/templates/web app",
+  ])("refuses %j", (path) => {
+    expect(serverApiUrl(BASE, path)).toBeNull();
+  });
+
+  it("refuses rather than throws on an unparseable base", () => {
+    expect(serverApiUrl("not a url", "/v1/me")).toBeNull();
+  });
+
+  it("compares under a base that has a path of its own", () => {
+    expect(serverApiUrl("http://gw.example/api", "/v1/me")).toBe("http://gw.example/api/v1/me");
+    expect(serverApiUrl("http://gw.example/api", "/v1/../me")).toBeNull();
   });
 });
