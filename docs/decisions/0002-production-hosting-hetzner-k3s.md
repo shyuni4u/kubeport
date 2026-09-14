@@ -97,4 +97,4 @@ kubeport 를 MVP 개발 이후 **실제 사용자가 접근 가능한 환경**�
 
 - `CLAUDE.md` — 기술 스택 표에 "운영 호스팅" 행 추가
 - `docs/brainstorming-summary.md` — 새 섹션 "11. 운영 호스팅" 추가
-- `docs/superpowers/plans/...-mvp-2-production-deploy.md` (미래 플랜) — 이 ADR 을 기반으로 작성
+- (작성되지 않음) MVP 2 production deploy 플랜 — 이 ADR 이 ADR 0003 으로 superseded 되며 불필요해졌다. 실제 부트스트랩 절차는 `deploy/oci/README.md`.
