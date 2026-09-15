@@ -338,8 +338,10 @@ from cdn.jsdelivr.net) is the page most likely to hit one.
 
 > The token recipe below is documented in full — claims, gotchas, and the
 > production story — in [docs/machine-clients.md §2](machine-clients.md).
-> `groups` is deliberately not requested: these static passwords define none,
-> so asking for it changes nothing.
+> `groups` is harmless either way: these static passwords define none, so the
+> token is the same with or without it. `scripts/e2e/common.sh` asks for it (so
+> the same helper works against an IdP that does emit groups); the manual example
+> below leaves it out, and the drift-recovery example further down includes it.
 
 ```bash
 ADM=$(curl -ks -X POST https://host.docker.internal:5556/token \
