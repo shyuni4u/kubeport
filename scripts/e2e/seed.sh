@@ -23,9 +23,9 @@ else
   # clone sent oidc_issuer_url=undefined, got 400, and `-sf` hid the reason).
   BODY="$(DEX_ISSUER="$DEX_ISSUER" node -e 'process.stdout.write(JSON.stringify({name:"kind",api_url:"https://127.0.0.1:6443",ca_bundle:process.env.KIND_CA,oidc_issuer_url:process.env.DEX_ISSUER,default_namespace:"default"}))')"
   RESP="$(printf '%s' "$BODY" | curl -s -w '\n%{http_code}' -H "Authorization: Bearer $ADM" -H 'content-type: application/json' \
-        -X POST "$API_URL/v1/clusters" -d @-)"
+        -X POST "$API_URL/v1/clusters" -d @-)" || true   # curl failure falls through to die below
   CODE="${RESP##*$'\n'}"
-  [[ "$CODE" == 201 ]] || die "cluster registration failed (HTTP $CODE): ${RESP%$'\n'*}"
+  [[ "$CODE" == 201 ]] || die "cluster registration failed (HTTP ${CODE:-none — curl could not reach $API_URL}): ${RESP%$'\n'*}"
   log "cluster 'kind' registered"
 fi
 
