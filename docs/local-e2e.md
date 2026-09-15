@@ -20,6 +20,7 @@ scripts/e2e/run.sh         # = pnpm exec playwright test. 특정 스펙: run.sh 
 
 | 증상 | 원인·조치 |
 |---|---|
+| `up.sh` 가 `failed to resolve reference "docker.io/library/postgres:16" … timeout awaiting response headers` 로 죽음 | Docker Desktop 을 방금 처음 띄운 직후라 레지스트리 네트워크가 아직 안 잡힌 것(#20, macOS 첫 설치에서 재현). 인증서는 이미 만들어졌으니 30초쯤 뒤 `up.sh` 를 그대로 다시 실행 — 멱등이라 만든 것은 건너뛴다 |
 | `dex not reachable` | hosts 에 `host.docker.internal` 이 없거나 LAN IP 로 잡힘 → §1. Docker Desktop 이 자동으로 넣은 항목은 지우고 `127.0.0.1 host.docker.internal` 로 |
 | 로그인 후 `/catalog` 로 안 감, 401 | `frontend/tests/e2e/.auth/*.json` 이 DB 리셋·dex 재시작 이후 stale → `run.sh --fresh` |
 | 05 스펙의 pattern 검증이 안 뜸 | 예전 시드 템플릿이 남아 있음 → `seed.sh -reset` |

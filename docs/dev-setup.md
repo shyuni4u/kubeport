@@ -135,7 +135,7 @@ curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
 
 ```bash
 # macOS (Homebrew)
-brew install go node pnpm atlas-go kubectl kind make sqlc
+brew install go node pnpm atlas kubectl kind make sqlc   # atlas = ariga/atlas (community edition, enough for `schema apply`)
 brew install --cask docker   # Docker Desktop
 
 # helm 은 버전을 고정한다 — `brew install helm` 은 helm 4 를 준다. 이유는 §2 Step 3.
