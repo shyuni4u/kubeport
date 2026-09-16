@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { KindPicker, KindRef } from "@/components/KindPicker";
+import { fieldSchemaProblems } from "@/lib/field-schema";
 import { SchemaTree } from "@/components/SchemaTree";
 import { FieldInspector, UIField } from "@/components/FieldInspector";
 import { YamlPreview, UIModeTemplate } from "@/components/YamlPreview";
@@ -221,7 +222,8 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
 
   // A name the API refuses keeps save off, with the reason beside it (#369).
   const nameBlocked = templateNameProblem(meta.name) === "format" ? t("meta.nameInvalid") : undefined;
-  const canSave = meta.name.trim().length > 0 && !nameBlocked && resources.length > 0 && !saving;
+  const schemaProblems = fieldSchemaProblems(resources.map(r => ({ ...r, schema: r.rootSchema })));
+  const canSave = schemaProblems.length === 0 && meta.name.trim().length > 0 && !nameBlocked && resources.length > 0 && !saving;
   // Plan 4 Task 7 scope: Publish is not part of the create flow; a newly
   // created template version always starts as `draft` and is published from
   // the template detail page. We expose the button disabled here so the
@@ -230,6 +232,7 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
   const canPublish = false;
 
   async function saveDraft() {
+    if (schemaProblems.length) { setErr(t("errors.schemaTypeMismatch", { path: schemaProblems[0] })); return; }
     setErr(null);
     setFailure(null);
     // Every exposed field needs a label — it's what the end-user sees.
@@ -351,7 +354,11 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
     <div className="text-muted-foreground text-sm">{t("pickFieldHint")}</div>
   );
 
-  const preview = (
+  const preview = schemaProblems.length ? (
+    <div className="p-3" role="alert">
+      {schemaProblems.map(path => <p key={path} className="text-sm text-destructive">{t("errors.schemaTypeMismatch", { path })}</p>)}
+    </div>
+  ) : (
     <div className="p-3">
       <Tabs defaultValue="yaml">
         <TabsList className="mb-2">
@@ -416,7 +423,7 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
         canSave={canSave}
         dirty={dirty}
         canPublish={canPublish}
-        blockedReason={nameBlocked}
+        blockedReason={nameBlocked ?? (schemaProblems.length ? t("errors.schemaTypeMismatch", { path: schemaProblems[0] }) : undefined)}
         saving={saving}
         publishing={publishing}
         onSave={saveDraft}

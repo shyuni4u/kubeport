@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { fieldSchemaProblems } from "@/lib/field-schema";
 import { SchemaTree } from "@/components/SchemaTree";
 import { FieldInspector, UIField } from "@/components/FieldInspector";
 import { YamlPreview, UIModeTemplate } from "@/components/YamlPreview";
@@ -282,13 +283,17 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
   //   - non-draft source (any mode) → POST creates a new draft.
   const isYamlDraft = sourceStatus === "draft" && sourceAuthoringMode !== "ui";
   const saveAsPatch = sourceStatus === "draft" && sourceAuthoringMode === "ui";
-  const canSave = !!state && !saving && !isYamlDraft;
+  const schemaProblems = fieldSchemaProblems((state?.resources ?? []).map(r => ({ ...r, schema: schemas[`${r.apiVersion}/${r.kind}`] })));
+  const schemasReady = !!state && state.resources.every(r => !!schemas[`${r.apiVersion}/${r.kind}`]);
+  const canSave = schemasReady && schemaProblems.length === 0 && !!state && !saving && !isYamlDraft;
   // Publish-from-editor is a later task; the BottomBar shell stays consistent
   // but the button is disabled here. Publishing still happens from the
   // template detail page.
   const canPublish = false;
 
   async function save() {
+    if (!schemasReady) return;
+    if (schemaProblems.length) { setErr(t("errors.schemaTypeMismatch", { path: schemaProblems[0] })); return; }
     setErr(null);
     setFailure(null);
     if (!state) return;
@@ -476,7 +481,13 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
     <div className="text-muted-foreground text-sm">{t("pickFieldHint")}</div>
   );
 
-  const preview = (
+  const preview = !schemasReady ? (
+    <p className="p-3 text-sm text-muted-foreground">{cluster ? t("schemaLoading", { cluster }) : t("schemaLoadingNoCluster")}</p>
+  ) : schemaProblems.length ? (
+    <div className="p-3" role="alert">
+      {schemaProblems.map(path => <p key={path} className="text-sm text-destructive">{t("errors.schemaTypeMismatch", { path })}</p>)}
+    </div>
+  ) : (
     <div className="p-3">
       <Tabs defaultValue="yaml">
         <TabsList className="mb-2">
@@ -550,6 +561,7 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
         </div>
       )}
       <BottomBar
+        blockedReason={!schemasReady ? (cluster ? t("schemaLoading", { cluster }) : t("schemaLoadingNoCluster")) : schemaProblems.length ? t("errors.schemaTypeMismatch", { path: schemaProblems[0] }) : undefined}
         canSave={canSave}
         canPublish={canPublish}
         dirty={dirty}

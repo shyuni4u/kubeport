@@ -4,6 +4,7 @@ import { useId } from "react";
 import { useTranslations } from "next-intl";
 import type { SchemaNode } from "@/lib/openapi";
 import { HelpHint } from "@/components/HelpHint";
+import { mapSchemaType, fieldMatchesSchema } from "@/lib/field-schema";
 
 // Field types the editor supports. `enum` and `autocomplete` both render a
 // values list editor (admin-supplied options); the difference is enforcement
@@ -76,23 +77,27 @@ export function FieldInspector({
         min-width is its content, which would stop the inspector shrinking.
       */}
       <fieldset disabled={readOnly} className="min-w-0 border-0 p-0 m-0">
+      {!schemaType && <p role="alert" className="mb-3 text-muted-foreground">{t("unsupportedType")}</p>}
+      {value && !fieldMatchesSchema(node, value) && <p role="alert" className="mb-3 text-destructive">{t("typeMismatch")}</p>}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <button
           type="button"
           className={`min-h-9 px-3 py-1.5 rounded text-sm ${mode === "fixed" ? "bg-primary text-primary-foreground" : "bg-muted"}`}
-          onClick={() => onChange({ mode: "fixed", fixedValue: defaultFor(schemaType) })}
+          disabled={!schemaType}
+          onClick={() => schemaType && onChange({ mode: "fixed", fixedValue: defaultFor(schemaType) })}
         >{t("fix")}</button>
         <HelpHint text={t("fixHelp")} />
         <button
           type="button"
           className={`min-h-9 px-3 py-1.5 rounded text-sm ${mode === "exposed" ? "bg-primary text-primary-foreground" : "bg-muted"}`}
-          onClick={() => onChange({ mode: "exposed", uiSpec: { label: "", type: schemaType, required: false } })}
+          disabled={!schemaType}
+          onClick={() => schemaType && onChange({ mode: "exposed", uiSpec: { label: "", type: schemaType, required: false } })}
         >{t("expose")}</button>
         <HelpHint text={t("exposeHelp")} />
         {value && <button type="button" className="ml-auto text-xs text-red-600 dark:text-red-400" onClick={onClear}>{t("clear")}</button>}
       </div>
 
-      {value?.mode === "fixed" && (
+      {schemaType && value?.mode === "fixed" && (
         <div>
           <label className="block text-xs mb-1">{t("value")}</label>
           <input
@@ -103,7 +108,7 @@ export function FieldInspector({
         </div>
       )}
 
-      {value?.mode === "exposed" && (
+      {schemaType && value?.mode === "exposed" && fieldMatchesSchema(node, value) && (
         <div className="space-y-2">
           {/*
             Type toggle for string-compatible schema slots. We hide it for
@@ -227,13 +232,6 @@ function Labeled({ label, v, placeholder, onChange }: { label: string; v: string
       <input id={id} className="min-h-10 border rounded px-3 py-2 w-full" value={v} placeholder={placeholder} onChange={e => onChange(e.target.value)} />
     </div>
   );
-}
-
-function mapSchemaType(n: SchemaNode): UISpecType {
-  if (n.enum) return "enum";
-  if (n.type === "integer" || n.type === "number") return "integer";
-  if (n.type === "boolean") return "boolean";
-  return "string";
 }
 
 function defaultFor(t: UISpecType): unknown {

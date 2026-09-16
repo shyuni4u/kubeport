@@ -34,6 +34,32 @@ function harness(
 }
 
 describe("FieldInspector", () => {
+  describe("schema type safety (#412)", () => {
+    it.each(["object", "array", "number", undefined] as const)("blocks unsupported %s fields", type => {
+      const { onChange } = harness(undefined, { type });
+      expect(screen.getByRole("alert")).toHaveTextContent(ko.templates.editor.field.unsupportedType);
+      for (const name of ["값 고정", "사용자 노출"]) {
+        const button = screen.getByRole("button", { name });
+        expect(button).toBeDisabled();
+        fireEvent.click(button);
+      }
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it("allows clearing a legacy object exposed as a string without offering scalar inputs", () => {
+      const { onClear } = harness({ mode: "exposed", uiSpec: { label: "Data", type: "string", default: "hi" } }, { type: "object" });
+      expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+      expect(screen.getByText(ko.templates.editor.field.typeMismatch)).toBeVisible();
+      fireEvent.click(screen.getByText(ko.templates.editor.field.clear));
+      expect(onClear).toHaveBeenCalledOnce();
+    });
+
+    it.each(["string", "integer", "boolean"] as const)("preserves %s exposure", type => {
+      const { onChange } = harness(undefined, { type });
+      fireEvent.click(screen.getByRole("button", { name: "사용자 노출" }));
+      expect(onChange).toHaveBeenCalledWith({ mode: "exposed", uiSpec: { label: "", type, required: false } });
+    });
+  });
   describe("header + help", () => {
     it("shows the ui-spec path Kind[name].path when resource context is given", () => {
       harness(undefined, stringSchema, { kind: "Deployment", resourceName: "web" });
