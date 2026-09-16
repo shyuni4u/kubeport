@@ -65,6 +65,7 @@ export function CatalogBrowser({ templates }: Props) {
         <Input
           className="max-w-xs"
           placeholder={t("searchPlaceholder")}
+          aria-label={t("searchPlaceholder")}
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />

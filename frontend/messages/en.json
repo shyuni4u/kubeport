@@ -383,6 +383,7 @@
     }
   },
   "logs": {
+    "instanceSelector": "{kube, select, true {Select log pod} other {Select log instance}}",
     "autoscroll": "Auto-scroll",
     "clear": "Clear",
     "emptyWaiting": "No output yet. Lines appear here as soon as it runs.",
