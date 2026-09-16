@@ -598,7 +598,7 @@
         "pathAutoArray": "{path} cannot be set: {at} does not exist, and a list is not created automatically. Add it to resources.yaml.",
         "schemaType": "{path} should be {expected}, not {actual}. The cluster may refuse it at deploy."
       },
-      "demoPractice": "In the demo, you can edit drafts of existing templates and preview user forms. Saving new templates depends on this installation’s settings; publishing is unavailable.",
+      "demoPractice": "In the demo, you can edit drafts of existing templates and preview user forms. Saving new templates and publishing may be restricted by this installation’s settings.",
       "existingTemplates": "Start from an existing template"
     },
     "status": {
