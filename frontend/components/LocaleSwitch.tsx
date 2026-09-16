@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useTransition } from "react";
+import { SettingsSelect } from "./SettingsSelect";
 
 type Locale = "ko" | "en";
 const OPTIONS: Array<{ value: Locale; label: string }> = [
@@ -25,18 +26,12 @@ export function LocaleSwitch() {
   }
 
   return (
-    <select
-      aria-label={t("localeSwitchLabel")}
+    <SettingsSelect
+      label={t("localeSwitchLabel")}
       value={current}
       disabled={pending}
-      onChange={(e) => pick(e.target.value as Locale)}
-      className="rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground disabled:opacity-60"
-    >
-      {OPTIONS.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
+      onValueChange={pick}
+      options={OPTIONS}
+    />
   );
 }

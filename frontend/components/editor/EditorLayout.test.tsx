@@ -67,10 +67,10 @@ describe("EditorLayout on a wide viewport", () => {
   // never the viewport. Computing the percentage against the viewport is how
   // the first attempt at this landed on 22%, which is 162px of the real 736px
   // group — under the floor it was written to enforce.
-  it("cannot be dragged below the 220px floor at its narrowest", () => {
+  it("cannot be dragged below the 340px floor at its narrowest", () => {
     expect(
       (MIN_PANEL_PERCENT / 100) * (WIDE_LAYOUT_MIN_PX - SHELL_CHROME_PX),
-    ).toBeGreaterThanOrEqual(220);
+    ).toBeGreaterThanOrEqual(340);
   });
 
   it("leaves room for three panels at once", () => {
@@ -91,7 +91,7 @@ describe("EditorLayout on a wide viewport", () => {
       });
 
     renderWithIntl(<EditorLayout {...panels} />);
-    expect(seen).toEqual([MIN_PANEL_PERCENT, MIN_PANEL_PERCENT, MIN_PANEL_PERCENT]);
+    expect(seen).toEqual(Array(3).fill(`${MIN_PANEL_PERCENT}%`));
     spy.mockRestore();
   });
 
@@ -103,7 +103,7 @@ describe("EditorLayout on a wide viewport", () => {
     const spy = vi
       .spyOn(mod, "ResizablePanel")
       .mockImplementation((props: Record<string, unknown>) => {
-        seen.push(props.defaultSize as number);
+        seen.push(Number.parseFloat(props.defaultSize as string));
         return <div>{props.children as React.ReactNode}</div>;
       });
 

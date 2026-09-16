@@ -58,12 +58,14 @@ export default async function AdminTeamsPage() {
           {t("demoNotice")}
         </p>
       )}
-      <ActionForm action={createTeam} className="flex flex-wrap gap-2 mb-6">
-        <label htmlFor="team-name" className="sr-only">{t("slugLabel")}</label>
-        <input id="team-name" name="name" placeholder={t("slugPlaceholder")} className="border rounded px-3 py-1.5" required />
-        <label htmlFor="team-display-name" className="sr-only">{t("displayNameLabel")}</label>
-        <input id="team-display-name" name="display_name" placeholder={t("displayNamePlaceholder")} className="border rounded px-3 py-1.5" />
-        <button className="px-4 py-1.5 bg-primary text-primary-foreground rounded">{t("createButton")}</button>
+      <ActionForm action={createTeam} className="mb-6">
+        <fieldset disabled={isDemo} className="flex flex-wrap gap-2 disabled:opacity-70">
+          <label htmlFor="team-name" className="sr-only">{t("slugLabel")}</label>
+          <input id="team-name" name="name" placeholder={t("slugPlaceholder")} className="h-11 sm:h-10 min-w-0 border rounded px-3" required />
+          <label htmlFor="team-display-name" className="sr-only">{t("displayNameLabel")}</label>
+          <input id="team-display-name" name="display_name" placeholder={t("displayNamePlaceholder")} className="h-11 sm:h-10 min-w-0 border rounded px-3" />
+          <button className="h-11 sm:h-10 px-4 bg-primary text-primary-foreground rounded">{t("createButton")}</button>
+        </fieldset>
       </ActionForm>
       <ul className="space-y-2">
         {teams.map(t => (

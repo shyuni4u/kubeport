@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { renderWithIntl as render } from "@/tests/intl-test-utils";
 import { ErrorDetailProvider, useErrorDetail } from "./ErrorDetailProvider";
+import userEvent from "@testing-library/user-event";
 import { ErrorDetailSwitch } from "./ErrorDetailSwitch";
 
 function LevelProbe() {
@@ -14,41 +15,44 @@ afterEach(() => {
 });
 
 describe("ErrorDetailSwitch", () => {
-  it("is a labelled select starting at the server's level, with the three levels", () => {
+  it("is a labelled select starting at the server's level, with the three levels", async () => {
     render(
       <ErrorDetailProvider initial="raw">
         <ErrorDetailSwitch />
       </ErrorDetailProvider>,
     );
     const select = screen.getByRole("combobox", { name: "에러 표시" });
-    expect(select).toHaveValue("raw");
-    expect(screen.getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual([
-      "friendly",
-      "detailed",
-      "raw",
+    expect(select).toHaveTextContent("원문");
+    await userEvent.click(select);
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "간단히",
+      "자세히",
+      "원문",
     ]);
   });
 
-  it("choosing a level changes it for the page at once and writes the cookie", () => {
+  it("choosing a level changes it for the page at once and writes the cookie", async () => {
     render(
       <ErrorDetailProvider initial="friendly">
         <ErrorDetailSwitch />
         <LevelProbe />
       </ErrorDetailProvider>,
     );
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "detailed" } });
+    await userEvent.click(screen.getByRole("combobox"));
+    await userEvent.click(screen.getByRole("option", { name: "자세히" }));
     expect(screen.getByTestId("level")).toHaveTextContent("detailed");
     expect(document.cookie).toContain("kbp_error_detail=detailed");
   });
 
-  it("writes a host-only cookie on Path=/ with SameSite=Lax", () => {
+  it("writes a host-only cookie on Path=/ with SameSite=Lax", async () => {
     const set = vi.spyOn(document, "cookie", "set");
     render(
       <ErrorDetailProvider initial="friendly">
         <ErrorDetailSwitch />
       </ErrorDetailProvider>,
     );
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "raw" } });
+    await userEvent.click(screen.getByRole("combobox"));
+    await userEvent.click(screen.getByRole("option", { name: "원문" }));
     expect(set).toHaveBeenCalledTimes(1);
     const written = set.mock.calls[0][0].toLowerCase();
     expect(written).toContain("path=/");

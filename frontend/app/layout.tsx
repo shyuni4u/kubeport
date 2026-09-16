@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages, getNow, getTimeZone } from "next-intl/server";
 import "./globals.css";
@@ -9,9 +10,12 @@ import { ERROR_DETAIL_COOKIE } from "@/lib/error-detail";
 import { parseTheme, THEME_COOKIE, themeClass } from "@/lib/theme";
 import { Providers } from "./providers";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+const pretendard = localFont({
+  src: "./fonts/PretendardVariable.woff2",
+  variable: "--font-pretendard",
+  weight: "45 920",
+  display: "swap",
+  preload: false,
 });
 
 const geistMono = Geist_Mono({
@@ -49,7 +53,7 @@ export default async function RootLayout({
   return (
     <html
       lang={locale}
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased${themeCls ? ` ${themeCls}` : ""}`}
+      className={`${pretendard.variable} ${geistMono.variable} h-full antialiased${themeCls ? ` ${themeCls}` : ""}`}
     >
       <body className="min-h-full bg-background text-foreground">
         <NextIntlClientProvider

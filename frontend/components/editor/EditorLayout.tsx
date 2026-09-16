@@ -27,8 +27,8 @@ type Props = {
   selectionEvent?: number;
 };
 
-/** Narrowest viewport that still gets three columns — Tailwind's `lg`. */
-export const WIDE_LAYOUT_MIN_PX = 1024;
+/** Keep three columns for large desktops; smaller workspaces use full-width tabs. */
+export const WIDE_LAYOUT_MIN_PX = 1440;
 /**
  * What AppShell takes off the viewport before the panel group sees it:
  * Sidebar `w-60` (240px, shown from `md` up) plus the main container's `p-6`
@@ -36,13 +36,7 @@ export const WIDE_LAYOUT_MIN_PX = 1024;
  * the *group*, so the floor has to be computed against this, not the viewport.
  */
 export const SHELL_CHROME_PX = 288;
-/**
- * Spec §3.6 wants 220px per panel. 220 of (1024 − 288) = 736px is 29.9%, so 30.
- * Three of those come to 90%, leaving room to drag.
- *
- * This is also why the breakpoint is `lg` and not `md`: at 768px the group is
- * 480px, where 220px is 45.8% and three panels cannot coexist at all.
- */
+/** At 1440px, 30% of the workspace leaves at least 345px per panel. */
 export const MIN_PANEL_PERCENT = 30;
 
 export function EditorLayout({ tree, inspector, preview, selectionEvent }: Props) {
@@ -55,17 +49,18 @@ export function EditorLayout({ tree, inspector, preview, selectionEvent }: Props
   return wide ? (
     <ResizablePanelGroup
       orientation="horizontal"
-      className="min-h-[calc(100vh-220px)] rounded-md border"
+      className="min-h-96 rounded-md border"
+      style={{ height: "65dvh" }}
     >
-      <ResizablePanel defaultSize={30} minSize={MIN_PANEL_PERCENT}>
+      <ResizablePanel defaultSize="30%" minSize={`${MIN_PANEL_PERCENT}%`}>
         <div className="h-full overflow-auto p-3">{tree}</div>
       </ResizablePanel>
       <ResizableHandle withHandle />
-      <ResizablePanel defaultSize={35} minSize={MIN_PANEL_PERCENT}>
+      <ResizablePanel defaultSize="35%" minSize={`${MIN_PANEL_PERCENT}%`}>
         <div className="h-full overflow-auto p-3">{inspector}</div>
       </ResizablePanel>
       <ResizableHandle withHandle />
-      <ResizablePanel defaultSize={35} minSize={MIN_PANEL_PERCENT}>
+      <ResizablePanel defaultSize="35%" minSize={`${MIN_PANEL_PERCENT}%`}>
         <div className="h-full overflow-auto">{preview}</div>
       </ResizablePanel>
     </ResizablePanelGroup>

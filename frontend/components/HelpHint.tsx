@@ -19,7 +19,7 @@ export function HelpHint({ text, className }: { text: string; className?: string
             type="button"
             aria-label={t("help")}
             className={cn(
-              "inline-flex size-4 items-center justify-center rounded-full text-muted-foreground align-middle hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring",
+              "inline-flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground align-middle hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring",
               className,
             )}
           />

@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { useTranslations } from "next-intl";
 import type { SchemaNode } from "@/lib/openapi";
 import { HelpHint } from "@/components/HelpHint";
@@ -75,16 +76,16 @@ export function FieldInspector({
         min-width is its content, which would stop the inspector shrinking.
       */}
       <fieldset disabled={readOnly} className="min-w-0 border-0 p-0 m-0">
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex flex-wrap items-center gap-2 mb-3">
         <button
           type="button"
-          className={`px-2 py-1 rounded text-xs ${mode === "fixed" ? "bg-primary text-primary-foreground" : "bg-muted"}`}
+          className={`min-h-9 px-3 py-1.5 rounded text-sm ${mode === "fixed" ? "bg-primary text-primary-foreground" : "bg-muted"}`}
           onClick={() => onChange({ mode: "fixed", fixedValue: defaultFor(schemaType) })}
         >{t("fix")}</button>
         <HelpHint text={t("fixHelp")} />
         <button
           type="button"
-          className={`px-2 py-1 rounded text-xs ${mode === "exposed" ? "bg-primary text-primary-foreground" : "bg-muted"}`}
+          className={`min-h-9 px-3 py-1.5 rounded text-sm ${mode === "exposed" ? "bg-primary text-primary-foreground" : "bg-muted"}`}
           onClick={() => onChange({ mode: "exposed", uiSpec: { label: "", type: schemaType, required: false } })}
         >{t("expose")}</button>
         <HelpHint text={t("exposeHelp")} />
@@ -95,7 +96,7 @@ export function FieldInspector({
         <div>
           <label className="block text-xs mb-1">{t("value")}</label>
           <input
-            className="border rounded px-2 py-1 w-full"
+            className="min-h-10 border rounded px-3 py-2 w-full"
             value={String(value.fixedValue ?? "")}
             onChange={e => onChange({ mode: "fixed", fixedValue: coerce(e.target.value, schemaType) })}
           />
@@ -123,7 +124,7 @@ export function FieldInspector({
                   <button
                     key={ty}
                     type="button"
-                    className={`flex-1 px-2 py-1 rounded text-xs ${
+                    className={`flex-1 min-h-9 px-3 py-1.5 rounded text-sm ${
                       value.uiSpec.type === ty
                         ? "bg-primary text-primary-foreground"
                         : "bg-muted"
@@ -219,10 +220,11 @@ export function FieldInspector({
 }
 
 function Labeled({ label, v, placeholder, onChange }: { label: string; v: string; placeholder?: string; onChange: (v: string) => void }) {
+  const id = useId();
   return (
     <div>
-      <label className="block text-xs mb-1">{label}</label>
-      <input className="border rounded px-2 py-1 w-full" value={v} placeholder={placeholder} onChange={e => onChange(e.target.value)} />
+      <label htmlFor={id} className="block text-sm mb-1">{label}</label>
+      <input id={id} className="min-h-10 border rounded px-3 py-2 w-full" value={v} placeholder={placeholder} onChange={e => onChange(e.target.value)} />
     </div>
   );
 }

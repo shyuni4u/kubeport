@@ -544,7 +544,7 @@ function FieldRow({
               </span>
             ) : null}
           </div>
-          <div ref={area}>
+          <div ref={area} className="min-w-0">
             {keeping ? (
               <KeptSecret
                 label={field.label}

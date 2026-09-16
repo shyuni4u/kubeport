@@ -12,9 +12,10 @@ type Props = {
   // rendered as "—" (a dash reads as "broken" to a non-k8s user).
   memory: string | null;
   accessURL: string | null;
+  releaseId?: string;
 };
 
-export function MetricCards({ readyTotal, restarts, memory, accessURL }: Props) {
+export function MetricCards({ readyTotal, restarts, memory, accessURL, releaseId }: Props) {
   const kube = useKubeTermsStore((s) => s.showKubeTerms);
   const tTerms = useTranslations("releases.terms");
   const tOverview = useTranslations("releases.overview");
@@ -31,7 +32,11 @@ export function MetricCards({ readyTotal, restarts, memory, accessURL }: Props) 
         {accessURL !== null && <Metric label={L("accessURL")} value={accessURL} />}
       </div>
       {accessURL === null && (
-        <p className="text-xs text-muted-foreground">{tOverview("noAccessUrlHint")}</p>
+        <section className="mt-2 rounded-lg border bg-card p-4 space-y-2">
+          <h2 className="font-semibold">{tOverview("nextTitle")}</h2>
+          <p className="text-sm leading-relaxed text-muted-foreground">{tOverview("noAccessUrlHint")}</p>
+          {releaseId && <a className="inline-flex min-h-11 items-center text-sm font-medium text-link underline underline-offset-4" href={`/releases/${encodeURIComponent(releaseId)}/logs`}>{tOverview("openLogs")}</a>}
+        </section>
       )}
     </div>
   );
@@ -40,8 +45,8 @@ export function MetricCards({ readyTotal, restarts, memory, accessURL }: Props) 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <Card>
-      <CardHeader className="pb-1 text-xs text-muted-foreground">{label}</CardHeader>
-      <CardContent className="pt-0 text-lg font-medium">{value}</CardContent>
+      <CardHeader className="pb-1 text-sm text-muted-foreground">{label}</CardHeader>
+      <CardContent className="pt-0 text-2xl font-medium">{value}</CardContent>
     </Card>
   );
 }
