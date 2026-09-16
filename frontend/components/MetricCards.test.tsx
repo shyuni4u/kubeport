@@ -5,6 +5,12 @@ import { MetricCards } from "./MetricCards";
 import { useKubeTermsStore } from "@/stores/kube-terms-store";
 
 describe("MetricCards", () => {
+  it("links the next action to this release's logs without inventing an access address", () => {
+    render(<MetricCards readyTotal={[1, 1]} restarts={0} memory={null} accessURL={null} releaseId="release-one" />);
+    expect(screen.getByRole("heading", { name: "다음으로 할 일" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "로그에서 실행 확인" })).toHaveAttribute("href", "/releases/release-one/logs");
+    expect(screen.getByText(/템플릿 관리자에게 확인/)).toBeInTheDocument();
+  });
   beforeEach(() => {
     useKubeTermsStore.setState({ showKubeTerms: false });
   });

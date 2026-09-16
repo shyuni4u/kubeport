@@ -57,8 +57,6 @@ export default async function Home({
         </p>
       )}
 
-      <LandingCompare resourcesYaml={showcase.resourcesYaml} uiSpecYaml={showcase.uiSpecYaml} />
-
       {/* Signed in already — if they arrived carrying a destination (logged in
           on another tab while this one sat on landing), honour it. */}
       {me ? (
@@ -91,6 +89,7 @@ export default async function Home({
           </a>
         </div>
       )}
+      <LandingCompare resourcesYaml={showcase.resourcesYaml} uiSpecYaml={showcase.uiSpecYaml} />
     </main>
   );
 }

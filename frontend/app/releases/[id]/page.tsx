@@ -54,6 +54,7 @@ export default async function ReleaseOverviewPage({
         restarts={restarts}
         memory={null}
         accessURL={null}
+        releaseId={d.id}
       />
       <section>
         <InstancesHeading count={d.instances.length} />

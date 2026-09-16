@@ -185,7 +185,9 @@
     },
     "overview": {
       "instancesHeading": "Instances ({count})",
-      "noAccessUrlHint": "Public addresses are not shown here yet. Check the 'Logs' tab to see it working."
+      "noAccessUrlHint": "External addresses are not shown here yet. Ask the template owner for the address and access instructions for a web app. For scheduled jobs, check the logs after the scheduled run.",
+      "nextTitle": "What to do next",
+      "openLogs": "Check execution logs"
     },
     "tabs": {
       "overview": "Overview",
@@ -595,7 +597,9 @@
         "pathIndexOutOfRange": "{path} cannot be set: {at} has {length} item(s), so [{item}] does not exist. The template saves, but deploying it may fail.",
         "pathAutoArray": "{path} cannot be set: {at} does not exist, and a list is not created automatically. Add it to resources.yaml.",
         "schemaType": "{path} should be {expected}, not {actual}. The cluster may refuse it at deploy."
-      }
+      },
+      "demoPractice": "In the demo, you can edit drafts of existing templates and preview user forms. Saving new templates depends on this installation’s settings; publishing is unavailable.",
+      "existingTemplates": "Start from an existing template"
     },
     "status": {
       "draft": "Draft",
