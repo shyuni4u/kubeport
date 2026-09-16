@@ -3,8 +3,14 @@ kind: CronJob
 metadata: { name: nightly }
 spec:
   schedule: "0 3 * * *"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
+      activeDeadlineSeconds: 240
+      backoffLimit: 0
       template:
         spec:
           restartPolicy: Never

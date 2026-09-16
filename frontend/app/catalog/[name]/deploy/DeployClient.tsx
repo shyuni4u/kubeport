@@ -871,7 +871,9 @@ export function DeployClient({
           // notice. Nothing about the wording changes — only where it sits.
           <div className="mt-2 flex justify-end">
             <p role="status" className="max-w-sm text-right text-sm text-red-700 dark:text-red-400">
-              {t("blockedByRbac")}
+              {demoNamespace && meta.namespace !== demoNamespace
+                ? t("blockedByRbacDemo", { namespace: demoNamespace })
+                : t("blockedByRbac")}
             </p>
           </div>
         )}
@@ -913,6 +915,7 @@ export function DeployClient({
           <RBACCheckPanel
             cluster={meta.cluster}
             namespace={debouncedNamespace}
+            demoNamespace={demoNamespace}
             kinds={kinds}
             onResult={handleRbacResult}
             idleReason={formInvalid ? t("rbacWaitsForForm") : undefined}

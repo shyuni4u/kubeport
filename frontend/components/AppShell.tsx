@@ -53,12 +53,15 @@ export async function AppShell({
       <div className="flex min-h-screen bg-background">
         <Sidebar role={role} signedIn={me !== null} />
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-6">
+          <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-card px-3 py-2 sm:h-14 sm:flex-nowrap sm:px-6 sm:py-0">
             <MobileSidebar role={role} signedIn={me !== null} />
-            <div className="flex-1" />
-            <ErrorDetailSwitch />
-            <ThemeSwitch initial={theme} />
-            <LocaleSwitch />
+            <div className="hidden sm:block sm:flex-1" />
+            <div className="order-last flex basis-full flex-wrap items-center justify-end gap-2 sm:order-none sm:basis-auto sm:flex-nowrap sm:gap-3">
+              <ErrorDetailSwitch />
+              <ThemeSwitch initial={theme} />
+              <LocaleSwitch />
+            </div>
+            <div className="flex min-w-0 flex-1 justify-end sm:flex-initial">
             {me ? (
               <TopBarUserMenu email={email} role={role} />
             ) : (
@@ -69,6 +72,7 @@ export async function AppShell({
                 {t("login")}
               </a>
             )}
+            </div>
           </header>
           {isDemoEmail(me?.email) && (
             <DemoBanner

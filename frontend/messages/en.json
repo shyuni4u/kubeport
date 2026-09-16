@@ -333,6 +333,7 @@
     "clusterHelp": "Pick one group of servers (a cluster). If there is only one, leave it.",
     "namespaceLabel": "Area",
     "namespaceHelp": "The compartment inside the cluster where your things live (a namespace). If it is empty, or the permission check denies it, ask an admin which area you may deploy to.",
+    "blockedByRbacDemo": "Deployment is blocked by permissions. Switch the area back to {namespace} and check permissions again.",
     "blockedByRbac": "You do not have permission to deploy this right now. Check the 'Permission check' notes, then ask an admin.",
     "formCrashed": "This template's form could not be drawn. The template may have a problem, so please let an admin know.",
     "errors": {
@@ -623,6 +624,7 @@
       "httpError": "Permission check failed (HTTP {status}).",
       "skipped": "Not checked: {kinds} — these may still be denied at deploy time.",
       "deniedRow": "{resource} — {message}",
+      "deniedDemoNext": "For this demo, use the {namespace} area. Switch back to {namespace} and check permissions again.",
       "deniedNext": "The deploy will fail like this. Ask an admin for permission to deploy into this cluster and area.",
       "scope": "Create in area {namespace}"
     }

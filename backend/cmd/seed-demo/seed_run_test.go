@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
 	"kubeport/cmd/seed-demo/fixtures"
@@ -75,6 +76,36 @@ func TestReleaseSpecs_RenderAgainstTheirTemplates(t *testing.T) {
 
 				if r.Name == "nightly-job-demo" && !strings.Contains(string(rendered), "ghcr.io/does-not-exist/nightly:0.0.0") {
 					t.Errorf("nightly-job-demo must render the image that cannot be pulled, or the failure showcase is gone")
+				}
+				if r.Name == "nightly-job-demo" {
+					var cron struct {
+						Spec struct {
+							Schedule          string `yaml:"schedule"`
+							TimeZone          string `yaml:"timeZone"`
+							ConcurrencyPolicy string `yaml:"concurrencyPolicy"`
+							Successful        int    `yaml:"successfulJobsHistoryLimit"`
+							Failed            int    `yaml:"failedJobsHistoryLimit"`
+							JobTemplate       struct {
+								Spec struct {
+									Deadline int `yaml:"activeDeadlineSeconds"`
+									Backoff  int `yaml:"backoffLimit"`
+								} `yaml:"spec"`
+							} `yaml:"jobTemplate"`
+						} `yaml:"spec"`
+					}
+					require.NoError(t, yaml.Unmarshal(rendered, &cron))
+					require.Equal(t, "*/5 * * * *", cron.Spec.Schedule)
+					require.Equal(t, "Etc/UTC", cron.Spec.TimeZone)
+					require.Equal(t, "Forbid", cron.Spec.ConcurrencyPolicy)
+					require.Equal(t, 1, cron.Spec.Successful)
+					require.Equal(t, 1, cron.Spec.Failed)
+					require.Equal(t, 240, cron.Spec.JobTemplate.Spec.Deadline)
+					require.Zero(t, cron.Spec.JobTemplate.Spec.Backoff)
+					// Visitors still start from the daily catalog schedule.
+					defaultYAML, err := template.Render(f.ResourcesYAML, f.UISpecYAML, json.RawMessage(`{}`), template.Labels{})
+					require.NoError(t, err)
+					require.NoError(t, yaml.Unmarshal(defaultYAML, &cron))
+					require.Equal(t, "0 3 * * *", cron.Spec.Schedule)
 				}
 
 				stringMap := map[any]string{"ConfigMap": "data", "Secret": "stringData"}

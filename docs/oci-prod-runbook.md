@@ -535,6 +535,12 @@ Google OIDC 로 **로그인**과 **k8s 배포** 둘 다 돌리므로, 아래가 
   PVC 도 지운다(#349) — 방문자가 배포한 StatefulSet 의 데이터가 리셋을 넘기지 않게. 그사이 쌓이는 양은
   `demo` 쿼터가 `demo.quota.storage`·`demo.quota.persistentVolumeClaims` 로 막는다.
   **시드 릴리스 구성을 바꾸는 배포 뒤에는 이 수동 실행이 필수다** (§3-2).
+  #404 이후 `nightly-job-demo`는 UTC 5분 간격으로 실패 예제를 시작한다(카탈로그 기본값은 매일 UTC 03:00).
+  정상 컨트롤러·노드·레지스트리 응답 조건에서 리셋 후 다음 5분 경계와 이미지 다운로드 시도 뒤 실패 설명을 확인한다.
+  `concurrencyPolicy: Forbid`, 실행 상한 240초, 재시도 0회, 성공·실패 이력 각각 1개로 잡 누적을 제한한다.
+  이력 정리 전의 활성 잡과 직전 실패 잡은 잠시 함께 보일 수 있다. 최소 두 실행 주기 동안 잡·파드 수가 증가하지 않는지 확인한다.
+  기존 릴리스는 이미지 배포만으로 변경되지 않는다. 공유 데모를 사용하는 운영 담당과 리셋 시점을 조율한 뒤
+  위 수동 리셋을 실행하고 `seed-demo: done`, 실패 인스턴스·설명, 잡 보관 개수를 확인한다.
 - **오너 RBAC**: 오너 Google 이메일의 cluster-admin 바인딩 이름은 `kubeport-owner-admin`
   (예전 이름 `kubeport-demo-admin` 은 이름과 달리 오너 바인딩이었음 — 삭제 전 subject 확인).
   데모 계정은 chart 의 `demo` ns RoleBinding 만 갖는다. 검증: `kubectl auth can-i create deployments --as=dex:demo-user@demo.kubeport -n default` → **no**.
