@@ -12,7 +12,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "design:dev": "vite design-preview --config design-preview/vite.config.ts",
+    "design:build": "vite build design-preview --config design-preview/vite.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
@@ -39,6 +41,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@openai/apps-sdk-ui": "0.2.2",
     "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
