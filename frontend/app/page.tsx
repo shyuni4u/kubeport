@@ -62,7 +62,7 @@ export default async function Home({
       {me ? (
         <a href={next ?? "/catalog"} className="rounded-md bg-primary px-4 py-2 text-primary-foreground">{next ? t("goBack") : t("goCatalog")}</a>
       ) : (
-        <div className="flex flex-col items-center gap-3">
+        <div className="flex w-full max-w-2xl flex-col items-center gap-3">
           {demo && (
             <DemoAccounts
               accounts={[

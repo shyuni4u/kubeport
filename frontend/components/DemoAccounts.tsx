@@ -28,30 +28,30 @@ type Props = {
 export function DemoAccounts({ accounts, passwordHint }: Props) {
   const t = useTranslations("landing");
   return (
-    <div className="flex flex-col items-center gap-3">
-      <div className="flex flex-wrap justify-center gap-3">
+    <section aria-labelledby="demo-heading" className="w-full rounded-xl border bg-card p-4 text-left text-card-foreground sm:p-6">
+      <h2 id="demo-heading" className="text-lg font-semibold">{t("demoTitle")}</h2>
+      <p className="mt-1 text-sm text-muted-foreground">{t("demoLoginHelp")}</p>
+      {passwordHint && (
+        <dl className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border bg-muted px-4 py-3">
+          <dt className="text-sm font-medium">{t("demoPasswordLabel")}</dt>
+          <dd className="min-w-0 break-all select-all font-mono text-lg font-semibold">{passwordHint}</dd>
+        </dl>
+      )}
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
         {accounts.map((a) => (
-          <div key={a.email} className="flex flex-col items-center gap-1">
-            <a href={a.href} className="rounded-md border px-4 py-2 hover:bg-hover">
+          <div key={a.email} className="min-w-0 rounded-lg border p-4">
+            <dl>
+              <dt className="text-sm text-muted-foreground">{t("demoAccountLabel")}</dt>
+              {/* select-all: one click selects the whole address for copying. */}
+              <dd className="mt-1 break-all select-all font-mono text-sm font-medium">{a.email}</dd>
+            </dl>
+            <a href={a.href} className="mt-3 flex min-h-11 items-center justify-center rounded-md border bg-background px-4 py-2 text-sm font-medium hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
               {a.label}
             </a>
-            <span className="text-xs text-muted-foreground">
-              {t("demoAccountLabel")}{" "}
-              {/* select-all: one click selects the whole address for copying. */}
-              <span className="select-all font-mono">{a.email}</span>
-            </span>
           </div>
         ))}
       </div>
-      <p className="text-xs text-muted-foreground">
-        {t("demoNote")}
-        {passwordHint && (
-          <>
-            <br />
-            {t("demoCreds", { password: passwordHint })}
-          </>
-        )}
-      </p>
-    </div>
+      <p className="mt-4 text-sm text-muted-foreground">{t("demoNote")}</p>
+    </section>
   );
 }
