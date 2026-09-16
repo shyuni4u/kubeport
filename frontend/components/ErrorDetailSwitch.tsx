@@ -3,10 +3,10 @@
 import { useTranslations } from "next-intl";
 import { ERROR_DETAIL_LEVELS, errorDetailCookie, parseErrorDetailLevel } from "@/lib/error-detail";
 import { useErrorDetail } from "./ErrorDetailProvider";
+import { SettingsSelect } from "./SettingsSelect";
 
 /**
- * Friendly / detailed / raw (#6), beside the theme and locale switches and built
- * the same way: a native <select>. The change applies at once through the
+ * Friendly / detailed / raw (#6), sharing the theme and locale menu. The change applies at once through the
  * provider, and the cookie makes the next server render start from it.
  */
 export function ErrorDetailSwitch() {
@@ -14,22 +14,16 @@ export function ErrorDetailSwitch() {
   const { level, setLevel } = useErrorDetail();
 
   return (
-    <select
-      aria-label={t("errorDetailSwitchLabel")}
+    <SettingsSelect
+      label={t("errorDetailSwitchLabel")}
       value={level}
-      onChange={(e) => {
-        const next = parseErrorDetailLevel(e.target.value);
+      onValueChange={(value) => {
+        const next = parseErrorDetailLevel(value);
         if (!next) return;
         document.cookie = errorDetailCookie(next, window.location.protocol === "https:");
         setLevel(next);
       }}
-      className="rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground"
-    >
-      {ERROR_DETAIL_LEVELS.map((value) => (
-        <option key={value} value={value}>
-          {t(`errorDetail.${value}`)}
-        </option>
-      ))}
-    </select>
+      options={ERROR_DETAIL_LEVELS.map((value) => ({ value, label: t(`errorDetail.${value}`) }))}
+    />
   );
 }

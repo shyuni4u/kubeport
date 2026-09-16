@@ -3,11 +3,10 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { applyThemeClass, parseTheme, THEMES, themeCookie, type Theme } from "@/lib/theme";
+import { SettingsSelect } from "./SettingsSelect";
 
 /**
- * Light / dark / system (#155). Built like LocaleSwitch beside it: a native
- * <select>, so keyboard use and "current value" announcement come from the
- * platform rather than from ARIA we would have to get right.
+ * Light / dark / system (#155), using the shared accessible settings menu.
  *
  * Unlike the locale there is nothing to re-render on the server: the change is
  * a class on <html>, applied here at once, and the cookie makes the next server
@@ -25,17 +24,11 @@ export function ThemeSwitch({ initial }: { initial: Theme }) {
   }
 
   return (
-    <select
-      aria-label={t("themeSwitchLabel")}
+    <SettingsSelect
+      label={t("themeSwitchLabel")}
       value={theme}
-      onChange={(e) => pick(parseTheme(e.target.value))}
-      className="rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground"
-    >
-      {THEMES.map((value) => (
-        <option key={value} value={value}>
-          {t(`theme.${value}`)}
-        </option>
-      ))}
-    </select>
+      onValueChange={(value) => pick(parseTheme(value))}
+      options={THEMES.map((value) => ({ value, label: t(`theme.${value}`) }))}
+    />
   );
 }
