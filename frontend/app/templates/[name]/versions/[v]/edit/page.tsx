@@ -19,6 +19,7 @@ import { useTemplateYamlValidation } from "@/components/editor/useTemplateYamlVa
 import { YamlIssueList, useSaveBlockedReason } from "@/components/editor/YamlIssues";
 import { validateTemplateYaml } from "@/lib/yaml-validation";
 import { Button } from "@/components/ui/button";
+import { VersionHeading } from "@/components/editor/VersionHeading";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { findKindSchema, OpenAPISchemaDoc, SchemaNode } from "@/lib/openapi";
 import { yamlToUIState } from "@/lib/yaml-to-ui-state";
@@ -572,6 +573,7 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
   const { name, v } = useParams<{ name: string; v: string }>();
   const router = useRouter();
   const t = useTranslations("templates.editor");
+  const tStatus = useTranslations("templates.status");
   const [resourcesYaml, setResourcesYaml] = useState("");
   const [uispecYaml, setUispecYaml] = useState("");
   const [status, setStatus] = useState<string>("");
@@ -682,8 +684,11 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
   if (err && !loaded) return <div className="text-red-600 dark:text-red-400 text-sm whitespace-pre">{err}</div>;
   if (!loaded) return <div>{t("loading")}</div>;
 
+  const statusLabel = tStatus.has(status) ? tStatus(status) : status;
+
   return (
     <div className="space-y-3">
+      <VersionHeading name={name} version={v} status={status} statusLabel={statusLabel} />
       {isUiDraft && (
         <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100 px-4 py-3 text-sm text-amber-900">
           {t("convert.uiDraftPreview")}
@@ -691,7 +696,7 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
       )}
       {!isDraft && (
         <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100 px-4 py-3 text-sm text-amber-800">
-          {t("convert.nonDraftYaml", { version: v, status })}
+          {t("convert.nonDraftYaml", { version: v, status: statusLabel })}
         </div>
       )}
       <div className="grid grid-cols-2 gap-3">
