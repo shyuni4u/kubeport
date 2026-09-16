@@ -19,7 +19,7 @@ import { useTemplateYamlValidation } from "@/components/editor/useTemplateYamlVa
 import { YamlIssueList, useSaveBlockedReason } from "@/components/editor/YamlIssues";
 import { validateTemplateYaml } from "@/lib/yaml-validation";
 import { Button } from "@/components/ui/button";
-import { StatusChip } from "@/components/StatusChip";
+import { VersionHeading } from "@/components/editor/VersionHeading";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { findKindSchema, OpenAPISchemaDoc, SchemaNode } from "@/lib/openapi";
 import { yamlToUIState } from "@/lib/yaml-to-ui-state";
@@ -688,14 +688,7 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
 
   return (
     <div className="space-y-3">
-      <header className="flex min-w-0 flex-wrap items-center gap-3">
-        <h1 className="min-w-0 max-w-full break-all text-xl font-semibold">
-          {name} <span className="whitespace-nowrap">v{v}</span>
-        </h1>
-        <StatusChip variant={isDraft ? "warning" : status === "published" ? "success" : "muted"}>
-          {statusLabel}
-        </StatusChip>
-      </header>
+      <VersionHeading name={name} version={v} status={status} statusLabel={statusLabel} />
       {isUiDraft && (
         <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100 px-4 py-3 text-sm text-amber-900">
           {t("convert.uiDraftPreview")}
