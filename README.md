@@ -312,6 +312,7 @@ kubeport/
 
 ## How to find context fast
 
+- **I want to explore the UI direction** → [Mint workspace design lab](docs/design-direction.md) and [admin/user flow review](docs/user-flow-review.md).
 - **I want to build something** → read [CLAUDE.md](CLAUDE.md), then the open issues.
 - **I want to understand a decision** → [docs/brainstorming-summary.md](docs/brainstorming-summary.md).
 - **I want the full system picture** → the stack and architecture boundaries in [CLAUDE.md](CLAUDE.md), and the [frontend design spec](docs/superpowers/specs/2026-04-19-frontend-design-spec.md).

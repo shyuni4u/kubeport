@@ -3,6 +3,8 @@
 k8s 리소스(YAML)를 템플릿화해서, 관리자는 편집하고 비전문 사용자는 폼으로 쓰는 웹 앱.
 Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추상화된 셀프서비스 포털**로 바꾸는 것이 목표.
 
+**UI 작업 기준 (2026-09-16):** 사용자와 합의한 민트·청회색 방향과 OpenAI 공식 컴포넌트 재사용 원칙은 [디자인 기준](docs/design-direction.md), 역할별 사용성 평가는 [사용 흐름 평가](docs/user-flow-review.md)를 먼저 읽는다. 독립 시안은 `frontend`에서 `pnpm design:dev`로 실행한다. 제품 전체 적용이 끝났다는 뜻은 아니다.
+
 ## 현재 단계
 
 **🟢 라이브 배포 완료 — https://kubeport.enzo.kr** (OCI Always Free A1, Phase 2 직행). Plan 0~10 실행 완료: 프론트 재설계(0~7) + drift 회수(8) + Helm chart(9) + **OCI 부트스트랩·helm install·Google OIDC·실제 k8s 배포 인프라(10)**. 운영 지식은 반드시 [docs/oci-prod-runbook.md](docs/oci-prod-runbook.md) 참조.
