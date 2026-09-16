@@ -221,7 +221,7 @@ function Toolbar({
     <>
       <div className="flex items-center gap-3 text-xs">
         <Select value={instance} onValueChange={(v) => onInstanceChange(v ?? "all")}>
-          <SelectTrigger className="w-52">
+          <SelectTrigger className="w-52" aria-label={t("instanceSelector", { kube: String(kube) })}>
             {/*
               The label is passed in rather than left to Base UI to infer from
               the matching SelectItem: it cannot resolve one before the popup

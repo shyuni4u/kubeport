@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
+import { Field as BaseField } from "@base-ui/react/field";
 import { useTranslations } from "next-intl";
 import { Lock } from "lucide-react";
 import type { ZodIssue } from "zod";
@@ -743,6 +744,40 @@ function EnumSelect({
   );
 }
 
+// Forward form wiring to the native range input, not its layout wrapper.
+function RangeWidget({ min, max, current, onChange, ...control }: ControlProps & {
+  min: number;
+  max: number;
+  current: number;
+  onChange: (value: number) => void;
+}) {
+  const { formLabelId } = useFormField();
+  return (
+    <BaseField.Root invalid={control["aria-invalid"]} className="flex items-center gap-2">
+      {/* Keep the end labels so users can see the available range (#43). */}
+      <span data-testid="slider-min" className="text-[11px] tabular-nums text-muted-foreground">
+        {min}
+      </span>
+      <Slider
+        min={min}
+        max={max}
+        value={[current]}
+        className="flex-1"
+        thumbProps={{
+          "aria-labelledby": formLabelId,
+          "aria-describedby": control["aria-describedby"],
+        }}
+        onValueChange={(v: number | readonly number[]) => {
+          onChange(Array.isArray(v) ? v[0] : (v as number));
+        }}
+      />
+      <span data-testid="slider-max" className="text-[11px] tabular-nums text-muted-foreground">
+        {max}
+      </span>
+    </BaseField.Root>
+  );
+}
+
 function renderWidget(
   field: UISpecField,
   rhf: ControllerRenderProps<FieldValues, string>,
@@ -763,35 +798,7 @@ function renderWidget(
         const min = field.min!;
         const max = field.max!;
         const current = rangedIntValue(field, rhf.value);
-        // The end labels are not decoration: without them a slider whose
-        // thumb sits at an end is indistinguishable from a disabled control,
-        // and a non-k8s user has no way to know how far the range goes (#43).
-        return (
-          <div className="flex items-center gap-2">
-            <span
-              data-testid="slider-min"
-              className="text-[11px] tabular-nums text-muted-foreground"
-            >
-              {min}
-            </span>
-            <Slider
-              min={min}
-              max={max}
-              value={[current]}
-              onValueChange={(v: number | readonly number[]) => {
-                const next = Array.isArray(v) ? v[0] : (v as number);
-                rhf.onChange(next);
-              }}
-              className="flex-1"
-            />
-            <span
-              data-testid="slider-max"
-              className="text-[11px] tabular-nums text-muted-foreground"
-            >
-              {max}
-            </span>
-          </div>
-        );
+        return <RangeWidget min={min} max={max} current={current} onChange={rhf.onChange} />;
       }
       // No full range → plain number input. An empty box is null (#321), not
       // undefined: react-hook-form reads an undefined field back from its

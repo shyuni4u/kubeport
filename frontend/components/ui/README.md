@@ -1,5 +1,7 @@
 # `components/ui/` — shadcn 생성물
 
+`slider.tsx`의 `thumbProps`는 #403에서 추가했습니다. 폼 라벨과 설명을 실제 range 입력으로 전달하기 위한 것으로, 재생성 시 보존해야 합니다. 오류 상태는 `DynamicForm`의 Base UI `Field.Root`에서 전달합니다.
+
 이 디렉터리의 파일은 `shadcn` 이 생성합니다. `npx shadcn@latest add <name>` 은 파일을
 **통째로 덮어씁니다** — 아래 로컬 수정 목록을 먼저 확인하고, 덮어썼다면 다시 적용하세요.
 

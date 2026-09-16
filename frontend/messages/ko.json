@@ -383,6 +383,7 @@
     }
   },
   "logs": {
+    "instanceSelector": "{kube, select, true {로그 Pod 선택} other {로그 인스턴스 선택}}",
     "autoscroll": "자동 스크롤",
     "clear": "지우기",
     "emptyWaiting": "아직 출력이 없습니다. 실행되면 여기에 바로 나타납니다.",
