@@ -35,7 +35,9 @@ type releaseSpec struct {
 func releaseSpecs() []releaseSpec {
 	return []releaseSpec{
 		{Name: "app-with-config-demo", Template: "app-with-config", Values: json.RawMessage(`{"ConfigMap[app-config].data.REGION":"kr","Secret[app-secret].stringData.API_KEY":"demo-placeholder-not-a-secret"}`)},
-		{Name: "nightly-job-demo", Template: "nightly-job", Values: json.RawMessage(`{"CronJob[nightly].spec.jobTemplate.spec.template.spec.containers[0].image":"ghcr.io/does-not-exist/nightly:0.0.0"}`)},
+		// Only the failure showcase runs every five minutes; the catalog keeps
+		// its daily default. The fixture bounds runtime and retained jobs.
+		{Name: "nightly-job-demo", Template: "nightly-job", Values: json.RawMessage(`{"CronJob[nightly].spec.schedule":"*/5 * * * *","CronJob[nightly].spec.jobTemplate.spec.template.spec.containers[0].image":"ghcr.io/does-not-exist/nightly:0.0.0"}`)},
 	}
 }
 

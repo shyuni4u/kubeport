@@ -137,6 +137,23 @@ describe("DeployClient", () => {
     expect(screen.getByRole("button", { name: /배포하기/ })).toBeDisabled();
   });
 
+  it("recovers the demo submit gate after returning to its custom area", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", routedFetch({
+      ssar: (body) => jsonResponse({ allowed: body.namespace === "try-it", reason: "" }),
+    }));
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={spec} demoNamespace="try-it" />);
+    await fillMeta(user);
+    const hint = "권한이 없어 지금은 배포할 수 없습니다. 구역을 try-it(으)로 되돌린 뒤 권한을 다시 확인하세요.";
+    expect(await screen.findByText(hint)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /배포하기/ })).toBeDisabled();
+    await user.clear(screen.getByLabelText("구역"));
+    await user.type(screen.getByLabelText("구역"), "try-it");
+    expect(await screen.findByText("위 목록을 모두 만들 수 있습니다.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: /배포하기/ })).toBeEnabled());
+    expect(screen.queryByText(hint)).not.toBeInTheDocument();
+  });
+
   it("keeps submission enabled when RBAC allows everything", async () => {
     const user = userEvent.setup();
     vi.stubGlobal("fetch", routedFetch({}));

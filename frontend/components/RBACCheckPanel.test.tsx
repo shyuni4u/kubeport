@@ -3,6 +3,9 @@ import { screen, waitFor, cleanup } from "@testing-library/react";
 import { renderWithIntl as render } from "@/tests/intl-test-utils";
 import { RBACCheckPanel } from "./RBACCheckPanel";
 import { useKubeTermsStore } from "@/stores/kube-terms-store";
+import { NextIntlClientProvider } from "next-intl";
+import en from "@/messages/en.json";
+import ko from "@/messages/ko.json";
 
 const HINT = "클러스터와 구역을 정하면 여기에 만들 수 있는지 확인합니다.";
 const ALL_ALLOWED = "위 목록을 모두 만들 수 있습니다.";
@@ -33,6 +36,22 @@ describe("RBACCheckPanel", () => {
     cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it.each(["ko", "en"] as const)("guides a demo visitor back to a custom area in %s", async (locale) => {
+    vi.stubGlobal("fetch", vi.fn(async () => okResponse({ allowed: false })));
+    const messages = locale === "ko" ? ko : en;
+    const view = (namespace: string) => (
+      <NextIntlClientProvider locale={locale} messages={messages}>
+        <RBACCheckPanel cluster="dev" namespace={namespace} demoNamespace="try-it" kinds={["Deployment"]} />
+      </NextIntlClientProvider>
+    );
+    const { rerender } = render(view("default"));
+    const hint = messages.templates.rbac.deniedDemoNext.replaceAll("{namespace}", "try-it");
+    expect(await screen.findByText(hint)).toBeInTheDocument();
+    rerender(view("try-it"));
+    expect(await screen.findByText(messages.templates.rbac.deniedNext)).toBeInTheDocument();
+    expect(screen.queryByText(hint)).not.toBeInTheDocument();
   });
 
   it("shows placeholder and does not fetch when cluster is empty", () => {

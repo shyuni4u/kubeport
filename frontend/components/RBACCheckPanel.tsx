@@ -34,6 +34,7 @@ const refKey = (r: KindRef) => (typeof r === "string" ? r : `${groupOf(r.apiVers
 type Props = {
   cluster: string;
   namespace: string;
+  demoNamespace?: string;
   kinds: KindRef[];
   /**
    * Reports the panel's verdict upward so the deploy form can block a submit
@@ -98,7 +99,7 @@ function statusFrom(results: CheckResult[]): RbacStatus {
   return "unknown";
 }
 
-export function RBACCheckPanel({ cluster, namespace, kinds, onResult, idleReason }: Props) {
+export function RBACCheckPanel({ cluster, namespace, demoNamespace, kinds, onResult, idleReason }: Props) {
   const t = useTranslations("templates.rbac");
   const [results, setResults] = useState<CheckResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -294,7 +295,11 @@ export function RBACCheckPanel({ cluster, namespace, kinds, onResult, idleReason
                 );
               })}
             </ul>
-            <p className="text-red-700 dark:text-red-400">{t("deniedNext")}</p>
+            <p className="text-red-700 dark:text-red-400">
+              {status === "denied" && demoNamespace && namespace !== demoNamespace
+                ? t("deniedDemoNext", { namespace: demoNamespace })
+                : t("deniedNext")}
+            </p>
           </>
         )}
         {!checking && skipped.length > 0 && (
