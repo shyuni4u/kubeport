@@ -407,7 +407,6 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
             id="edit-schema-cluster"
             value={cluster}
             onChange={(e) => pickCluster(e.target.value)}
-            className="border rounded px-2 py-1 w-full text-sm"
           >
             {clusters.map((c) => (
               <option key={c.name}>{c.name}</option>
