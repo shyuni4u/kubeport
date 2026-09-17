@@ -22,7 +22,7 @@ We're looking for early feedback: what you tried to do, where you got stuck, and
 | Account | Shared demo credentials shown on the landing page | Your account with the installation's OIDC provider; Google on the public site |
 | Purpose | Explore user/admin screens and a limited deployment flow | Perform actions permitted to your account on that installation |
 | Permissions | Demo namespace and feature restrictions apply, including when trying the admin role | Determined by kubeport admin/team permissions and the target cluster's Kubernetes RBAC |
-| Data | Shared with other visitors and reset daily. Never enter real passwords, API keys, or personal information | Separate from the demo reset scope; retention and deletion follow the installation's operating policy |
+| Data | Shared with other visitors and reset daily. Never enter real passwords, API keys, or personal information | Personal account DB records are outside the demo cleanup scope, but resources in the demo namespace are reset regardless of account. Other retention follows the installation's policy |
 
 **Signing in with Google does not automatically create a private cluster or grant admin access.** Demo access and personal sign-in are different login paths on the same installation; the buttons do not imply separate servers or databases. To use kubeport on your own infrastructure, follow [Install on your cluster](#install-on-your-cluster) and configure authentication, team access, and cluster permissions.
 

@@ -1637,7 +1637,10 @@ paths:
       tags: [teams]
       operationId: listTeams
       summary: List teams
-      description: Admins see all teams; everyone else sees their own.
+      description: |
+        Non-demo admins see all teams; other non-demo users see their own.
+        Demo callers, including demo admins, only see teams they belong to
+        whose entire membership consists of demo-domain accounts.
       responses:
         "200":
           description: OK
@@ -1690,6 +1693,10 @@ paths:
       tags: [teams]
       operationId: listTeamMembers
       summary: List team members
+      description: |
+        Non-demo admins may read any team; other non-demo users must be members.
+        Demo callers must belong to a team containing only demo-domain accounts.
+        Teams outside that demo scope return 404, as do unknown team IDs for demo callers.
       parameters: [{ $ref: "#/components/parameters/TeamID" }]
       responses:
         "200":
