@@ -400,6 +400,7 @@ jobs:
           DEMO_ADMIN_EMAIL=demo-admin@demo.kubeport
           DEMO_USER_EMAIL=demo-user@demo.kubeport
           DEMO_PASSWORD_HINT=demo
+          DEMO_NAMESPACE=default
           EOF
 
       - name: Run frontend
@@ -420,6 +421,7 @@ jobs:
 
       - name: Run Playwright
         env:
+          KBP_RECOVERY_E2E: "1"
           NODE_EXTRA_CA_CERTS: "${{ github.workspace }}/deploy/docker/certs/dex.crt"
         run: cd frontend && pnpm test:e2e
 
@@ -428,7 +430,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report
-          path: frontend/playwright-report/
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
           retention-days: 7
 
       - name: Upload server logs on failure

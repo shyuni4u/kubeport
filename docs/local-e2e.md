@@ -421,8 +421,46 @@ reseeding — useful after fixture or schema changes, or a dirty local DB.
 | `05-user-deploy` | demo user | deploy form: empty-name guard, Korean validation sentence, RBAC denial sentence for `kube-system`, deploy to `default`, delete own release |
 | `06-admin-draft-save` | demo admin | seeded `web-app` draft in YAML mode: append a `# e2e-touched` comment to ui-spec.yaml, a declined leave prompt on the UI-mode tab keeps the edit, PATCH save lands on the detail page, reopening shows the comment. The template's display name is not touched, and nothing is restored — the comment stays on the seeded draft until you reseed (§9b) |
 | `07-error-pages` | demo user | unknown template / release / team → localized not-found page with a way back |
+| `08-cli-connect` | fresh demo user | browser consent → CLI identity/read → logout revokes the connection |
+| `09-release-recovery` | demo user / admin | real kind workload → isolated transport outage/recovery → log-only RBAC denial/recovery → external resource deletion → user force-delete rejection → admin force-delete and 404. Requires `KBP_RECOVERY_E2E=1`; CI enables it. |
 
 All specs assume the seed from §9b (templates `web-app`, `nightly-job`, `app-with-config` + a `web-app` draft) and the demo RBAC bindings from §6 (`demo-user` has `edit` in `default`). Anything that pops `window.confirm` needs `autoAcceptDialogs(page)` from `fixtures.ts` — Playwright dismisses dialogs by default, which cancels the action.
+
+#### Plan 11 recovery checks
+
+```bash
+# After the §0 stack and seed are ready:
+KBP_RECOVERY_E2E=1 scripts/e2e/run.sh tests/e2e/09-release-recovery.spec.ts
+# Include recovery checks in the full regression run:
+KBP_RECOVERY_E2E=1 scripts/e2e/run.sh
+```
+
+`recovery-harness.ts` requires a local HTTP application, local `kubeport`
+database and a loopback HTTPS API in the explicit `kind-kubeport` context.
+It respects `KUBECONFIG`; a task-specific kubeconfig can be used without
+changing the user's default context. `KBP_E2E_DATABASE_URL` defaults to the
+documented local Postgres connection and must refer to the application's DB.
+
+Each attempt creates a unique namespace, scoped RBAC and a cluster registration
+behind a loopback TCP proxy. Dropping that proxy's connections tests real
+backend connection failures without stopping kind or modifying the shared
+cluster registration. Removing only `pods/log` access leaves Pod reads working,
+so the browser must receive an HTTP 200 SSE stream and display its localized
+permission error, rather than a pre-stream HTTP error. Restoring the Role must
+make real nginx log lines visible again.
+
+The external-delete check selects only that release UID in its own namespace.
+Cleanup runs in `finally`, restores connectivity, removes the release and
+namespace, and deletes only the exact test cluster ID/name from the local DB
+(there is no cluster-delete API). Cleanup failures fail the test. Hard-killing
+the test process cannot run `finally`; inspect the `e2e-recovery-*` namespace
+and registration from that attempt before removing leftovers.
+
+Production smoke is separate: create a uniquely named `web-app` release in
+`oci-a1` / `demo`, verify ready state and actual logs, delete it, verify the
+detail is no longer accessible and its UID selects no Kubernetes objects.
+Never run the recovery harness against production. Results are recorded in
+[Plan 11 verification](plan11-verification.md).
 
 ### 10. Browser
 
