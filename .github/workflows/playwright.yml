@@ -284,6 +284,15 @@ jobs:
           roleRef: { kind: Role, name: e2e-configmap-apply, apiGroup: rbac.authorization.k8s.io }
           YAML
 
+      - name: Validate quick-pick starters against Kubernetes
+        # Explicit disposable kind context; no application user RBAC is changed.
+        run: |
+          node - <<'NODE' | kubectl --context kind-kubeport create --dry-run=server --validate=strict -f -
+          const starters = require('./frontend/lib/resource-starters.json');
+          const items = starters.map(s => JSON.parse(JSON.stringify(s).replaceAll('__RESOURCE_NAME__', `starter-${s.kind.toLowerCase()}`)));
+          process.stdout.write(JSON.stringify({apiVersion: 'v1', kind: 'List', items}));
+          NODE
+
       # ci.yml claimed this workflow was the gate for the kind-backed Go tests
       # while it ran no `go test` at all, so they had never executed anywhere
       # (#121). Everything they need is already built above, so this is wiring,
@@ -356,6 +365,17 @@ jobs:
 
       - name: Install frontend deps
         run: cd frontend && pnpm install --frozen-lockfile
+
+      - name: Check starter editor values against live OpenAPI schemas
+        env:
+          STARTER_SCHEMA_DIR: ${{ runner.temp }}/starter-schemas
+        run: |
+          mkdir -p "$STARTER_SCHEMA_DIR"
+          kubectl --context kind-kubeport get --raw /openapi/v3/api/v1 > "$STARTER_SCHEMA_DIR/v1.json"
+          kubectl --context kind-kubeport get --raw /openapi/v3/apis/apps/v1 > "$STARTER_SCHEMA_DIR/apps_v1.json"
+          kubectl --context kind-kubeport get --raw /openapi/v3/apis/batch/v1 > "$STARTER_SCHEMA_DIR/batch_v1.json"
+          cd frontend
+          pnpm exec vitest run lib/resource-starters.test.ts
 
       - name: Install Playwright browsers + system deps
         run: cd frontend && pnpm exec playwright install --with-deps chromium

@@ -1,0 +1,88 @@
+[
+  {
+    "apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "__RESOURCE_NAME__"},
+    "spec": {
+      "replicas": 1,
+      "selector": {"matchLabels": {"app": "__RESOURCE_NAME__"}},
+      "template": {
+        "metadata": {"labels": {"app": "__RESOURCE_NAME__"}},
+        "spec": {
+          "automountServiceAccountToken": false,
+          "securityContext": {"runAsNonRoot": true, "runAsUser": 101, "seccompProfile": {"type": "RuntimeDefault"}},
+          "containers": [{
+            "name": "app", "image": "ghcr.io/nginx/nginx-unprivileged:1.27-alpine",
+            "ports": [{"containerPort": 8080}],
+            "resources": {"requests": {"cpu": "50m", "memory": "32Mi"}, "limits": {"cpu": "250m", "memory": "128Mi"}},
+            "securityContext": {"allowPrivilegeEscalation": false, "capabilities": {"drop": ["ALL"]}}
+          }]
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "apps/v1", "kind": "StatefulSet", "metadata": {"name": "__RESOURCE_NAME__"},
+    "spec": {
+      "replicas": 1, "serviceName": "__RESOURCE_NAME__",
+      "selector": {"matchLabels": {"app": "__RESOURCE_NAME__"}},
+      "template": {
+        "metadata": {"labels": {"app": "__RESOURCE_NAME__"}},
+        "spec": {
+          "automountServiceAccountToken": false,
+          "securityContext": {"runAsNonRoot": true, "runAsUser": 101, "seccompProfile": {"type": "RuntimeDefault"}},
+          "containers": [{
+            "name": "app", "image": "ghcr.io/nginx/nginx-unprivileged:1.27-alpine",
+            "ports": [{"containerPort": 8080}],
+            "resources": {"requests": {"cpu": "50m", "memory": "32Mi"}, "limits": {"cpu": "250m", "memory": "128Mi"}},
+            "securityContext": {"allowPrivilegeEscalation": false, "capabilities": {"drop": ["ALL"]}}
+          }]
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "v1", "kind": "Service", "metadata": {"name": "__RESOURCE_NAME__"},
+    "spec": {"type": "ClusterIP", "selector": {"app": "__RESOURCE_NAME__"}, "ports": [{"name": "http", "port": 8080}]}
+  },
+  {
+    "apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "__RESOURCE_NAME__"},
+    "data": {"message": "Hello from kubeport"}
+  },
+  {
+    "apiVersion": "v1", "kind": "Secret", "metadata": {"name": "__RESOURCE_NAME__"},
+    "type": "Opaque"
+  },
+  {
+    "apiVersion": "batch/v1", "kind": "Job", "metadata": {"name": "__RESOURCE_NAME__"},
+    "spec": {
+      "backoffLimit": 1, "ttlSecondsAfterFinished": 300,
+      "template": {"spec": {
+        "restartPolicy": "Never", "automountServiceAccountToken": false,
+        "securityContext": {"runAsNonRoot": true, "runAsUser": 1000, "seccompProfile": {"type": "RuntimeDefault"}},
+        "containers": [{
+          "name": "job", "image": "busybox:1.37", "command": ["echo", "Hello from kubeport"],
+          "resources": {"requests": {"cpu": "10m", "memory": "16Mi"}, "limits": {"cpu": "100m", "memory": "64Mi"}},
+          "securityContext": {"allowPrivilegeEscalation": false, "capabilities": {"drop": ["ALL"]}}
+        }]
+      }}
+    }
+  },
+  {
+    "apiVersion": "batch/v1", "kind": "CronJob", "metadata": {"name": "__RESOURCE_NAME__"},
+    "spec": {
+      "schedule": "0 * * * *", "suspend": true, "concurrencyPolicy": "Forbid",
+      "successfulJobsHistoryLimit": 1, "failedJobsHistoryLimit": 1,
+      "jobTemplate": {"spec": {
+        "backoffLimit": 1, "ttlSecondsAfterFinished": 300,
+        "template": {"spec": {
+          "restartPolicy": "Never", "automountServiceAccountToken": false,
+          "securityContext": {"runAsNonRoot": true, "runAsUser": 1000, "seccompProfile": {"type": "RuntimeDefault"}},
+          "containers": [{
+            "name": "job", "image": "busybox:1.37", "command": ["echo", "Hello from kubeport"],
+            "resources": {"requests": {"cpu": "10m", "memory": "16Mi"}, "limits": {"cpu": "100m", "memory": "64Mi"}},
+            "securityContext": {"allowPrivilegeEscalation": false, "capabilities": {"drop": ["ALL"]}}
+          }]
+        }}
+      }}
+    }
+  }
+]

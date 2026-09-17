@@ -3,12 +3,14 @@
 import { NativeSelect } from "@/components/ui/native-select";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { KindPicker, KindRef } from "@/components/KindPicker";
 import { fieldSchemaProblems } from "@/lib/field-schema";
+import { resourceStarterFields } from "@/lib/resource-starters";
 import { SchemaTree } from "@/components/SchemaTree";
 import { FieldInspector, UIField } from "@/components/FieldInspector";
 import { YamlPreview, UIModeTemplate } from "@/components/YamlPreview";
@@ -50,6 +52,7 @@ function renderTeamLabel(value: unknown, teams: Team[], globalLabel: string): st
 }
 
 interface EditedResource {
+  id: string;
   gv: string;
   kind: string;
   name: string;          // metadata.name
@@ -206,12 +209,27 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
     const doc = await res.json() as OpenAPISchemaDoc;
     const schema = findKindSchema(doc, k.group, k.version, k.kind);
     if (!schema) { setErr(t("schemaMissing", { kind: k.kind })); return; }
-    setResources(prev => [...prev, {
+    const id = crypto.randomUUID();
+    setResources(prev => {
+      let number = 1;
+      while (prev.some(r => r.name === `${k.kind.toLowerCase()}-${number}`)) number++;
+      const name = `${k.kind.toLowerCase()}-${number}`;
+      return [...prev, {
+      id,
       gv: k.gv, kind: k.kind,
-      name: `${k.kind.toLowerCase()}-${prev.length + 1}`,
+      name,
       rootSchema: schema,
-      fields: {},
-    }]);
+      fields: resourceStarterFields(k.gv, k.kind, name),
+    }];
+    });
+    touch();
+  }
+
+  function removeResource(index: number) {
+    setResources(prev => prev.filter((_, i) => i !== index));
+    setActive(prev => !prev || prev.resIdx === index ? null : {
+      ...prev, resIdx: prev.resIdx > index ? prev.resIdx - 1 : prev.resIdx,
+    });
     touch();
   }
 
@@ -309,7 +327,13 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
       <div className="space-y-2">
         <h3 className="font-semibold">{t("editingNew")}</h3>
         {resources.map((r, i) => (
-          <div key={i} className="border rounded p-2">
+          <div key={r.id} className="border rounded p-2">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-sm font-semibold">{r.kind}</span>
+              <Button type="button" variant="ghost" className="text-destructive" disabled={saving}
+                aria-label={t("removeResourceNamed", { kind: r.kind, name: r.name })}
+                onClick={() => removeResource(i)}>{t("removeResource")}</Button>
+            </div>
             <Label className="mb-2" htmlFor={`resource-name-${i}`}>{t("resourceName")}</Label>
             <Input
               id={`resource-name-${i}`}
