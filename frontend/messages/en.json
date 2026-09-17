@@ -68,7 +68,7 @@
       "adminDesc": "authors templates",
       "userDesc": "consumes the catalog"
     },
-    "cli": "Connect AI / CLI"
+    "cli": "Connect AI / CLI (Beta)"
   },
   "problem": {
     "more": "Details",

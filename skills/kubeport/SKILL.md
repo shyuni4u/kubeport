@@ -9,6 +9,9 @@ description: >-
 
 # kubeport
 
+**Beta:** an initial interactive integration. Verify the selected installation
+and identity with a read-only call before making authorized changes.
+
 Use the bundled Node.js 22+ helper at `scripts/kubeport.mjs` (resolve its absolute
 path relative to this skill). No npm install, MCP server, or central service is
 required. Every request goes to the user's own kubeport installation.

@@ -301,7 +301,7 @@ kubeport/
 - **특정 결정의 이유가 궁금하다** → [docs/brainstorming-summary.md](docs/brainstorming-summary.md).
 - **시스템 전체 그림을 보고 싶다** → [CLAUDE.md](CLAUDE.md) 의 기술 스택·아키텍처 경계, 그리고 [프론트엔드 디자인 스펙](docs/superpowers/specs/2026-04-19-frontend-design-spec.md).
 - **로컬에서 돌려보고 싶다** → 위의 "빠른 시작".
-- **AI로 내 설치본을 사용하고 싶다** → [Skill + CLI 연결](docs/ai-client.md). 별도 MCP 서버나 중앙 인증 서비스 없이 자기 설치본에 연결한다.
+- **AI로 내 설치본을 사용하고 싶다 (Beta)** → [Skill + CLI 연결](docs/ai-client.md). 별도 MCP 서버나 중앙 인증 서비스 없이 자기 설치본에 연결한다.
 - **스크립트로 API 를 호출하고 싶다** → 계약은 [backend/api/openapi.yaml](backend/api/openapi.yaml), 인증 방법은 [docs/machine-clients.md](docs/machine-clients.md).
 
 ## 기여

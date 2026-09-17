@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 
 export function CliConnect() {
   const t = useTranslations("cli");
@@ -32,7 +33,10 @@ export function CliConnect() {
 
   return (
     <section className="mx-auto max-w-xl space-y-5 py-8">
-      <h1 className="text-xl font-semibold">{t("title")}</h1>
+      <div className="flex items-center gap-3">
+        <h1 className="text-xl font-semibold">{t("title")}</h1>
+        <Badge variant="warning">Beta</Badge>
+      </div>
       <p className="text-sm text-muted-foreground">{t("body")}</p>
       <p className="text-sm">{t("permissions")}</p>
       <Button onClick={() => void issue()} disabled={pending}>

@@ -1,5 +1,8 @@
 # Connecting to an installation
 
+**Beta:** validate read-only access on your installation before using writes.
+Automated tests do not replace verification against your own IdP and cluster.
+
 Requires Node.js 22+ and network access from the agent's execution environment to
 the installation. This package does not connect through kubeport.enzo.kr, open a
 port-forward, install an MCP server, or send telemetry. Private installations can
