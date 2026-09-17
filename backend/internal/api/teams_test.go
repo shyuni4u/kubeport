@@ -28,6 +28,58 @@ func TestTeams_Create_RequiresAdmin(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, w.Code)
 }
 
+func TestTeams_DemoReadIsolation(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	suffix := randSuffix()
+	demo, err := s.UpsertUser(ctx, store.UpsertUserParams{OidcSubject: "demo-reader-" + suffix, Email: store.PgText("reader@demo.kubeport")})
+	require.NoError(t, err)
+	real, err := s.UpsertUser(ctx, store.UpsertUserParams{OidcSubject: "real-reader-" + suffix, Email: store.PgText("private-" + suffix + "@example.com"), DisplayName: store.PgText("Private Person")})
+	require.NoError(t, err)
+	own, err := s.InsertTeam(ctx, store.InsertTeamParams{Name: "demo-own-" + suffix})
+	require.NoError(t, err)
+	mixed, err := s.InsertTeam(ctx, store.InsertTeamParams{Name: "mixed-" + suffix})
+	require.NoError(t, err)
+	hidden, err := s.InsertTeam(ctx, store.InsertTeamParams{Name: "private-team-" + suffix})
+	require.NoError(t, err)
+	for _, team := range []store.Team{own, mixed} {
+		_, err = s.InsertTeamMembership(ctx, store.InsertTeamMembershipParams{TeamID: team.ID, UserID: demo.ID, Role: "viewer"})
+		require.NoError(t, err)
+	}
+	for _, team := range []store.Team{mixed, hidden} {
+		_, err = s.InsertTeamMembership(ctx, store.InsertTeamMembershipParams{TeamID: team.ID, UserID: real.ID, Role: "viewer"})
+		require.NoError(t, err)
+	}
+	for _, admin := range []bool{false, true} {
+		claims := auth.Claims{Subject: demo.OidcSubject, Email: demo.Email.String}
+		if admin {
+			claims.Groups = []string{"kubeport-admin"}
+		}
+		r := api.NewRouter(config.Config{}, api.Deps{Verifier: customVerifier{claims: claims}, Store: s, DemoEmailDomain: "demo.kubeport"})
+		w := do(t, r, http.MethodGet, "/v1/teams", nil)
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Contains(t, w.Body.String(), own.Name)
+		require.NotContains(t, w.Body.String(), mixed.Name)
+		require.NotContains(t, w.Body.String(), hidden.Name)
+		for _, id := range []string{uuid.UUID(mixed.ID.Bytes).String(), uuid.UUID(hidden.ID.Bytes).String(), uuid.NewString()} {
+			w = do(t, r, http.MethodGet, "/v1/teams/"+id+"/members", nil)
+			require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+			require.NotContains(t, w.Body.String(), real.Email.String)
+			require.NotContains(t, w.Body.String(), "Private Person")
+		}
+		w = do(t, r, http.MethodGet, "/v1/teams/"+uuid.UUID(own.ID.Bytes).String()+"/members", nil)
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Contains(t, w.Body.String(), demo.Email.String)
+	}
+	// Real admins retain access even with demo enabled.
+	r := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: s, DemoEmailDomain: "demo.kubeport"})
+	w := do(t, r, http.MethodGet, "/v1/teams", nil)
+	require.Contains(t, w.Body.String(), hidden.Name)
+	w = do(t, r, http.MethodGet, "/v1/teams/"+uuid.UUID(mixed.ID.Bytes).String()+"/members", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), real.Email.String)
+}
+
 func TestTeams_Create_AdminSucceeds(t *testing.T) {
 	r := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: testStore(t)})
 	name := "plat-" + randSuffix()

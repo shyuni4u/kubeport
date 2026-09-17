@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -47,8 +48,9 @@ func (h *Handlers) CreateTeam(c *gin.Context) {
 
 func (h *Handlers) ListTeams(c *gin.Context) {
 	u, _ := auth.UserFrom(c.Request.Context())
+	demo := auth.IsDemoEmail(u.Email, h.deps.DemoEmailDomain)
 
-	if isKubeportAdmin(u) {
+	if isKubeportAdmin(u) && !demo {
 		all, err := h.deps.Store.ListTeams(c)
 		if err != nil {
 			internalError(c, "ListTeams", err)
@@ -63,6 +65,10 @@ func (h *Handlers) ListTeams(c *gin.Context) {
 
 	user, err := h.deps.Store.GetUserByOidcSubject(c, u.Subject)
 	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			internalError(c, "ListTeams: caller", err)
+			return
+		}
 		// User hasn't warmed up via /v1/me yet — show empty teams.
 		c.JSON(http.StatusOK, gin.H{"teams": []any{}})
 		return
@@ -75,7 +81,41 @@ func (h *Handlers) ListTeams(c *gin.Context) {
 	if mine == nil {
 		mine = []store.Team{}
 	}
+	if demo {
+		visible := make([]store.Team, 0, len(mine))
+		for _, team := range mine {
+			_, allowed, err := h.demoTeamMembers(c.Request.Context(), team.ID, user.ID)
+			if err != nil {
+				internalError(c, "ListTeams: demo scope", err)
+				return
+			}
+			if allowed {
+				visible = append(visible, team)
+			}
+		}
+		mine = visible
+	}
 	c.JSON(http.StatusOK, gin.H{"teams": mine})
+}
+
+// Teams have no demo ownership marker. Only expose teams the demo caller
+// belongs to whose entire membership is demo-only. Use the same snapshot for
+// authorization and the response so a mixed team's real members never leak.
+func (h *Handlers) demoTeamMembers(ctx context.Context, teamID, callerID pgtype.UUID) ([]store.ListTeamMembersRow, bool, error) {
+	members, err := h.deps.Store.ListTeamMembers(ctx, teamID)
+	if err != nil {
+		return nil, false, err
+	}
+	belongs := false
+	for _, member := range members {
+		if !auth.IsDemoEmail(member.Email.String, h.deps.DemoEmailDomain) {
+			return nil, false, nil
+		}
+		if member.UserID == callerID {
+			belongs = true
+		}
+	}
+	return members, belongs, nil
 }
 
 // isKubeportAdmin centralises the group check used from multiple handlers.
@@ -110,6 +150,28 @@ func (h *Handlers) ListTeamMembers(c *gin.Context) {
 		return
 	}
 	u, _ := auth.UserFrom(c.Request.Context())
+	if auth.IsDemoEmail(u.Email, h.deps.DemoEmailDomain) {
+		caller, err := h.deps.Store.GetUserByOidcSubject(c, u.Subject)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			internalError(c, "ListTeamMembers: caller", err)
+			return
+		}
+		var members []store.ListTeamMembersRow
+		allowed := false
+		if err == nil {
+			members, allowed, err = h.demoTeamMembers(c.Request.Context(), tid, caller.ID)
+			if err != nil {
+				internalError(c, "ListTeamMembers: demo scope", err)
+				return
+			}
+		}
+		if !allowed {
+			writeError(c, http.StatusNotFound, "not-found", "team not found")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"members": members})
+		return
+	}
 
 	// Admin can list any team. Non-admins must be members of the target team.
 	if !isKubeportAdmin(u) {
