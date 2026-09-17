@@ -12,7 +12,7 @@
 | 파일 | 수정 | 이유 |
 |---|---|---|
 | `input.tsx`, `select.tsx`, `native-select.tsx` | `field-styles.ts`의 `fieldControlClass` 공유 | 관리자·사용자 입력을 40px(모바일 44px) 높이, 8px 모서리, `bg-card`·`text-foreground`, 동일한 포커스·오류·비활성 상태로 통일합니다. |
-| `label.tsx`, `form.tsx` | `fieldLabelClass`, `fieldDescriptionClass` 공유 | label은 15px 보조색·중간 굵기, 도움말은 13px로 표시합니다. 관리자 속성과 메타데이터도 같은 규칙을 사용합니다. |
+| `label.tsx`, `form.tsx` | `fieldLabelClass`, `fieldDescriptionClass` 공유 | label은 13px 보조색·중간 굵기, 도움말은 13px로 표시합니다. 관리자 속성과 메타데이터도 같은 규칙을 사용합니다. |
 | `button.tsx` | 기본 모서리 8px | 입력·선택 컨트롤과 같은 모서리를 사용합니다. |
 | `slider.tsx` | Track `bg-muted` → `bg-slider-track`, 두께 `h-1` → `h-1.5` | [#43](https://github.com/shyuni4u/kubeport/issues/43). `globals.css` 의 `--muted` 가 `--background` 와 **같은 oklch 값**이라 기본 `bg-muted` 트랙이 페이지 배경에 묻혀 보이지 않았습니다. `--border` 도 배경 대비 약 1.2:1 이라 부족해, WCAG 1.4.11(비텍스트 UI 3:1)용 전용 토큰 `--slider-track` 을 뒀습니다. |
 | `toggle-group.tsx` | 아이템 클래스를 상수 `toggleGroupItemClassName` 으로 뽑고, shadcn 에 없는 `ToggleRadioGroup` / `ToggleRadioGroupItem` 추가 (Base UI `RadioGroup`·`Radio`) | [#325](https://github.com/shyuni4u/kubeport/issues/325). 필수 enum 은 선택 해제가 안 되는데(#323) 토글 버튼(`aria-pressed`)은 "다시 누르면 풀린다" 고 읽힙니다. 라디오 의미(`radiogroup`·`radio`·`aria-checked`, 화살표 이동, 탭 한 번)로 바꾸되 모양은 토글 그룹과 같게 — 같은 클래스 상수를 쓰고, 눌린 모양만 `aria-checked:` 로 겁니다. `DynamicForm.test.tsx` 가 클래스 동일성을 고정합니다. |
