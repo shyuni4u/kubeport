@@ -29,6 +29,11 @@ test.describe("demo user deploys and deletes a release", () => {
   test("form validation, RBAC feedback, deploy, delete", async ({ page }) => {
     autoAcceptDialogs(page);
     await page.goto("/catalog/web-app/deploy");
+    // Local databases can contain cluster fixtures from backend unit tests.
+    // Pick the real API explicitly; a dead fixture produces HTTP 502 rather
+    // than the definitive RBAC denial this scenario is meant to exercise.
+    await page.getByRole("combobox", { name: /어디에/ }).click();
+    await page.getByRole("listbox").getByRole("option", { name: "kind", exact: true }).click();
 
     const submit = page.getByRole("button", { name: "배포하기" });
     const nameInput = page.getByLabel(/배포 이름/);
@@ -57,7 +62,7 @@ test.describe("demo user deploys and deletes a release", () => {
     // the next step, never the raw `... is forbidden: User "..."` text.
     const namespace = page.getByLabel(/^구역/);
     await namespace.fill("kube-system");
-    await expect(page.getByText(/관리자에게 '이 클러스터·구역에 배포 권한' 을 요청하세요/)).toBeVisible({
+    await expect(page.getByText(/데모에서는 default 구역에 배포할 수 있습니다/)).toBeVisible({
       timeout: 15_000,
     });
     await expect(page.getByText(/is forbidden: User/)).toHaveCount(0);
@@ -67,7 +72,7 @@ test.describe("demo user deploys and deletes a release", () => {
     await expect(submit).toBeDisabled();
     await expect(
       page.getByText(
-        "권한이 없어 지금은 배포할 수 없습니다. '권한 확인' 안내를 확인한 뒤 관리자에게 요청하세요.",
+        "권한이 없어 지금은 배포할 수 없습니다. 구역을 default(으)로 되돌린 뒤 권한을 다시 확인하세요.",
       ),
     ).toBeVisible();
 
@@ -80,7 +85,7 @@ test.describe("demo user deploys and deletes a release", () => {
     expect(trackBg).not.toBe(pageBg);
 
     await namespace.fill("default");
-    await expect(page.getByText(/관리자에게 '이 클러스터·구역에 배포 권한'/)).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.getByText(/데모에서는 default 구역에 배포할 수 있습니다/)).toHaveCount(0, { timeout: 15_000 });
 
     // Deploy → release detail.
     await expect(submit).toBeEnabled();
