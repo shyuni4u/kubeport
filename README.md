@@ -9,6 +9,40 @@
 
 ---
 
+## Try the demo and share feedback
+
+**[Open the demo](https://kubeport.enzo.kr) · [Leave feedback](https://github.com/shyuni4u/kubeport/issues/new) · [Browse existing issues](https://github.com/shyuni4u/kubeport/issues)**
+
+We're looking for early feedback: what you tried to do, where you got stuck, and what would make kubeport easier to use. You don't need Kubernetes expertise or a bug report to contribute; confusing wording and missing guidance are useful feedback too. English and Korean are both welcome.
+
+### A short walkthrough
+
+1. Open the demo and choose the user experience. Use the demo account and password shown on the landing page; no personal account registration is needed.
+2. Find **`web-app`** in the catalog and open its deployment form. Are the settings and next steps understandable?
+3. Optionally deploy it to the **`demo`** namespace, then inspect its status and logs. Delete only the release you created when you're done.
+4. Tell us where you hesitated, what you expected, or what failed—even if you stopped before deploying.
+
+The public demo uses a shared environment and resets daily at **06:00 KST (21:00 UTC)**. It supports real deployments within demo permissions, but restricts administrative actions such as publishing template versions, managing teams, and registering clusters. Try the user flow first; the demo cannot validate every self-hosted workflow.
+
+### What to include in an issue
+
+Check existing issues first; add your experience to a matching issue or open a new one. A short report is enough—copy these prompts into the issue body:
+
+```text
+Environment: public demo / self-hosted
+What I was trying to do:
+Where I got stuck (screen and steps):
+What I expected / what actually happened:
+When it happened (include timezone):
+Version or commit, if known:
+Browser / device (optional):
+Screenshot (optional, with sensitive information removed):
+```
+
+**Issues are public.** Do not include tokens, passwords, Secrets, kubeconfig files, sensitive input values, or unredacted logs. If GitHub is inconvenient, send feedback to the person who invited you; they can help turn it into an issue.
+
+Our initial feedback cycle (roadmap step 14) starts with roughly two weeks of direct user feedback and GitHub Issues. We'll review reports weekly, prioritize recurring problems and blocked tasks, and link fixes and verification results back to the issues. Sentry and Umami integration are deferred until this feedback clarifies what automated collection would help.
+
 ## Why
 
 Running Kubernetes well still requires reading a lot of YAML. Existing tools solve pieces of the problem:
