@@ -67,7 +67,8 @@
     "role": {
       "adminDesc": "authors templates",
       "userDesc": "consumes the catalog"
-    }
+    },
+    "cli": "Connect AI / CLI"
   },
   "problem": {
     "more": "Details",
@@ -696,5 +697,19 @@
       "emptyMembers": "This team has no members yet.",
       "backToTeams": "Back to teams"
     }
+  },
+  "cli": {
+    "title": "Connect AI / CLI",
+    "body": "Connect a local kubeport skill or command-line tool to this installation. Sign in here with your own account; no central kubeport service is involved.",
+    "permissions": "This token allows the tool to act with your current permissions, including creating, changing and deleting resources you can manage.",
+    "pending": "Creating token…",
+    "issue": "Create connection token",
+    "failed": "Could not complete the action. Try again, or sign in again if your session has expired. If copying failed, select and copy the token field.",
+    "token": "Connection token",
+    "expires": "Valid until {time}, or until this sign-in session ends.",
+    "paste": "Paste this into the kubeport login prompt in your terminal. Do not paste it into an AI conversation or command argument.",
+    "copy": "Copy token",
+    "copied": "Copied",
+    "revoke": "Signing out of this browser session revokes its connection tokens. CLI logout only removes the local copy. Tokens expire after at most one hour; creating another does not revoke earlier tokens."
   }
 }

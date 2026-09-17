@@ -55,6 +55,9 @@ export function TopBarUserMenu({ email, role }: Props) {
           {email}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
+        <DropdownMenuItem render={<a href="/cli" />}>
+          {t("cli")}
+        </DropdownMenuItem>
         <DropdownMenuItem
           disabled={pending}
           onClick={() => {

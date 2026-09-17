@@ -317,6 +317,7 @@ kubeport/
 - **I want to understand a decision** → [docs/brainstorming-summary.md](docs/brainstorming-summary.md).
 - **I want the full system picture** → the stack and architecture boundaries in [CLAUDE.md](CLAUDE.md), and the [frontend design spec](docs/superpowers/specs/2026-04-19-frontend-design-spec.md).
 - **I want to run things locally** → "Quick start" above.
+- **I want an AI agent to use my installation** → install the [kubeport skill](skills/kubeport/SKILL.md), then run its bundled Node.js helper: `node skills/kubeport/scripts/kubeport.mjs login --url https://your-kubeport.example`. Sign in at your installation's `/cli` page and paste the connection token into the terminal's hidden prompt. No MCP service or central authentication is needed. See the [connection reference](skills/kubeport/references/connection.md) for permissions, lifetime and revocation, or the [Korean guide](docs/ai-client.md).
 - **I want to call the API from a script** → [backend/api/openapi.yaml](backend/api/openapi.yaml) for the contract, [docs/machine-clients.md](docs/machine-clients.md) for how to authenticate.
 
 ## Contributing

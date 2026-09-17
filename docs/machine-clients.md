@@ -4,14 +4,18 @@
 API 계약 자체는 [`backend/api/openapi.yaml`](../backend/api/openapi.yaml) 에 있고, 이 문서는 **어디로
 어떻게 붙느냐**만 다룬다.
 
-> **요약을 먼저:** 로컬 개발 환경에서는 dex 의 password grant 로 토큰을 얻어 바로 호출할 수 있다(§2, 검증됨).
-> **운영 환경에서 실사용자 권한으로 쓸 비대화형 경로는 아직 없다**(§3) — 데모 dex 를 통한 데모 범위
-> 자동화만 가능하다. 클러스터 등록 같은 운영자 1회성 작업은 §4 의 우회 경로를 쓴다. 실사용자 권한의
-> 비대화형 경로는 아직 설계 결정이 필요한 과제다(§3 끝).
+> **AI·CLI 권장 경로:** [Skill + CLI 연결](ai-client.md). 각 설치본의 브라우저 로그인 후 `/cli`에서
+> 최대 1시간짜리 연결 토큰을 발급해 `/api/cli/v1/*`를 호출한다. 중앙 인증 서비스는 필요 없다.
+> 로컬 개발 환경에서는 dex password grant로 Go API를 직접 호출할 수도 있다(§2).
+> 사람의 로그인 없이 장시간 동작하는 서비스 계정·무인 CI 인증은 아직 별도 과제다(§3).
 
 ---
 
-## 1. 입구가 두 개다 — 어느 쪽에 붙는지부터 정한다
+## 1. 접속 경로 — 어느 쪽에 붙는지부터 정한다
+
+**Skill/CLI는 외부에 열린 `/api/cli/v1/*`에 `Authorization: Bearer kbp_cli_...`로 접속한다.**
+아래 표는 기존 두 경로다. CLI 경로는 브라우저 세션을 확인한 뒤 같은 Go API에 사용자 OIDC 토큰을
+전달한다. 토큰 발급·저장·만료·취소는 [AI 클라이언트 안내](ai-client.md)에 있다.
 
 | | Go API | Next.js BFF |
 |---|---|---|
@@ -20,7 +24,7 @@ API 계약 자체는 [`backend/api/openapi.yaml`](../backend/api/openapi.yaml) �
 | 인증 | `Authorization: Bearer <id_token>` | **httpOnly 세션 쿠키** |
 | 경로·본문 | `openapi.yaml` 그대로 | `/api` 접두어만 붙고 나머지 동일 |
 
-**BFF 는 요청의 `Authorization` 헤더를 무시한다.** 세션 쿠키에서 토큰을 꺼내 서버 측에서 새로 붙인다
+**기존 `/api/v1` BFF는 요청의 `Authorization` 헤더를 무시한다.** 세션 쿠키에서 토큰을 꺼내 서버 측에서 새로 붙인다
 (`frontend/app/api/v1/[...path]/route.ts`). 그래서 베어러 토큰을 들고 `https://<host>/api/v1/...` 을
 호출하는 건 동작하지 않는다 — 토큰이 있다면 Go API 쪽에 직접 붙어야 한다.
 
@@ -106,12 +110,16 @@ curl -ks -X POST https://host.docker.internal:5556/token \
 
 ---
 
-## 3. 운영 환경 — 실사용자 권한으로는 경로가 없다
+## 3. 운영 환경 — 대화형 AI 연결과 무인 인증의 차이
+
+실사용자는 기존 IdP로 브라우저 로그인한 뒤 `/cli`에서 연결 토큰을 발급할 수 있다.
+이 경로는 사람이 로그인한 세션의 권한을 최대 1시간 동안 로컬 도구에 위임하며,
+로그아웃/세션 만료 시 함께 무효화된다. 아래 제약은 **사람의 로그인 없는 무인 인증**에 대한 것이다.
 
 운영 설치는 IdP 가 **둘**이다: 주 IdP 인 Google(`values.yaml` 의 `oidc.issuer`)과, 데모 모드를 켰다면
 자체 호스팅 dex. 둘을 구분해야 답이 정확해진다.
 
-**Google 쪽 — 경로 없음.**
+**Google 쪽 — 무인 서비스 계정 경로 미구현.**
 
 - **password grant 를 지원하지 않는다.** §2 방식이 통하지 않는다.
 - **`client_credentials` 는 이 리포 어디에도 구현돼 있지 않다.** 백엔드는 `requireAuth` 에서 오직
@@ -143,9 +151,9 @@ curl -ks -X POST https://host.docker.internal:5556/token \
   `POST /v1/templates` 의 409 `conflict` 는 볼 수 없는 템플릿 이름과도 충돌한다.
 - k8s 쪽 권한도 `demo` 네임스페이스로 묶여 있다(`templates/demo-rbac.yaml`).
 
-그래서 **데모 범위의 스모크 자동화는 가능하고, 실사용자 권한으로 운영을 자동화하는 경로는 여전히
-없다.** 절차를 문서로 남기자던 [#34](https://github.com/shyuni4u/kubeport/issues/34) 는 이 문서로 닫혔지만 경로 자체는
-아직 없고, 후보 해법 두 가지는:
+따라서 데모 범위 스모크와 **브라우저 로그인 후의 실사용자 AI 작업**은 가능하다.
+로그인 없이 계속 운영하는 서비스 계정 인증은 아직 없다. [#34](https://github.com/shyuni4u/kubeport/issues/34)는
+당시 인증 절차 문서화로 닫혔으며, 장시간 무인 호출을 위한 후보 해법 두 가지는:
 
 1. **서비스 계정 토큰(장수명 API key)을 `/v1` 에 도입** — `Authorization: Bearer kbp_...` 를
    `requireAuth` 가 함께 받도록. 다만 kubeport 의 보안 모델은 "사용자 토큰을 k8s 로 그대로 포워딩"
@@ -159,7 +167,8 @@ curl -ks -X POST https://host.docker.internal:5556/token \
 
 ## 4. 운영자 1회성 작업 — 클러스터 등록
 
-설치 직후 대상 클러스터를 등록하는 건 §3 의 공백에도 불구하고 지금 해야 하는 일이다. 두 가지 경로가 있고,
+설치 직후 대상 클러스터를 등록할 때는 관리자 CLI 연결 후 `api POST /v1/clusters --file cluster.json`을
+사용할 수 있다. CLI 연결이 없는 설치를 위한 기존 두 경로도 아래에 유지한다.
 **어느 쪽이든 `ca_bundle` 을 반드시 채운다.**
 
 `POST /v1/clusters` 는 이제 `ca_bundle` 을 PEM 으로 검증하고, 비었거나 파싱되지 않으면 **400** 이다
@@ -695,4 +704,5 @@ Next.js Route Handler 가 만든다. 499 를 뺀 여섯은 같은 `Problem` 스�
 - [`backend/api/openapi.yaml`](../backend/api/openapi.yaml) — API 계약
 - [docs/local-e2e.md](local-e2e.md) — 로컬 스택 전체 세우기
 - [deploy/helm/kubeport/README.md](../deploy/helm/kubeport/README.md) — 설치와 설치 후 필수 단계
+- [docs/ai-client.md](ai-client.md) — 각 설치본에 직접 연결하는 Skill + CLI와 대화형 인증
 - [docs/api-agent-backlog.md](api-agent-backlog.md) — 아직 없는 기계 클라이언트 표면(MCP 서버·upsert·멱등키·페이지네이션 메타 등)
