@@ -90,6 +90,25 @@ test('bounds a live log stream instead of hanging indefinitely', async t => {
   assert.equal(result.data.events[0].data.line, 'hello');
 });
 
+test('a clean HTTP close without the API end event is incomplete', async t => {
+  const origin = await server(t, (_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end('event: log\ndata: {"line":"hello"}\n\n');
+  });
+  const result = await request(origin, token, 'GET', '/v1/releases/id/logs', undefined, 1);
+  assert.equal(result.data.truncated, true);
+});
+
+test('the API end event marks an actually completed stream', async t => {
+  const origin = await server(t, (_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end('event: log\ndata: {"line":"hello"}\n\nevent: end\ndata: {"reason":"eof"}\n\n');
+  });
+  const result = await request(origin, token, 'GET', '/v1/releases/id/logs', undefined, 1);
+  assert.equal(result.ok, true);
+  assert.equal(result.data.truncated, false);
+});
+
 test('login validates identity, saves privately, refuses target switching, and logout removes only local state', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'kubeport-cli-test-'));
   const filename = join(directory, 'credentials.json');

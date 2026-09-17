@@ -97,6 +97,9 @@ export async function request(origin, token, method, path, body, seconds) {
         try { event.data = JSON.parse(event.data); } catch { /* retain text */ }
         return [event];
       });
+      // EOF alone is not the API's completion signal: a proxy may close a
+      // dropped stream cleanly. Only the named end event proves completion.
+      truncated ||= !events.some(e => e.event === 'end');
       return { ok: !events.some(e => e.event === 'error'), status: response.status, data: { events, truncated } };
     }
     if (truncated) throw new Error('Response exceeded the output limit. Narrow the query.');
