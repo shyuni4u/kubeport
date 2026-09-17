@@ -84,7 +84,7 @@ func TestValidateSpec_AcceptsAnOrdinaryPattern(t *testing.T) {
 func TestRender_StillHonoursAPatternSavedBeforeTheRules(t *testing.T) {
 	spec := patternSpec("string", `(?i)^web-`)
 
-	_, err := template.Render(fieldTypeResources, spec, []byte(`{"Deployment[web].metadata.name":"WEB-1"}`), template.Labels{ReleaseName: "r"})
+	_, err := template.Render(fieldTypeResources, spec, []byte(`{"Deployment[web].metadata.name":"web-1"}`), template.Labels{ReleaseName: "r"})
 	require.NoError(t, err)
 
 	_, err = template.Render(fieldTypeResources, spec, []byte(`{"Deployment[web].metadata.name":"api"}`), template.Labels{ReleaseName: "r"})

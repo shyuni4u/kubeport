@@ -215,6 +215,7 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	// without seeing what they are authoring. noDemoAuthoring would take the
 	// editor walkthrough away from the demo admin, which is the tour.
 	v.POST("/templates/preview", rateLimit(preview), h.PreviewTemplate)
+	v.POST("/templates/validate", rateLimit(upstream), noDemo, h.ValidateTemplate)
 	v.POST("/templates/:name/render", h.PreviewRender)
 	v.GET("/templates/:name", h.GetTemplate)
 	v.PATCH("/templates/:name", h.UpdateTemplate)
