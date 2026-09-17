@@ -5,6 +5,13 @@ import type { UIField } from "@/components/FieldInspector";
 const exposed = (type: Extract<UIField, { mode: "exposed" }>["uiSpec"]["type"]): UIField => ({ mode: "exposed", uiSpec: { label: "Test", type } });
 
 describe("editor schema validation", () => {
+  it("validates values inside maps against additionalProperties", () => {
+    const schema = { type: "object" as const, properties: { labels: { type: "object" as const, additionalProperties: { type: "string" as const } } } };
+    expect(fieldSchemaProblems([{ kind: "Deployment", name: "web", schema, fields: {
+      'labels["app.kubernetes.io/name"]': { mode: "fixed", fixedValue: "web" },
+      "labels.invalid": { mode: "fixed", fixedValue: 42 },
+    } }])).toEqual(["Deployment[web].labels.invalid"]);
+  });
   it("identifies the reproduced ConfigMap data mismatch", () => {
     expect(fieldSchemaProblems([{ kind: "ConfigMap", name: "configmap-1", fields: { data: exposed("string") }, schema: { type: "object", properties: { data: { type: "object" } } } }])).toEqual(["ConfigMap[configmap-1].data"]);
   });

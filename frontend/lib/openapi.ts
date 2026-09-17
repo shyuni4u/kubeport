@@ -16,6 +16,7 @@ export interface SchemaNode {
   description?: string;
   required?: string[];
   properties?: Record<string, SchemaNode>;
+  additionalProperties?: SchemaNode | boolean;
   items?: SchemaNode;
   enum?: Array<string | number>;
   $ref?: string;
@@ -94,6 +95,7 @@ export function resolveRefs(node: SchemaNode, schemas: Record<string, SchemaNode
     );
   }
   if (node.items) out.items = resolveRefs(node.items, schemas, seen);
+  if (typeof node.additionalProperties === "object") out.additionalProperties = resolveRefs(node.additionalProperties, schemas, seen);
   return out;
 }
 
