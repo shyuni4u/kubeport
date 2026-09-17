@@ -29,6 +29,25 @@ function renderTree(props: Partial<React.ComponentProps<typeof SchemaTree>> = {}
 }
 
 describe("SchemaTree", () => {
+  it("adds a quoted map key and selects its scalar schema for editing", () => {
+    const selected: Array<[string, unknown]> = [];
+    renderTree({ schema: { type: "object", properties: { spec: { type: "object", properties: {
+      matchLabels: { type: "object", additionalProperties: { type: "string" } },
+    } } } }, onSelect: (path, node) => selected.push([path, node]) });
+    fireEvent.click(screen.getByRole("treeitem", { name: /matchLabels/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "spec.matchLabels 새 키" }), { target: { value: "app.kubernetes.io/name" } });
+    fireEvent.click(screen.getByRole("button", { name: "키 추가" }));
+    expect(selected.at(-1)).toEqual(['spec.matchLabels["app.kubernetes.io/name"]', { type: "string" }]);
+    expect(screen.getByRole("treeitem", { name: /app.kubernetes.io\/name/ })).toBeVisible();
+  });
+
+  it("shows saved map entries when reopening the tree", () => {
+    renderTree({ schema: { type: "object", properties: { metadata: { type: "object", properties: {
+      labels: { type: "object", additionalProperties: { type: "string" } },
+    } } } }, fields: { "metadata.labels.app": { mode: "fixed" } } });
+    fireEvent.click(screen.getByRole("treeitem", { name: /labels/ }));
+    expect(screen.getByRole("treeitem", { name: /app string 고정/ })).toBeVisible();
+  });
   /**
    * The selected node's border has to survive class merging.
    *

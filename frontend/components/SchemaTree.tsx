@@ -5,6 +5,9 @@ import { useTranslations } from "next-intl";
 import { SchemaNode } from "@/lib/openapi";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { joinPath, parsePathSegments } from "@/lib/template-path";
 
 export type SchemaFieldMode = { mode: "fixed" | "exposed" };
 
@@ -54,6 +57,42 @@ const NODE_CLASS =
  */
 const SELECTED_CLASS = "border-primary bg-selected text-selected-foreground";
 
+function MapEntries({ path, node, selectedPath, onSelect, fields }: {
+  path: string; node: SchemaNode; selectedPath: string | null;
+  onSelect: (path: string, node: SchemaNode) => void;
+  fields?: Record<string, SchemaFieldMode>;
+}) {
+  const t = useTranslations("templates.editor.field");
+  const [key, setKey] = useState("");
+  const [added, setAdded] = useState<string[]>([]);
+  const prefix = parsePathSegments(path) ?? [];
+  const existing = Object.keys(fields ?? {}).flatMap(p => {
+    const parts = parsePathSegments(p);
+    return parts && parts.length > prefix.length && prefix.every((s, i) => parts[i] === s)
+      && typeof parts[prefix.length] === "string" ? [parts[prefix.length] as string] : [];
+  });
+  const keys = [...new Set([...existing, ...added])];
+  const child = node.additionalProperties as SchemaNode;
+  return <li role="none">
+    <p className="px-2 text-xs text-muted-foreground">{t("mapHelp")}</p>
+    {keys.map(k => {
+      const p = joinPath(path, k)!;
+      return <button key={k} type="button" role="treeitem" aria-selected={selectedPath === p}
+        className={cn(NODE_CLASS, selectedPath === p && SELECTED_CLASS)} onClick={() => onSelect(p, child)}>
+        {k}{" "}<span className="ml-2 text-muted-foreground">{child.type}</span>{" "}
+        {fields?.[p] && <FieldBadge mode={fields[p].mode} />}
+      </button>;
+    })}
+    <div className="flex gap-2 p-2">
+      <Input aria-label={t("mapKey", { path })} value={key} onChange={e => setKey(e.target.value)} />
+      <Button type="button" variant="outline" disabled={!key.trim() || !joinPath(path, key.trim()) || keys.includes(key.trim())}
+        onClick={() => { const k = key.trim(); setAdded(prev => [...prev, k]); setKey(""); onSelect(joinPath(path, k)!, child); }}>
+        {t("addKey")}
+      </Button>
+    </div>
+  </li>;
+}
+
 function renderNode(
   path: string, node: SchemaNode, depth: number,
   expanded: Set<string>, setExpanded: React.Dispatch<React.SetStateAction<Set<string>>>,
@@ -68,11 +107,15 @@ function renderNode(
       return n;
     });
 
+  if (node.type === "object" && typeof node.additionalProperties === "object" &&
+    ["string", "integer", "boolean"].includes(node.additionalProperties.type ?? "")) {
+    return <MapEntries key={path} path={path} node={node} selectedPath={selectedPath} onSelect={onSelect} fields={fields} />;
+  }
   if (node.type === "object" && node.properties) {
     return Object.entries(node.properties).map(([name, child]) => {
       const p = path ? `${path}.${name}` : name;
       const isExp = expanded.has(p);
-      const hasKids = (child.type === "object" && !!child.properties) || (child.type === "array" && !!child.items);
+      const hasKids = (child.type === "object" && (!!child.properties || typeof child.additionalProperties === "object")) || (child.type === "array" && !!child.items);
       const fieldMode = fields?.[p]?.mode;
       return (
         <li key={p} role="none" style={{ paddingLeft: depth * 12 }}>

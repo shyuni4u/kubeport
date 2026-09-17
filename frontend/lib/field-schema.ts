@@ -33,7 +33,8 @@ export function fieldSchemaProblems(resources: Array<{
       const segments = parsePathSegments(path);
       if (!segments) return [];
       for (const segment of segments) {
-        node = typeof segment === "number" ? node?.items : node?.properties?.[segment];
+        node = typeof segment === "number" ? node?.items : node?.properties?.[segment] ??
+          (typeof node?.additionalProperties === "object" ? node.additionalProperties : undefined);
       }
       return node && !fieldMatchesSchema(node, value as UIField)
         ? [`${resource.kind}[${resource.name}].${path}`] : [];
