@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { parseIndex, OpenAPIIndex } from "@/lib/openapi";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export interface KindRef {
@@ -79,14 +81,14 @@ export function KindPicker({
       <h3 className="font-semibold mb-2">{t("quickPick")}</h3>
       <div className="flex flex-wrap gap-2 mb-4">
         {FEATURED.map(k => (
-          <button
+          <Button
             key={k.gv + "/" + k.kind}
             type="button"
             onClick={() => onPick(k)}
-            className="px-3 py-1 border rounded hover:bg-hover text-sm"
+            variant="outline"
           >
             {k.kind}
-          </button>
+          </Button>
         ))}
       </div>
       <details>
@@ -94,9 +96,11 @@ export function KindPicker({
         <div className="mt-2 max-h-64 overflow-auto text-xs font-mono">
           {err && <div className="text-red-600 dark:text-red-400">{err}</div>}
           {gvs.map(gv => (
-            <button
+            <Button
               key={gv}
               type="button"
+              variant="ghost"
+              aria-pressed={selectedGv === gv}
               onClick={() => { setSelectedGv(gv); setKindInput(""); }}
               // cn(), not a template literal: `border-primary` and the base's
               // `border-transparent` are the same Tailwind group, so
@@ -104,33 +108,33 @@ export function KindPicker({
               // decides — painting the transparent one and erasing the
               // selection outline entirely.
               className={cn(
-                "block w-full text-left py-0.5 px-1 rounded border border-transparent hover:bg-hover",
+                "w-full justify-start font-mono border-transparent",
                 selectedGv === gv && "border-primary bg-selected text-selected-foreground",
               )}
             >
               {gv}
-            </button>
+            </Button>
           ))}
         </div>
         {selectedGv && (
-          <div className="mt-2 flex items-center gap-2 text-xs">
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
             <span className="font-mono text-muted-foreground">{selectedGv}</span>
-            <input
+            <Input
               value={kindInput}
               onChange={(e) => setKindInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); pickFromGv(); } }}
               placeholder={t("kindPlaceholder")}
               aria-label="Kind"
-              className="border rounded px-2 py-1 flex-1"
+              className="flex-1"
             />
-            <button
+            <Button
               type="button"
               onClick={pickFromGv}
               disabled={!kindInput.trim()}
-              className="px-2 py-1 border rounded hover:bg-hover disabled:border-border disabled:bg-muted disabled:text-muted-foreground"
+              variant="outline"
             >
               {t("add")}
-            </button>
+            </Button>
           </div>
         )}
       </details>

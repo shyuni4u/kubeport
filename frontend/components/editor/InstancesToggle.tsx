@@ -3,6 +3,8 @@
 import { useId } from "react";
 import { useTranslations } from "next-intl";
 
+import { Label } from "@/components/ui/label";
+import { fieldDescriptionClass } from "@/components/ui/field-styles";
 import { Checkbox } from "@/components/ui/checkbox";
 
 type Props = {
@@ -22,8 +24,8 @@ export function InstancesToggle({ multiple, onChange, readOnly }: Props) {
   const t = useTranslations("templates.editor.instances");
   const helpId = useId();
   return (
-    <div className="rounded-md border px-4 py-2 text-xs">
-      <label className="flex items-center gap-2 font-medium">
+    <div className="rounded-[12px] border bg-card p-4">
+      <Label className="items-start gap-3">
         <Checkbox
           checked={multiple}
           disabled={readOnly}
@@ -31,8 +33,8 @@ export function InstancesToggle({ multiple, onChange, readOnly }: Props) {
           onCheckedChange={(checked) => onChange(checked)}
         />
         {t("label")}
-      </label>
-      <p id={helpId} className="mt-1 text-muted-foreground">
+      </Label>
+      <p id={helpId} className={`${fieldDescriptionClass} mt-2`}>
         {t("help")}
       </p>
     </div>

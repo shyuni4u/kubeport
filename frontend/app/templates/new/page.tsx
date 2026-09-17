@@ -1,5 +1,9 @@
 "use client";
 
+import { NativeSelect } from "@/components/ui/native-select";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -284,8 +288,8 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
   const tree = (
     <div className="space-y-4">
       <div>
-        <label htmlFor="new-schema-cluster" className="block text-xs mb-1">{t("schemaCluster")}</label>
-        <select
+        <Label htmlFor="new-schema-cluster" className="mb-2">{t("schemaCluster")}</Label>
+        <NativeSelect
           id="new-schema-cluster"
           value={cluster}
           onChange={(e) => {
@@ -294,10 +298,10 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
               window.sessionStorage.setItem("kbp:editor-cluster", e.target.value);
             }
           }}
-          className="border rounded px-2 py-1 w-full"
+
         >
           {clusters.map(c => <option key={c.name}>{c.name}</option>)}
-        </select>
+        </NativeSelect>
       </div>
       <KindPicker cluster={cluster} onPick={addKind} />
       <hr />
@@ -305,14 +309,16 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
         <h3 className="font-semibold">{t("editingNew")}</h3>
         {resources.map((r, i) => (
           <div key={i} className="border rounded p-2">
-            <input
+            <Label className="mb-2" htmlFor={`resource-name-${i}`}>{t("resourceName")}</Label>
+            <Input
+              id={`resource-name-${i}`}
               value={r.name}
               aria-label={t("resourceName")}
               onChange={e => {
                 setResources(prev => prev.map((x, idx) => idx === i ? { ...x, name: e.target.value } : x));
                 touch();
               }}
-              className="w-full border-b text-sm font-mono mb-2"
+              className="font-mono mb-2"
             />
             <div className="text-xs text-muted-foreground mb-2">{r.gv} · {r.kind}</div>
             <SchemaTree
@@ -372,15 +378,15 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
   );
 
   return (
-    <div className="space-y-3">
-      <MetaRow meta={meta} onChange={(m) => { setMeta(m); touch(); }} hideTeam />
-      <div className="flex items-center gap-2 text-xs">
-        <span className="text-muted-foreground">{t("owningTeam")}</span>
+    <div className="space-y-5">
+      <MetaRow meta={meta} onChange={(m) => { setMeta(m); touch(); }} hideTeam>
+      <div className="grid min-w-0 gap-2">
+        <Label htmlFor="owning-team">{t("owningTeam")}</Label>
         <Select
           value={owningTeamId === "" ? GLOBAL_TEAM : owningTeamId}
           onValueChange={(v) => { setOwningTeamId(!v || v === GLOBAL_TEAM ? "" : v); touch(); }}
         >
-          <SelectTrigger className="w-64">
+          <SelectTrigger id="owning-team" className="w-full">
             <SelectValue>{(v) => renderTeamLabel(v, teams, t("globalTeamOption"))}</SelectValue>
           </SelectTrigger>
           <SelectContent>
@@ -393,6 +399,7 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
           </SelectContent>
         </Select>
       </div>
+      </MetaRow>
       <InstancesToggle
         multiple={instances === "multiple"}
         onChange={(m) => { setInstances(m ? "multiple" : undefined); touch(); }}
@@ -543,15 +550,15 @@ function YamlModeNew({ dirty, onDirty }: ModeProps) {
   }
 
   return (
-    <div className="space-y-3">
-      <MetaRow meta={meta} onChange={(m) => { setMeta(m); touch(); }} hideTeam />
-      <div className="flex items-center gap-2 text-xs">
-        <span className="text-muted-foreground">{t("owningTeam")}</span>
+    <div className="space-y-5">
+      <MetaRow meta={meta} onChange={(m) => { setMeta(m); touch(); }} hideTeam>
+      <div className="grid min-w-0 gap-2">
+        <Label htmlFor="owning-team">{t("owningTeam")}</Label>
         <Select
           value={owningTeamId === "" ? GLOBAL_TEAM : owningTeamId}
           onValueChange={(v) => { setOwningTeamId(!v || v === GLOBAL_TEAM ? "" : v); touch(); }}
         >
-          <SelectTrigger className="w-64">
+          <SelectTrigger id="owning-team" className="w-full">
             <SelectValue>{(v) => renderTeamLabel(v, teams, t("globalTeamOption"))}</SelectValue>
           </SelectTrigger>
           <SelectContent>
@@ -564,7 +571,8 @@ function YamlModeNew({ dirty, onDirty }: ModeProps) {
           </SelectContent>
         </Select>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      </MetaRow>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <YamlEditor label="resources.yaml" value={resourcesYaml} issues={validation.resources} onChange={(v) => { setResourcesYaml(v); touch(); }} />
         <YamlEditor label="ui-spec.yaml" value={uispecYaml} issues={validation.uiSpec} onChange={(v) => { setUispecYaml(v); touch(); }} />
       </div>

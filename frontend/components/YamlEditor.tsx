@@ -37,7 +37,7 @@ export function YamlEditor({
     [issues, text],
   );
   return (
-    <div className="overflow-hidden rounded-md border bg-card">
+    <div className="min-w-0 overflow-hidden rounded-[12px] border bg-card">
       <div className="border-b bg-muted px-3 py-1.5 font-mono text-xs">
         {label}
       </div>

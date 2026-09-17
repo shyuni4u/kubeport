@@ -444,7 +444,8 @@
       "editDraft": "draft v{version} 편집",
       "confirmPublish": "v{version} 을(를) 게시하시겠습니까? 게시하면 사용자에게 노출됩니다.",
       "confirmDeprecate": "v{version} 을(를) 사용 중단하시겠습니까? 사용자가 새로 배포할 수 없게 됩니다.",
-      "confirmDeleteDraft": "draft v{version} 을(를) 삭제하시겠습니까? 되돌릴 수 없습니다."
+      "confirmDeleteDraft": "draft v{version} 을(를) 삭제하시겠습니까? 되돌릴 수 없습니다.",
+      "backToTemplates": "템플릿 목록으로 돌아가기"
     },
     "editor": {
       "newTitle": "새 템플릿",
@@ -535,7 +536,8 @@
         "nameInvalid": "이름은 영문자·숫자·하이픈·점으로 63자까지 쓰고, 영문자나 숫자로 시작하고 끝나야 합니다(점 바로 뒤도 영문자나 숫자). 이름은 주소에 그대로 들어가고, 만든 뒤에는 바꿀 수 없습니다.",
         "displayName": "표시 이름",
         "team": "팀",
-        "addTag": "태그 추가",
+        "tags": "태그",
+        "addTag": "입력 후 Enter",
         "removeTag": "태그 {tag} 제거"
       },
       "instances": {
@@ -668,7 +670,12 @@
         "conflict": "이미 같은 이름의 팀이 있거나 이미 멤버입니다. 새로고침 후 다시 확인하세요.",
         "notFound": "대상 유저를 찾을 수 없습니다. 최소 한 번 로그인한 사용자여야 합니다.",
         "generic": "요청이 실패했습니다 (HTTP {status})."
-      }
+      },
+      "slugHelp": "팀을 식별하는 이름입니다. 예: platform",
+      "listHeading": "등록된 팀",
+      "emptyTeams": "등록된 팀이 없습니다. 새 팀을 만들면 여기에 표시됩니다.",
+      "emptyMembers": "아직 이 팀에 등록된 멤버가 없습니다.",
+      "backToTeams": "팀 목록으로 돌아가기"
     }
   }
 }

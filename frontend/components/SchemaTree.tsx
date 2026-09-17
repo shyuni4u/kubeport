@@ -43,7 +43,7 @@ function FieldBadge({ mode }: { mode: "fixed" | "exposed" }) {
 // Every node is a real <button> so keyboard users can Tab/Enter through the
 // tree; the ARIA tree roles let screen readers announce nesting + state.
 const NODE_CLASS =
-  "cursor-pointer rounded border border-transparent px-1 text-left hover:bg-hover focus-visible:outline-2 focus-visible:outline-ring";
+  "min-h-9 w-full cursor-pointer rounded-[8px] border border-transparent px-2 py-1 text-left hover:bg-hover focus-visible:outline-2 focus-visible:outline-ring";
 
 /**
  * Applied through `cn()`, never concatenated. `border-primary` and the base's

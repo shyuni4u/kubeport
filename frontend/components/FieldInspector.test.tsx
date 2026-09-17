@@ -257,7 +257,7 @@ describe("FieldInspector", () => {
       expect(screen.getByDisplayValue("Image")).toBeDisabled();
       expect(screen.getByText(ko.templates.editor.field.fix)).toBeDisabled();
       expect(screen.getByText(ko.templates.editor.field.expose)).toBeDisabled();
-      expect(screen.getByRole("checkbox")).toBeDisabled();
+      expect(screen.getByRole("checkbox")).toHaveAttribute("aria-disabled", "true");
     });
 
     it("stays editable by default", () => {

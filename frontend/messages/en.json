@@ -444,7 +444,8 @@
       "editDraft": "Edit draft v{version}",
       "confirmPublish": "Publish v{version}? Once published it becomes visible to users.",
       "confirmDeprecate": "Deprecate v{version}? Users will no longer be able to deploy it.",
-      "confirmDeleteDraft": "Delete draft v{version}? This cannot be undone."
+      "confirmDeleteDraft": "Delete draft v{version}? This cannot be undone.",
+      "backToTemplates": "Back to templates"
     },
     "editor": {
       "newTitle": "New template",
@@ -535,7 +536,8 @@
         "nameInvalid": "Use up to 63 letters, digits, hyphens and dots, starting and ending with a letter or digit (and with one right after each dot). The name goes into the address as is and cannot be changed later.",
         "displayName": "Display name",
         "team": "Team",
-        "addTag": "Add tag",
+        "tags": "Tags",
+        "addTag": "Type and press Enter",
         "removeTag": "Remove tag {tag}"
       },
       "instances": {
@@ -668,7 +670,12 @@
         "conflict": "A team with that name already exists, or the user is already a member. Refresh and check again.",
         "notFound": "That user could not be found. They must have logged in at least once.",
         "generic": "The request failed (HTTP {status})."
-      }
+      },
+      "slugHelp": "A unique name identifying this team, e.g. platform.",
+      "listHeading": "Teams",
+      "emptyTeams": "No teams yet. Create a team to see it here.",
+      "emptyMembers": "This team has no members yet.",
+      "backToTeams": "Back to teams"
     }
   }
 }

@@ -14,6 +14,7 @@ import { ProblemMessage } from "@/components/ProblemMessage";
 import { RBACCheckPanel, type KindRef, type RbacStatus } from "@/components/RBACCheckPanel";
 import { groupOf } from "@/lib/kube-kinds";
 import { ResourcesPreview } from "@/components/ResourcesPreview";
+import { fieldLabelClass } from "@/components/ui/field-styles";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -701,14 +702,14 @@ export function DeployClient({
           </p>
         </header>
         {!isUpdate && (
-          <div className="mb-4 grid grid-cols-2 gap-3">
+          <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             {/*
               HelpHint sits beside each label (not inside it) so the (?)
               button's aria-label doesn't leak into the input's name.
             */}
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-1">
-                <label htmlFor="deploy-name" className="text-sm font-medium">
+                <label htmlFor="deploy-name" className={fieldLabelClass}>
                   {t("nameLabel")}
                 </label>
                 <HelpHint text={t("nameHelp")} />
@@ -760,7 +761,7 @@ export function DeployClient({
             </div>
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-1">
-                <span id="deploy-cluster-label" className="text-sm font-medium">
+                <span id="deploy-cluster-label" className={fieldLabelClass}>
                   {t("clusterLabel")}
                 </span>
                 <HelpHint text={t("clusterHelp")} />
@@ -799,9 +800,9 @@ export function DeployClient({
                 </SelectContent>
               </Select>
             </div>
-            <div className="col-span-2 flex flex-col gap-1">
+            <div className="sm:col-span-2 flex flex-col gap-1">
               <div className="flex items-center gap-1">
-                <label htmlFor="deploy-namespace" className="text-sm font-medium">
+                <label htmlFor="deploy-namespace" className={fieldLabelClass}>
                   {termLabel("namespace", kube, (k) => tTerms(k))}
                 </label>
                 <HelpHint text={t("namespaceHelp")} />

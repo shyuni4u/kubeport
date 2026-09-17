@@ -1,8 +1,9 @@
+import { TeamCreateForm } from "@/components/TeamForms";
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "next-intl/server";
 import { apiFetch } from "@/lib/api-server";
-import { ActionForm, type ActionState } from "@/components/ActionForm";
+import { type ActionState } from "@/components/ActionForm";
 import { isDemoEmail } from "@/lib/demo";
 import { problemTitle } from "@/lib/problem";
 
@@ -51,26 +52,20 @@ export default async function AdminTeamsPage() {
   }
 
   return (
-    <div>
+    <div className="space-y-6">
       <h1 className="text-xl font-bold mb-4">{t("title")}</h1>
       {isDemo && (
         <p role="status" className="mb-4 rounded-md border px-3 py-2 text-sm text-muted-foreground">
           {t("demoNotice")}
         </p>
       )}
-      <ActionForm action={createTeam} className="mb-6">
-        <fieldset disabled={isDemo} className="flex flex-wrap gap-2 disabled:opacity-70">
-          <label htmlFor="team-name" className="sr-only">{t("slugLabel")}</label>
-          <input id="team-name" name="name" placeholder={t("slugPlaceholder")} className="h-11 sm:h-10 min-w-0 border rounded px-3" required />
-          <label htmlFor="team-display-name" className="sr-only">{t("displayNameLabel")}</label>
-          <input id="team-display-name" name="display_name" placeholder={t("displayNamePlaceholder")} className="h-11 sm:h-10 min-w-0 border rounded px-3" />
-          <button className="h-11 sm:h-10 px-4 bg-primary text-primary-foreground rounded">{t("createButton")}</button>
-        </fieldset>
-      </ActionForm>
+      <TeamCreateForm action={createTeam} disabled={isDemo} />
+      <h2 className="font-semibold">{t("listHeading")}</h2>
+      {teams.length === 0 && <p className="rounded-[12px] border bg-card p-6 text-sm text-muted-foreground">{t("emptyTeams")}</p>}
       <ul className="space-y-2">
         {teams.map(t => (
-          <li key={t.id}>
-            <Link href={`/admin/teams/${t.id}`} className="text-link">
+          <li key={t.id} className="rounded-[12px] border bg-card p-4">
+            <Link href={`/admin/teams/${t.id}`} className="font-medium text-link hover:underline">
               {t.display_name ?? t.name}
             </Link>
             <span className="text-xs text-muted-foreground ml-2">{t.name}</span>
