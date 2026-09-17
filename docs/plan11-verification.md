@@ -21,7 +21,13 @@ kind(Kubernetes v1.35.0)에서 실행했다. 개별 실행 1개 테스트 통과
 ESLint 통과. 기존 `05-user-deploy`가 오래된 DB fixture 클러스터를 선택하던
 문제를 실제 `kind` 명시 선택으로 고쳤고, CI에도 로컬과 같은
 `DEMO_NAMESPACE=default`를 적용해 데모 권한 안내를 검증한다.
-CI 결과는 실행 완료 후 기록한다.
+코드 커밋 `321218c`의 [일반 CI](https://github.com/shyuni4u/kubeport/actions/runs/35188768205)와
+[Playwright E2E](https://github.com/shyuni4u/kubeport/actions/runs/35188768176)가 모두 통과했다.
+CI에서도 `KBP_RECOVERY_E2E=1`로 복구 시나리오를 실제 실행했다.
+첫 CI 실행은 14개 첫 시도 통과 + 기존 `03-deprecate-flow` 1개 재시도 통과
+(`published` 화면 표시 대기 timeout)로 종료했다. 새 복구 시나리오는 첫 시도에
+통과했으며, 전체가 재시도 없이 통과한 결과로 해석하지 않는다.
+이 결과와 아래 운영 smoke를 근거로 [PR #423](https://github.com/shyuni4u/kubeport/pull/423)에서 Plan 11을 완료로 표시한다.
 
 ### 운영 smoke
 
