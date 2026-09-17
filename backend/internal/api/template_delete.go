@@ -14,7 +14,7 @@ func (h *Handlers) DeleteTemplate(c *gin.Context) {
 		return
 	}
 	if !isAdmin(c) {
-		writeError(c, http.StatusForbidden, "forbidden", "template deletion requires kubeport-admin")
+		writeError(c, http.StatusForbidden, "rbac-denied", "template deletion requires kubeport-admin")
 		return
 	}
 	if err := h.deps.Store.DeleteTemplate(c.Request.Context(), tpl.ID); err != nil {
@@ -23,7 +23,7 @@ func (h *Handlers) DeleteTemplate(c *gin.Context) {
 		case errors.Is(err, pgx.ErrNoRows):
 			writeError(c, http.StatusNotFound, "not-found", "template")
 		case errors.As(err, &pgErr) && pgErr.Code == "23503":
-			writeError(c, http.StatusConflict, "template-in-use", "a release references this template")
+			writeError(c, http.StatusConflict, "conflict", "a release references this template")
 		default:
 			internalError(c, "delete template", err)
 		}

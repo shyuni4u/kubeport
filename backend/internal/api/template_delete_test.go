@@ -36,7 +36,7 @@ func TestDeleteTemplate_InUseKeepsVersions(t *testing.T) {
 	seedReleaseAdmin(t, r, cluster, name, "delete-in-use")
 	w := do(t, r, http.MethodDelete, "/v1/templates/"+name, nil)
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
-	require.Contains(t, w.Body.String(), "template-in-use")
+	require.Contains(t, w.Body.String(), "conflict")
 	w = do(t, r, http.MethodGet, "/v1/templates/"+name+"/versions/1", nil)
 	require.Equal(t, http.StatusOK, w.Code)
 }
