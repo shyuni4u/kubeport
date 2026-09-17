@@ -29,6 +29,14 @@ function renderTree(props: Partial<React.ComponentProps<typeof SchemaTree>> = {}
 }
 
 describe("SchemaTree", () => {
+  it("opens Kubernetes Quantity maps so starter CPU and memory remain editable", () => {
+    renderTree({ schema: { type: "object", properties: { spec: { type: "object", properties: {
+      requests: { type: "object", additionalProperties: { oneOf: [{ type: "string" }, { type: "number" }] } },
+    } } } }, fields: { "spec.requests.cpu": { mode: "fixed" } } });
+    fireEvent.click(screen.getByRole("treeitem", { name: /requests/ }));
+    expect(screen.getByRole("treeitem", { name: /cpu string 고정/ })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "spec.requests 새 키" })).toBeVisible();
+  });
   it("adds a quoted map key and selects its scalar schema for editing", () => {
     const selected: Array<[string, unknown]> = [];
     renderTree({ schema: { type: "object", properties: { spec: { type: "object", properties: {

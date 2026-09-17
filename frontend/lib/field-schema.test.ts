@@ -5,6 +5,12 @@ import type { UIField } from "@/components/FieldInspector";
 const exposed = (type: Extract<UIField, { mode: "exposed" }>["uiSpec"]["type"]): UIField => ({ mode: "exposed", uiSpec: { label: "Test", type } });
 
 describe("editor schema validation", () => {
+  it("accepts Kubernetes Quantity strings and numbers without permitting object unions", () => {
+    const quantity = { oneOf: [{ type: "string" as const }, { type: "number" as const }] };
+    for (const value of ["50m", "128Mi", 0.5]) expect(fieldMatchesSchema(quantity, { mode: "fixed", fixedValue: value })).toBe(true);
+    for (const value of [true, {}, [], Infinity]) expect(fieldMatchesSchema(quantity, { mode: "fixed", fixedValue: value })).toBe(false);
+    expect(fieldMatchesSchema({ oneOf: [{ type: "string" }, { type: "object" }] }, exposed("string"))).toBe(false);
+  });
   it("validates values inside maps against additionalProperties", () => {
     const schema = { type: "object" as const, properties: { labels: { type: "object" as const, additionalProperties: { type: "string" as const } } } };
     expect(fieldSchemaProblems([{ kind: "Deployment", name: "web", schema, fields: {
