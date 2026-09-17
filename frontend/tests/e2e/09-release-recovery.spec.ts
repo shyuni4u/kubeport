@@ -76,8 +76,16 @@ test("real cluster outage, log RBAC denial, missing resources and admin cleanup"
       const page = await admin.newPage();
       autoAcceptDialogs(page);
       await page.goto(`/releases/${releaseID}`);
+      // This fresh admin context first loads the client button here. In a
+      // cold CI dev server the SSR button is visible before hydration binds
+      // onClick; clicking it then silently does nothing. Wait for the client
+      // chunks and assert the actual DELETE, not merely a later navigation.
+      await page.waitForLoadState("networkidle");
+      const deletion = page.waitForResponse((response) =>
+        response.url().endsWith(`${path}?force=true`) && response.request().method() === "DELETE");
       await page.getByRole("button", { name: "강제 삭제", exact: true }).click();
-      await expect(page).toHaveURL(/\/releases$/);
+      expect((await deletion).status()).toBe(200);
+      await expect(page).toHaveURL(/\/releases$/, { timeout: 15_000 });
       expect((await admin.request.get(path)).status()).toBe(404);
       releaseID = undefined;
     });

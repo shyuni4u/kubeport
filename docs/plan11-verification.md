@@ -27,6 +27,13 @@ CI에서도 `KBP_RECOVERY_E2E=1`로 복구 시나리오를 실제 실행했다.
 첫 CI 실행은 14개 첫 시도 통과 + 기존 `03-deprecate-flow` 1개 재시도 통과
 (`published` 화면 표시 대기 timeout)로 종료했다. 새 복구 시나리오는 첫 시도에
 통과했으며, 전체가 재시도 없이 통과한 결과로 해석하지 않는다.
+후속 문서 커밋의 [CI 재실행](https://github.com/shyuni4u/kubeport/actions/runs/35189265679)에서는
+새 관리자 브라우저의 강제 삭제 버튼을 hydration 전에 클릭하는 타이밍 문제가
+발견됐다. 서버 로그에는 해당 UI DELETE가 없고 실패 후 정리 요청만 있었다.
+클라이언트 로딩을 기다린 뒤 실제 DELETE 응답과 화면 전환을 각각 검증하도록
+보완했다. 실패 trace·스크린샷이 보존되도록 CI 아티팩트에도 `test-results`를 추가했다.
+보완 후 로컬 복구 시나리오를 `--repeat-each=3 --retries=0`으로 실행해
+**3회 모두 통과(51.2초)**했다. 최종 CI 결과는 PR #423의 체크에서 확인한다.
 이 결과와 아래 운영 smoke를 근거로 [PR #423](https://github.com/shyuni4u/kubeport/pull/423)에서 Plan 11을 완료로 표시한다.
 
 ### 운영 smoke
