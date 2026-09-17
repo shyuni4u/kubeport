@@ -15,6 +15,21 @@
 
 We're looking for early feedback: what you tried to do, where you got stuck, and what would make kubeport easier to use. You don't need Kubernetes expertise or a bug report to contribute; confusing wording and missing guidance are useful feedback too. English and Korean are both welcome.
 
+### Demo access vs. personal sign-in
+
+| | Demo access | Personal sign-in |
+| --- | --- | --- |
+| Account | Shared demo credentials shown on the landing page | Your account with the installation's OIDC provider; Google on the public site |
+| Purpose | Explore user/admin screens and a limited deployment flow | Perform actions permitted to your account on that installation |
+| Permissions | Demo namespace and feature restrictions apply, including when trying the admin role | Determined by kubeport admin/team permissions and the target cluster's Kubernetes RBAC |
+| Data | Shared with other visitors and reset daily. Never enter real passwords, API keys, or personal information | Personal account DB records are outside the demo cleanup scope, but resources in the demo namespace are reset regardless of account. Other retention follows the installation's policy |
+
+**Signing in with Google does not automatically create a private cluster or grant admin access.** Demo access and personal sign-in are different login paths on the same installation; the buttons do not imply separate servers or databases. To use kubeport on your own infrastructure, follow [Install on your cluster](#install-on-your-cluster) and configure authentication, team access, and cluster permissions.
+
+**With demo disabled (`demo.enabled=false`), the chart creates no demo reset job.** When demo is enabled, the reset removes demo-owned database data and deletes workloads, Secrets, PVCs, and other selected resources throughout the demo namespace, regardless of who created them. Resources deployed there with a personal account are also reset; keep real workloads and data in a separate namespace.
+
+The scheduled demo reset cleans up trial data. It does not replace identity or authorization checks.
+
 ### A short walkthrough
 
 1. Open the demo and choose the user experience. Use the demo account and password shown on the landing page; no personal account registration is needed.
