@@ -138,5 +138,3 @@ export async function proxyApi(req: NextRequest, ctx: { params: Promise<{ path: 
 ) {
   return applySecurityHeaders(await proxy(req, ctx, authenticate, missingAuth));
 }
-
-
