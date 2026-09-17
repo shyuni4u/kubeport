@@ -8,6 +8,21 @@ const source = { resourcesYaml: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  n
 afterEach(() => vi.unstubAllGlobals());
 
 describe("TemplateValidation", () => {
+  it("locks test values while the cluster is validating them", async () => {
+    let finish!: (r: Response) => void;
+    vi.stubGlobal("fetch", vi.fn((url: string) => url.endsWith("/clusters") ? Promise.resolve(Response.json({ clusters: [{ name: "test" }] })) : new Promise<Response>(resolve => { finish = resolve; })));
+    const user = userEvent.setup();
+    render(<TemplateValidation {...source} uiSpecYaml={"fields:\n- path: ConfigMap[example].data.note\n  label: Note\n  type: string\n  default: original\n"} />);
+    await user.click(screen.getByRole("button", { name: "검증 준비 (dry-run)" }));
+    await user.selectOptions(await screen.findByLabelText("검증 클러스터"), "test");
+    await user.click(screen.getByRole("button", { name: "클러스터에서 검증" }));
+    expect(screen.getByRole("textbox", { name: "Note" })).toBeDisabled();
+    expect(screen.getByLabelText("테스트 배포 이름")).toBeDisabled();
+    finish(Response.json({ valid: true }));
+    expect(await screen.findByRole("status")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Note" })).toBeEnabled();
+  });
+
   it("validates only on explicit submission and invalidates success when the target changes", async () => {
     const fetcher = vi.fn(async (url: string) => Response.json(url.endsWith("/clusters") ? { clusters: [{ name: "test" }] } : { valid: true }));
     vi.stubGlobal("fetch", fetcher);

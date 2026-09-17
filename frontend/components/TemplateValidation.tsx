@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useId, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { parse } from "yaml";
 import { DynamicForm, type UISpec } from "@/components/DynamicForm";
@@ -33,7 +33,8 @@ function ValidationPanel({ source }: { source: Source }) {
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<RequestFailure | null>(null);
   const [success, setSuccess] = useState(false);
-  const invalidate = useCallback(() => { setSuccess(false); setFailure(null); }, []);
+  const revision = useRef(0);
+  const invalidate = useCallback(() => { revision.current++; setSuccess(false); setFailure(null); }, []);
 
   async function checked(res: Response) {
     if (res.ok) return;
@@ -80,6 +81,7 @@ function ValidationPanel({ source }: { source: Source }) {
     if (!prepared || !cluster || !namespace || !name) return;
     setPending(true);
     invalidate();
+    const submittedRevision = revision.current;
     try {
       const res = await fetch("/api/v1/templates/validate", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -88,7 +90,7 @@ function ValidationPanel({ source }: { source: Source }) {
       await checked(res);
       const result = await res.json() as { valid?: boolean };
       if (result.valid !== true) throw new Error(t("failed"));
-      setSuccess(true);
+      if (revision.current === submittedRevision) setSuccess(true);
     } catch (error) { report(error); }
     finally { setPending(false); }
   }
@@ -105,9 +107,11 @@ function ValidationPanel({ source }: { source: Source }) {
         <div className="space-y-2"><Label htmlFor={`${id}-namespace`}>{t("namespace")}</Label><Input id={`${id}-namespace`} value={namespace} onChange={e => { setNamespace(e.target.value); invalidate(); }} /></div>
         <div className="space-y-2"><Label htmlFor={`${id}-name`}>{t("name")}</Label><Input id={`${id}-name`} value={name} onChange={e => { setName(e.target.value); invalidate(); }} /></div>
       </fieldset>
-      <PreviewErrorBoundary fallback={() => <p role="alert">{t("invalidSpec")}</p>}>
+      <fieldset disabled={pending}>
+      <PreviewErrorBoundary resetKey={prepared.uiSpec} fallback={() => <p role="alert">{t("invalidSpec")}</p>}>
         <DynamicForm spec={prepared.spec} onSubmit={validate} onChange={invalidate} disabled={pending || !cluster || !namespace || !name} submitLabel={pending ? t("running") : t("run")} submitVariant="outline" />
       </PreviewErrorBoundary>
+      </fieldset>
     </>}
     {failure && <ProblemMessage {...failure} />}
     {success && <p role="status" className="text-sm text-foreground">{t("success", { cluster, namespace })}</p>}
