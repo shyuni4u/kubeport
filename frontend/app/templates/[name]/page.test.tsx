@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 
 vi.mock("next/navigation", () => ({
+  redirect: () => { throw new Error("REDIRECT"); },
   notFound: () => {
     throw new Error("NOT_FOUND");
   },
@@ -109,3 +110,19 @@ describe("template detail page, the version a form posts", () => {
     expect(apiFetch).toHaveBeenCalledWith("/v1/templates/WebApp/versions/1/publish", { method: "POST" });
   });
 });
+
+ describe("whole template deletion", () => {
+  it("deletes the encoded template and redirects", async () => {
+    routeTemplate("web%20App");
+    const actions = actionsIn(await render("web App"));
+    apiFetch.mockResolvedValue(json(204));
+    await expect(actions.at(-1)!({}, new FormData())).rejects.toThrow("REDIRECT");
+    expect(apiFetch).toHaveBeenCalledWith("/v1/templates/web%20App", { method: "DELETE" });
+  });
+  it("explains when a release prevents deletion", async () => {
+    routeTemplate("WebApp");
+    const actions = actionsIn(await render("WebApp"));
+    apiFetch.mockResolvedValue(json(409));
+    expect(await actions.at(-1)!({}, new FormData())).toEqual({ error: "templateInUse" });
+  });
+ });

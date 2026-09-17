@@ -1,7 +1,7 @@
 import { buttonVariants } from "@/components/ui/button";
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { apiFetch } from "@/lib/api-server";
 import { apiPathSegment, versionSegment } from "@/lib/api-path";
@@ -34,7 +34,7 @@ async function actionError(what: string, res: Response): Promise<ActionState> {
     const publishing = what === "publish" || what === "deprecate" || what === "undeprecate";
     return { error: publishing ? te("demoPublishRestricted") : te("demoRestricted") };
   }
-  if (res.status === 409) return { error: te("conflict") };
+  if (res.status === 409) return { error: te(what === "delete template" ? "templateInUse" : "conflict") };
   return { error: te("generic", { status: res.status }) };
 }
 
@@ -139,6 +139,14 @@ export default async function TemplateDetail({
   // only when the user actually saves. Going back without saving leaves the
   // DB untouched.
 
+  async function deleteTemplate(): Promise<ActionState> {
+    "use server";
+    const res = await apiFetch(`/v1/templates/${seg}`, { method: "DELETE" });
+    if (!res.ok) return actionError("delete template", res);
+    revalidatePath("/templates");
+    redirect("/templates");
+  }
+
   return (
     <div className="space-y-6">
       <Link href="/templates" className="text-sm text-link hover:underline">{tr("detail.backToTemplates")}</Link>
@@ -242,6 +250,16 @@ export default async function TemplateDetail({
           </li>
         ))}
       </ul>
+      {isAdmin && (
+        <div className="border-t pt-6 space-y-3">
+          <p className="text-sm text-muted-foreground">{tr("detail.deleteTemplateHelp")}</p>
+          <ActionForm action={deleteTemplate}>
+            <ConfirmSubmit message={tr("detail.confirmDeleteTemplate", { name: t.display_name || name })} variant="destructive">
+              {tr("detail.deleteTemplate")}
+            </ConfirmSubmit>
+          </ActionForm>
+        </div>
+      )}
     </div>
   );
 }
