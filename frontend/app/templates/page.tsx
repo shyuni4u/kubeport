@@ -1,3 +1,4 @@
+import { buttonVariants } from "@/components/ui/button";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { apiFetch } from "@/lib/api-server";
@@ -22,26 +23,26 @@ export default async function TemplatesPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <h1 className="text-xl font-bold">{t("title")}</h1>
         <Link
           href="/templates/new"
-          className="px-3 py-1.5 bg-primary text-primary-foreground rounded text-sm"
+          className={buttonVariants()}
         >
           {t("new")}
         </Link>
       </div>
-      <table className="w-full bg-card border rounded">
+      <div className="overflow-x-auto rounded-[12px] border bg-card"><table className="w-full text-sm">
         <thead className="text-xs text-muted-foreground">
           <tr>
-            <th scope="col" className="p-2 text-left">{t("colName")}</th>
-            <th scope="col" className="p-2 text-left">{t("colVersion")}</th>
-            <th scope="col" className="p-2 text-left">{t("colDescription")}</th>
+            <th scope="col" className="px-4 py-4 text-left">{t("colName")}</th>
+            <th scope="col" className="px-4 py-4 text-left">{t("colVersion")}</th>
+            <th scope="col" className="px-4 py-4 text-left">{t("colDescription")}</th>
           </tr>
         </thead>
         <tbody>
           {templates.length === 0 && (
-            <tr className="border-t">
+            <tr className="border-t hover:bg-hover">
               <td colSpan={3} className="p-6 text-center text-sm text-muted-foreground">
                 <p>{t("empty")}</p>
                 <Link href="/templates/new" className="mt-2 inline-block text-link">
@@ -51,21 +52,21 @@ export default async function TemplatesPage() {
             </tr>
           )}
           {templates.map((tpl) => (
-            <tr key={tpl.name} className="border-t">
-              <td className="p-2">
+            <tr key={tpl.name} className="border-t hover:bg-hover">
+              <td className="px-4 py-4">
                 <Link
                   href={`/templates/${encodeURIComponent(tpl.name)}`}
-                  className="text-link"
+                  className="font-medium text-link hover:underline"
                 >
-                  {tpl.display_name}
+                  {tpl.display_name || tpl.name}
                 </Link>
               </td>
-              <td className="p-2">v{tpl.current_version ?? "—"}</td>
-              <td className="p-2 text-muted-foreground">{tpl.description}</td>
+              <td className="px-4 py-4">{tpl.current_version == null ? "—" : `v${tpl.current_version}`}</td>
+              <td className="px-4 py-4 text-muted-foreground">{tpl.description}</td>
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
     </div>
   );
 }

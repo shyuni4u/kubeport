@@ -3,6 +3,8 @@
 import * as React from "react"
 import { Select as SelectPrimitive } from "@base-ui/react/select"
 
+import { fieldControlClass } from "./field-styles"
+
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
@@ -41,7 +43,8 @@ function SelectTrigger({
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        "flex min-w-0 max-w-full w-fit items-center justify-between gap-2 rounded-[8px] border border-input bg-card py-2 pr-3 pl-3 shadow-xs hover:bg-hover text-sm whitespace-nowrap transition-colors outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground dark:disabled:bg-muted aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-placeholder:text-muted-foreground data-[size=default]:h-11 sm:data-[size=default]:h-10 data-[size=sm]:h-9 dark:bg-input/30 dark:hover:bg-hover dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        fieldControlClass,
+        "flex max-w-full w-fit items-center justify-between gap-2 whitespace-nowrap select-none data-placeholder:text-muted-foreground data-[size=sm]:h-9 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}

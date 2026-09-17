@@ -11,6 +11,8 @@ import {
   type FieldValues,
 } from "react-hook-form";
 
+import { fieldDescriptionClass } from "./field-styles";
+
 import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
 
@@ -128,7 +130,7 @@ function FormDescription({ className, ...props }: React.ComponentProps<"p">) {
     <p
       data-slot="form-description"
       id={formDescriptionId}
-      className={cn("text-muted-foreground text-sm", className)}
+      className={cn(fieldDescriptionClass, className)}
       {...props}
     />
   );

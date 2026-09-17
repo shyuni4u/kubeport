@@ -1,3 +1,4 @@
+import { buttonVariants } from "@/components/ui/button";
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { notFound } from "next/navigation";
@@ -139,24 +140,25 @@ export default async function TemplateDetail({
   // DB untouched.
 
   return (
-    <div>
-      <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      <Link href="/templates" className="text-sm text-link hover:underline">{tr("detail.backToTemplates")}</Link>
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold">{t.display_name}</h1>
+          <h1 className="text-xl font-bold">{t.display_name || t.name}</h1>
           <p className="text-muted-foreground">{t.description}</p>
         </div>
         {canEdit && latestVersion && (
           existingDraft ? (
             <Link
               href={`/templates/${name}/versions/${existingDraft.version}/edit?mode=${existingDraft.authoring_mode}`}
-              className="px-3 py-1.5 bg-primary text-primary-foreground rounded text-sm"
+              className={buttonVariants()}
             >
               {tr("detail.editDraft", { version: existingDraft.version })}
             </Link>
           ) : (
             <Link
               href={`/templates/${name}/versions/${latestVersion.version}/edit?mode=${latestVersion.authoring_mode}`}
-              className="px-3 py-1.5 bg-primary text-primary-foreground rounded text-sm"
+              className={buttonVariants()}
             >
               {tr("detail.newVersion")}
             </Link>
@@ -171,8 +173,8 @@ export default async function TemplateDetail({
       <h2 className="mt-6 font-semibold">{tr("detail.versionsHeading")}</h2>
       <ul className="space-y-2 mt-2">
         {versions.map((v) => (
-          <li key={v.id} className="flex flex-wrap items-center gap-3">
-            <span>v{v.version}</span>
+          <li key={v.id} className="flex flex-wrap items-center gap-3 rounded-[12px] border bg-card p-4">
+            <span className="min-w-12 font-semibold">v{v.version}</span>
             <span
               title={tr(`statusHelp.${v.status as TemplateStatus}`)}
               className={`text-xs px-2 py-0.5 rounded ${
@@ -190,7 +192,7 @@ export default async function TemplateDetail({
               <>
                 <Link
                   href={`/templates/${name}/versions/${v.version}/edit?mode=${v.authoring_mode}`}
-                  className="text-link text-sm"
+                  className={buttonVariants({ variant: "outline" })}
                 >
                   {tr("edit")}
                 </Link>
@@ -200,7 +202,7 @@ export default async function TemplateDetail({
                       <input type="hidden" name="version" value={v.version} />
                       <ConfirmSubmit
                         message={tr("detail.confirmPublish", { version: v.version })}
-                        className="text-link text-sm"
+                        className={buttonVariants({ variant: "outline" })}
                       >
                         {tr("publish")}
                       </ConfirmSubmit>
@@ -209,7 +211,7 @@ export default async function TemplateDetail({
                       <input type="hidden" name="version" value={v.version} />
                       <ConfirmSubmit
                         message={tr("detail.confirmDeleteDraft", { version: v.version })}
-                        className="text-red-600 dark:text-red-400 text-sm"
+                        variant="destructive"
                       >
                         {tr("deleteDraft")}
                       </ConfirmSubmit>
@@ -221,7 +223,7 @@ export default async function TemplateDetail({
                     <input type="hidden" name="version" value={v.version} />
                     <ConfirmSubmit
                       message={tr("detail.confirmDeprecate", { version: v.version })}
-                      className="text-red-600 dark:text-red-400 text-sm"
+                      variant="destructive"
                     >
                       {tr("deprecate")}
                     </ConfirmSubmit>
@@ -230,7 +232,7 @@ export default async function TemplateDetail({
                 {v.status === "deprecated" && (
                   <ActionForm action={undeprecate}>
                     <input type="hidden" name="version" value={v.version} />
-                    <button className="text-link text-sm" title={tr("undeprecateHelp")}>
+                    <button className={buttonVariants({ variant: "outline" })} title={tr("undeprecateHelp")}>
                       {tr("undeprecate")}
                     </button>
                   </ActionForm>

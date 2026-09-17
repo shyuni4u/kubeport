@@ -11,6 +11,9 @@
 
 | 파일 | 수정 | 이유 |
 |---|---|---|
+| `input.tsx`, `select.tsx`, `native-select.tsx` | `field-styles.ts`의 `fieldControlClass` 공유 | 관리자·사용자 입력을 40px(모바일 44px) 높이, 8px 모서리, `bg-card`·`text-foreground`, 동일한 포커스·오류·비활성 상태로 통일합니다. |
+| `label.tsx`, `form.tsx` | `fieldLabelClass`, `fieldDescriptionClass` 공유 | label은 13px 보조색·중간 굵기, 도움말은 13px로 표시합니다. 관리자 속성과 메타데이터도 같은 규칙을 사용합니다. |
+| `button.tsx` | 기본 모서리 8px | 입력·선택 컨트롤과 같은 모서리를 사용합니다. |
 | `slider.tsx` | Track `bg-muted` → `bg-slider-track`, 두께 `h-1` → `h-1.5` | [#43](https://github.com/shyuni4u/kubeport/issues/43). `globals.css` 의 `--muted` 가 `--background` 와 **같은 oklch 값**이라 기본 `bg-muted` 트랙이 페이지 배경에 묻혀 보이지 않았습니다. `--border` 도 배경 대비 약 1.2:1 이라 부족해, WCAG 1.4.11(비텍스트 UI 3:1)용 전용 토큰 `--slider-track` 을 뒀습니다. |
 | `toggle-group.tsx` | 아이템 클래스를 상수 `toggleGroupItemClassName` 으로 뽑고, shadcn 에 없는 `ToggleRadioGroup` / `ToggleRadioGroupItem` 추가 (Base UI `RadioGroup`·`Radio`) | [#325](https://github.com/shyuni4u/kubeport/issues/325). 필수 enum 은 선택 해제가 안 되는데(#323) 토글 버튼(`aria-pressed`)은 "다시 누르면 풀린다" 고 읽힙니다. 라디오 의미(`radiogroup`·`radio`·`aria-checked`, 화살표 이동, 탭 한 번)로 바꾸되 모양은 토글 그룹과 같게 — 같은 클래스 상수를 쓰고, 눌린 모양만 `aria-checked:` 로 겁니다. `DynamicForm.test.tsx` 가 클래스 동일성을 고정합니다. |
 | `form.tsx` | `useFormField` 에 `formLabelId`, `FormLabel` 에 그 `id` | #325. `<label for>` 는 `<div role="radiogroup">` 의 이름이 되지 못해, 그룹이 `aria-labelledby` 로 라벨을 가리킵니다. |
@@ -37,3 +40,7 @@ UI 컴포넌트인데, muted 급 채움은 라이트 배경 대비 1.2:1 이 한
 기준을 넘겼습니다. `app/globals.test.ts` 는 이제 **두 테마의 모든 표면**을 훑고, 3.0 이 아니라
 **3.3** 을 요구합니다 — oklch 는 8비트 채널로 반올림된 뒤 디스플레이 색관리를 거치므로, 서류상
 2% 여유로 통과하는 값은 반올림에 기대는 것이기 때문입니다.
+
+### 2026-09-17 추가 통일
+
+업무 화면의 본문·데스크톱 컨트롤은 14px/20px, label·설명은 13px을 사용합니다. 모바일 입력은 16px을 유지합니다. 작은 버튼과 토글/연결된 선택 버튼도 8px 모서리를 사용하며 선택·포커스 표시는 유지합니다. ClusterPicker는 NativeSelect를 공유하고 배포 메타데이터 label은 fieldLabelClass를 공유합니다.

@@ -40,6 +40,7 @@ export const SHELL_CHROME_PX = 288;
 export const MIN_PANEL_PERCENT = 30;
 
 export function EditorLayout({ tree, inspector, preview, selectionEvent }: Props) {
+  const t = useTranslations("templates.editor.panels");
   const wide = useMediaQuery(`(min-width: ${WIDE_LAYOUT_MIN_PX}px)`);
 
   // Deliberately one layout at a time rather than a `hidden lg:block` pair:
@@ -49,19 +50,19 @@ export function EditorLayout({ tree, inspector, preview, selectionEvent }: Props
   return wide ? (
     <ResizablePanelGroup
       orientation="horizontal"
-      className="min-h-96 rounded-md border"
+      className="min-h-96 rounded-[12px] border bg-card"
       style={{ height: "65dvh" }}
     >
       <ResizablePanel defaultSize="30%" minSize={`${MIN_PANEL_PERCENT}%`}>
-        <div className="h-full overflow-auto p-3">{tree}</div>
+        <div className="h-full overflow-auto p-3"><h2 className="mb-4 border-b pb-3 text-sm font-semibold">{t("tree")}</h2>{tree}</div>
       </ResizablePanel>
       <ResizableHandle withHandle />
       <ResizablePanel defaultSize="35%" minSize={`${MIN_PANEL_PERCENT}%`}>
-        <div className="h-full overflow-auto p-3">{inspector}</div>
+        <div className="h-full overflow-auto p-3"><h2 className="mb-4 border-b pb-3 text-sm font-semibold">{t("inspector")}</h2>{inspector}</div>
       </ResizablePanel>
       <ResizableHandle withHandle />
       <ResizablePanel defaultSize="35%" minSize={`${MIN_PANEL_PERCENT}%`}>
-        <div className="h-full overflow-auto">{preview}</div>
+        <div className="h-full overflow-auto"><h2 className="mx-3 mb-1 mt-3 border-b pb-3 text-sm font-semibold">{t("preview")}</h2>{preview}</div>
       </ResizablePanel>
     </ResizablePanelGroup>
   ) : (
@@ -88,8 +89,8 @@ function NarrowLayout({ tree, inspector, preview, selectionEvent = 0 }: Props) {
   }
 
   return (
-    <Tabs value={tab} onValueChange={(v) => setTab(String(v))} className="rounded-md border">
-      <TabsList className="m-2">
+    <Tabs value={tab} onValueChange={(v) => setTab(String(v))} className="rounded-[12px] border bg-card">
+      <TabsList className="m-3">
         <TabsTrigger value="tree">{t("tree")}</TabsTrigger>
         <TabsTrigger value="inspector">{t("inspector")}</TabsTrigger>
         <TabsTrigger value="preview">{t("preview")}</TabsTrigger>

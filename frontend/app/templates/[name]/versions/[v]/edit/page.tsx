@@ -1,5 +1,8 @@
 "use client";
 
+import { NativeSelect } from "@/components/ui/native-select";
+import { Label } from "@/components/ui/label";
+
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -105,6 +108,7 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
   const t = useTranslations("templates.editor");
   const [state, setState] = useState<UIModeTemplate | null>(null);
   const [sourceStatus, setSourceStatus] = useState<string>("");
+  const tStatus = useTranslations("templates.status");
   const [sourceAuthoringMode, setSourceAuthoringMode] = useState<string>("");
   const [convertWarnings, setConvertWarnings] = useState<string[]>([]);
   const [schemas, setSchemas] = useState<Record<string, SchemaNode>>({});
@@ -398,17 +402,16 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
       <h2 className="font-semibold mb-2">{t("editing", { name, version: v })}</h2>
       {clusters.length > 1 && (
         <div>
-          <label htmlFor="edit-schema-cluster" className="block text-xs mb-1">{t("schemaCluster")}</label>
-          <select
+          <Label htmlFor="edit-schema-cluster" className="mb-2">{t("schemaCluster")}</Label>
+          <NativeSelect
             id="edit-schema-cluster"
             value={cluster}
             onChange={(e) => pickCluster(e.target.value)}
-            className="border rounded px-2 py-1 w-full text-sm"
           >
             {clusters.map((c) => (
               <option key={c.name}>{c.name}</option>
             ))}
-          </select>
+          </NativeSelect>
         </div>
       )}
       {state.resources.map((r, i) => {
@@ -505,9 +508,10 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
   );
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-5">
       {/* Same reason as the inspector's readOnly: nothing here can be saved on a
           YAML draft, and an edit would also arm the leave-page guard (#184). */}
+      <VersionHeading name={name} version={v} status={sourceStatus} statusLabel={tStatus.has(sourceStatus) ? tStatus(sourceStatus) : sourceStatus} />
       <MetaRow meta={meta} onChange={(m) => { setMeta(m); touch(); }} nameLocked hideTeam readOnly={isYamlDraft} />
       {state && (
         <InstancesToggle
@@ -699,7 +703,7 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
   const statusLabel = tStatus.has(status) ? tStatus(status) : status;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-5">
       <VersionHeading name={name} version={v} status={status} statusLabel={statusLabel} />
       {isUiDraft && (
         <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100 px-4 py-3 text-sm text-amber-900">
@@ -711,7 +715,7 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
           {t("convert.nonDraftYaml", { version: v, status: statusLabel })}
         </div>
       )}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <YamlEditor label="resources.yaml" value={resourcesYaml} issues={validation.resources} onChange={(x) => { setResourcesYaml(x); touch(); }} />
         <YamlEditor label="ui-spec.yaml" value={uispecYaml} issues={validation.uiSpec} onChange={(x) => { setUispecYaml(x); touch(); }} />
       </div>
@@ -740,7 +744,7 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
         is now outline. Labels stay — "save as new version" is the whole point
         of editing a published version and BottomBar cannot say it.
       */}
-      <div className="flex flex-wrap items-center justify-end gap-3">
+      <div className="sticky bottom-0 z-20 flex flex-wrap items-center justify-end gap-3 border-t bg-card p-4">
         {/* The screen #146 was observed on: say edits are pending before the leave prompt does. */}
         <UnsavedChangesStatus dirty={dirty} />
         {/* Same as BottomBar: a save that is off for a reason says so (#181). */}

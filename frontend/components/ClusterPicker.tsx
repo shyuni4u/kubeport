@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
 
 // Fired on window with `detail` = cluster name whenever the sidebar picker
 // changes; `localStorage.kbp_cluster` is already updated by then.
@@ -46,24 +48,23 @@ export function ClusterPicker() {
 
   return (
     <div>
-      <label
+      <Label
         htmlFor="kbp-cluster"
-        className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+        className="mb-2"
       >
         {t("currentCluster")}
-      </label>
-      <select
+      </Label>
+      <NativeSelect
         id="kbp-cluster"
         value={current}
         onChange={(e) => pick(e.target.value)}
-        className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-xs text-foreground"
       >
         {clusters.map((c) => (
           <option key={c.name} value={c.name}>
             {c.name}
           </option>
         ))}
-      </select>
+      </NativeSelect>
     </div>
   );
 }

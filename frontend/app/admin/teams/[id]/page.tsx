@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { TeamMemberForm } from "@/components/TeamForms";
 import { revalidatePath } from "next/cache";
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
@@ -5,7 +7,6 @@ import { apiFetch } from "@/lib/api-server";
 import { apiPathSegment } from "@/lib/api-path";
 import { ActionForm, type ActionState } from "@/components/ActionForm";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
-import { HelpHint } from "@/components/HelpHint";
 import { isDemoEmail } from "@/lib/demo";
 import { problemTitle } from "@/lib/problem";
 
@@ -89,7 +90,8 @@ export default async function TeamDetailPage({
   }
 
   return (
-    <div>
+    <div className="space-y-6">
+      <Link href="/admin/teams" className="text-sm text-link hover:underline">{t("backToTeams")}</Link>
       <h1 className="text-xl font-bold mb-4">{team?.name ?? id}</h1>
       {isDemo && (
         <p role="status" className="mb-4 rounded-md border px-3 py-2 text-sm text-muted-foreground">
@@ -98,21 +100,23 @@ export default async function TeamDetailPage({
       )}
 
       <h2 className="font-semibold mb-2">{t("membersHeading")}</h2>
-      <table className="w-full bg-card border rounded text-sm mb-6">
+      <div className="overflow-x-auto rounded-[12px] border bg-card"><table className="w-full text-sm">
         <thead className="text-xs text-muted-foreground">
-          <tr><th scope="col" className="p-2 text-left">{t("colEmail")}</th><th scope="col" className="p-2 text-left">{t("colRole")}</th><th scope="col" className="p-2"><span className="sr-only">{t("colActions")}</span></th></tr>
+          <tr><th scope="col" className="px-4 py-3 text-left">{t("colEmail")}</th><th scope="col" className="px-4 py-3 text-left">{t("colRole")}</th><th scope="col" className="px-4 py-3"><span className="sr-only">{t("colActions")}</span></th></tr>
         </thead>
         <tbody>
+          {!members?.length && <tr><td colSpan={3} className="p-6 text-center text-muted-foreground">{t("emptyMembers")}</td></tr>}
           {(members ?? []).map(m => (
             <tr key={m.user_id} className="border-t">
-              <td className="p-2">{m.email ?? m.user_id}</td>
-              <td className="p-2">{m.role}</td>
-              <td className="p-2">
+              <td className="px-4 py-3">{m.email ?? m.user_id}</td>
+              <td className="px-4 py-3">{m.role}</td>
+              <td className="px-4 py-3">
                 <ActionForm action={removeMember}>
                   <input type="hidden" name="user_id" value={m.user_id} />
                   <ConfirmSubmit
+                    disabled={isDemo}
                     message={t("confirmRemoveMember", { email: m.email ?? m.user_id })}
-                    className="text-red-600 dark:text-red-400 text-sm"
+                    variant="destructive"
                   >
                     {t("removeMember")}
                   </ConfirmSubmit>
@@ -121,21 +125,9 @@ export default async function TeamDetailPage({
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
 
-      <h2 className="font-semibold mb-2">{t("addMemberHeading")}</h2>
-      <ActionForm action={addMember} className="flex flex-wrap gap-2">
-        <label htmlFor="member-email" className="sr-only">{t("emailLabel")}</label>
-        <input id="member-email" name="email" type="email" placeholder={t("emailPlaceholder")} required className="border rounded px-3 py-1.5" />
-        <label htmlFor="member-role" className="sr-only">{t("roleLabel")}</label>
-        <select id="member-role" name="role" className="border rounded px-3 py-1.5">
-          <option value="editor">{t("roleEditor")}</option>
-          <option value="viewer">{t("roleViewer")}</option>
-        </select>
-        <HelpHint text={t("roleHelp")} />
-        <button className="px-4 py-1.5 bg-primary text-primary-foreground rounded">{t("addMemberButton")}</button>
-      </ActionForm>
-      <p className="text-xs text-muted-foreground mt-2">{t("loginHint")}</p>
+      <TeamMemberForm action={addMember} disabled={isDemo} />
     </div>
   );
 }

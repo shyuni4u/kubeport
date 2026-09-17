@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 import { useTranslations } from "next-intl";
 import { X } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { fieldLabelClass } from "@/components/ui/field-styles";
 import { Badge } from "@/components/ui/badge";
 import { TEMPLATE_NAME_MAX_LENGTH, templateNameProblem } from "@/lib/template-name";
 
@@ -15,6 +16,7 @@ export type TemplateMeta = {
 };
 
 type Props = {
+  children?: React.ReactNode;
   meta: TemplateMeta;
   onChange: (m: TemplateMeta) => void;
   nameLocked?: boolean;
@@ -34,7 +36,7 @@ type Props = {
   hideTeam?: boolean;
 };
 
-export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Props) {
+export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam, children }: Props) {
   const t = useTranslations("templates.editor.meta");
   const [tagInput, setTagInput] = useState("");
   const lockAll = readOnly === true;
@@ -42,13 +44,13 @@ export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Prop
   // is an existing template's, which may predate the rule and still works.
   const nameInvalid = !nameLocked && !lockAll && templateNameProblem(meta.name) === "format";
   const nameMessageId = useId();
+  const tagInputId = useId();
 
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted px-4 py-2">
-      <label className="flex items-center gap-2 text-xs">
-        <span className="text-muted-foreground">{t("name")}</span>
+    <div className={`grid grid-cols-1 items-start gap-5 rounded-[12px] border bg-card p-5 sm:grid-cols-2 ${children ? "xl:grid-cols-4" : "lg:grid-cols-3"}`}>
+      <label className="grid min-w-0 gap-2">
+        <span className={fieldLabelClass}>{t("name")}</span>
         <Input
-          className="w-48 text-sm"
           placeholder={t("namePlaceholder")}
           value={meta.name}
           maxLength={TEMPLATE_NAME_MAX_LENGTH}
@@ -58,10 +60,9 @@ export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Prop
           onChange={(e) => onChange({ ...meta, name: e.target.value })}
         />
       </label>
-      <label className="flex items-center gap-2 text-xs">
-        <span className="text-muted-foreground">{t("displayName")}</span>
+      <label className="grid min-w-0 gap-2">
+        <span className={fieldLabelClass}>{t("displayName")}</span>
         <Input
-          className="w-48 text-sm"
           placeholder={t("displayName")}
           value={meta.display_name ?? ""}
           disabled={lockAll}
@@ -69,17 +70,18 @@ export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Prop
         />
       </label>
       {!hideTeam && (
-        <label className="flex items-center gap-2 text-xs">
-          <span className="text-muted-foreground">{t("team")}</span>
+        <label className="grid min-w-0 gap-2">
+          <span className={fieldLabelClass}>{t("team")}</span>
           <Input
-            className="w-32 text-sm"
-            value={meta.team ?? ""}
+              value={meta.team ?? ""}
             disabled={lockAll}
             onChange={(e) => onChange({ ...meta, team: e.target.value })}
           />
         </label>
       )}
-      <div className="flex flex-wrap items-center gap-1">
+      <div className="grid min-w-0 gap-2">
+        <label htmlFor={lockAll ? undefined : tagInputId} className={fieldLabelClass}>{t("tags")}</label>
+        <div className="flex flex-wrap items-center gap-2">
         {meta.tags.map((tag) => (
           <Badge key={tag} variant="secondary" className="gap-1 text-[11px]">
             {tag}
@@ -111,8 +113,9 @@ export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Prop
         ))}
         {!lockAll && (
           <Input
+            id={tagInputId}
             placeholder={t("addTag")}
-            className="h-7 w-28 text-xs"
+            className="min-w-28 flex-1"
             value={tagInput}
             onChange={(e) => setTagInput(e.target.value)}
             onKeyDown={(e) => {
@@ -127,9 +130,11 @@ export function MetaRow({ meta, onChange, nameLocked, readOnly, hideTeam }: Prop
             }}
           />
         )}
+        </div>
       </div>
+      {children}
       {nameInvalid && (
-        <p id={nameMessageId} className="basis-full text-xs text-destructive">
+        <p id={nameMessageId} className="col-span-full text-xs text-destructive">
           {t("nameInvalid")}
         </p>
       )}
