@@ -18,6 +18,7 @@ import { MetaRow, TemplateMeta } from "@/components/editor/MetaRow";
 import { templateNameProblem } from "@/lib/template-name";
 import { InstancesToggle } from "@/components/editor/InstancesToggle";
 import { BottomBar } from "@/components/editor/BottomBar";
+import { TemplateValidation } from "@/components/TemplateValidation";
 import { problemDetail, saveFailure } from "@/components/editor/saveError";
 import { ProblemMessage, type RequestFailure } from "@/components/ProblemMessage";
 import { findUnlabelledExposedField, stableStringify, useBeforeUnloadWhenDirty, useDirtyAgainstBaseline } from "@/components/editor/useDirtyGuard";
@@ -415,6 +416,7 @@ function UIModeNew({ dirty, onDirty }: ModeProps) {
         preview={preview}
         selectionEvent={selectionEvent}
       />
+      <TemplateValidation uiState={uiState} />
       {err && <div className="text-red-600 dark:text-red-400 text-sm whitespace-pre">{err}</div>}
       {failure && (
         <ProblemMessage
@@ -577,6 +579,7 @@ function YamlModeNew({ dirty, onDirty }: ModeProps) {
         <YamlEditor label="ui-spec.yaml" value={uispecYaml} issues={validation.uiSpec} onChange={(v) => { setUispecYaml(v); touch(); }} />
       </div>
       <YamlIssueList validation={validation} />
+      <TemplateValidation resourcesYaml={resourcesYaml} uiSpecYaml={uispecYaml} />
       <details className="rounded-md border bg-card p-3" open>
         <summary className="cursor-pointer text-sm font-semibold">{t("userFormPreview")}</summary>
         <div className="mt-3">

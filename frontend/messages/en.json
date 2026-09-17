@@ -1,4 +1,19 @@
 {
+  "templateValidation": {
+    "title": "Cluster validation",
+    "help": "Check whether Kubernetes would accept the current draft with your test values as new resources. Nothing is persisted. Existing names cause conflicts; passing does not guarantee deployment or runtime success. Use a non-demo admin or team editor account.",
+    "prepare": "Prepare validation (dry-run)",
+    "loading": "Preparing…",
+    "cluster": "Validation cluster",
+    "chooseCluster": "Choose a cluster",
+    "namespace": "Validation namespace",
+    "name": "Test release name",
+    "run": "Validate on cluster",
+    "running": "Validating…",
+    "failed": "Cluster validation failed.",
+    "invalidSpec": "Cannot read the form settings. Fix the ui-spec errors first.",
+    "success": "New-resource validation passed on {cluster} / {namespace}. No resources were created."
+  },
   "kinds": {
     "Deployment": "App",
     "Service": "Internal address",

@@ -215,6 +215,7 @@ func SerializeUIMode(ui UIModeTemplate) (resourcesYAML, uiSpecYAML string, err e
 	pathBytes := 0
 
 	for _, r := range ui.Resources {
+		fieldStart := len(allFields)
 		if r.APIVersion == "" || r.Kind == "" || r.Name == "" {
 			return "", "", fmt.Errorf("resource missing apiVersion/kind/name")
 		}
@@ -257,7 +258,9 @@ func SerializeUIMode(ui UIModeTemplate) (resourcesYAML, uiSpecYAML string, err e
 				if f.UISpec == nil {
 					return "", "", fmt.Errorf("exposed field %q missing ui-spec", fpath)
 				}
-				if f.UISpec.Default != nil {
+				// Keep the editor's resource identity stable. A name default is
+				// applied at render time, after all field targets are bound.
+				if f.UISpec.Default != nil && fpath != "metadata.name" {
 					if err := setJSONPathAbsolute(doc, fpath, f.UISpec.Default, budget); err != nil {
 						return "", "", fmt.Errorf("default for %q: %w", fpath, err)
 					}
@@ -268,6 +271,15 @@ func SerializeUIMode(ui UIModeTemplate) (resourcesYAML, uiSpecYAML string, err e
 			default:
 				return "", "", fmt.Errorf("unknown field mode %q", f.Mode)
 			}
+		}
+		// Fixed metadata.name fields may also rename a resource. Bind all
+		// emitted paths to the final identity, independent of map order.
+		for i := fieldStart; i < len(allFields); i++ {
+			_, _, rest, err := parseHead(allFields[i].Path)
+			if err != nil {
+				return "", "", err
+			}
+			allFields[i].Path = r.Kind + "[" + objectName(doc) + "]." + rest
 		}
 		if err := enc.Encode(doc); err != nil {
 			return "", "", err

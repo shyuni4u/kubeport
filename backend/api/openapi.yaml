@@ -662,6 +662,51 @@ paths:
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
 
+  /v1/templates/validate:
+    post:
+      tags: [templates]
+      operationId: validateTemplate
+      summary: Validate an unsaved template on a cluster without creating resources
+      description: |
+        Non-demo administrators or team editors only. Validates the YAML pair,
+        renders the supplied values, and sends create requests with dryRun=All
+        and fieldValidation=Strict using the caller's token. No template, release,
+        or Kubernetes object is persisted and no Kubernetes object is returned.
+        Existing object names cause a validation error; this is not update validation.
+        Limited to MVP resources and 50 objects, with a 20-second upstream timeout.
+        A successful check does not guarantee later deployment or workload readiness.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resources_yaml, ui_spec_yaml, cluster, namespace, name]
+              properties:
+                resources_yaml: { type: string }
+                ui_spec_yaml: { type: string }
+                values: { type: object, additionalProperties: true }
+                cluster: { type: string }
+                namespace: { type: string }
+                name: { type: string, description: Test release name used for multi-instance resource naming }
+      responses:
+        "200":
+          description: All resources passed dry-run creation
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [valid]
+                properties:
+                  valid: { type: boolean, enum: [true] }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
   /v1/templates/{name}/render:
     post:
       tags: [templates]
@@ -2476,7 +2521,7 @@ components:
         only one object of that Kind exists. Examples:
         `Deployment.spec.replicas`,
         `Service[web].spec.ports[0].port`,
-        `Deployment[api].spec.template.spec.containers[0].image`.
+        `Deployment[web].spec.template.spec.containers[0].image`.
 
         Grammar:
 

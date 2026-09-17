@@ -1,4 +1,19 @@
 {
+  "templateValidation": {
+    "title": "클러스터 유효성 검사",
+    "help": "현재 편집 내용에 테스트 입력값을 적용해 Kubernetes에서 신규 생성 가능 여부를 확인합니다. 리소스는 저장되지 않습니다. 같은 이름이 이미 있으면 충돌하며, 검증 성공이 실제 배포·실행 성공을 보장하지는 않습니다. 일반 관리자 또는 팀 편집자 계정으로 이용하세요.",
+    "prepare": "검증 준비 (dry-run)",
+    "loading": "검증 준비 중…",
+    "cluster": "검증 클러스터",
+    "chooseCluster": "클러스터 선택",
+    "namespace": "검증 네임스페이스",
+    "name": "테스트 배포 이름",
+    "run": "클러스터에서 검증",
+    "running": "검증 중…",
+    "failed": "클러스터 검증에 실패했습니다.",
+    "invalidSpec": "폼 설정을 해석할 수 없습니다. ui-spec 오류를 먼저 수정하세요.",
+    "success": "{cluster} / {namespace}에서 신규 생성 검증을 통과했습니다. 리소스는 생성되지 않았습니다."
+  },
   "kinds": {
     "Deployment": "앱",
     "Service": "내부 주소",

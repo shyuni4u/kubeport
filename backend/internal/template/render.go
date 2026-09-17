@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/validation"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -24,8 +26,9 @@ type Labels struct {
 }
 
 // ValidateSpec parses the resources and ui-spec YAML pair and returns a
-// non-nil error if either is malformed, if any ui-spec field has an invalid
-// pattern, or if any field path is unparseable. It skips value injection and
+// non-nil error if either is malformed, resource identities are invalid,
+// a field target cannot be resolved/traversed, or a field pattern is invalid.
+// It skips value injection and
 // required-field checks so admins can register templates whose fields are
 // required at deploy time.
 //
@@ -41,6 +44,9 @@ func ValidateSpec(resourcesYAML, uiSpecYAML string) error {
 	}
 	spec, err := parseSpec(uiSpecYAML)
 	if err != nil {
+		return err
+	}
+	if err := validateResourceIdentities(docs); err != nil {
 		return err
 	}
 	for i, f := range spec.Fields {
@@ -70,6 +76,25 @@ func ValidateSpec(resourcesYAML, uiSpecYAML string) error {
 			// quote characters of their own, and %q escapes them into
 			// something the author cannot paste back.
 			return fmt.Errorf("fields[%d] (label %q) has an unusable path `%s`: %w", i, f.Label, f.Path, err)
+		}
+		// Check the actual target and traversal, without applying defaults or
+		// changing another field's target. Required input may be absent here.
+		kind, selector, rest, _ := parseHead(f.Path)
+		target, err := findDoc(docs, kind, selector)
+		if err == nil {
+			err = walkInto(target, rest, nil, false)
+		}
+		if err != nil {
+			return fmt.Errorf("fields[%d] (path `%s`) cannot be applied: %w", i, f.Path, err)
+		}
+		if rest == "metadata.name" && f.Default != nil {
+			name, ok := f.Default.(string)
+			if !ok {
+				return fmt.Errorf("fields[%d] metadata.name default must be a string", i)
+			}
+			if probs := resourceNameProblems(kind, name); len(probs) > 0 {
+				return fmt.Errorf("fields[%d] metadata.name default %q is invalid: %s", i, name, strings.Join(probs, "; "))
+			}
 		}
 		if (f.Type == TypeString || f.Type == TypeAutocomplete) && f.Pattern != "" {
 			// The deploy form runs the pattern in the browser as the user
@@ -165,7 +190,21 @@ func Render(resourcesYAML, uiSpecYAML string, values json.RawMessage, l Labels) 
 		return nil, fmt.Errorf("values not a JSON object: %w", err)
 	}
 
-	for _, f := range spec.Fields {
+	// Resolve every target before values can rename any of the objects.
+	targets := make([]map[string]any, len(spec.Fields))
+	rests := make([]string, len(spec.Fields))
+	for i, f := range spec.Fields {
+		kind, selector, rest, err := parseHead(f.Path)
+		if err != nil {
+			return nil, err
+		}
+		targets[i], err = findDoc(docs, kind, selector)
+		if err != nil {
+			return nil, err
+		}
+		rests[i] = rest
+	}
+	for i, f := range spec.Fields {
 		raw, present := input[f.Path]
 		if !present {
 			if f.Required {
@@ -179,9 +218,12 @@ func Render(resourcesYAML, uiSpecYAML string, values json.RawMessage, l Labels) 
 		if err := f.Validate(raw); err != nil {
 			return nil, err
 		}
-		if err := setJSONPath(docs, f.Path, raw); err != nil {
+		if err := setInto(targets[i], rests[i], raw); err != nil {
 			return nil, err
 		}
+	}
+	if err := validateResourceIdentities(docs); err != nil {
+		return nil, err
 	}
 
 	for _, d := range docs {
@@ -200,6 +242,42 @@ func Render(resourcesYAML, uiSpecYAML string, values json.RawMessage, l Labels) 
 	}
 
 	return marshalMultiDoc(docs)
+}
+
+// These checks are local manifest checks, not a substitute for apiserver
+// schema/admission validation against a selected cluster.
+func validateResourceIdentities(docs []map[string]any) error {
+	seen := map[string]bool{}
+	for i, doc := range docs {
+		kind, _ := doc["kind"].(string)
+		apiVersion, _ := doc["apiVersion"].(string)
+		if kind == "" || apiVersion == "" {
+			return fmt.Errorf("resources[%d] requires apiVersion and kind", i)
+		}
+		name := objectName(doc)
+		problems := resourceNameProblems(kind, name)
+		if len(problems) > 0 {
+			return fmt.Errorf("%s metadata.name %q is invalid: %s", kind, name, strings.Join(problems, "; "))
+		}
+		meta, _ := doc["metadata"].(map[string]any)
+		key := fmt.Sprintf("%s/%s/%v/%s", apiVersion, kind, meta["namespace"], name)
+		if seen[key] {
+			return fmt.Errorf("duplicate resource %s %q", kind, name)
+		}
+		seen[key] = true
+	}
+	return nil
+}
+
+func resourceNameProblems(kind, name string) []string {
+	problems := validation.IsDNS1123Subdomain(name)
+	if kind == "Service" {
+		problems = validation.IsDNS1035Label(name)
+	}
+	if kind == "CronJob" && len(name) > 52 {
+		problems = append(problems, "must be no more than 52 characters")
+	}
+	return problems
 }
 
 // stringifyStringMaps turns scalar values in the fields the API types as

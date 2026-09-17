@@ -517,6 +517,12 @@ func (h *Handlers) PublishVersion(c *gin.Context) {
 
 	// Checked again at publish: the draft was checked when written, but a
 	// version of the other mode may have been published since (#190).
+	if existing.Status == "draft" {
+		if err := template.ValidateSpec(existing.ResourcesYaml, existing.UiSpecYaml); err != nil {
+			writeError(c, http.StatusBadRequest, "validation-error", err.Error())
+			return
+		}
+	}
 	if existing.Status == "draft" && !h.sameModeAsTemplate(c, c.Param("name"), existing.UiSpecYaml, existing.ID) {
 		return
 	}

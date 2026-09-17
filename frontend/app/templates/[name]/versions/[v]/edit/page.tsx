@@ -15,6 +15,7 @@ import { EditorLayout } from "@/components/editor/EditorLayout";
 import { MetaRow, TemplateMeta } from "@/components/editor/MetaRow";
 import { InstancesToggle } from "@/components/editor/InstancesToggle";
 import { BottomBar, UnsavedChangesStatus } from "@/components/editor/BottomBar";
+import { TemplateValidation } from "@/components/TemplateValidation";
 import { problemDetail, saveFailure } from "@/components/editor/saveError";
 import { ProblemMessage, type RequestFailure } from "@/components/ProblemMessage";
 import { findUnlabelledExposedField, stableStringify, useBeforeUnloadWhenDirty, useDirtyAgainstBaseline } from "@/components/editor/useDirtyGuard";
@@ -551,6 +552,7 @@ function UIModeEdit({ dirty, onDirty }: ModeProps) {
         preview={preview}
         selectionEvent={selectionEvent}
       />
+      {uiStateSynthetic && <TemplateValidation uiState={uiStateSynthetic} />}
       {err && <div className="text-red-600 dark:text-red-400 text-sm mt-2 whitespace-pre">{err}</div>}
       {failure && (
         <div className="mt-2">
@@ -720,6 +722,7 @@ function YamlModeEdit({ dirty, onDirty }: ModeProps) {
         <YamlEditor label="ui-spec.yaml" value={uispecYaml} issues={validation.uiSpec} onChange={(x) => { setUispecYaml(x); touch(); }} />
       </div>
       <YamlIssueList validation={validation} />
+      <TemplateValidation resourcesYaml={resourcesYaml} uiSpecYaml={uispecYaml} />
       <details className="rounded-md border bg-card p-3" open>
         <summary className="cursor-pointer text-sm font-semibold">{t("userFormPreview")}</summary>
         <div className="mt-3">

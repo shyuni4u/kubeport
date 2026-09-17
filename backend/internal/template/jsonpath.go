@@ -290,6 +290,11 @@ func CanonicalPath(path string) (string, error) {
 }
 
 func setInto(node any, rest string, v any) error {
+	return walkInto(node, rest, v, true)
+}
+
+// With write=false, validate traversal without mutating the template.
+func walkInto(node any, rest string, v any, write bool) error {
 	segs, err := parsePathSegments(rest)
 	if err != nil {
 		return err
@@ -309,7 +314,9 @@ func setInto(node any, rest string, v any) error {
 				return fmt.Errorf("not a map at %q", s.key)
 			}
 			if last {
-				obj[s.key] = v
+				if write {
+					obj[s.key] = v
+				}
 				return nil
 			}
 			if _, exists := obj[s.key]; !exists {
@@ -319,6 +326,10 @@ func setInto(node any, rest string, v any) error {
 				// labels["app.kubernetes.io/name"] as an array.
 				if segs[i+1].arr {
 					return fmt.Errorf("cannot auto-create array at %q: add the field to the template", s.key)
+				}
+				if !write {
+					node = map[string]any{}
+					continue
 				}
 				obj[s.key] = map[string]any{}
 			}
@@ -332,7 +343,9 @@ func setInto(node any, rest string, v any) error {
 				return fmt.Errorf("index %d out of range (len=%d)", s.idx, len(arr))
 			}
 			if last {
-				arr[s.idx] = v
+				if write {
+					arr[s.idx] = v
+				}
 				return nil
 			}
 			node = arr[s.idx]
