@@ -82,6 +82,12 @@ export async function getSession(): Promise<Session | null> {
   const cookieStore = await cookies();
   const id = cookieStore.get(SESSION_COOKIE)?.value;
   if (!id) return null;
+  return getSessionById(id);
+}
+
+// Only call with a cookie or an authenticated, decrypted CLI credential.
+// The DB expiry/revocation check remains authoritative for both entry points.
+export async function getSessionById(id: string): Promise<Session | null> {
   const { rows } = await pool.query(
     `SELECT id, user_id, id_token_encrypted, refresh_token_encrypted, id_token_exp, provider
        FROM sessions WHERE id=$1 AND expires_at > now()`,
