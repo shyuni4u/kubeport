@@ -2521,7 +2521,7 @@ components:
         only one object of that Kind exists. Examples:
         `Deployment.spec.replicas`,
         `Service[web].spec.ports[0].port`,
-        `Deployment[api].spec.template.spec.containers[0].image`.
+        `Deployment[web].spec.template.spec.containers[0].image`.
 
         Grammar:
 

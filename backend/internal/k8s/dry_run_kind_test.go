@@ -35,9 +35,13 @@ func TestDryRunCreateWithKind(t *testing.T) {
 	require.NoError(t, client.DryRunCreate(ctx, "default", manifest))
 	_, err = reader.Resource(schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}).Namespace("default").Get(ctx, name, metav1.GetOptions{})
 	require.True(t, apierrors.IsNotFound(err), "dry-run must not leave an object: %v", err)
-	// A syntactically valid Deployment still requires selector and pod template.
+	// The CI caller intentionally has ConfigMap rights only. Dry-run must
+	// preserve that boundary instead of elevating to a cluster administrator.
 	err = client.DryRunCreate(ctx, "default", []byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: invalid-dryrun\n"))
-	require.True(t, apierrors.IsInvalid(err), "apiserver must reject missing spec: %v", err)
+	require.True(t, apierrors.IsForbidden(err), "dry-run must respect caller RBAC: %v", err)
+	// ConfigMap data and binaryData cannot share a key: valid YAML, invalid object.
+	err = client.DryRunCreate(ctx, "default", append(manifest, []byte("binaryData:\n  hello: d29ybGQ=\n")...))
+	require.True(t, apierrors.IsInvalid(err), "apiserver must reject overlapping keys: %v", err)
 	err = client.DryRunCreate(ctx, "default", append(manifest, []byte("unknownField: true\n")...))
 	require.True(t, apierrors.IsBadRequest(err), "strict field validation must reject unknown fields: %v", err)
 }
