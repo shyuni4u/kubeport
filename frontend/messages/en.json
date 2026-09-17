@@ -447,6 +447,7 @@
       "errors": {
         "forbidden": "You don't have permission for this action. Only the kubeport-admin group can change global templates.",
         "demoRestricted": "Demo accounts can only change templates created in the demo.",
+        "templateInUse": "A release references this template. Deprecate its published versions to prevent new deployments.",
         "demoPublishRestricted": "Demo accounts can't publish versions or change a published version's status. Drafts and previews still work.",
         "conflict": "The state changed and the request could not be processed (already published, or another draft exists). Refresh and check again.",
         "generic": "The request failed (HTTP {status})."
@@ -459,6 +460,9 @@
       "editDraft": "Edit draft v{version}",
       "confirmPublish": "Publish v{version}? Once published it becomes visible to users.",
       "confirmDeprecate": "Deprecate v{version}? Users will no longer be able to deploy it.",
+      "deleteTemplate": "Delete template",
+      "deleteTemplateHelp": "Deletes the template and all versions. Templates referenced by releases cannot be deleted.",
+      "confirmDeleteTemplate": "Delete {name} and all its versions? This cannot be undone.",
       "confirmDeleteDraft": "Delete draft v{version}? This cannot be undone.",
       "backToTemplates": "Back to templates"
     },

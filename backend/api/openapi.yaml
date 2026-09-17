@@ -843,6 +843,29 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/InternalError" }
 
+    delete:
+      tags: [templates]
+      operationId: deleteTemplate
+      summary: Delete a template and all versions (admin only)
+      description: |
+        Requires kubeport-admin and the existing template editing/demo scope.
+        Deletes all versions atomically. Returns 409 when any release references
+        a version, preserving the template and its versions. Deprecate published
+        versions instead to prevent new deployments of an in-use template.
+      parameters:
+        - $ref: "#/components/parameters/TemplateName"
+      responses:
+        "204": { description: "Template and all versions deleted. No body." }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: A release references a template version; nothing was deleted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
   /v1/templates/{name}/versions:
     get:
       tags: [templates]
