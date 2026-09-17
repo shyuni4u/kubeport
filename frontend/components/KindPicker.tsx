@@ -79,6 +79,7 @@ export function KindPicker({
   return (
     <div>
       <h3 className="font-semibold mb-2">{t("quickPick")}</h3>
+      <p className="mb-3 text-xs text-muted-foreground">{t("starterHelp")}</p>
       <div className="flex flex-wrap gap-2 mb-4">
         {FEATURED.map(k => (
           <Button

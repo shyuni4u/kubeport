@@ -473,6 +473,8 @@
       "yamlMode": "YAML mode",
       "editing": "Editing ({name} v{version})",
       "editingNew": "Editing",
+      "removeResource": "Remove resource",
+      "removeResourceNamed": "Remove {kind} {name}",
       "pickFieldHint": "Select a field from the tree on the left.",
       "loading": "Loading…",
       "schemaCluster": "Schema cluster",
@@ -548,6 +550,7 @@
       },
       "kindPicker": {
         "quickPick": "Quick pick",
+        "starterHelp": "Adds an example with required structure. Enter a template name to save a draft. Review images, commands and connections before deployment. Match Service selectors to target Pod labels and provide a headless Service matching the StatefulSet serviceName. CronJobs start suspended.",
         "allGroupVersions": "All GroupVersions ({count})",
         "kindPlaceholder": "Kind (e.g. Deployment)",
         "add": "Add",

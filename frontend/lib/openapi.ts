@@ -21,6 +21,8 @@ export interface SchemaNode {
   enum?: Array<string | number>;
   $ref?: string;
   allOf?: SchemaNode[];
+  oneOf?: SchemaNode[];
+  anyOf?: SchemaNode[];
   "x-kubernetes-group-version-kind"?: Array<{ group: string; version: string; kind: string }>;
 }
 

@@ -48,3 +48,10 @@ kubectl --context <검증용-context> --namespace <검증용-namespace> create \
 이 명령은 리소스를 저장하지 않는다. 원본 `resources.yaml`만 검사하면 사용자 입력이나
 다중 인스턴스 이름 변환 결과는 검증되지 않는다. 일반 YAML 미리보기는 렌더링만 수행하고,
 클러스터 검증 버튼을 눌렀을 때만 실제 클러스터에 dry-run 요청을 보낸다.
+# 빠른 선택과 초안 편집
+
+새 템플릿의 빠른 선택 7종은 필수 구조를 갖춘 예제로 시작합니다. 템플릿 이름은 직접 입력해야 합니다. Deployment·StatefulSet에는 일치하는 selector/Pod 라벨과 이름·이미지가 있는 컨테이너를, Service에는 포트를, Job·CronJob에는 명령과 restartPolicy를 제공합니다. CronJob은 일시정지 상태입니다. Secret은 자격 증명 없는 빈 Opaque Secret으로 시작합니다.
+
+배포 전 이미지·명령·일정·연결 대상을 확인하세요. Service의 selector는 연결할 Pod 라벨과 맞춰야 하고, StatefulSet의 serviceName에 맞는 headless Service는 별도로 준비해야 합니다. CI는 기본 예제 7종을 실제 kind 클러스터에서 서버 dry-run과 OpenAPI 기반 UI 타입 검사로 검증합니다. 운영 클러스터의 추가 정책·권한·이미지 접근 여부는 별도 검증 대상입니다.
+
+새 템플릿의 **편집 중 → 리소스 삭제**는 해당 리소스를 작성 중인 초안과 미리보기에서 제거합니다. 저장된 템플릿이나 클러스터의 리소스를 삭제하는 기능이 아닙니다.

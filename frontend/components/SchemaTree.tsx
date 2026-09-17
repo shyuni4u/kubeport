@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { joinPath, parsePathSegments } from "@/lib/template-path";
+import { mapSchemaType } from "@/lib/field-schema";
 
 export type SchemaFieldMode = { mode: "fixed" | "exposed" };
 
@@ -79,7 +80,7 @@ function MapEntries({ path, node, selectedPath, onSelect, fields }: {
       const p = joinPath(path, k)!;
       return <button key={k} type="button" role="treeitem" aria-selected={selectedPath === p}
         className={cn(NODE_CLASS, selectedPath === p && SELECTED_CLASS)} onClick={() => onSelect(p, child)}>
-        {k}{" "}<span className="ml-2 text-muted-foreground">{child.type}</span>{" "}
+        {k}{" "}<span className="ml-2 text-muted-foreground">{child.type ?? mapSchemaType(child)}</span>{" "}
         {fields?.[p] && <FieldBadge mode={fields[p].mode} />}
       </button>;
     })}
@@ -108,7 +109,7 @@ function renderNode(
     });
 
   if (node.type === "object" && typeof node.additionalProperties === "object" &&
-    ["string", "integer", "boolean"].includes(node.additionalProperties.type ?? "")) {
+    mapSchemaType(node.additionalProperties)) {
     return <MapEntries key={path} path={path} node={node} selectedPath={selectedPath} onSelect={onSelect} fields={fields} />;
   }
   if (node.type === "object" && node.properties) {
