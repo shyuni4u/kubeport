@@ -13,6 +13,8 @@ test.describe("demo user", () => {
   test("landing shows operational status when logged in", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: /배포 운영 현황|Deployment operations/ })).toBeVisible();
+    await expect(page.locator('aside a[href="/clusters"]')).toHaveCount(0);
+    await expect(page.locator('aside a[href="/storage"], aside a[href="/network"]')).toHaveCount(0);
   });
 });
 
@@ -23,6 +25,20 @@ test.describe("demo admin restrictions", () => {
     const res = await request.post("/api/v1/teams", { data: { name: "should-fail", display_name: "x" } });
     expect(res.status()).toBe(403);
     expect(await res.text()).toContain("demo-restricted");
+  });
+
+  test("opens beta operations inside the selected cluster", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("link", { name: /클러스터 설정 beta|Cluster settings beta/ }).click();
+    const nav = page.getByRole("navigation", { name: /선택한 클러스터의 운영 메뉴|Selected cluster operations/ });
+    const storage = nav.getByRole("link", { name: /스토리지 beta|Storage beta/ });
+    const href = await storage.getAttribute("href");
+    expect(href).toMatch(/^\/clusters\/[^/]+\/storage$/);
+    await storage.click();
+    await page.waitForURL(`**${href}`);
+    await expect(nav.getByRole("link", { name: /스토리지 beta|Storage beta/ })).toHaveAttribute("aria-current", "page");
+    await expect(nav.getByRole("link", { name: /노드 운영 beta|Node operations beta/ })).toHaveAttribute("href", href!.replace(/storage$/, "nodes"));
+    await expect(page.locator('aside a[href="/nodes"], aside a[href="/storage"], aside a[href="/network"]')).toHaveCount(0);
   });
 });
 
@@ -52,6 +68,7 @@ test.describe("logged out landing", () => {
     await page.goto("/");
     await expect(page.getByRole("link", { name: /관리자로 체험|Try as admin/ })).toBeVisible();
     await expect(page.getByRole("link", { name: /사용자로 체험|Try as user/ })).toBeVisible();
+    await expect(page.locator('aside a[href="/clusters"], aside a[href="/storage"], aside a[href="/network"], aside a[href="/catalog"]')).toHaveCount(0);
     await ctx.close();
   });
 });

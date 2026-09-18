@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { BetaBadge } from "./BetaBadge";
 
-export function SidebarNavItem({ href, label }: { href: string; label: string }) {
+export function SidebarNavItem({ href, label, beta = false }: { href: string; label: string; beta?: boolean }) {
   const pathname = usePathname();
   const active = pathname === href || pathname.startsWith(href + "/");
   return (
@@ -12,7 +13,7 @@ export function SidebarNavItem({ href, label }: { href: string; label: string })
       href={href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex items-center rounded-md px-3 py-2 text-sm transition-colors",
+        "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
         // The active item and a hovered item used to paint the *same* fill —
         // `--sidebar-accent`, about 1.11:1 on the white sidebar — so the nav
         // could not say which page you were on, and hovering told you nothing
@@ -23,6 +24,7 @@ export function SidebarNavItem({ href, label }: { href: string; label: string })
       )}
     >
       {label}
+      {beta && <> <BetaBadge /></>}
     </Link>
   );
 }

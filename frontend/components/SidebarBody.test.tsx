@@ -12,8 +12,8 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/",
 }));
 
-async function renderBody(signedIn: boolean) {
-  const body = await SidebarBody({ role: "user", signedIn });
+async function renderBody(signedIn: boolean, role: "user" | "admin" = "user") {
+  const body = await SidebarBody({ role, signedIn });
   return render(
     <NextIntlClientProvider locale="ko" messages={ko}>
       {body}
@@ -43,9 +43,10 @@ describe("SidebarBody cluster picker", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.queryByLabelText(ko.shell.currentCluster)).not.toBeInTheDocument();
     expect(screen.queryByText(ko.shell.noClusters)).not.toBeInTheDocument();
-    // The nav itself is still there. The server translations mock returns the
-    // key, so the link reads "catalog".
-    expect(screen.getByRole("link", { name: "catalog" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "introduction" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "login" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "catalog" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /clusters|nodes|storage|network/ })).not.toBeInTheDocument();
   });
 
   it("renders the picker, filled from /api/v1/clusters, with a session", async () => {
@@ -53,5 +54,16 @@ describe("SidebarBody cluster picker", () => {
     const select = await screen.findByLabelText(ko.shell.currentCluster);
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/clusters");
     expect(select).toHaveValue("a");
+    expect(screen.getByRole("link", { name: "catalog" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /clusters|nodes|storage|network|templates|teams/ })).not.toBeInTheDocument();
+  });
+
+  it("groups administration separately and keeps beta operations inside cluster settings", async () => {
+    await renderBody(true, "admin");
+    await screen.findByLabelText(ko.shell.currentCluster);
+    expect(screen.getByText("administration")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "clusters beta" })).toHaveAttribute("href", "/clusters");
+    expect(screen.getByRole("link", { name: "templates" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /nodes|storage|network/ })).not.toBeInTheDocument();
   });
 });

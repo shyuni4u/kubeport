@@ -6,6 +6,15 @@ own releases for users, demo-owned releases for demo admins). Counts and filters
 cover the current 20-row page. Failed reads stay distinguishable from healthy
 resources. `/help` keeps the product introduction available.
 
+The logged-out navigation contains only introduction/demo and sign-in. Signed-in
+navigation focuses on overview, deployment and releases; administrators get a
+separate group for templates, teams and **Cluster settings (beta)**. Node,
+storage and routing tools are optional beta features inside the selected cluster
+at `/clusters/<name>`, with `/nodes`, `/storage` and `/network` subpages. Tool
+links retain that cluster, independently of the sidebar's deployment default.
+They are not prerequisites for deploying a template. Existing top-level operation
+URLs remain available for bookmarks, but are no longer global menu entries.
+
 ## Connections and identity
 
 `/clusters` provides registration, connection settings and a caller-specific

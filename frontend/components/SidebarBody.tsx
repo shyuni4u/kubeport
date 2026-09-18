@@ -4,35 +4,8 @@ import { ClusterPicker } from "./ClusterPicker";
 import { SidebarNavItem } from "./SidebarNavItem";
 import type { Role } from "@/lib/role";
 
-type NavKey = "catalog" | "myReleases" | "templates" | "releases" | "teams" | "overview" | "clusters" | "nodes" | "storage" | "network" | "help";
-
-const NAV_BY_ROLE: Record<Role, Array<{ href: string; key: NavKey }>> = {
-  user: [
-    { href: "/", key: "overview" },
-    { href: "/catalog", key: "catalog" },
-    { href: "/releases", key: "myReleases" },
-    { href: "/clusters", key: "clusters" },
-    { href: "/storage", key: "storage" },
-    { href: "/network", key: "network" },
-    { href: "/help", key: "help" },
-  ],
-  admin: [
-    { href: "/", key: "overview" },
-    { href: "/catalog", key: "catalog" },
-    { href: "/templates", key: "templates" },
-    { href: "/releases", key: "releases" },
-    { href: "/admin/teams", key: "teams" },
-    { href: "/clusters", key: "clusters" },
-    { href: "/nodes", key: "nodes" },
-    { href: "/storage", key: "storage" },
-    { href: "/network", key: "network" },
-    { href: "/help", key: "help" },
-  ],
-};
-
 export async function SidebarBody({ role, signedIn }: { role: Role; signedIn: boolean }) {
   const t = await getTranslations("shell.nav");
-  const nav = NAV_BY_ROLE[role];
   return (
     <>
       <div className="flex h-14 items-center border-b border-sidebar-border px-6">
@@ -41,9 +14,29 @@ export async function SidebarBody({ role, signedIn }: { role: Role; signedIn: bo
         </Link>
       </div>
       <nav className="flex-1 space-y-1 p-4">
-        {nav.map((item) => (
-          <SidebarNavItem key={item.href} href={item.href} label={t(item.key)} />
-        ))}
+        {signedIn ? (
+          <>
+            <SidebarNavItem href="/" label={t("overview")} />
+            <SidebarNavItem href="/catalog" label={t("catalog")} />
+            <SidebarNavItem href="/releases" label={t(role === "admin" ? "releases" : "myReleases")} />
+            {role === "admin" && (
+              <div className="mt-5 space-y-1 border-t border-sidebar-border pt-4">
+                <p className="px-3 pb-1 text-xs font-medium text-muted-foreground">{t("administration")}</p>
+                <SidebarNavItem href="/templates" label={t("templates")} />
+                <SidebarNavItem href="/admin/teams" label={t("teams")} />
+                <SidebarNavItem href="/clusters" label={t("clusters")} beta />
+              </div>
+            )}
+            <div className="mt-5 border-t border-sidebar-border pt-4">
+              <SidebarNavItem href="/help" label={t("help")} />
+            </div>
+          </>
+        ) : (
+          <>
+            <SidebarNavItem href="/" label={t("introduction")} />
+            <SidebarNavItem href="/api/auth/login" label={t("login")} />
+          </>
+        )}
       </nav>
       {/* The picker lists clusters on mount, which needs a session. Without
           one it only earned a 401 in the console and "no clusters registered"
