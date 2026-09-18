@@ -337,6 +337,10 @@ jobs:
           KIND_CA=$(kubectl --context kind-kubeport config view --raw --minify --flatten -o json \
             | jq -r '.clusters[0].cluster."certificate-authority-data"' | base64 -d)
           export KIND_CA
+          # Exercise the new storage/routing operations against this disposable
+          # cluster, with a unique namespace and exact-resource cleanup.
+          export KBP_OPERATIONS_KUBECONFIG="$RUNNER_TEMP/kubeport-operations.config"
+          (umask 077; kubectl --context kind-kubeport config view --raw --minify --flatten > "$KBP_OPERATIONS_KUBECONFIG")
           # -v so the log names the tests that ran. KBP_REQUIRE_KIND is what
           # gates; this is so a human can see which kind-backed tests executed
           # without inferring it from an exit code — the distinction this whole
