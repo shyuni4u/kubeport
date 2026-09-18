@@ -4,17 +4,29 @@ import { ClusterPicker } from "./ClusterPicker";
 import { SidebarNavItem } from "./SidebarNavItem";
 import type { Role } from "@/lib/role";
 
-type NavKey = "catalog" | "myReleases" | "templates" | "releases" | "teams";
+type NavKey = "catalog" | "myReleases" | "templates" | "releases" | "teams" | "overview" | "clusters" | "nodes" | "storage" | "network" | "help";
 
 const NAV_BY_ROLE: Record<Role, Array<{ href: string; key: NavKey }>> = {
   user: [
+    { href: "/", key: "overview" },
     { href: "/catalog", key: "catalog" },
     { href: "/releases", key: "myReleases" },
+    { href: "/clusters", key: "clusters" },
+    { href: "/storage", key: "storage" },
+    { href: "/network", key: "network" },
+    { href: "/help", key: "help" },
   ],
   admin: [
+    { href: "/", key: "overview" },
+    { href: "/catalog", key: "catalog" },
     { href: "/templates", key: "templates" },
     { href: "/releases", key: "releases" },
     { href: "/admin/teams", key: "teams" },
+    { href: "/clusters", key: "clusters" },
+    { href: "/nodes", key: "nodes" },
+    { href: "/storage", key: "storage" },
+    { href: "/network", key: "network" },
+    { href: "/help", key: "help" },
   ],
 };
 

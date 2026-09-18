@@ -37,14 +37,14 @@ export async function GET(req: NextRequest) {
     code_challenge: challenge,
     code_challenge_method: "S256",
   };
-  // login_hint goes to the demo provider only, so a hint never leaks to the
-  // primary IdP. Dex's local connector currently ignores it — the login form
-  // opens empty — so the landing page shows each demo account's email under
-  // its button instead (#29). Kept because it costs nothing and an IdP that
-  // honours it would pre-fill.
+  // Keep the standard hint for providers that support it. Dex's local
+  // connector uses our password template and the redirect-preserved fragment.
   const hint = req.nextUrl.searchParams.get("hint");
   if (provider === "demo" && hint) params.login_hint = hint;
 
   const url = client.buildAuthorizationUrl(config, params);
+  if (provider === "demo" && hint) {
+    url.hash = new URLSearchParams({ login_hint: hint }).toString();
+  }
   return NextResponse.redirect(url.href);
 }

@@ -34,6 +34,7 @@ const nextConfig: NextConfig = {
   // sure the standalone build ships them (see lib/showcase/load.ts).
   outputFileTracingIncludes: {
     "/": ["./lib/showcase/*.yaml"],
+    "/help": ["./lib/showcase/*.yaml"],
   },
 };
 

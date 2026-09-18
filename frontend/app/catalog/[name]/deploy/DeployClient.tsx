@@ -710,7 +710,7 @@ export function DeployClient({
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-1">
                 <label htmlFor="deploy-name" className={fieldLabelClass}>
-                  {t("nameLabel")}
+                  {t(kube ? "nameLabelKube" : "nameLabel")}
                 </label>
                 <HelpHint text={t("nameHelp")} />
               </div>

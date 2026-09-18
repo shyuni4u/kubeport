@@ -360,3 +360,5 @@ kubeport/
 ## 라이선스
 
 [MIT License](LICENSE) — 자유롭게 사용·수정·재배포 가능. 저작권 표기와 라이선스 전문만 유지하면 된다.
+
+클러스터 연결·권한, 노드 운영, 스토리지 및 Ingress 흐름: [운영 가이드](docs/cluster-operations.md).

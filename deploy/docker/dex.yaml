@@ -1,4 +1,6 @@
 issuer: https://host.docker.internal:5556
+frontend:
+  dir: /srv/dex/web
 storage:
   type: memory
 web:

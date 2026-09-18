@@ -10,6 +10,7 @@ import type { ErrorDetailLevel } from "@/lib/error-detail";
 import { DeployClient } from "./DeployClient";
 import type { UISpec } from "@/lib/ui-spec-to-zod";
 import type { ReleaseNameRules } from "@/lib/release-name";
+import { useKubeTermsStore } from "@/stores/kube-terms-store";
 
 const pushMock = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -104,6 +105,18 @@ describe("DeployClient", () => {
     cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("switches the release name label without changing its value", async () => {
+    const user = userEvent.setup();
+    useKubeTermsStore.setState({ showKubeTerms: false });
+    vi.stubGlobal("fetch", routedFetch({}));
+    render(<DeployClient templateName="web-app" version={1} team={null} spec={spec} />);
+    await user.type(screen.getByLabelText("배포 이름"), "same-name");
+    await user.click(screen.getByRole("switch", { name: "Kubernetes 용어로 보기" }));
+    expect(screen.getByLabelText("Release name")).toHaveValue("same-name");
+    await user.click(screen.getByRole("switch", { name: "Kubernetes 용어로 보기" }));
+    expect(screen.getByLabelText("배포 이름")).toHaveValue("same-name");
   });
 
   // #30 — a denied preflight used to leave the button an active indigo

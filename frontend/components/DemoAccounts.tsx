@@ -19,11 +19,8 @@ type Props = {
  * The landing page's demo entry: one button per account, with that account's
  * email right under it.
  *
- * The email used to be nowhere on the page (#29). The buttons pass it as
- * `login_hint`, on the assumption that Dex pre-fills its login form from it —
- * but Dex's local connector ignores login_hint, so a first visitor reached an
- * empty login form knowing the password and not the account. Showing the email
- * here is the only thing that gets them through.
+ * The selected email is prefilled by the demo provider's password template.
+ * Keep it visible here so visitors can identify the account before signing in.
  */
 export function DemoAccounts({ accounts, passwordHint }: Props) {
   const t = useTranslations("landing");

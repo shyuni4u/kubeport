@@ -18,12 +18,16 @@ metadata:
     {{- include "kubeport.labels" . | nindent 4 }}
     app.kubernetes.io/component: dex
 data:
+  password.html: |
+    {{- .Files.Get "files/dex-password.html" | nindent 4 }}
   config.yaml: |
     issuer: {{ include "kubeport.dex.issuer" . }}
     storage:
       type: memory
     web:
       http: 0.0.0.0:5556
+    frontend:
+      dir: /srv/dex/web
     oauth2:
       passwordConnector: local
       skipApprovalScreen: true

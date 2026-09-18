@@ -52,6 +52,10 @@ spec:
             {{- toYaml .Values.dex.resources | nindent 12 }}
           volumeMounts:
             - name: config
+              mountPath: /srv/dex/web/templates/password.html
+              subPath: password.html
+              readOnly: true
+            - name: config
               mountPath: /etc/dex
               readOnly: true
             - name: tmp

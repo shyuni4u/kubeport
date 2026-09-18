@@ -16,25 +16,25 @@ function renderIn(locale: "ko" | "en", ui: React.ReactElement) {
 describe("RoleBadge", () => {
   it("renders admin label when role=admin and withLabel", () => {
     renderIn("ko", <RoleBadge role="admin" withLabel />);
-    expect(screen.getByText(/Admin · 템플릿 작성/)).toBeInTheDocument();
+    expect(screen.getByText(/Admin · 플랫폼 관리/)).toBeInTheDocument();
   });
 
   it("renders user label when role=user and withLabel", () => {
     renderIn("ko", <RoleBadge role="user" withLabel />);
-    expect(screen.getByText(/User · 카탈로그 소비/)).toBeInTheDocument();
+    expect(screen.getByText(/User · 허용된 환경에서 배포·조회/)).toBeInTheDocument();
   });
 
   // #40 — the long labels were hardcoded Korean, so an English UI showed
-  // "User · 카탈로그 소비" in its own top bar.
+  // "User · 허용된 환경에서 배포·조회" in its own top bar.
   it("translates the long label for en", () => {
     renderIn("en", <RoleBadge role="user" withLabel />);
-    expect(screen.getByText(/User · consumes the catalog/i)).toBeInTheDocument();
+    expect(screen.getByText(/User · Deploy and inspect authorized resources/i)).toBeInTheDocument();
     expect(screen.queryByText(/카탈로그/)).not.toBeInTheDocument();
   });
 
   it("translates the admin long label for en", () => {
     renderIn("en", <RoleBadge role="admin" withLabel />);
-    expect(screen.getByText(/Admin · authors templates/i)).toBeInTheDocument();
+    expect(screen.getByText(/Admin · Platform admin/i)).toBeInTheDocument();
   });
 
   // "Admin" / "User" are the role names themselves — deliberately not
@@ -42,7 +42,7 @@ describe("RoleBadge", () => {
   it("renders short label when withLabel is omitted", () => {
     renderIn("ko", <RoleBadge role="admin" />);
     expect(screen.getByText("Admin")).toBeInTheDocument();
-    expect(screen.queryByText(/템플릿 작성/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/플랫폼 관리/)).not.toBeInTheDocument();
   });
 
   it("applies purple palette for admin", () => {

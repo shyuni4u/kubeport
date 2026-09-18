@@ -222,11 +222,7 @@ export function RBACCheckPanel({ cluster, namespace, demoNamespace, kinds, onRes
         <span>{t("title")}</span>
         {hasInputs && (
           <span
-            className={
-              kube
-                ? "font-mono text-xs font-normal text-muted-foreground"
-                : "text-xs font-normal text-muted-foreground"
-            }
+            className="font-mono text-xs font-normal text-muted-foreground"
           >
             {kube ? `create · ${namespace}` : t("scope", { namespace })}
           </span>

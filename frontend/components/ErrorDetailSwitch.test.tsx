@@ -21,13 +21,13 @@ describe("ErrorDetailSwitch", () => {
         <ErrorDetailSwitch />
       </ErrorDetailProvider>,
     );
-    const select = screen.getByRole("combobox", { name: "에러 표시" });
-    expect(select).toHaveTextContent("원문");
+    const select = screen.getByRole("combobox", { name: "오류 메시지 표시" });
+    expect(select).toHaveTextContent("상세 정보 펼치기");
     await userEvent.click(select);
     expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
-      "간단히",
-      "자세히",
-      "원문",
+      "기본 안내",
+      "상세 정보 접기",
+      "상세 정보 펼치기",
     ]);
   });
 
@@ -39,7 +39,7 @@ describe("ErrorDetailSwitch", () => {
       </ErrorDetailProvider>,
     );
     await userEvent.click(screen.getByRole("combobox"));
-    await userEvent.click(screen.getByRole("option", { name: "자세히" }));
+    await userEvent.click(screen.getByRole("option", { name: "상세 정보 접기" }));
     expect(screen.getByTestId("level")).toHaveTextContent("detailed");
     expect(document.cookie).toContain("kbp_error_detail=detailed");
   });
@@ -52,7 +52,7 @@ describe("ErrorDetailSwitch", () => {
       </ErrorDetailProvider>,
     );
     await userEvent.click(screen.getByRole("combobox"));
-    await userEvent.click(screen.getByRole("option", { name: "원문" }));
+    await userEvent.click(screen.getByRole("option", { name: "상세 정보 펼치기" }));
     expect(set).toHaveBeenCalledTimes(1);
     const written = set.mock.calls[0][0].toLowerCase();
     expect(written).toContain("path=/");

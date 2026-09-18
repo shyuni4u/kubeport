@@ -87,11 +87,7 @@ export function ResourcesPreview({ renderedYaml, pending, paused = false, refusa
               className="flex items-baseline justify-between gap-3 text-sm"
             >
               <span
-                className={
-                  kube
-                    ? "shrink-0 whitespace-nowrap font-mono text-xs text-muted-foreground"
-                    : "shrink-0 whitespace-nowrap text-xs text-muted-foreground"
-                }
+                className="shrink-0 whitespace-nowrap font-mono text-xs text-muted-foreground"
               >
                 {/* Raw terms show what the manifest says, apiVersion included:
                     a kind name alone cannot tell batch/v1 from a CRD. */}
@@ -100,11 +96,7 @@ export function ResourcesPreview({ renderedYaml, pending, paused = false, refusa
                   : kindLabel(r.kind, kube, (k) => tKinds(k), r.apiVersion)}
               </span>
               <span
-                className={
-                  kube
-                    ? "min-w-0 break-words text-right font-mono text-xs"
-                    : "min-w-0 break-words text-right"
-                }
+                className="min-w-0 break-words text-right font-mono text-xs"
               >
                 {r.name ?? t("unnamed")}
               </span>
