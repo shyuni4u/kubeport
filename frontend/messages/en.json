@@ -46,11 +46,14 @@
       "releases": "Releases",
       "teams": "Teams",
       "overview": "Deployment operations",
-      "clusters": "Cluster connections · access",
+      "clusters": "Cluster settings",
       "nodes": "Node operations",
       "storage": "Storage",
       "network": "Network · routing",
-      "help": "Help · product introduction"
+      "help": "Help · product introduction",
+      "administration": "Administration",
+      "introduction": "Introduction · demo",
+      "login": "Sign in"
     },
     "logout": "Log out",
     "login": "Log in",
@@ -818,6 +821,9 @@
     "createStorageApp": "Create an app with a PVC",
     "image": "Container image",
     "createStorageAppHelp": "Creates a single-replica Deployment. Use a non-root image and a volume with matching write permissions. CPU 100m/1 and memory 128Mi/512Mi (request/limit), with Recreate strategy. Directly created apps appear in the Deployment list below, not in template Releases.",
-    "tls-error": "TLS certificate verification failed. Check the API address and CA certificate."
+    "tls-error": "TLS certificate verification failed. Check the API address and CA certificate.",
+    "workspaceHelp": "Select a cluster to inspect its connection and resources. Node, storage and routing tools are optional beta features; they are not required to deploy a template.",
+    "clusterNavigation": "Selected cluster operations",
+    "clusterMissing": "This cluster was not found or is not accessible. Select another cluster from the list."
   }
 }

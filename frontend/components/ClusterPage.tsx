@@ -6,15 +6,18 @@ import { ClusterWorkspace } from "./ClusterWorkspace";
 
 export async function ClusterPage({
   area,
+  initialCluster,
 }: {
   area: "settings" | "nodes" | "storage" | "network";
+  initialCluster?: string;
 }) {
   const res = await apiFetch("/v1/me");
   if (!res.ok) redirect("/");
   const me = await res.json();
   const admin = roleFromGroups(me.groups) === "admin";
-  if (area === "nodes" && !admin) redirect("/clusters");
+  if (area === "nodes" && !admin)
+    redirect(initialCluster ? `/clusters/${encodeURIComponent(initialCluster)}` : "/clusters");
   return (
-    <ClusterWorkspace area={area} admin={admin} demo={isDemoEmail(me.email)} />
+    <ClusterWorkspace key={`${initialCluster ?? ""}:${area}`} area={area} initialCluster={initialCluster} admin={admin} demo={isDemoEmail(me.email)} />
   );
 }

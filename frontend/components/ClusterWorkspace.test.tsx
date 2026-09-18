@@ -4,6 +4,8 @@ import { renderWithIntl as render } from "@/tests/intl-test-utils";
 import { ClusterWorkspace } from "./ClusterWorkspace";
 import { ErrorDetailProvider } from "./ErrorDetailProvider";
 
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+
 afterEach(() => {
   vi.unstubAllGlobals();
   localStorage.clear();
@@ -98,5 +100,25 @@ describe("cluster operations", () => {
     expect(screen.getByRole("status")).toHaveTextContent("공개 데모 계정");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "새로고침" })).toBeDisabled();
+    expect(screen.getByRole("link", { name: "노드 운영 beta" })).toHaveAttribute("href", "/clusters/prod/nodes");
+    expect(screen.getByRole("link", { name: "스토리지 beta" })).toHaveAttribute("href", "/clusters/prod/storage");
+  });
+
+  it("keeps the URL cluster when switching tools, instead of the globally selected cluster", async () => {
+    localStorage.setItem("kbp_cluster", "other");
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ clusters: [{ name: "other" }, { name: "prod" }] })));
+    render(<ErrorDetailProvider initial="friendly"><ClusterWorkspace area="storage" initialCluster="prod" admin={false} demo /></ErrorDetailProvider>);
+    await screen.findByRole("option", { name: "prod" });
+    expect(screen.getByRole("link", { name: "네트워크 · 라우팅 beta" })).toHaveAttribute("href", "/clusters/prod/network");
+    expect(screen.queryByRole("link", { name: "노드 운영 beta" })).not.toBeInTheDocument();
+  });
+
+  it("does not silently operate on another cluster when a bookmarked cluster disappears", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ clusters: [{ name: "other" }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ErrorDetailProvider initial="friendly"><ClusterWorkspace area="storage" initialCluster="missing" admin demo={false} /></ErrorDetailProvider>);
+    await screen.findByText(/이 클러스터를 찾을 수 없거나/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
   });
 });

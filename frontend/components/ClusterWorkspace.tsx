@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { BetaBadge } from "./BetaBadge";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Button } from "@/components/ui/button";
@@ -38,12 +40,17 @@ export function ClusterWorkspace({
   area,
   admin,
   demo,
+  initialCluster,
 }: {
   area: "settings" | "nodes" | "storage" | "network";
   admin: boolean;
   demo: boolean;
+  initialCluster?: string;
 }) {
   const t = useTranslations("operations");
+  const router = useRouter();
+  const clusterHref = (name: string, section: typeof area) =>
+    `/clusters/${encodeURIComponent(name)}${section === "settings" ? "" : `/${section}`}`;
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [cluster, setCluster] = useState("");
   const [namespace, setNamespace] = useState("default");
@@ -71,9 +78,12 @@ export function ClusterWorkspace({
         const list: Cluster[] = (await r.json()).clusters;
         if (controller.signal.aborted) return;
         setClusters(list);
-        const selected =
-          list.find((c) => c.name === localStorage.getItem("kbp_cluster")) ??
-          list[0];
+        const selected = initialCluster
+          ? list.find((c) => c.name === initialCluster)
+          : list.find((c) => c.name === localStorage.getItem("kbp_cluster")) ?? list[0];
+        if (initialCluster && !selected) {
+          setFailure({ message: t("clusterMissing"), status: 404, body: "", at: new Date().toISOString() });
+        }
         if (selected) {
           setCluster(selected.name);
           setNamespace(selected.default_namespace || "default");
@@ -89,7 +99,7 @@ export function ClusterWorkspace({
           });
       });
     return () => controller.abort();
-  }, [t]);
+  }, [t, initialCluster]);
 
   useEffect(() => {
     if (!cluster || demo || !/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(namespace))
@@ -173,6 +183,7 @@ export function ClusterWorkspace({
     !failure &&
     Boolean(snapshot?.permissions[action]);
   function chooseCluster(name: string) {
+    router.push(clusterHref(name, area));
     setCluster(name);
     setNamespace(
       clusters.find((c) => c.name === name)?.default_namespace || "default",
@@ -339,7 +350,24 @@ export function ClusterWorkspace({
   );
   return (
     <section className="space-y-5">
-      <h1 className="text-xl font-semibold">{t(area)}</h1>
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="text-xl font-semibold">{t(area)}</h1>
+        <BetaBadge />
+      </div>
+      <p className="text-sm text-muted-foreground">{t("workspaceHelp")}</p>
+      {cluster && (
+        <nav aria-label={t("clusterNavigation")} className="flex flex-wrap gap-2 rounded-xl border bg-card p-2">
+          {(["settings", ...(admin ? ["nodes" as const] : []), "storage", "network"] as const).map((section) => (
+            <Link key={section} href={clusterHref(cluster, section)}
+              aria-current={area === section ? "page" : undefined}
+              aria-disabled={writing || undefined}
+              onClick={(event) => { if (writing) event.preventDefault(); }}
+              className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm ${area === section ? "bg-selected text-selected-foreground font-medium" : "hover:bg-hover"}`}>
+              {t(section)} <BetaBadge />
+            </Link>
+          ))}
+        </nav>
+      )}
       <p className="text-sm text-muted-foreground">{t("roles")}</p>
       {demo && (
         <p role="status" className="rounded-xl border bg-muted p-4">
@@ -354,7 +382,7 @@ export function ClusterWorkspace({
             value={cluster}
             onChange={(e) => chooseCluster(e.target.value)}
           >
-            <option value="">{t("choose")}</option>
+            <option value="" disabled>{t("choose")}</option>
             {clusters.map((c) => (
               <option key={c.name}>{c.name}</option>
             ))}
