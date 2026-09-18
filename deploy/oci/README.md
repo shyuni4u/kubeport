@@ -285,12 +285,12 @@ kubectl create clusterrolebinding kubeport-owner-admin \
 | `oidc_issuer_url` | `https://accounts.google.com` |
 | `default_namespace` | `default` |
 
-admin UI 에 클러스터 등록 화면이 아직 없으므로, admin 토큰으로 API 호출하거나 DB 에 직접 insert
-한다(인프라 config, PII 아님). 등록 후 로그인하면 좌측하단 클러스터 드롭다운에 나타난다.
+실제 관리자 계정으로 `/clusters`의 클러스터 등록 폼을 사용하거나 admin 토큰으로 API를 호출한다.
+등록 후 연결 진단을 확인하고, 좌측하단 클러스터 드롭다운에서 배포 대상을 선택한다.
 
 > `name` 도 필수 필드다(위 표에 없음). 실행 가능한 curl·SQL 과 토큰 획득 방법은
 > [docs/machine-clients.md §4](../../docs/machine-clients.md) 참조.
-> **`ca_bundle` 을 비우면 백엔드가 TLS 검증 없이 그 클러스터에 접속하면서도 등록은 201 로 성공한다.**
+> `ca_bundle`은 유효한 PEM 인증서여야 한다. 개발용 insecure 옵션을 명시하지 않으면 빈 CA 등록은 거부된다.
 
 ### 7.5. 검증
 

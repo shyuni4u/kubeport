@@ -190,6 +190,11 @@ func NewRouter(cfg config.Config, deps Deps) *gin.Engine {
 	v.GET("/me", h.GetMe)
 	v.GET("/clusters", h.ListClusters)
 	v.POST("/clusters", requireAdmin(), noDemo, h.CreateCluster)
+	v.GET("/clusters/:name/settings", requireAdmin(), noDemo, h.GetClusterSettings)
+	v.PATCH("/clusters/:name/settings", requireAdmin(), noDemo, h.UpdateClusterSettings)
+	v.GET("/clusters/:name/diagnostics", noDemo, rateLimit(upstream), h.DiagnoseCluster)
+	v.GET("/clusters/:name/operations", noDemo, rateLimit(upstream), h.InspectOperations)
+	v.POST("/clusters/:name/operations", noDemo, rateLimit(h.releaseWrite), h.RunOperation)
 	v.GET("/clusters/:name/openapi", rateLimit(upstream), h.GetOpenAPIIndex)
 	v.GET("/clusters/:name/openapi/*gv", rateLimit(upstream), h.GetOpenAPIGroupVersion)
 	// Evicting the cache makes the next read re-fetch the schema from the

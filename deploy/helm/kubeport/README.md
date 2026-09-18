@@ -333,7 +333,7 @@ OCI-specific.
    the username prefix and `email_verified` rules in step 1.
 
 3. **Register the cluster as a deploy target** (§7.4) — `POST /v1/clusters`,
-   admin only. There is no cluster-registration screen in the admin UI yet.
+   admin only. Non-demo admins can also register and inspect connections at `/clusters`.
 
    | field | required | note |
    |---|---|---|
@@ -1027,13 +1027,21 @@ refused only after the reset had already emptied the demo.
 
 Changing a demo account's email is two edits, not one: `dex.staticPasswords[].email`
 is the account Dex accepts, and `demo.adminEmail`/`demo.userEmail` are what the
-landing page tells visitors to type, the RBAC subjects, and the reset Job's
+landing page prefills on login, the RBAC subjects, and the reset Job's
 logins. Both must sit under `demo.emailDomain`. An account outside it is not a
 demo account to the backend: it skips demo scoping while the landing page prints
 its password, and `demo.adminEmail` is also appended to `KBP_DEV_ADMIN_EMAILS`,
 which makes it a full `kubeport-admin`. The chart refuses to
 render when `demo.adminEmail` or `demo.userEmail` is outside the domain or
 matches no Dex account (#208, #209).
+
+The demo buttons prefill the selected email and focus the password field using
+`files/dex-password.html`, mounted into Dex's web templates. Deploy the frontend
+and chart together for this behavior. Dex 2.39 ignores the standard `login_hint`
+for local passwords, so the frontend also carries it in a URL fragment, which
+browsers preserve through Dex's redirects. The template consumes and removes
+the fragment; authentication still requires the password and the OIDC callback.
+An externally managed demo provider needs its own prefill support.
 
 Generate a static-password bcrypt hash:
 

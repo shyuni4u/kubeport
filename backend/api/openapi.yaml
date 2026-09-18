@@ -260,8 +260,8 @@ paths:
       description: |
         Returns only what is needed to target a deploy. `api_url`, `ca_bundle`
         and `oidc_issuer_url` are deliberately **not** included for any caller,
-        admin included — see issue #52. Register a cluster to see them once, in
-        the POST response.
+        admin included — see issue #52. Non-demo app admins can read them through
+        GET /v1/clusters/{name}/settings.
       responses:
         "200":
           description: OK
@@ -281,9 +281,8 @@ paths:
       operationId: createCluster
       summary: Register a cluster as a deploy target
       description: |
-        Admin only, and refused for demo-domain callers. There is no
-        cluster-registration screen in the admin UI, so this endpoint is the
-        supported path — see `deploy/helm/kubeport/README.md`, "After install".
+        Admin only, and refused for demo-domain callers. Also available in the
+        cluster settings UI.
       requestBody:
         required: true
         content:
@@ -307,6 +306,257 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Problem" }
         "500": { $ref: "#/components/responses/InternalError" }
+
+  /v1/clusters/{name}/settings:
+    get:
+      tags: &a1
+        - clusters
+      parameters: &a2
+        - &a12
+          name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      operationId: getClusterSettings
+      summary: Read connection settings (non-demo app admins only)
+      responses:
+        "200":
+          description: Cluster record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cluster"
+        "400": &a3
+          $ref: "#/components/responses/ValidationError"
+        "401": &a4
+          $ref: "#/components/responses/Unauthenticated"
+        "403": &a5
+          $ref: "#/components/responses/Forbidden"
+        "404": &a6
+          $ref: "#/components/responses/NotFound"
+        "409": &a7
+          description: Concurrent change, existing resource or PDB refusal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429": &a8
+          description: Rate limited
+        "500": &a9
+          $ref: "#/components/responses/InternalError"
+        "501": &a10
+          description: Operations client unavailable
+        "502": &a11
+          description: Kubernetes call failed
+    patch:
+      tags: *a1
+      parameters: *a2
+      operationId: updateClusterSettings
+      summary: Update CA, issuer metadata and default namespace
+      description: Non-demo app admins only. API address and name remain immutable so
+        existing releases cannot be retargeted. updated_at must match the last
+        read.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - ca_bundle
+                - oidc_issuer_url
+                - default_namespace
+                - updated_at
+              properties:
+                display_name:
+                  type: string
+                ca_bundle:
+                  type: string
+                oidc_issuer_url:
+                  type: string
+                  format: uri
+                default_namespace:
+                  type: string
+                updated_at:
+                  type: string
+                  format: date-time
+      responses:
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "200":
+          description: Updated
+        "400": *a3
+        "401": *a4
+        "403": *a5
+        "404": *a6
+        "409": *a7
+        "429": *a8
+        "500": *a9
+        "501": *a10
+        "502": *a11
+  /v1/clusters/{name}/diagnostics:
+    get:
+      tags: *a1
+      parameters:
+        - *a12
+        - name: namespace
+          in: query
+          schema:
+            type: string
+            default: default
+      operationId: diagnoseCluster
+      summary: Check cluster authentication and current caller RBAC
+      description: Demo accounts are refused. Uses the caller token. A 200 may carry a
+        failed connection diagnosis; denied permissions are distinct from
+        transport failures.
+      responses:
+        "200":
+          description: Connection category and permissions map
+        "400": *a3
+        "401": *a4
+        "403": *a5
+        "404": *a6
+        "409": *a7
+        "429": *a8
+        "500": *a9
+        "501": *a10
+        "502": *a11
+  /v1/clusters/{name}/operations:
+    get:
+      tags: *a1
+      parameters:
+        - *a12
+        - name: area
+          in: query
+          required: true
+          schema:
+            type: string
+            enum:
+              - nodes
+              - storage
+              - network
+        - name: namespace
+          in: query
+          description: Required for storage/network; a single namespace, never all namespaces.
+          schema:
+            type: string
+      operationId: inspectOperations
+      summary: Inspect nodes, storage or Ingress resources
+      description: Demo accounts are refused; nodes require app admin in addition to
+        Kubernetes RBAC. Lists have a 500-object bound and explicit truncation.
+        Each section can independently report forbidden, unauthorized,
+        unsupported, retry or unreachable. Resource payloads omit Secret data, pod
+        environment and PV connection details.
+      responses:
+        "200":
+          description: Sections of resource summaries and caller permission hints
+        "400": *a3
+        "401": *a4
+        "403": *a5
+        "404": *a6
+        "409": *a7
+        "429": *a8
+        "500": *a9
+        "501": *a10
+        "502": *a11
+    post:
+      tags: *a1
+      parameters: *a2
+      operationId: runOperation
+      summary: Perform a bounded cluster operation using the caller token
+      description: Demo accounts are refused. Cordon, uncordon, eviction and
+        foundation publishing also require app admin. Eviction requires a cordoned
+        node, matching pod UID and a controller-owned pod without
+        emptyDir/hostPath; it always uses policy/v1 Eviction and honors PDBs.
+        Storage uses RWO filesystem PVCs and retains PVCs when creating apps.
+        Direct apps use single-replica Recreate with non-root security, CPU 100m/1
+        and memory 128Mi/512Mi. Attach refuses kubeport-managed releases, reused
+        volumes and multiple replicas. Foundation annotations require class patch
+        RBAC. Ingress creation requires a published class, matching
+        namespace/domain and no currently visible overlapping host; cluster
+        admission should enforce race-free global host uniqueness. Success means
+        accepted, not ready. Audit records are written to backend logs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  enum:
+                    - cordon
+                    - uncordon
+                    - evict
+                    - publish-storage
+                    - publish-ingress
+                    - create-pvc
+                    - create-storage-app
+                    - attach-pvc
+                    - create-ingress
+                namespace:
+                  type: string
+                name:
+                  type: string
+                node:
+                  type: string
+                uid:
+                  type: string
+                version:
+                  type: string
+                class:
+                  type: string
+                claim:
+                  type: string
+                container:
+                  type: string
+                image:
+                  type: string
+                mount_path:
+                  type: string
+                host:
+                  type: string
+                path:
+                  type: string
+                service:
+                  type: string
+                size_gi:
+                  type: integer
+                  minimum: 1
+                port:
+                  type: integer
+                  minimum: 1
+                  maximum: 65535
+                foundation:
+                  type:
+                    - object
+                    - "null"
+                  properties:
+                    namespace:
+                      type: string
+                    max_gi:
+                      type: integer
+                    domain:
+                      type: string
+                    tls_secret:
+                      type: string
+              required:
+                - action
+                - name
+      responses:
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "200":
+          description: Accepted; inspect state/events to confirm completion
+        "400": *a3
+        "401": *a4
+        "403": *a5
+        "404": *a6
+        "409": *a7
+        "429": *a8
+        "500": *a9
+        "501": *a10
+        "502": *a11
 
   /v1/clusters/{name}/openapi:
     get:

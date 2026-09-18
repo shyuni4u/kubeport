@@ -24,7 +24,7 @@ const shortLabel: Record<Role, string> = {
 export function RoleBadge({ role, withLabel = false, className }: Props) {
   const t = useTranslations("shell.role");
   return (
-    <Badge className={cn("border-transparent", palette[role], className)}>
+    <Badge className={cn("border-transparent", withLabel && "h-auto whitespace-normal py-1", palette[role], className)}>
       {withLabel
         ? `${shortLabel[role]} · ${t(role === "admin" ? "adminDesc" : "userDesc")}`
         : shortLabel[role]}

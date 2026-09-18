@@ -14,11 +14,12 @@ import (
 // optional from this type's perspective; the handler layer decides which are
 // required (Verb + Resource for the HTTP endpoint).
 type AccessCheck struct {
-	Namespace string
-	Verb      string
-	Group     string
-	Resource  string
-	Name      string
+	Namespace   string
+	Verb        string
+	Group       string
+	Resource    string
+	Subresource string
+	Name        string
 }
 
 // AccessResult is the cluster's answer to an AccessCheck.
@@ -43,11 +44,12 @@ func (c *Client) CheckAccess(ctx context.Context, spec AccessCheck) (AccessResul
 	review := &authv1.SelfSubjectAccessReview{
 		Spec: authv1.SelfSubjectAccessReviewSpec{
 			ResourceAttributes: &authv1.ResourceAttributes{
-				Namespace: spec.Namespace,
-				Verb:      spec.Verb,
-				Group:     spec.Group,
-				Resource:  spec.Resource,
-				Name:      spec.Name,
+				Namespace:   spec.Namespace,
+				Verb:        spec.Verb,
+				Group:       spec.Group,
+				Resource:    spec.Resource,
+				Subresource: spec.Subresource,
+				Name:        spec.Name,
 			},
 		},
 	}

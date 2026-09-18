@@ -8,6 +8,7 @@ import { parseLoginError } from "@/lib/login-error";
 import { demoEnabled } from "@/lib/oidc";
 import { sanitizeNext } from "@/lib/safe-next";
 import { loadShowcase } from "@/lib/showcase/load";
+import { OperationsDashboard } from "@/components/OperationsDashboard";
 
 export default async function Home({
   searchParams,
@@ -22,6 +23,10 @@ export default async function Home({
   const next = sanitizeNext(params.next);
   const me = await apiFetch("/v1/me").then((r) => (r.ok ? r.json() : null)).catch(() => null);
   const demo = demoEnabled();
+  if (me) {
+    if (next) redirect(next);
+    return <OperationsDashboard />;
+  }
 
   // The proxy only routes through here when a demo IdP is configured, because
   // that is the only case with a choice to show. If the configuration changed

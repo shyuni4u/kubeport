@@ -10,9 +10,9 @@ test.describe("demo user", () => {
     await expect(page.getByText("야간 배치")).toBeVisible();
   });
 
-  test("landing shows 'go to catalog' when logged in", async ({ page }) => {
+  test("landing shows operational status when logged in", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("link", { name: /카탈로그로 이동|Go to catalog/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /배포 운영 현황|Deployment operations/ })).toBeVisible();
   });
 });
 
@@ -27,6 +27,25 @@ test.describe("demo admin restrictions", () => {
 });
 
 test.describe("logged out landing", () => {
+  for (const [role, email] of [
+    [/관리자로 체험|Try as admin/, "demo-admin@demo.kubeport"],
+    [/사용자로 체험|Try as user/, "demo-user@demo.kubeport"],
+  ] as const) {
+    test(`prefills ${email} and focuses the password`, async ({ browser }) => {
+      const ctx = await browser.newContext({ ignoreHTTPSErrors: true });
+      try {
+        const page = await ctx.newPage();
+        await page.goto("/");
+        await page.getByRole("link", { name: role }).click();
+        await expect(page.locator("input[name=login]")).toHaveValue(email);
+        await expect(page.locator("input[name=password]")).toBeFocused();
+        await expect(page.locator("input[name=password]")).toHaveValue("");
+      } finally {
+        await ctx.close();
+      }
+    });
+  }
+
   test("shows demo entry buttons", async ({ browser }) => {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();

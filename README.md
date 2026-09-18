@@ -376,3 +376,5 @@ Not yet open to outside contributions — the shape of the system is still stabi
 ## License
 
 [MIT License](LICENSE) — free to use, modify, and redistribute, provided the copyright notice and license text are preserved.
+
+Cluster connections, permissions, node operations, storage and Ingress workflows: [operations guide](docs/cluster-operations.md).

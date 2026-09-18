@@ -31,6 +31,7 @@ services:
     ports: ["${KBP_DEX_BIND:-127.0.0.1}:5556:5556"]
     volumes:
       - ./dex.yaml:/config/dex.yaml:ro
+      - ../helm/kubeport/files/dex-password.html:/srv/dex/web/templates/password.html:ro
       - ./certs:/config/certs:ro
     # Probes the plaintext telemetry listener (dex.yaml `telemetry.http`), not the
     # HTTPS port: the image ships BusyBox wget, which has no --no-check-certificate,
