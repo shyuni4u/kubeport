@@ -246,6 +246,16 @@ jobs:
     # transitive under eslint, eslint-config-next, shadcn, jsdom or
     # @vitejs/plugin-react and waiting on those to move. The summary step
     # below still lists them all.
+    #
+    # When an advisory does land on Monaco's DOMPurify at high, this gate goes
+    # red on a finding no change here can clear, and `audit` is a required
+    # check — every merge, and so every deploy, stops. The escape hatch is a
+    # dated exception in frontend/package.json, not a lower gate:
+    #   "pnpm": { "auditConfig": { "ignoreGhsas": ["GHSA-xxxx-xxxx-xxxx"] } }
+    # (verified 2026-09-21 on pnpm 10.15.0: an ignored advisory takes the step
+    # from exit 1 to exit 0 and is counted as "(1 ignored)"). Name the issue
+    # and the Monaco release being waited on, and delete the entry the moment
+    # that release is pinned in frontend/lib/monaco-cdn.ts.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

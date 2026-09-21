@@ -2,9 +2,16 @@
  * Which Monaco build this app runs, in one place (#438).
  *
  * The editor is not bundled. `@monaco-editor/loader` fetches it from a CDN at
- * runtime, and the npm `monaco-editor` package is here for its types only —
- * nothing in Monaco's dist imports it. Monaco vendors its own copy of
- * DOMPurify (`esm/vs/base/browser/dompurify/dompurify.js`), so the sanitizer
+ * runtime, so the npm `monaco-editor` devDependency ships nothing — but it is
+ * load-bearing three times over: it supplies the editor's types, it is the
+ * only path `pnpm audit --prod` has to the DOMPurify Monaco vendors
+ * (`. > @monaco-editor/react > monaco-editor > dompurify`, which is what the
+ * audit gate in ci.yml reads), and monaco-cdn.test.ts reads its
+ * `min/vs/editor/editor.main.css` to prove the codicon font is still inlined.
+ * Deleting it or moving it to `dependencies` fails those tests on purpose.
+ *
+ * Monaco vendors its own copy of DOMPurify
+ * (`esm/vs/base/browser/dompurify/dompurify.js`), so the sanitizer
  * that actually runs in an admin's browser is whichever one is baked into the
  * build at the version below, and no lockfile or `pnpm.overrides` entry can
  * change it. 0.55.1 carried DOMPurify 3.2.7; 0.56.0 carries 3.4.8.
