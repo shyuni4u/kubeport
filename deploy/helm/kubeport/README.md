@@ -768,6 +768,18 @@ letters and digits, `-` or `.` only between them, 63 characters at most — or
 the create is 400 `validation-error`. Templates created before the upgrade keep
 their names and keep being served.
 
+### Behaviour changes when upgrading past #438
+
+The YAML editor loads Monaco 0.56.0 instead of 0.55.1, and the CSP's pinned
+path moves with it. An install on the default policy needs nothing — the app
+sends the new path itself. An install that set
+`frontend.securityHeaders.contentSecurityPolicy` sends that policy verbatim,
+so one still naming `monaco-editor@0.55.1/` blocks the editor after the
+upgrade: the admin's YAML screen stays empty, every Pod is Ready, `/healthz`
+is green, and the only sign is `Refused to load the script …
+monaco-editor@0.56.0/min/vs/loader.js` in the browser console. Take the new
+path from the upgraded image before you cut over, as below.
+
 ## Uninstall
 
 ```bash
@@ -934,11 +946,25 @@ Whitespace and line breaks inside a value are folded into single spaces, so a
 long policy can be written as a YAML block.
 
 The default policy allows scripts, styles, fonts, images, workers, form posts
-and connections from the app's own origin only, plus Monaco's pinned path,
-`https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/` — the YAML editor loads
-from there. Inline scripts and styles are still allowed (Next.js needs them
-without nonces). `object-src 'none'` and `base-uri 'self'` close the rest. The
-exact string is in `frontend/lib/security-headers.ts`.
+and connections from the app's own origin, plus `data:` and `blob:` where
+Monaco inlines its font and runs its workers, plus Monaco's pinned CDN path
+for the YAML editor. Inline scripts and styles are still allowed (Next.js
+needs them without nonces). `object-src 'none'` and `base-uri 'self'` close
+the rest.
+
+That pinned path carries a version that moves with the image, so do not copy
+it out of this README. Read it from the install you are about to customise,
+while `contentSecurityPolicy` is still empty:
+
+```bash
+curl -sI https://<host>/ | grep -i '^content-security-policy'
+```
+
+Take the `https://cdn.jsdelivr.net/npm/monaco-editor@.../` token from
+`script-src` and `style-src` into your own policy, and re-read it whenever you
+upgrade. In the source the version is `frontend/lib/monaco-cdn.ts` — the app
+configures the Monaco loader from that same constant — and the whole policy is
+built in `frontend/lib/security-headers.ts`.
 
 **CSP keywords keep their single quotes inside the value.** In a values file
 write `frameAncestors: "'self' https://portal.example.com"`; on the command

@@ -226,14 +226,36 @@ jobs:
   audit:
     # Separate job on purpose: the advisory database changes without anyone
     # touching this repo, so a new finding must not look like a test failure.
-    # Gated at critical only, twice: production dependencies, and everything
-    # including dev (#371). Dev is not in the image, but a critical there hits
-    # the machines that run it (a vitest critical sat here unseen because the
-    # gate was --prod only). High is not gated: as of 2026-09-14 it is 2 in
-    # --prod (browserslist) and 20 in all, every one transitive under eslint,
-    # eslint-config-next, shadcn, jsdom or @vitejs/plugin-react and waiting on
-    # those to move, so gating there would mean a permanently red job nobody
-    # reads. The summary step below still lists them.
+    # Gated twice: production dependencies at high, and everything including
+    # dev at critical (#371 — dev is not in the image, but a critical there
+    # hits the machines that run it; a vitest critical sat here unseen because
+    # the gate was --prod only).
+    #
+    # Why --prod stops at high rather than moderate (#438): every moderate it
+    # reports is DOMPurify, reached only through
+    # @monaco-editor/react > monaco-editor. Monaco vendors its own copy of
+    # DOMPurify into its dist and pins the npm package to the same version, so
+    # this number is a faithful proxy for the sanitizer the editor actually
+    # runs — and it moves only when Monaco cuts a release. monaco-editor
+    # 0.56.0 carries DOMPurify 3.4.8 against an upstream 3.4.15, leaving
+    # findings nothing in this repo can clear. A pnpm.overrides entry would
+    # zero them while changing no shipped byte, which is why there is none.
+    #
+    # Measured 2026-09-21 — --prod: 0 critical, 0 high, 2 moderate, 2 low.
+    # Dev included: 0 critical, 18 high, 15 moderate, 5 low, every high
+    # transitive under eslint, eslint-config-next, shadcn, jsdom or
+    # @vitejs/plugin-react and waiting on those to move. The summary step
+    # below still lists them all.
+    #
+    # When an advisory does land on Monaco's DOMPurify at high, this gate goes
+    # red on a finding no change here can clear, and `audit` is a required
+    # check — every merge, and so every deploy, stops. The escape hatch is a
+    # dated exception in frontend/package.json, not a lower gate:
+    #   "pnpm": { "auditConfig": { "ignoreGhsas": ["GHSA-xxxx-xxxx-xxxx"] } }
+    # (verified 2026-09-21 on pnpm 10.15.0: an ignored advisory takes the step
+    # from exit 1 to exit 0 and is counted as "(1 ignored)"). Name the issue
+    # and the Monaco release being waited on, and delete the entry the moment
+    # that release is pinned in frontend/lib/monaco-cdn.ts.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -248,7 +270,7 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: cd frontend && pnpm install --frozen-lockfile
       - name: Audit production dependencies
-        run: cd frontend && pnpm audit --prod --audit-level critical
+        run: cd frontend && pnpm audit --prod --audit-level high
       - name: Audit all dependencies, dev included, at critical
         # Runs even when the step above failed, so one run shows whether dev
         # has a critical of its own.

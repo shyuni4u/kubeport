@@ -1,7 +1,3 @@
-import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_HSTS, MONACO_CDN, applySecurityHeaders, defaultCsp, securityHeaders } from "./security-headers";
@@ -37,16 +33,8 @@ describe("securityHeaders defaults", () => {
     expect(csp).not.toMatch(/https:\/\/cdn\.jsdelivr\.net(?:\s|;|$)/);
   });
 
-  // The loader decides where the editor comes from; if an upgrade moves it,
-  // the pinned path above would block the editor in production. Fail here.
-  it("pins the same path @monaco-editor/loader loads from", () => {
-    const fromReact = createRequire(require.resolve("@monaco-editor/react"));
-    const loaderPkg = fromReact.resolve("@monaco-editor/loader/package.json");
-    const config = readFileSync(join(dirname(loaderPkg), "lib/es/config/index.js"), "utf8");
-    const vs = /vs:\s*'([^']+)'/.exec(config)?.[1];
-    expect(vs, "loader config vs path").toBeTruthy();
-    expect(`${vs}/`.startsWith(MONACO_CDN)).toBe(true);
-  });
+  // Which version the editor is fetched from, and that MonacoPanel points the
+  // loader at that same path, now live in monaco-cdn.test.ts (#438).
 
   it("relaxes eval and the HMR socket only under next dev", () => {
     expect(defaultCsp(true)).toContain("'unsafe-eval'");
