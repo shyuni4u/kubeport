@@ -437,7 +437,9 @@ paths:
               - network
         - name: namespace
           in: query
-          description: Required for storage/network; a single namespace, never all namespaces.
+          description: Required for storage/network; a single namespace, never all
+            namespaces. Ignored for nodes, which lists every namespace and decides
+            eviction per pod.
           schema:
             type: string
       operationId: inspectOperations
@@ -446,7 +448,11 @@ paths:
         Kubernetes RBAC. Lists have a 500-object bound and explicit truncation.
         Each section can independently report forbidden, unauthorized,
         unsupported, retry or unreachable. Resource payloads omit Secret data, pod
-        environment and PV connection details.
+        environment and PV connection details. In the nodes area each pod carries
+        `evictable`, the caller's pods/eviction permission in that pod's own
+        namespace; the field is absent when the review could not be completed,
+        which is not a refusal. `permissions.evict` summarises the same reviews
+        and is false only when every listed namespace refused.
       responses:
         "200":
           description: Sections of resource summaries and caller permission hints

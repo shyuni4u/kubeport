@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	apps "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
@@ -40,6 +41,11 @@ type OperationItem struct {
 	Status     string      `json:"status"`
 	Details    []string    `json:"details"`
 	Foundation *Foundation `json:"foundation,omitempty"`
+	// Evictable answers pods/eviction in this pod's own namespace. Absent
+	// means the review could not be completed: the caller keeps the action
+	// and Kubernetes RBAC gives the real answer, because treating an
+	// unanswered review as a refusal hides evictions that are allowed (#437).
+	Evictable *bool `json:"evictable,omitempty"`
 }
 
 type OperationSection struct {
@@ -185,6 +191,22 @@ func (c *Client) InspectOperations(ctx context.Context, area, ns string) Operati
 				podRows = append(podRows, item("Pod", &p, state, "node: "+p.Spec.NodeName, "eviction: "+evictionBlock(p), fmt.Sprintf("nodeSelector: %v; affinity: %t; topology constraints: %d", p.Spec.NodeSelector, p.Spec.Affinity != nil, len(p.Spec.TopologySpreadConstraints))))
 			}
 		}
+		// Not check(): that decides on the request's namespace, while the pods
+		// above come from every namespace (List("")). Each pod is answered in
+		// its own namespace instead (#437), which also leaves `ns` unused for
+		// this area — nothing the caller sends here reaches a review.
+		evictable := c.evictionPermissions(ctx, podRows)
+		for i := range podRows {
+			podRows[i].Evictable = evictable[podRows[i].Namespace]
+		}
+		// The screen-wide gate. False only once every namespace has answered
+		// no, so it never hides a pod whose own namespace was never asked.
+		out.Permissions["evict"] = len(evictable) == 0
+		for _, allowed := range evictable {
+			if allowed == nil || *allowed {
+				out.Permissions["evict"] = true
+			}
+		}
 		cont = ""
 		if pods != nil {
 			cont = pods.Continue
@@ -212,7 +234,6 @@ func (c *Client) InspectOperations(ctx context.Context, area, ns string) Operati
 		}
 		add("metrics", rows, cont, e)
 		check("cordon", "", "nodes", "patch")
-		check("evict", "", "pods/eviction", "create")
 	}
 	if area == "storage" {
 		classes, e := c.cs.StorageV1().StorageClasses().List(ctx, opts)
@@ -394,6 +415,56 @@ func podAllocation(p core.Pod) (cpu, mem, lcpu, lmem int64) {
 	}
 	a, b := totals(p.Spec.Overhead)
 	return cpu + a, mem + b, lcpu + a, lmem + b
+}
+
+// The node screen lists pods from every namespace and refreshes every 30s, so
+// the number of reviews follows the cluster rather than a fixed list: bound
+// both how many run at once and how many are asked at all. Namespaces past
+// the budget stay unknown, which leaves their pods actionable for Kubernetes
+// to judge rather than silently disabled — the failure this fix is about.
+const (
+	evictionCheckConcurrency = 8
+	evictionCheckBudget      = 64
+)
+
+// evictionPermissions answers pods/eviction once per distinct namespace among
+// items — not once per pod, and not once for the whole screen. A namespace
+// whose review could not be completed stays nil: unknown, not refused.
+func (c *Client) evictionPermissions(ctx context.Context, items []OperationItem) map[string]*bool {
+	out := map[string]*bool{}
+	var namespaces []string
+	for _, i := range items {
+		if i.Kind != "Pod" {
+			continue
+		}
+		if _, seen := out[i.Namespace]; !seen {
+			out[i.Namespace] = nil
+			if len(namespaces) < evictionCheckBudget {
+				namespaces = append(namespaces, i.Namespace)
+			}
+		}
+	}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, evictionCheckConcurrency)
+	for _, ns := range namespaces {
+		wg.Add(1)
+		go func(ns string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			r, err := c.CheckAccess(ctx, AccessCheck{Namespace: ns, Resource: "pods", Subresource: "eviction", Verb: "create"})
+			if err != nil {
+				return
+			}
+			allowed := r.Allowed
+			mu.Lock()
+			defer mu.Unlock()
+			out[ns] = &allowed
+		}(ns)
+	}
+	wg.Wait()
+	return out
 }
 
 func evictionBlock(p core.Pod) string {
