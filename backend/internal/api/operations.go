@@ -129,7 +129,14 @@ func (h *Handlers) InspectOperations(c *gin.Context) {
 		writeError(c, 403, "rbac-denied", "app admin required for node operations")
 		return
 	}
-	if area != "nodes" && len(validation.IsDNS1123Label(ns)) != 0 {
+	if area == "nodes" {
+		// This area lists every namespace and decides eviction per pod (#437),
+		// so there is nothing for a namespace to mean here. Drop it at the
+		// boundary rather than carrying an unvalidated string inwards and
+		// relying on the node branch never reading it. Not a 400: a browser on
+		// the previous bundle still sends one, and openapi says it is ignored.
+		ns = ""
+	} else if len(validation.IsDNS1123Label(ns)) != 0 {
 		writeError(c, 400, "validation-error", "one valid namespace is required")
 		return
 	}

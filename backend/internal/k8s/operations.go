@@ -422,9 +422,16 @@ func podAllocation(p core.Pod) (cpu, mem, lcpu, lmem int64) {
 // both how many run at once and how many are asked at all. Namespaces past
 // the budget stay unknown, which leaves their pods actionable for Kubernetes
 // to judge rather than silently disabled — the failure this fix is about.
+//
+// The budget is small because client-go throttles before the apiserver does:
+// this client sets no QPS/Burst, so the defaults (5 QPS, burst 10) apply and a
+// budget of B costs (B-10)/5 seconds of client-side waiting on its own, against
+// the handler's 20s deadline. 16 costs about a second; 64 would spend half the
+// deadline queueing and time the rest out into "unknown", quietly widening the
+// very fallback that is meant to be the rare case.
 const (
 	evictionCheckConcurrency = 8
-	evictionCheckBudget      = 64
+	evictionCheckBudget      = 16
 )
 
 // evictionPermissions answers pods/eviction once per distinct namespace among
