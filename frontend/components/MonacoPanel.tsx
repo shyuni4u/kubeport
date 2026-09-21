@@ -4,8 +4,17 @@ import { useCallback, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import type { OnMount } from "@monaco-editor/react";
 
+import { pinMonacoSource } from "@/lib/monaco-cdn";
+
+// Inside the dynamic import so the editor stays lazy, and before the loader
+// starts fetching: the app decides which Monaco build runs, not the version
+// @monaco-editor/loader happens to hardcode (#438).
 const Editor = dynamic(
-  () => import("@monaco-editor/react").then((m) => m.default),
+  () =>
+    import("@monaco-editor/react").then((m) => {
+      pinMonacoSource(m.loader);
+      return m.default;
+    }),
   { ssr: false },
 );
 

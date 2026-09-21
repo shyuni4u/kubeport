@@ -23,8 +23,14 @@
  * carrying a body — the proxy deliberately does not match those (see proxy.ts).
  *
  * Import-free on purpose: proxy.ts may not pull in anything heavy (see
- * lib/demo-config).
+ * lib/demo-config). lib/monaco-cdn is the one exception — constants only,
+ * because the editor's version has to be the same string here and in the
+ * loader MonacoPanel configures.
  */
+
+import { MONACO_CDN } from "./monaco-cdn";
+
+export { MONACO_CDN };
 
 export const DEFAULT_HSTS = "max-age=63072000; includeSubDomains";
 
@@ -34,12 +40,12 @@ export const DEFAULT_HSTS = "max-age=63072000; includeSubDomains";
 // bootstrap scripts need 'unsafe-inline'.
 //
 // Monaco: @monaco-editor/loader fetches the editor from exactly this path at
-// runtime — its scripts, stylesheet and codicon font — and runs its language
-// workers from blob: URLs. A path, not the whole host: cdn.jsdelivr.net serves
-// every npm package, and a host-wide allowlist would hand an attacker script
-// gadgets once 'unsafe-inline' goes. security-headers.test.ts fails when the
-// loader's own path moves, so an upgrade cannot silently break the editor.
-export const MONACO_CDN = "https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/";
+// runtime — its scripts, stylesheet and inlined codicon font — and runs its
+// language workers from blob: URLs. A path, not the whole host:
+// cdn.jsdelivr.net serves every npm package, and a host-wide allowlist would
+// hand an attacker script gadgets once 'unsafe-inline' goes. The version is
+// the app's own choice rather than the loader's default (#438) and lives in
+// lib/monaco-cdn, whose tests hold it and this policy together.
 
 export function defaultCsp(dev: boolean): string {
   return [

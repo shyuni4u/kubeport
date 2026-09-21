@@ -935,10 +935,12 @@ long policy can be written as a YAML block.
 
 The default policy allows scripts, styles, fonts, images, workers, form posts
 and connections from the app's own origin only, plus Monaco's pinned path,
-`https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/` — the YAML editor loads
+`https://cdn.jsdelivr.net/npm/monaco-editor@<version>/` — the YAML editor loads
 from there. Inline scripts and styles are still allowed (Next.js needs them
 without nonces). `object-src 'none'` and `base-uri 'self'` close the rest. The
-exact string is in `frontend/lib/security-headers.ts`.
+version is `frontend/lib/monaco-cdn.ts`, which the app also configures the
+Monaco loader with, and the exact policy string is in
+`frontend/lib/security-headers.ts`.
 
 **CSP keywords keep their single quotes inside the value.** In a values file
 write `frameAncestors: "'self' https://portal.example.com"`; on the command
