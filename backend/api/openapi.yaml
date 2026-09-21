@@ -450,12 +450,59 @@ paths:
         unsupported, retry or unreachable. Resource payloads omit Secret data, pod
         environment and PV connection details. In the nodes area each pod carries
         `evictable`, the caller's pods/eviction permission in that pod's own
-        namespace; the field is absent when the review could not be completed,
-        which is not a refusal. `permissions.evict` summarises the same reviews
-        and is false only when every listed namespace refused.
+        namespace; the field is absent when the review could not be completed or
+        the namespace fell outside the per-refresh bound, neither of which is a
+        refusal. `permissions.evict` summarises the same reviews and is false only
+        when every listed namespace refused. Changed (#437), so a client using
+        `permissions.evict` as a per-action gate must move to each pod's
+        `evictable` and treat an absent value as unknown rather than permitted,
+        since the old value answered the `namespace` query parameter alone.
       responses:
         "200":
           description: Sections of resource summaries and caller permission hints
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  permissions:
+                    type: object
+                    additionalProperties:
+                      type: boolean
+                  sections:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        resource:
+                          type: string
+                        truncated:
+                          type: boolean
+                        error:
+                          type: string
+                        items:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              kind:
+                                type: string
+                              name:
+                                type: string
+                              namespace:
+                                type: string
+                              status:
+                                type: string
+                              details:
+                                type: array
+                                items:
+                                  type: string
+                              evictable:
+                                type: boolean
+                                description: >-
+                                  Pods in the nodes area only. The caller's
+                                  pods/eviction right in this pod's own namespace.
+                                  Absent means unreviewed, which is not a refusal.
         "400": *a3
         "401": *a4
         "403": *a5

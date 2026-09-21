@@ -54,6 +54,15 @@ sidecars and Pod overhead; they are planning estimates, not scheduler verdicts
 (in-place resize, extended resources and topology require further inspection).
 Absent limits are not a guarantee of bounded consumption.
 
+Eviction permission is reviewed per namespace, not once per screen: each listed
+Pod carries the caller's `pods/eviction` right in that Pod's own namespace. At
+most 64 namespaces are reviewed per refresh, in list order — which is namespace
+ascending — and the screen refreshes every 30 seconds. Pods in namespaces past
+that bound are left undecided rather than refused: their eviction button stays
+enabled and Kubernetes gives the real answer, so on a cluster with more than 64
+namespaces expect some evictions to fail when requested instead of being greyed
+out in advance. The same is true when a review cannot be completed at all.
+
 Cordon/uncordon use a resource-version precondition. The assisted drain flow is
 cordon → inspect remaining capacity and constraints → request individual Pod
 evictions → watch termination and replacement state. It is not an unattended
@@ -124,6 +133,10 @@ All access uses the login token, never the backend service account:
 - Diagnostics: create `selfsubjectaccessreviews.authorization.k8s.io`.
 - Nodes: list nodes, pods and `poddisruptionbudgets.policy`; optional node metrics.
   Cordon needs node patch; eviction needs get node/pod and create `pods/eviction`.
+  The node screen additionally creates up to 65 `selfsubjectaccessreviews.authorization.k8s.io`
+  per refresh — one per listed namespace, plus the cordon check. Without that
+  right the advance eviction hint is simply absent and Kubernetes decides on the
+  attempt.
 - Storage: list/get StorageClasses, PVCs, PVs and namespace Deployments/events.
   Creating needs PVC or Deployment create; attachment needs Deployment update.
   Reuse checks additionally need namespace Pod/Deployment/StatefulSet list.
