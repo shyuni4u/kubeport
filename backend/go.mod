@@ -4,7 +4,7 @@ go 1.26.2
 
 require (
 	github.com/coreos/go-oidc/v3 v3.21.0
-	github.com/gin-contrib/sse v1.1.0
+	github.com/gin-contrib/sse v1.1.2
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
