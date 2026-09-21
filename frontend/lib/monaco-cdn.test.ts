@@ -59,14 +59,39 @@ describe("the Monaco build this app runs", () => {
     expect(defaultCsp(false)).toContain(MONACO_CDN);
   });
 
-  // Without this call the loader fetches its own hardcoded version, which the
-  // CSP above does not allow — the editor would fail to load in production.
-  it("is what MonacoPanel configures the loader with", () => {
+  it("passes MONACO_VS_PATH to loader.config", () => {
     const loader = { config: vi.fn() };
     pinMonacoSource(loader);
     expect(loader.config).toHaveBeenCalledWith({
       paths: { vs: MONACO_VS_PATH },
     });
+  });
+
+  // Losing this call is silent in every other check — types, lint, tests and
+  // the build all stay green — while the loader falls back to its hardcoded
+  // version, which the CSP does not allow, and the editor stops loading. Read
+  // the source, the way design-consistency.test.ts pins Monaco's only importer.
+  it("is configured by MonacoPanel, before the loader can init", () => {
+    const src = readFileSync(
+      join(__dirname, "../components/MonacoPanel.tsx"),
+      "utf8",
+    );
+    expect(src).toMatch(/pinMonacoSource\(\s*m\.loader\s*\)/);
+  });
+
+  // The CSP dropped its CDN font source because Monaco inlines the codicon
+  // font. If a build ships it as a file again, the icons would be blocked —
+  // fail here instead, where the version is bumped.
+  it("ships its font inline, which is why font-src has no CDN source", () => {
+    const css = readFileSync(
+      join(__dirname, "../node_modules/monaco-editor/min/vs/editor/editor.main.css"),
+      "utf8",
+    );
+    const external = css.match(/url\((?!["']?data:)[^)]*\)/g) ?? [];
+    expect(external, "non-data: url() in Monaco's stylesheet").toEqual([]);
+    expect(css).toContain("data:font/");
+    expect(defaultCsp(false)).toContain("font-src 'self' data:");
+    expect(defaultCsp(false)).not.toMatch(/font-src[^;]*cdn\.jsdelivr\.net/);
   });
 
   // Pinning is to move ahead of the loader, never behind it. Both floors
