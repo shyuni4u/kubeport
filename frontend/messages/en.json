@@ -807,6 +807,7 @@
     "noResources": "No resources returned.",
     "published": "Published foundation",
     "evict": "Request Pod eviction",
+    "evictDenied": "You may not evict pods in this pod's namespace.",
     "capability": {
       "pods": "List Pods",
       "deploy": "Create Deployment",

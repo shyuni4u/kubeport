@@ -122,3 +122,102 @@ describe("cluster operations", () => {
     expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
   });
 });
+
+// The node screen lists pods from every namespace but has no namespace field,
+// so a single screen-wide decision disabled eviction where it was allowed and
+// enabled it where it was refused (#437).
+const nodesSnapshot = {
+  permissions: { cordon: true, evict: true },
+  sections: [
+    {
+      resource: "nodes",
+      items: [{ kind: "Node", name: "node-a", status: "Ready", details: [] }],
+    },
+    {
+      resource: "pods",
+      items: [
+        {
+          kind: "Pod",
+          name: "allowed-pod",
+          namespace: "beta",
+          status: "Running",
+          details: ["node: node-a", "eviction: PDB checked by Eviction API"],
+          evictable: true,
+        },
+        {
+          kind: "Pod",
+          name: "refused-pod",
+          namespace: "alpha",
+          status: "Running",
+          details: ["node: node-a", "eviction: PDB checked by Eviction API"],
+          evictable: false,
+        },
+        {
+          kind: "Pod",
+          name: "unknown-pod",
+          namespace: "gamma",
+          status: "Running",
+          details: ["node: node-a", "eviction: PDB checked by Eviction API"],
+        },
+      ],
+    },
+  ],
+};
+
+function renderNodes() {
+  const fetchMock = vi.fn(async (url: string) =>
+    Response.json(
+      url === "/api/v1/clusters"
+        ? { clusters: [{ name: "prod", default_namespace: "team" }] }
+        : nodesSnapshot,
+    ),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <ErrorDetailProvider initial="raw">
+      <ClusterWorkspace area="nodes" admin={true} demo={false} />
+    </ErrorDetailProvider>,
+  );
+  return fetchMock;
+}
+
+// The heading reads "<namespace>/<name>" — eviction is decided per namespace,
+// so the namespace is part of how a pod is identified on screen.
+const cardFor = (pod: string) => screen.getByText(pod).closest("li")!;
+const evictButtonFor = (pod: string) =>
+  within(cardFor(pod)).getByRole("button", {
+    name: "Pod 이동 요청 (Eviction)",
+  });
+
+describe("node operations eviction", () => {
+  it("disables eviction only for the pods whose own namespace refused it", async () => {
+    renderNodes();
+    await screen.findByText("alpha/refused-pod");
+    expect(evictButtonFor("alpha/refused-pod")).toBeDisabled();
+    expect(evictButtonFor("beta/allowed-pod")).toBeEnabled();
+    // Unanswered is not a refusal: Kubernetes RBAC gives the real answer.
+    expect(evictButtonFor("gamma/unknown-pod")).toBeEnabled();
+  });
+
+  it("explains a refusal instead of leaving the button silently off", async () => {
+    renderNodes();
+    await screen.findByText("alpha/refused-pod");
+    const reason = "이 Pod 의 네임스페이스에서는 Pod 이동 권한이 없습니다.";
+    expect(cardFor("alpha/refused-pod")).toHaveTextContent(reason);
+    // Said only where it applies, not under every pod.
+    expect(cardFor("beta/allowed-pod")).not.toHaveTextContent(reason);
+    expect(cardFor("gamma/unknown-pod")).not.toHaveTextContent(reason);
+  });
+
+  // Nothing on this screen can show or change a namespace, so sending one
+  // only invites a decision taken on the wrong namespace.
+  it("asks for the node area without a namespace", async () => {
+    const fetchMock = renderNodes();
+    await screen.findByText("alpha/refused-pod");
+    const asked = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes("/operations"));
+    expect(asked.length).toBeGreaterThan(0);
+    for (const url of asked) expect(url).not.toContain("namespace=");
+  });
+});

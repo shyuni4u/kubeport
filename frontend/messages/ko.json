@@ -807,6 +807,7 @@
     "noResources": "조회된 리소스가 없습니다.",
     "published": "제공 설정",
     "evict": "Pod 이동 요청 (Eviction)",
+    "evictDenied": "이 Pod 의 네임스페이스에서는 Pod 이동 권한이 없습니다.",
     "capability": {
       "pods": "Pod 조회",
       "deploy": "Deployment 생성",

@@ -3,10 +3,12 @@ package k8s
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	apps "k8s.io/api/apps/v1"
+	authv1 "k8s.io/api/authorization/v1"
 	core "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
 	policy "k8s.io/api/policy/v1"
@@ -17,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	kt "k8s.io/client-go/testing"
 )
@@ -198,4 +201,141 @@ func TestPodAllocationIncludesInitPeakSidecarAndOverhead(t *testing.T) {
 	p.Spec.InitContainers = p.Spec.InitContainers[:1]
 	cpu, _, _, _ = podAllocation(p)
 	require.Equal(t, int64(160), cpu)
+}
+
+// evictionAnswers records every pods/eviction review and answers each from
+// allow, keyed by namespace. A namespace missing from fail answers normally;
+// one present fails the review outright.
+func evictionAnswers(cs *fake.Clientset, allow map[string]bool, fail map[string]bool) *[]string {
+	var asked []string
+	cs.PrependReactor("create", "selfsubjectaccessreviews", func(a kt.Action) (bool, runtime.Object, error) {
+		spec := a.(kt.CreateAction).GetObject().(*authv1.SelfSubjectAccessReview).Spec.ResourceAttributes
+		if spec.Resource != "pods" || spec.Subresource != "eviction" {
+			return true, &authv1.SelfSubjectAccessReview{}, nil
+		}
+		asked = append(asked, spec.Namespace)
+		if fail[spec.Namespace] {
+			return true, nil, apierrors.NewServiceUnavailable("review unavailable")
+		}
+		return true, &authv1.SelfSubjectAccessReview{Status: authv1.SubjectAccessReviewStatus{Allowed: allow[spec.Namespace]}}, nil
+	})
+	return &asked
+}
+
+// The pods on a node come from every namespace, so one decision taken on the
+// request's namespace would disable eviction where it is allowed and enable it
+// where it is refused (#437).
+func evictNodesFixture() []runtime.Object {
+	yes := true
+	owner := []meta.OwnerReference{{Kind: "ReplicaSet", Name: "app", Controller: &yes}}
+	return []runtime.Object{
+		&core.Node{ObjectMeta: meta.ObjectMeta{Name: "node-a"}},
+		&core.Pod{ObjectMeta: meta.ObjectMeta{Name: "a1", Namespace: "alpha", OwnerReferences: owner}, Spec: core.PodSpec{NodeName: "node-a"}},
+		&core.Pod{ObjectMeta: meta.ObjectMeta{Name: "a2", Namespace: "alpha", OwnerReferences: owner}, Spec: core.PodSpec{NodeName: "node-a"}},
+		&core.Pod{ObjectMeta: meta.ObjectMeta{Name: "b1", Namespace: "beta", OwnerReferences: owner}, Spec: core.PodSpec{NodeName: "node-a"}},
+	}
+}
+
+func evictablePods(s OperationSnapshot) map[string]*bool {
+	out := map[string]*bool{}
+	for _, sec := range s.Sections {
+		for _, i := range sec.Items {
+			if i.Kind == "Pod" {
+				out[i.Name] = i.Evictable
+			}
+		}
+	}
+	return out
+}
+
+func TestInspectNodesDecidesEvictionInEachPodsOwnNamespace(t *testing.T) {
+	c, cs := nodesClient()
+	asked := evictionAnswers(cs, map[string]bool{"beta": true}, nil)
+	// "alpha" is what the screen sends and cannot show; "beta" is where the
+	// caller may actually evict.
+	got := evictablePods(c.InspectOperations(context.Background(), "nodes", "alpha"))
+	require.Equal(t, false, *got["a1"])
+	require.Equal(t, false, *got["a2"])
+	require.Equal(t, true, *got["b1"], "a pod in a namespace the caller may evict in must stay available")
+	// One review per distinct namespace, not per pod.
+	require.ElementsMatch(t, []string{"alpha", "beta"}, *asked)
+}
+
+func TestInspectNodesEvictionIgnoresTheRequestNamespace(t *testing.T) {
+	for _, ns := range []string{"alpha", "beta", "does-not-exist", ""} {
+		t.Run("request="+ns, func(t *testing.T) {
+			c, cs := nodesClient()
+			evictionAnswers(cs, map[string]bool{"beta": true}, nil)
+			got := evictablePods(c.InspectOperations(context.Background(), "nodes", ns))
+			require.Equal(t, false, *got["a1"])
+			require.Equal(t, true, *got["b1"])
+		})
+	}
+}
+
+// An unanswered review is not a denial: leaving it unknown keeps the button
+// available and lets Kubernetes RBAC give the real answer.
+func TestInspectNodesLeavesEvictionUnknownWhenTheReviewFails(t *testing.T) {
+	c, cs := nodesClient()
+	evictionAnswers(cs, map[string]bool{"beta": true}, map[string]bool{"alpha": true})
+	s := c.InspectOperations(context.Background(), "nodes", "alpha")
+	got := evictablePods(s)
+	require.Nil(t, got["a1"])
+	require.Equal(t, true, *got["b1"])
+	require.True(t, s.Permissions["evict"])
+}
+
+// False only when every namespace answered no, so the screen-wide gate never
+// hides a pod whose own namespace was never asked.
+func TestInspectNodesEvictPermissionFalseOnlyWhenEveryNamespaceRefuses(t *testing.T) {
+	c, cs := nodesClient()
+	evictionAnswers(cs, nil, nil)
+	require.False(t, c.InspectOperations(context.Background(), "nodes", "alpha").Permissions["evict"])
+
+	c, cs = nodesClient()
+	evictionAnswers(cs, map[string]bool{"beta": true}, nil)
+	require.True(t, c.InspectOperations(context.Background(), "nodes", "alpha").Permissions["evict"])
+}
+
+// nodesClient is opsClient with a dynamic client too: the node area also asks
+// metrics.k8s.io, and a nil dynamic client panics there.
+func nodesClient() (*Client, *fake.Clientset) {
+	cs := fake.NewClientset(evictNodesFixture()...)
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{
+			{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "nodes"}: "NodeMetricsList",
+		})
+	return &Client{cs: cs, dyn: dyn}, cs
+}
+
+// A cluster with more namespaces than the budget must not turn one open node
+// screen into hundreds of reviews every refresh. The ones past the budget stay
+// unknown, so their pods stay actionable rather than silently disabled.
+func TestInspectNodesBoundsHowManyNamespacesItReviews(t *testing.T) {
+	yes := true
+	owner := []meta.OwnerReference{{Kind: "ReplicaSet", Name: "app", Controller: &yes}}
+	objs := []runtime.Object{&core.Node{ObjectMeta: meta.ObjectMeta{Name: "node-a"}}}
+	for i := 0; i < evictionCheckBudget+10; i++ {
+		objs = append(objs, &core.Pod{
+			ObjectMeta: meta.ObjectMeta{Name: fmt.Sprintf("p%d", i), Namespace: fmt.Sprintf("ns%03d", i), OwnerReferences: owner},
+			Spec:       core.PodSpec{NodeName: "node-a"},
+		})
+	}
+	cs := fake.NewClientset(objs...)
+	asked := evictionAnswers(cs, nil, nil)
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{
+			{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "nodes"}: "NodeMetricsList",
+		})
+	c := &Client{cs: cs, dyn: dyn}
+	got := evictablePods(c.InspectOperations(context.Background(), "nodes", ""))
+	require.Len(t, *asked, evictionCheckBudget)
+	answered := 0
+	for _, v := range got {
+		if v != nil {
+			answered++
+		}
+	}
+	require.Equal(t, evictionCheckBudget, answered)
+	require.Len(t, got, evictionCheckBudget+10)
 }

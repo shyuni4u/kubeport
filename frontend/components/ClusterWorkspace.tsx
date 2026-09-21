@@ -25,6 +25,10 @@ type Item = {
   status: string;
   details: string[];
   foundation?: Foundation;
+  // Eviction is decided in each pod's own namespace (#437). Absent means the
+  // cluster did not answer, so the action stays available and Kubernetes RBAC
+  // decides — only an explicit false disables it.
+  evictable?: boolean;
 };
 type Section = {
   resource: string;
@@ -114,10 +118,15 @@ export function ClusterWorkspace({
       }
       setBusy(true);
       try {
+        // The node area has no namespace field and the server ignores one
+        // there — eviction is decided per pod (#437) — so do not send a value
+        // the screen cannot show.
         const path =
           area === "settings"
             ? `/diagnostics?namespace=${encodeURIComponent(namespace)}`
-            : `/operations?area=${area}&namespace=${encodeURIComponent(namespace)}`;
+            : area === "nodes"
+              ? "/operations?area=nodes"
+              : `/operations?area=${area}&namespace=${encodeURIComponent(namespace)}`;
         const r = await fetch(base + path, { signal: controller.signal });
         if (!r.ok) {
           setFailure({
@@ -806,6 +815,7 @@ export function ClusterWorkspace({
                           variant="outline"
                           disabled={
                             !can("evict") ||
+                            i.evictable === false ||
                             i.details.some((d) =>
                               d.startsWith("eviction: blocked:"),
                             ) ||
@@ -825,6 +835,14 @@ export function ClusterWorkspace({
                         >
                           {t("evict")}
                         </Button>
+                      )}
+                      {/* A greyed button with no reason is the confusion this
+                          fixes, so say it in the page rather than in a title
+                          a disabled control may never show. */}
+                      {i.kind === "Pod" && i.evictable === false && (
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          {t("evictDenied")}
+                        </p>
                       )}
                     </li>
                   ))}
