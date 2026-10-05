@@ -4,16 +4,16 @@ go 1.26.2
 
 require (
 	github.com/coreos/go-oidc/v3 v3.21.0
-	github.com/gin-contrib/sse v1.1.0
+	github.com/gin-contrib/sse v1.1.2
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/stretchr/testify v1.12.1
 	gopkg.in/yaml.v3 v3.0.1
-	k8s.io/api v0.37.0
-	k8s.io/apimachinery v0.37.0
-	k8s.io/client-go v0.37.0
+	k8s.io/api v0.37.1
+	k8s.io/apimachinery v0.37.1
+	k8s.io/client-go v0.37.1
 	sigs.k8s.io/yaml v1.6.0
 )
 
