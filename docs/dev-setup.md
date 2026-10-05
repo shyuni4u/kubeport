@@ -161,7 +161,7 @@ cd <repo root>
 docker --version
 docker compose version
 go version          # go.mod 의 요구 버전 이상이어야 함
-node -v             # 24.x 권장(CI·이미지와 같음). 최소 20.9.0 — 20.8 이하는 Next 16 engines 때문에 pnpm dev 가 엔진 에러로 죽는다
+node -v             # 24.x 권장(CI·이미지와 같음). 최소 20.19.0(22.x 는 22.12.0) — @vitejs/plugin-react 5 의 engines 하한. 20.8 이하는 Next 16 engines 때문에 pnpm dev 도 죽는다
 pnpm -v
 atlas version
 kubectl version --client

@@ -44,7 +44,7 @@ a pod come up.
 ## Prereqs (install once per machine)
 
 - Docker Desktop (WSL2 integration on for Windows)
-- Go 1.26+, Node 20.9+ (Next 16's engines floor; CI runs 24), pnpm 10+
+- Go 1.26+, Node 20.19+ or 22.12+ (@vitejs/plugin-react 5's engines floor; CI runs 24), pnpm 10+
 - `atlas`, `kind`, `kubectl` — for `kind`, the version [dev-setup.md](dev-setup.md)
   installs (`go install sigs.k8s.io/kind@…`), which is the one this flow is run
   with. No script holds you to it: `scripts/e2e/doctor.sh` and `up.sh` only check
