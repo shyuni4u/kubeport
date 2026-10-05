@@ -311,7 +311,7 @@ test databases: [docs/testing.md](docs/testing.md).
 
 - Docker (for local Postgres + dex)
 - Go 1.26+
-- Node 20.9+ (Next 16's engines floor; CI and the image run 24), pnpm 10+
+- Node 20.19+ or 22.12+ (@vitejs/plugin-react 5's engines floor; CI and the image run 24), pnpm 10+
 - [`atlas`](https://atlasgo.io) CLI (DB migrations), `sqlc`
 - `openssl` (the dex cert in step 0; also generates the install secrets above)
 - (install only) [`helm`](https://helm.sh) 3.x — pin **v3.20.2** if you will
