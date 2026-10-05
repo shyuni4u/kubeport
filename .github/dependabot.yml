@@ -17,17 +17,23 @@ updates:
     open-pull-requests-limit: 3
     groups:
       # next + eslint-config-next must move together; they are pinned to the
-      # same exact version on purpose.
+      # same exact version on purpose (frontend/lib/next-pin.test.ts fails
+      # the build when they drift).
       next:
         patterns: ["next", "eslint-config-next", "@next/*"]
       react:
         patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+      # The catch-all groups exclude the next/react pairs explicitly. Without
+      # it, prod-minor-patch took next alone while eslint-config-next (a dev
+      # dependency) was left behind (#454, PR #452).
       dev-minor-patch:
         dependency-type: development
         update-types: ["minor", "patch"]
+        exclude-patterns: ["next", "eslint-config-next", "@next/*", "react", "react-dom", "@types/react", "@types/react-dom"]
       prod-minor-patch:
         dependency-type: production
         update-types: ["minor", "patch"]
+        exclude-patterns: ["next", "eslint-config-next", "@next/*", "react", "react-dom", "@types/react", "@types/react-dom"]
 
   - package-ecosystem: gomod
     directory: /backend
