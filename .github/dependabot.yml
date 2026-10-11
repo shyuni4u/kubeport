@@ -34,6 +34,12 @@ updates:
         dependency-type: production
         update-types: ["minor", "patch"]
         exclude-patterns: ["next", "eslint-config-next", "@next/*", "react", "react-dom", "@types/react", "@types/react-dom"]
+    # @types/node follows the Node major the frontend runs on (24: CI and
+    # node:24-alpine), not the newest Node. Newer majors describe APIs the
+    # runtime does not have; move it with the docker `node` major below.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: gomod
     directory: /backend
