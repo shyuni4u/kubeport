@@ -34,9 +34,11 @@ updates:
         dependency-type: production
         update-types: ["minor", "patch"]
         exclude-patterns: ["next", "eslint-config-next", "@next/*", "react", "react-dom", "@types/react", "@types/react-dom"]
-    # @types/node follows the Node major the frontend runs on (24: CI and
-    # node:24-alpine), not the newest Node. Newer majors describe APIs the
-    # runtime does not have; move it with the docker `node` major below.
+    # @types/node follows the Node major the frontend image runs on (24:
+    # node:24-alpine and the ci.yml frontend job), not the newest Node.
+    # playwright.yml and local setups may still run 20/22 (README floor
+    # 20.19+/22.12+), so frontend code avoids Node-24-only APIs. Newer majors
+    # describe APIs no runtime here has; move it with the docker `node` major.
     ignore:
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
