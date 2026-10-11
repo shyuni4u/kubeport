@@ -231,21 +231,20 @@ jobs:
     # hits the machines that run it; a vitest critical sat here unseen because
     # the gate was --prod only).
     #
-    # Why --prod stops at high rather than moderate (#438): every moderate it
-    # reports is DOMPurify, reached only through
+    # Why --prod stops at high rather than moderate (#438): the findings it
+    # cannot clear are DOMPurify, reached only through
     # @monaco-editor/react > monaco-editor. Monaco vendors its own copy of
     # DOMPurify into its dist and pins the npm package to the same version, so
     # this number is a faithful proxy for the sanitizer the editor actually
     # runs — and it moves only when Monaco cuts a release. monaco-editor
-    # 0.56.0 carries DOMPurify 3.4.8 against an upstream 3.4.15, leaving
-    # findings nothing in this repo can clear. A pnpm.overrides entry would
-    # zero them while changing no shipped byte, which is why there is none.
+    # 0.57.0 carries DOMPurify 3.4.15 (0.56.0 carried 3.4.8, #450); whenever
+    # upstream DOMPurify moves ahead again, the gap is findings nothing in this
+    # repo can clear. A pnpm.overrides entry would zero them while changing no
+    # shipped byte, which is why there is none.
     #
-    # Measured 2026-09-21 — --prod: 0 critical, 0 high, 2 moderate, 2 low.
-    # Dev included: 0 critical, 18 high, 15 moderate, 5 low, every high
-    # transitive under eslint, eslint-config-next, shadcn, jsdom or
-    # @vitejs/plugin-react and waiting on those to move. The summary step
-    # below still lists them all.
+    # Measured 2026-10-11 — --prod: 0 critical, 0 high, 0 moderate, 2 low
+    # (both Monaco's DOMPurify). Dev included: see the step summary; every
+    # high there is transitive under dev tooling and waiting on it to move.
     #
     # When an advisory does land on Monaco's DOMPurify at high, this gate goes
     # red on a finding no change here can clear, and `audit` is a required

@@ -38,10 +38,11 @@ function atLeast(a: string, b: string): boolean {
   return true;
 }
 
-// The first Monaco build that stopped vendoring DOMPurify 3.2.7, the version
-// that put 18 advisories in `pnpm audit --prod` (#438). Going back below this
-// reintroduces all of them in the code an admin's browser runs.
-const DOMPURIFY_FLOOR = "0.56.0";
+// The first Monaco build that vendors DOMPurify 3.4.15. 0.55.1 carried 3.2.7
+// (18 advisories in `pnpm audit --prod`, #438) and 0.56.0 carried 3.4.8 (four
+// XSS advisories, #450). Going back below this reintroduces them in the code
+// an admin's browser runs.
+const DOMPURIFY_FLOOR = "0.57.0";
 
 describe("the Monaco build this app runs", () => {
   // Monaco vendors its own DOMPurify, so this version — not the npm

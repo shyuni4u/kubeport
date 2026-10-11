@@ -14,7 +14,8 @@
  * (`esm/vs/base/browser/dompurify/dompurify.js`), so the sanitizer
  * that actually runs in an admin's browser is whichever one is baked into the
  * build at the version below, and no lockfile or `pnpm.overrides` entry can
- * change it. 0.55.1 carried DOMPurify 3.2.7; 0.56.0 carries 3.4.8.
+ * change it. 0.55.1 carried DOMPurify 3.2.7, 0.56.0 carried 3.4.8 (#450),
+ * 0.57.0 carries 3.4.15.
  *
  * `@monaco-editor/loader` hardcodes a version of its own, so MonacoPanel
  * configures the loader with MONACO_VS_PATH rather than inheriting it. That
@@ -26,7 +27,7 @@
  * weight into proxy.ts.
  */
 
-export const MONACO_VERSION = "0.56.0";
+export const MONACO_VERSION = "0.57.0";
 
 export const MONACO_CDN = `https://cdn.jsdelivr.net/npm/monaco-editor@${MONACO_VERSION}/`;
 
