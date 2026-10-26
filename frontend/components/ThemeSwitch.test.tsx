@@ -20,7 +20,7 @@ describe("ThemeSwitch", () => {
     const select = screen.getByRole("combobox", { name: "색 테마" });
     expect(select).toHaveTextContent("다크");
     await userEvent.click(select);
-    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+    expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual([
       "시스템 설정",
       "라이트",
       "다크",
@@ -30,7 +30,7 @@ describe("ThemeSwitch", () => {
   it("choosing dark writes the cookie and puts .dark on <html> without a reload", async () => {
     render(<ThemeSwitch initial="system" />);
     await userEvent.click(screen.getByRole("combobox"));
-    await userEvent.click(screen.getByRole("option", { name: "다크" }));
+    await userEvent.click(await screen.findByRole("option", { name: "다크" }));
     expect(document.documentElement).toHaveClass("dark");
     expect(document.documentElement).not.toHaveClass("light");
     expect(document.cookie).toContain("kbp_theme=dark");
@@ -41,7 +41,7 @@ describe("ThemeSwitch", () => {
     document.documentElement.classList.add("dark");
     render(<ThemeSwitch initial="dark" />);
     await userEvent.click(screen.getByRole("combobox"));
-    await userEvent.click(screen.getByRole("option", { name: "라이트" }));
+    await userEvent.click(await screen.findByRole("option", { name: "라이트" }));
     expect(document.documentElement).toHaveClass("light");
     expect(document.documentElement).not.toHaveClass("dark");
     expect(document.cookie).toContain("kbp_theme=light");
@@ -52,7 +52,7 @@ describe("ThemeSwitch", () => {
     document.documentElement.classList.add("light");
     render(<ThemeSwitch initial="light" />);
     await userEvent.click(screen.getByRole("combobox"));
-    await userEvent.click(screen.getByRole("option", { name: "시스템 설정" }));
+    await userEvent.click(await screen.findByRole("option", { name: "시스템 설정" }));
     expect(document.documentElement).not.toHaveClass("light");
     expect(document.documentElement).not.toHaveClass("dark");
     expect(document.cookie).toContain("kbp_theme=system");
@@ -64,7 +64,7 @@ describe("ThemeSwitch", () => {
     const set = vi.spyOn(document, "cookie", "set");
     render(<ThemeSwitch initial="system" />);
     await userEvent.click(screen.getByRole("combobox"));
-    await userEvent.click(screen.getByRole("option", { name: "다크" }));
+    await userEvent.click(await screen.findByRole("option", { name: "다크" }));
     expect(set).toHaveBeenCalledTimes(1);
     const written = set.mock.calls[0][0].toLowerCase();
     expect(written).toContain("path=/");

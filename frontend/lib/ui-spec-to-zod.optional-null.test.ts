@@ -37,7 +37,7 @@ function fieldFor(type: NonIntegerType, required: boolean, p = path): UISpecFiel
 function isRequiredIssue(issue: ZodIssue | undefined): boolean {
   return (
     issue?.code === "invalid_type" &&
-    (issue.received === "undefined" || issue.received === "null")
+    (issue.input === undefined || issue.input === null)
   );
 }
 
@@ -63,14 +63,14 @@ describe("optional non-integer fields, stored null (#316)", () => {
       it("reads null on an optional field as no value, like a missing key", () => {
         const schema = schemaFromUISpec({ fields: [fieldFor(type, false)] });
         for (const empty of [null, undefined]) {
-          const r = schema.safeParse({ [path]: empty });
+          const r = schema.safeParse({ [path]: empty }, { reportInput: true });
           expect(r.success, JSON.stringify(empty)).toBe(true);
           expect(r.data?.[path]).toBeUndefined();
           // The payload leaves the key out, so the backend fills the ui-spec
           // default instead of refusing a null it cannot validate.
           expect(JSON.stringify(r.data)).toBe("{}");
         }
-        const missing = schema.safeParse({});
+        const missing = schema.safeParse({}, { reportInput: true });
         expect(missing.success).toBe(true);
         expect(JSON.stringify(missing.data)).toBe("{}");
       });
@@ -78,13 +78,13 @@ describe("optional non-integer fields, stored null (#316)", () => {
       it("refuses null and undefined on a required field with the required issue", () => {
         const schema = schemaFromUISpec({ fields: [fieldFor(type, true)] });
         for (const empty of [null, undefined]) {
-          const r = schema.safeParse({ [path]: empty });
+          const r = schema.safeParse({ [path]: empty }, { reportInput: true });
           expect(r.success, JSON.stringify(empty)).toBe(false);
           expect(r.error?.issues).toHaveLength(1);
           expect(isRequiredIssue(r.error?.issues[0]), JSON.stringify(empty)).toBe(true);
           expect(r.error?.issues[0].path).toEqual([path]);
         }
-        const missing = schema.safeParse({});
+        const missing = schema.safeParse({}, { reportInput: true });
         expect(missing.success).toBe(false);
         expect(isRequiredIssue(missing.error?.issues[0])).toBe(true);
       });
@@ -95,7 +95,7 @@ describe("optional non-integer fields, stored null (#316)", () => {
         it(`${kind}: accepts a valid value unchanged`, () => {
           const schema = schemaFromUISpec({ fields: [fieldFor(type, required)] });
           for (const v of CASES[type].valid) {
-            const r = schema.safeParse({ [path]: v });
+            const r = schema.safeParse({ [path]: v }, { reportInput: true });
             expect(r.success, JSON.stringify(v)).toBe(true);
             expect(r.data?.[path]).toBe(v);
           }
@@ -104,7 +104,7 @@ describe("optional non-integer fields, stored null (#316)", () => {
         it(`${kind}: refuses an invalid value, and not as missing`, () => {
           const schema = schemaFromUISpec({ fields: [fieldFor(type, required)] });
           for (const v of CASES[type].invalid) {
-            const r = schema.safeParse({ [path]: v });
+            const r = schema.safeParse({ [path]: v }, { reportInput: true });
             expect(r.success, JSON.stringify(v)).toBe(false);
             expect(isRequiredIssue(r.error?.issues[0]), JSON.stringify(v)).toBe(false);
           }
@@ -117,11 +117,11 @@ describe("optional non-integer fields, stored null (#316)", () => {
           required && CASES[type].emptyString === "accepted" ? "missing" : CASES[type].emptyString;
         it(`${kind}: treats "" as ${emptyString}`, () => {
           const schema = schemaFromUISpec({ fields: [fieldFor(type, required)] });
-          const r = schema.safeParse({ [path]: "" });
+          const r = schema.safeParse({ [path]: "" }, { reportInput: true });
           if (emptyString === "missing") {
             expect(r.success).toBe(false);
             expect(r.error?.issues).toHaveLength(1);
-            expect(r.error?.issues[0]).toMatchObject({ code: "too_small", type: "string", minimum: 1 });
+            expect(r.error?.issues[0]).toMatchObject({ code: "too_small", origin: "string", minimum: 1 });
           } else if (emptyString === "accepted") {
             expect(r.success).toBe(true);
             expect(r.data?.[path]).toBe("");
@@ -142,10 +142,10 @@ describe("optional non-integer fields, stored null (#316)", () => {
       fields: [{ path, label: "Value", type: "string", minLength: 3, pattern: "^[a-z]+$" }],
     };
     const schema = schemaFromUISpec(spec);
-    expect(schema.safeParse({ [path]: null }).success).toBe(true);
-    expect(schema.safeParse({ [path]: "ab" }).success).toBe(false);
-    expect(schema.safeParse({ [path]: "ABC" }).success).toBe(false);
-    expect(schema.safeParse({ [path]: "abc" }).success).toBe(true);
+    expect(schema.safeParse({ [path]: null }, { reportInput: true }).success).toBe(true);
+    expect(schema.safeParse({ [path]: "ab" }, { reportInput: true }).success).toBe(false);
+    expect(schema.safeParse({ [path]: "ABC" }, { reportInput: true }).success).toBe(false);
+    expect(schema.safeParse({ [path]: "abc" }, { reportInput: true }).success).toBe(true);
   });
 
   it("keeps optional nulls from affecting the fields beside them", () => {
@@ -158,7 +158,7 @@ describe("optional non-integer fields, stored null (#316)", () => {
         { path: "metadata.name", label: "Name", type: "string", required: true },
       ],
     };
-    const r = schemaFromUISpec(spec).safeParse({ s: null, a: null, b: null, e: null, "metadata.name": "web" });
+    const r = schemaFromUISpec(spec).safeParse({ s: null, a: null, b: null, e: null, "metadata.name": "web" }, { reportInput: true });
     expect(r.success).toBe(true);
     expect(JSON.parse(JSON.stringify(r.data))).toEqual({ "metadata.name": "web" });
   });
@@ -194,18 +194,18 @@ describe("Secrets and stored null (#316 with #288, #196)", () => {
     const schema = schemaFromUISpec(spec, { keptSecrets: keptSecretPaths(start) });
     for (const f of secretFields) {
       for (const empty of [null, undefined]) {
-        const r = schema.safeParse({ ...start, [f.path]: empty });
+        const r = schema.safeParse({ ...start, [f.path]: empty }, { reportInput: true });
         expect(r.success, `${f.type} ${JSON.stringify(empty)}`).toBe(false);
         expect(r.error?.issues[0].path).toEqual([f.path]);
       }
-      expect(schema.safeParse({ ...start, [f.path]: replacement[f.path] }).success, f.type).toBe(true);
+      expect(schema.safeParse({ ...start, [f.path]: replacement[f.path] }, { reportInput: true }).success, f.type).toBe(true);
     }
   });
 
   it("refuses null for a Secret to enter again", () => {
     const schema = schemaFromUISpec(spec, { reenterSecrets: new Set(secretFields.map((f) => f.path)) });
     for (const f of secretFields) {
-      const r = schema.safeParse({ ...replacement, [f.path]: null });
+      const r = schema.safeParse({ ...replacement, [f.path]: null }, { reportInput: true });
       expect(r.success, f.type).toBe(false);
       expect(isRequiredIssue(r.error?.issues[0]), f.type).toBe(true);
     }

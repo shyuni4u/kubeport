@@ -1428,13 +1428,22 @@ spec:
         app.kubernetes.io/component: postgres
     spec:
       securityContext:
-        # postgres image runs as uid 999 (postgres). fsGroup so it can write
-        # the mounted PVC.
-        fsGroup: 999
+        fsGroup: 70
+        runAsGroup: 70
+        runAsNonRoot: true
+        runAsUser: 70
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: postgres
           image: postgres:16-alpine
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
           ports:
             - name: postgres
               containerPort: 5432
@@ -1450,6 +1459,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            - name: postgres-run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             exec:
               command:
@@ -1473,6 +1486,11 @@ spec:
             requests:
               cpu: 50m
               memory: 128Mi
+      volumes:
+        - name: postgres-run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
   volumeClaimTemplates:
     - metadata:
         name: data

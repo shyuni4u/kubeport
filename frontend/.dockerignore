@@ -41,3 +41,6 @@ Dockerfile
 
 # Coverage
 coverage/
+
+# Regenerated from the lockfile inside the builder
+public/vendor/monaco/

@@ -107,6 +107,12 @@ Swagger가 OpenAPI spec을 UI로 바꿔 주는 것처럼, k8s 리소스를 **추
 | `kuberport` 표기 | **고치지 말 것.** SSH 키·디렉터리의 실제 이름이다 (gpg 번들, `upload-gha-secrets.sh` 폴백). 초기 오타에서 왔지만 이름을 바꾸면 프로덕션 접속 절차가 문서상 깨진다 — 커밋 `106825c` 에서 "실제 파일명은 유지, 스크립트만 새 이름 우선" 으로 결정 |
 | SSH 키 **경로** | **머신마다 다르고, 통일하지 않는다** (#68). 키를 만든 머신은 `~/.ssh/oci_kuberport`(평평), gpg 번들로 복원한 머신은 `~/.ssh/kuberport-oci/oci_kuberport`. 한쪽으로 통일하면 반대쪽 머신이 반드시 깨진다 — 접속 전에 `ls` 로 확인. runbook §1 "SSH 키 위치" |
 
+## 운영·CLI 기능 영역
+
+- 클러스터 운영 Beta: `frontend/components/ClusterWorkspace.tsx`, `backend/internal/api/operations.go`, `backend/internal/k8s/operations.go`. 노드 cordon/evict, 스토리지·네트워크 foundation, 클러스터 설정·진단을 다룬다. 앱 관리자·데모 게이트와 Kubernetes RBAC를 함께 적용한다. 안내는 `docs/cluster-operations.md`.
+- 자가호스팅 AI Skill·CLI Beta: `skills/kubeport/SKILL.md`, `skills/kubeport/scripts/kubeport.mjs`, `tests/cli/kubeport.test.mjs`. 설치본별 CLI 연결 화면에서 단기 토큰을 발급하며 API 경로·URL·리다이렉트·자격증명 파일을 검증한다. CLI의 `cli` CI 잡도 main 필수 체크다.
+- Monaco 배포 파일은 `frontend/scripts/prepare-monaco.mjs`가 잠금된 npm 패키지에서 복사해 자체 제공한다. 남은 DOMPurify 감사 예외와 제거 조건은 `docs/security-dependency-exceptions.md`.
+
 ## 기술 스택
 
 | 영역 | 항목 | 결정 |
@@ -141,8 +147,10 @@ kubeport/
 ├── backend/                 ← Go API (gin, sqlc, atlas 스키마 migrations/schema.hcl, api/openapi.yaml)
 ├── frontend/                ← Next.js App Router (BFF route handlers, messages/{ko,en}.json)
 ├── deploy/                  ← helm/kubeport(차트·README), docker(compose + dex), oci(부트스트랩·kubeport-deploy)
+├── skills/kubeport/         ← 자가호스팅 AI Skill·Node CLI (설치본별 1시간 토큰)
+├── tests/cli/               ← CLI URL·자격증명·요청 경계 회귀 검사
 ├── scripts/                 ← compose.sh, test-db.sh, e2e/(doctor·up·seed·run)
-├── .github/workflows/       ← ci(필수 4체크)·build-images·deploy(main 머지 → 라이브)·playwright·helm
+├── .github/workflows/       ← ci(필수 5체크)·build-images·deploy(main 머지 → 라이브)·playwright·helm
 ├── docs/                    ← runbook·machine-clients·testing·dev-setup·local-e2e·brainstorming-summary·decisions(ADR)
 └── .claude/                 ← agents(리뷰 페르소나), skills(pr-review), hooks, worktrees(세션 작업 공간)
 ```
@@ -260,7 +268,7 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
 방식을 대체한다 — 머지 순서·배포 확인·뒷정리의 주인을 하나로 둔다.
 - 작업 세션(Developer·UI reviewer·CEO)은 리뷰 반영 후 푸시하고 PM 에게 한 줄:
   `머지 준비: PR #N, HEAD <sha7>, 리뷰 반영 완료, 기다릴 비필수 체크: playwright/helm/없음`. `gh pr merge`·`--auto` 는 치지 않는다.
-- PM 은 한 번에 하나씩 머지한다: PR HEAD 가 보고된 sha 인지, `isCrossRepository=false`, 필수 4개 + 경로에 해당하는 비필수 체크 초록,
+- PM 은 한 번에 하나씩 머지한다: PR HEAD 가 보고된 sha 인지, `isCrossRepository=false`, 필수 5개 + 경로에 해당하는 비필수 체크 초록,
   경계 PR 이면 security 리뷰 반영 → `gh pr merge <N> --squash` → `/api/healthz` 의 `version` 반영 확인 → UI reviewer 에게 sha 와 함께 검증 요청.
 - 머지 뒤 PM 이 확인한다: `Closes` 대상 이슈가 실제로 닫혔는지(안 닫혔으면 닫는다), 열린 채 남는 이슈의 claim 라벨,
   원격 브랜치 삭제(`git push origin --delete <branch>`), 작업 세션에 워크트리 제거 요청 → `git worktree list`·`ls .claude/worktrees` 로 사라졌는지.
@@ -271,7 +279,7 @@ commit 전에 `git config user.email` 이 이 값인지 반드시 확인하고, 
   PM 에게 머지 준비를 알리고 다음 일로 간다. 결과를 꼭 봐야 하면 `run_in_background` 로 띄운다.
 - **머지가 곧 배포다** (#199, 2026-09-10). main 머지 → 같은 sha 의 `build-images` 와 `CI` 가 둘 다 성공(#202) → `deploy.yml` 이 라이브(`kubeport.enzo.kr`)에
   올리고 `/api/healthz` 의 `version` 이 바뀔 때까지 확인한다. 머지 버튼(= PM 이 누르는 것)이 프로덕션 배포 버튼이다.
-- **머지의 필수 체크는 `ci.yml` 4개(`audit` `backend` `frontend` `hooks`)뿐이다** (ruleset `protect-main`, 2026-09-10).
+- **머지의 필수 체크는 `ci.yml` 5개(`audit` `backend` `frontend` `hooks` `cli`)다** (ruleset `protect-main`, 2026-10-26 사용자 승인 후 적용·재조회).
   `playwright`(워크플로 Playwright E2E)와 `lint-and-snapshot`·`kind-smoke`(워크플로 `helm`)는 kind 플레이크로 머지를 막지 않게
   필수에서 뺐다 — 빨개도 머지되고, **머지되면 배포된다.** 그래서 아래 경로를 건드린 PR 은 PM 이 해당 체크(돈 것만)가
   끝난 걸 `run_in_background` 로 기다려 보고 머지한다. 이 규칙이 "playwright 가 빨간데 프로덕션에 나간다" 를 막는 유일한 장치다(긴급 시 ruleset 을 끄는 건 사용자 몫).

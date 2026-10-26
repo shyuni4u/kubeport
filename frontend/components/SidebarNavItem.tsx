@@ -8,8 +8,9 @@ import { BetaBadge } from "./BetaBadge";
 export function SidebarNavItem({ href, label, beta = false }: { href: string; label: string; beta?: boolean }) {
   const pathname = usePathname();
   const active = pathname === href || pathname.startsWith(href + "/");
+  const Tag = href.startsWith("/api/auth/") ? "a" : Link;
   return (
-    <Link
+    <Tag
       href={href}
       aria-current={active ? "page" : undefined}
       className={cn(
@@ -25,6 +26,6 @@ export function SidebarNavItem({ href, label, beta = false }: { href: string; la
     >
       {label}
       {beta && <> <BetaBadge /></>}
-    </Link>
+    </Tag>
   );
 }
