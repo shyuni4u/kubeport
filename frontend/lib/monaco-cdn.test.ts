@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  MONACO_CDN,
+  MONACO_ASSET_ROOT,
   MONACO_VERSION,
   MONACO_VS_PATH,
   pinMonacoSource,
@@ -48,16 +48,17 @@ describe("the Monaco build this app runs", () => {
   // Monaco vendors its own DOMPurify, so this version — not the npm
   // dependency tree — decides which sanitizer runs in the browser (#438).
   it("is pinned to one version across the CDN path, the vs path and the types", () => {
-    expect(MONACO_CDN).toBe(
-      `https://cdn.jsdelivr.net/npm/monaco-editor@${MONACO_VERSION}/`,
+    expect(MONACO_ASSET_ROOT).toBe(
+      `/vendor/monaco/${MONACO_VERSION}/`,
     );
-    expect(MONACO_VS_PATH).toBe(`${MONACO_CDN}min/vs`);
+    expect(MONACO_VS_PATH).toBe(`${MONACO_ASSET_ROOT}min/vs`);
     // Exact, not a range: the types must describe the build being fetched.
     expect(pkg.devDependencies["monaco-editor"]).toBe(MONACO_VERSION);
   });
 
   it("is the path the CSP allows", () => {
-    expect(defaultCsp(false)).toContain(MONACO_CDN);
+    expect(defaultCsp(false)).toContain("script-src 'self'");
+    expect(defaultCsp(false)).not.toContain('cdn.jsdelivr.net');
   });
 
   it("passes MONACO_VS_PATH to loader.config", () => {

@@ -69,7 +69,7 @@ func specOperations(t *testing.T) map[string]bool {
 // from the router the way a hard-coded list would.
 func routerOperations(t *testing.T) map[string]bool {
 	t.Helper()
-	r := api.NewRouter(config.Config{}, api.Deps{Verifier: stubVerifier{}, Store: testStore(t)})
+	r := api.NewRouter(config.Config{}, api.Deps{Verifier: stubVerifier{}})
 
 	out := map[string]bool{}
 	for _, ri := range r.Routes() {
@@ -263,7 +263,7 @@ var statusNames = map[string]string{
 	"StatusBadRequest": "400", "StatusUnauthorized": "401", "StatusForbidden": "403",
 	"StatusNotFound": "404", "StatusMethodNotAllowed": "405", "StatusConflict": "409",
 	"StatusRequestEntityTooLarge": "413",
-	"StatusInternalServerError": "500", "StatusBadGateway": "502",
+	"StatusInternalServerError":   "500", "StatusBadGateway": "502",
 }
 
 // symbolBodies maps every package-level func and method in the api package to
@@ -338,6 +338,9 @@ func statusesOf(name string, bodies map[string]string, verdictCodes, seen map[st
 			out[code] = true
 		}
 	}
+	for _, sm := range regexp.MustCompile(`(?:writeError\(c,\s*|c\.(?:JSON|Status|Data)\(\s*)([1-5][0-9]{2})\b`).FindAllStringSubmatch(body, -1) {
+		out[sm[1]] = true
+	}
 	if verdictDispatchRe.MatchString(body) {
 		for code := range verdictCodes {
 			out[code] = true
@@ -397,7 +400,7 @@ func TestOpenAPISpec_DocumentsEveryStatusHandlersEmit(t *testing.T) {
 		}
 	}
 
-	r := api.NewRouter(config.Config{}, api.Deps{Verifier: stubVerifier{}, Store: testStore(t)})
+	r := api.NewRouter(config.Config{}, api.Deps{Verifier: stubVerifier{}})
 	var problems []string
 	used := map[string]bool{}
 	for _, ri := range r.Routes() {
@@ -410,6 +413,14 @@ func TestOpenAPISpec_DocumentsEveryStatusHandlersEmit(t *testing.T) {
 		}
 		key := strings.Replace(ri.Method+" "+ri.Path, "/*gv", "/:gv", 1)
 		declared := specCodes[key]
+		// Validation and missing-resource responses are handler contracts,
+		// not authentication middleware responses. Check this direction too.
+		reachable := statusesOf(hm[1], bodies, verdicts, map[string]bool{})
+		for _, code := range []string{"400", "404"} {
+			if declared[code] && !reachable[code] {
+				problems = append(problems, key+" documents "+code+" but "+hm[1]+" cannot emit it")
+			}
+		}
 
 		for _, code := range sortedKeys(statusesOf(hm[1], bodies, verdicts, map[string]bool{})) {
 			if declared[code] {

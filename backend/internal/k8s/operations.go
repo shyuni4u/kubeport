@@ -45,7 +45,8 @@ type OperationItem struct {
 	// means the review could not be completed: the caller keeps the action
 	// and Kubernetes RBAC gives the real answer, because treating an
 	// unanswered review as a refusal hides evictions that are allowed (#437).
-	Evictable *bool `json:"evictable,omitempty"`
+	Evictable     *bool `json:"evictable,omitempty"`
+	Unschedulable *bool `json:"unschedulable,omitempty"`
 }
 
 type OperationSection struct {
@@ -174,7 +175,10 @@ func (c *Client) InspectOperations(ctx context.Context, area, ns string) Operati
 				if pe != nil || (pods != nil && pods.Continue != "") {
 					details = append(details, "Pod allocation incomplete; do not infer spare capacity")
 				}
-				rows = append(rows, item("Node", &n, state, details...))
+				row := item("Node", &n, state, details...)
+				unschedulable := n.Spec.Unschedulable
+				row.Unschedulable = &unschedulable
+				rows = append(rows, row)
 			}
 		}
 		cont := ""
@@ -346,6 +350,9 @@ func (c *Client) InspectOperations(ctx context.Context, area, ns string) Operati
 		}
 		add("ingresses", rows, cont, e)
 		check("create-ingress", "networking.k8s.io", "ingresses", "create")
+		// Host conflict detection reads all namespaces before creating an ingress.
+		access, accessErr := c.CheckAccess(ctx, AccessCheck{Group: "networking.k8s.io", Resource: "ingresses", Verb: "list"})
+		out.Permissions["create-ingress"] = out.Permissions["create-ingress"] && accessErr == nil && access.Allowed
 		check("publish-ingress", "networking.k8s.io", "ingressclasses", "patch")
 	}
 	if area == "storage" || area == "network" {
@@ -479,6 +486,9 @@ func (c *Client) evictionPermissions(ctx context.Context, items []OperationItem)
 }
 
 func evictionBlock(p core.Pod) string {
+	if p.Spec.NodeName == "" {
+		return "blocked: pod is not assigned to a node"
+	}
 	if p.Annotations[core.MirrorPodAnnotationKey] != "" {
 		return "blocked: mirror pod"
 	}
@@ -599,6 +609,9 @@ func (c *Client) RunOperation(ctx context.Context, r OperationRequest) error {
 		}, meta.CreateOptions{})
 		return e
 	case "evict":
+		if !validName(r.Node) {
+			return invalidOperation("valid node name required; refresh first")
+		}
 		n, e := c.cs.CoreV1().Nodes().Get(ctx, r.Node, meta.GetOptions{})
 		if e != nil {
 			return e

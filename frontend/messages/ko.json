@@ -564,7 +564,7 @@
         "quickPick": "빠른 선택",
         "starterHelp": "필수 구조를 갖춘 예제를 추가합니다. 템플릿 이름을 입력한 뒤 초안으로 저장할 수 있습니다. 배포 전 이미지·명령·연결 대상을 확인하세요. Service의 selector는 대상 Pod 라벨에 맞추고, StatefulSet의 serviceName에 맞는 headless Service는 별도로 준비하세요. CronJob은 일시정지 상태로 시작합니다.",
         "allGroupVersions": "전체 GroupVersion 목록 ({count})",
-        "kindPlaceholder": "Kind (예: Deployment)",
+        "kindLabel": "리소스 종류", "kindPlaceholder": "Kind (예: Deployment)",
         "add": "추가",
         "indexFetchFailed": "OpenAPI 인덱스 조회에 실패했습니다 (HTTP {status})."
       },
@@ -731,6 +731,7 @@
     "revoke": "이 브라우저 세션에서 로그아웃하면 발급한 연결 토큰이 무효화됩니다. CLI logout은 로컬 사본만 지웁니다. 토큰은 최대 1시간 유효하며 새 토큰을 발급해도 이전 토큰은 유지됩니다."
   },
   "operations": {
+    "namespace": "네임스페이스", "apiUrl": "Kubernetes API 주소", "oidcIssuerUrl": "OIDC 발급자 주소", "caBundle": "CA 인증서 (PEM)", "cordon": "새 파드 배치 중지", "uncordon": "새 파드 배치 허용",
     "title": "배포 운영 현황",
     "newDeployment": "새 배포",
     "scope": "kubeport에 등록된 배포를 표시합니다. 관리자는 접근 가능한 전체 배포, 사용자는 자신의 배포를 확인합니다. 요약과 검색은 현재 페이지 기준입니다.",

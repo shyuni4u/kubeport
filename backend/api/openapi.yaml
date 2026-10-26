@@ -503,6 +503,9 @@ paths:
                                   Pods in the nodes area only. The caller's
                                   pods/eviction right in this pod's own namespace.
                                   Absent means unreviewed, which is not a refusal.
+                              unschedulable:
+                                type: boolean
+                                description: Node cordon state; use this instead of parsing the display status.
         "400": *a3
         "401": *a4
         "403": *a5
@@ -2061,6 +2064,7 @@ paths:
       tags: [teams]
       operationId: removeTeamMember
       summary: Remove a member
+      description: Returns 404 if the team does not exist. An already absent membership in an existing team returns 204.
       parameters:
         - $ref: "#/components/parameters/TeamID"
         - name: user_id
@@ -2601,12 +2605,13 @@ components:
         name:
           type: string
           minLength: 1
-          description: Slug releases refer to. Must be unique.
+          maxLength: 253
+          description: Unique RFC 1123 DNS subdomain name referenced by releases.
         display_name: { type: string }
         api_url:
           type: string
           format: uri
-          description: For an in-cluster target, `https://kubernetes.default.svc`.
+          description: HTTPS URL without credentials, query or fragment. For an in-cluster target, `https://kubernetes.default.svc`. HTTP is permitted only by the explicit local-development insecure-cluster setting; production connections refuse redirects.
         ca_bundle:
           type: string
           description: |
@@ -2625,7 +2630,9 @@ components:
         oidc_issuer_url: { type: string, format: uri }
         default_namespace:
           type: string
-          description: Pre-selected in the deploy form.
+          default: default
+          maxLength: 63
+          description: RFC 1123 DNS label, pre-selected in the deploy form. Omitted or empty uses default.
 
     SSARRequest:
       type: object

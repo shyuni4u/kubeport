@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_HSTS, MONACO_CDN, applySecurityHeaders, defaultCsp, securityHeaders } from "./security-headers";
+import { DEFAULT_HSTS, applySecurityHeaders, defaultCsp, securityHeaders } from "./security-headers";
 
 const prod = { NODE_ENV: "production" };
 const asMap = (h: [string, string][]) => Object.fromEntries(h);
@@ -26,10 +26,9 @@ describe("securityHeaders defaults", () => {
     expect(csp).not.toContain("unsafe-eval");
   });
 
-  it("allows only Monaco's path on the CDN, not the whole host", () => {
+  it("serves Monaco from self without any CDN allowlist", () => {
     const csp = defaultCsp(false);
-    expect(MONACO_CDN).toMatch(/^https:\/\/cdn\.jsdelivr\.net\/npm\/monaco-editor@[^/]+\/$/);
-    expect(csp).toContain(MONACO_CDN);
+    expect(csp).not.toContain("cdn.jsdelivr.net");
     expect(csp).not.toMatch(/https:\/\/cdn\.jsdelivr\.net(?:\s|;|$)/);
   });
 

@@ -29,6 +29,7 @@ type Item = {
   // cluster did not answer, so the action stays available and Kubernetes RBAC
   // decides — only an explicit false disables it.
   evictable?: boolean;
+  unschedulable?: boolean;
 };
 type Section = {
   resource: string;
@@ -399,7 +400,7 @@ export function ClusterWorkspace({
         </label>
         {area !== "nodes" && (
           <label className="grid gap-1 text-sm">
-            Namespace
+            {t("namespace")}
             <Input
               disabled={writing}
               value={namespace}
@@ -498,18 +499,18 @@ export function ClusterWorkspace({
                 )}
                 {field(
                   "oidc_issuer_url",
-                  "OIDC issuer URL",
+                  t("oidcIssuerUrl"),
                   "url",
                   settings.oidc_issuer_url,
                 )}
                 {field(
                   "default_namespace",
-                  "Namespace",
+                  t("namespace"),
                   "text",
                   settings.default_namespace || "default",
                 )}
                 <label className="grid gap-1 text-sm">
-                  CA bundle (PEM)
+                  {t("caBundle")}
                   <textarea
                     className="min-h-24 w-full rounded-lg border border-input bg-background p-3 font-mono text-sm"
                     name="ca_bundle"
@@ -534,11 +535,11 @@ export function ClusterWorkspace({
                 <fieldset disabled={demo || busy} className="contents">
                   {field("name", t("name"))}
                   {field("display_name", t("displayName"), "text", "", false)}
-                  {field("api_url", "Kubernetes API URL", "url")}
-                  {field("oidc_issuer_url", "OIDC issuer URL", "url")}
-                  {field("default_namespace", "Namespace", "text", "default")}
+                  {field("api_url", t("apiUrl"), "url")}
+                  {field("oidc_issuer_url", t("oidcIssuerUrl"), "url")}
+                  {field("default_namespace", t("namespace"), "text", "default")}
                   <label className="grid gap-1 text-sm">
-                    CA bundle (PEM)
+                    {t("caBundle")}
                     <textarea
                       className="min-h-24 w-full rounded-lg border border-input bg-background p-3 font-mono text-sm"
                       name="ca_bundle"
@@ -796,7 +797,7 @@ export function ClusterWorkspace({
                           disabled={!can("cordon")}
                           onClick={() =>
                             setReview({
-                              action: i.status.includes("cordoned")
+                              action: (i.unschedulable ?? i.status.includes("cordoned"))
                                 ? "uncordon"
                                 : "cordon",
                               name: i.name,
@@ -804,9 +805,9 @@ export function ClusterWorkspace({
                             })
                           }
                         >
-                          {i.status.includes("cordoned")
-                            ? "Uncordon"
-                            : "Cordon"}
+                          {(i.unschedulable ?? i.status.includes("cordoned"))
+                            ? t("uncordon")
+                            : t("cordon")}
                         </Button>
                       )}
                       {i.kind === "Pod" && (

@@ -22,15 +22,8 @@
  * `applySecurityHeaders` in the route handlers that answer API requests
  * carrying a body — the proxy deliberately does not match those (see proxy.ts).
  *
- * Import-free on purpose: proxy.ts may not pull in anything heavy (see
- * lib/demo-config). lib/monaco-cdn is the one exception — constants only,
- * because the editor's version has to be the same string here and in the
- * loader MonacoPanel configures.
+ * Import-free on purpose: proxy.ts may not pull in anything heavy.
  */
-
-import { MONACO_CDN } from "./monaco-cdn";
-
-export { MONACO_CDN };
 
 export const DEFAULT_HSTS = "max-age=63072000; includeSubDomains";
 
@@ -39,21 +32,13 @@ export const DEFAULT_HSTS = "max-age=63072000; includeSubDomains";
 // dynamically and each inline script tagged; until then Next's own inline
 // bootstrap scripts need 'unsafe-inline'.
 //
-// Monaco: @monaco-editor/loader fetches the editor from exactly this path at
-// runtime — its scripts and stylesheet, with fonts and images inlined as
-// data: URIs — and runs its language workers from blob: URLs. A path, not the
-// whole host:
-// cdn.jsdelivr.net serves every npm package, and a host-wide allowlist would
-// hand an attacker script gadgets once 'unsafe-inline' goes. The version is
-// the app's own choice rather than the loader's default (#438) and lives in
-// lib/monaco-cdn, whose tests hold it and this policy together.
-
+// Monaco scripts and workers are served from our own origin (#442).
 export function defaultCsp(dev: boolean): string {
   return [
     "default-src 'self'",
     // Dev only: React's dev build uses eval for error stacks (Next's CSP guide).
-    `script-src 'self' 'unsafe-inline' ${MONACO_CDN}${dev ? " 'unsafe-eval'" : ""}`,
-    `style-src 'self' 'unsafe-inline' ${MONACO_CDN}`,
+    `script-src 'self' 'unsafe-inline'${dev ? " 'unsafe-eval'" : ""}`,
+    "style-src 'self' 'unsafe-inline'",
     // No CDN source: Monaco inlines its codicon font as a data: URI, which
     // `data:` already covers. monaco-cdn.test.ts fails if a future build ships
     // the font as a file again, which would need this source back.

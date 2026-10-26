@@ -29,7 +29,7 @@ function fieldFor(type: TextType, required: boolean, extra: Partial<UISpecField>
 }
 
 function parse(field: UISpecField, value: unknown) {
-  return schemaFromUISpec({ fields: [field] }).safeParse({ [path]: value });
+  return schemaFromUISpec({ fields: [field] }).safeParse({ [path]: value }, { reportInput: true });
 }
 
 function firstIssue(field: UISpecField, value: unknown): ZodIssue | undefined {
@@ -41,8 +41,8 @@ function firstIssue(field: UISpecField, value: unknown): ZodIssue | undefined {
 // undefined/null, or a string too_small whose minimum is 1.
 function isRequiredIssue(issue: ZodIssue | undefined): boolean {
   if (!issue) return false;
-  if (issue.code === "invalid_type") return issue.received === "undefined" || issue.received === "null";
-  return issue.code === "too_small" && issue.type === "string" && Number(issue.minimum) <= 1;
+  if (issue.code === "invalid_type") return issue.input === undefined || issue.input === null;
+  return issue.code === "too_small" && issue.origin === "string" && Number(issue.minimum) <= 1;
 }
 
 for (const type of ["string", "autocomplete"] as const) {
@@ -88,11 +88,11 @@ for (const type of ["string", "autocomplete"] as const) {
       const withPattern = fieldFor(type, true, { pattern: "^[a-z]+$" });
       expect(isRequiredIssue(firstIssue(withPattern, ""))).toBe(true);
       const mismatch = firstIssue(withPattern, "ABC");
-      expect(mismatch?.code).toBe("invalid_string");
-      expect(mismatch && "validation" in mismatch ? mismatch.validation : undefined).toBe("regex");
+      expect(mismatch?.code).toBe("invalid_format");
+      expect(mismatch && "format" in mismatch ? mismatch.format : undefined).toBe("regex");
       expect(parse(withPattern, "abc").success).toBe(true);
       // The API refuses a blank value against this pattern as well.
-      expect(firstIssue(withPattern, "   ")?.code).toBe("invalid_string");
+      expect(firstIssue(withPattern, "   ")?.code).toBe("invalid_format");
     });
   });
 
@@ -116,7 +116,7 @@ for (const type of ["string", "autocomplete"] as const) {
 
     it("still runs minLength and pattern against an optional \"\"", () => {
       expect(firstIssue(fieldFor(type, false, { minLength: 3 }), "")?.code).toBe("too_small");
-      expect(firstIssue(fieldFor(type, false, { pattern: "^[a-z]+$" }), "")?.code).toBe("invalid_string");
+      expect(firstIssue(fieldFor(type, false, { pattern: "^[a-z]+$" }), "")?.code).toBe("invalid_format");
     });
   });
 }
@@ -127,17 +127,17 @@ describe("Secret strings are unchanged by #331", () => {
 
   it('refuses "" as required for a kept Secret, even with a minLength', () => {
     const schema = schemaFromUISpec({ fields: [field] }, { keptSecrets: new Set([secret]) });
-    expect(schema.safeParse({ [secret]: REDACTED_SECRET }).success).toBe(true);
-    const r = schema.safeParse({ [secret]: "" });
+    expect(schema.safeParse({ [secret]: REDACTED_SECRET }, { reportInput: true }).success).toBe(true);
+    const r = schema.safeParse({ [secret]: "" }, { reportInput: true });
     expect(r.success).toBe(false);
     const union = r.error?.issues[0];
-    const own = union?.code === "invalid_union" ? union.unionErrors.at(-1)?.issues[0] : union;
+    const own = union?.code === "invalid_union" ? union.errors.at(-1)?.[0] : union;
     expect(isRequiredIssue(own)).toBe(true);
   });
 
   it('refuses "" as required for a Secret to enter again, even with a minLength', () => {
     const schema = schemaFromUISpec({ fields: [field] }, { reenterSecrets: new Set([secret]) });
-    expect(isRequiredIssue(schema.safeParse({ [secret]: "" }).error?.issues[0])).toBe(true);
-    expect(schema.safeParse({ [secret]: "s3cret" }).success).toBe(true);
+    expect(isRequiredIssue(schema.safeParse({ [secret]: "" }, { reportInput: true }).error?.issues[0])).toBe(true);
+    expect(schema.safeParse({ [secret]: "s3cret" }, { reportInput: true }).success).toBe(true);
   });
 });

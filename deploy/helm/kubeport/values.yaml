@@ -174,6 +174,20 @@ postgres:
   # When embedded=false, set externalUrl to a postgres:// connection string.
   externalUrl: ""
   image: postgres:16-alpine
+  # Official Alpine postgres uses 70, Debian uses 999. For a custom image,
+  # match these IDs to both its postgres account and the existing PGDATA owner.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 70
+    runAsGroup: 70
+    fsGroup: 70
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
   user: kubeport
   database: kubeport
   password: ""               # required when embedded=true
