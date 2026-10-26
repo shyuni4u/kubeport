@@ -149,7 +149,7 @@ jobs:
       - name: Log in to GHCR
         # push 이벤트(main·v* 태그)만 이미지를 올린다 — PR·dispatch 는 로그인 자체를 건너뜀
         if: github.event_name == 'push'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
