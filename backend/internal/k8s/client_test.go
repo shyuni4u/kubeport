@@ -2,7 +2,10 @@ package k8s_test
 
 import (
 	"context"
+	"encoding/pem"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -11,6 +14,36 @@ import (
 
 	"kubeport/internal/k8s"
 )
+
+func TestSecureClientNeverSendsTokenOverHTTP(t *testing.T) {
+	called := false
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	defer s.Close()
+	_, err := k8s.NewWithToken(s.URL, "present", "secret-token")
+	require.ErrorContains(t, err, "HTTPS")
+	require.False(t, called)
+	for _, raw := range []string{"ftp://example.com", "https://user:pass@example.com", "https://example.com?token=x", "https://example.com#fragment", "example.com"} {
+		require.Error(t, k8s.ValidateAPIURL(raw, false), raw)
+	}
+	require.NoError(t, k8s.ValidateAPIURL("https://example.com:6443", false))
+	require.NoError(t, k8s.ValidateAPIURL(s.URL, true))
+}
+
+func TestSecureClientRefusesRedirectDowngrade(t *testing.T) {
+	called := false
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	defer plain.Close()
+	tls := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL, http.StatusFound)
+	}))
+	defer tls.Close()
+	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: tls.Certificate().Raw})
+	client, err := k8s.NewWithToken(tls.URL, string(ca), "secret-token")
+	require.NoError(t, err)
+	_, err = client.CheckAccess(context.Background(), k8s.AccessCheck{Resource: "pods", Verb: "list"})
+	require.Error(t, err)
+	require.False(t, called, "redirect destination must not receive a request")
+}
 
 func TestNewWithToken_RequiresCaBundle(t *testing.T) {
 	_, err := k8s.NewWithToken("https://localhost:6443", "", "token")

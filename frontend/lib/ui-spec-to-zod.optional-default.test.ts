@@ -98,7 +98,7 @@ for (const type of ["string", "autocomplete"] as const) {
       expect(emptyTakesDefault(field)).toBe(false);
       const r = parse(field, "");
       expect(r.success).toBe(false);
-      expect(r.error?.issues[0]).toMatchObject({ code: "too_small", type: "string", minimum: 1 });
+      expect(r.error?.issues[0]).toMatchObject({ code: "too_small", origin: "string", minimum: 1 });
       for (const v of ["   ", "a"]) {
         expect(wire(parse(field, v)), JSON.stringify(v)).toBe(JSON.stringify({ [path]: v }));
       }

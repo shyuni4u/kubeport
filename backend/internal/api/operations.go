@@ -42,6 +42,9 @@ func (h *Handlers) operationClient(c *gin.Context) (K8sApplier, bool) {
 }
 
 func (h *Handlers) GetClusterSettings(c *gin.Context) {
+	if !onlyQuery(c) {
+		return
+	}
 	cl, err := h.deps.Store.GetClusterByName(c.Request.Context(), c.Param("name"))
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, 404, "not-found", "cluster")
@@ -71,6 +74,14 @@ func (h *Handlers) UpdateClusterSettings(c *gin.Context) {
 	}
 	if len(validation.IsDNS1123Label(req.Namespace)) != 0 {
 		writeError(c, 400, "validation-error", "valid default namespace required")
+		return
+	}
+	if _, err := h.deps.Store.GetClusterByName(c.Request.Context(), c.Param("name")); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(c, 404, "not-found", "cluster")
+			return
+		}
+		internalError(c, "update cluster settings lookup", err)
 		return
 	}
 	ok, err := h.deps.Store.UpdateClusterSettings(c.Request.Context(), c.Param("name"), req.DisplayName, req.CA, req.Issuer, req.Namespace, req.Updated)

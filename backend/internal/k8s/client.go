@@ -2,6 +2,8 @@ package k8s
 
 import (
 	"errors"
+	"net/http"
+	"net/url"
 
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -27,6 +29,9 @@ const (
 // NewWithToken creates a k8s dynamic client using a bearer token.
 // caBundle is required; use NewInsecureWithToken for dev/kind clusters.
 func NewWithToken(apiURL, caBundle, bearer string) (*Client, error) {
+	if err := ValidateAPIURL(apiURL, false); err != nil {
+		return nil, err
+	}
 	if caBundle == "" {
 		return nil, errors.New("caBundle is required; use NewInsecureWithToken for dev/kind clusters")
 	}
@@ -38,6 +43,19 @@ func NewWithToken(apiURL, caBundle, bearer string) (*Client, error) {
 		Burst:           clientBurst,
 	}
 	return newClient(cfg)
+}
+
+// ValidateAPIURL prevents bearer tokens from crossing plaintext transports.
+// allowHTTP is reserved for the explicit local-development escape hatch.
+func ValidateAPIURL(raw string, allowHTTP bool) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
+		return errors.New("api_url must be an HTTPS URL without credentials, query or fragment")
+	}
+	if u.Scheme != "https" && !(allowHTTP && u.Scheme == "http") {
+		return errors.New("api_url must use HTTPS to protect the user's token; HTTP is allowed only with KBP_DEV_ALLOW_INSECURE_CLUSTERS=true")
+	}
+	return nil
 }
 
 // NewInsecureWithToken creates a k8s dynamic client with TLS verification
@@ -54,11 +72,16 @@ func NewInsecureWithToken(apiURL, bearer string) (*Client, error) {
 }
 
 func newClient(cfg *rest.Config) (*Client, error) {
-	dyn, err := dynamic.NewForConfig(cfg)
+	httpClient, err := rest.HTTPClientFor(cfg)
 	if err != nil {
 		return nil, err
 	}
-	cs, err := kubernetes.NewForConfig(cfg)
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	dyn, err := dynamic.NewForConfigAndClient(cfg, httpClient)
+	if err != nil {
+		return nil, err
+	}
+	cs, err := kubernetes.NewForConfigAndClient(cfg, httpClient)
 	if err != nil {
 		return nil, err
 	}

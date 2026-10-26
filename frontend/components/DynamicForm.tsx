@@ -239,35 +239,35 @@ export function DynamicForm({
     const messageFor = (issue: ZodIssue): string => {
       switch (issue.code) {
         case "invalid_type":
-          return issue.received === "undefined" || issue.received === "null"
+          return issue.input === undefined || issue.input === null
             ? tv("required")
             : tv("invalid");
         case "too_small":
           // A required string with min length 1 left empty reads better as
           // "required" than "must be at least 1".
-          if (issue.type === "string" && Number(issue.minimum) <= 1) {
+          if (issue.origin === "string" && Number(issue.minimum) <= 1) {
             return tv("required");
           }
-          if (issue.type === "string") {
+          if (issue.origin === "string") {
             return tv("tooShort", { min: String(issue.minimum) });
           }
           return tv("tooSmall", { min: String(issue.minimum) });
         case "too_big":
           // For strings the bound is a character count, not a numeric limit.
-          if (issue.type === "string") {
+          if (issue.origin === "string") {
             return tv("tooLong", { max: String(issue.maximum) });
           }
           return tv("tooBig", { max: String(issue.maximum) });
-        case "invalid_string":
+        case "invalid_format":
           return tv("pattern");
-        case "invalid_enum_value":
+        case "invalid_value":
           return tv("enum");
         case "invalid_union": {
           // Only a kept Secret's schema is a union: the placeholder, or the
           // field's own type (#196). Once it is not the placeholder, the
           // field's own complaint is the one worth saying — "required" for an
           // emptied replacement rather than a generic "check this value".
-          const own = issue.unionErrors.at(-1)?.issues[0];
+          const own = issue.errors.at(-1)?.[0];
           return own ? messageFor(own) : tv("invalid");
         }
         default:
@@ -276,7 +276,7 @@ export function DynamicForm({
     };
     return async (values) => {
       const decoded = decodeValues(values as Record<string, unknown>);
-      const result = schema.safeParse(decoded);
+      const result = schema.safeParse(decoded, { reportInput: true });
       if (result.success) {
         return { values: encodeValues(result.data) as FormShape, errors: {} };
       }
@@ -314,7 +314,7 @@ export function DynamicForm({
       if (!onParsedChange) return;
       // The resolver's parse, on the same decoded values: submit sends
       // `result.data` (the resolver returns it, handleSubmit decodes it).
-      const result = schema.safeParse(decoded);
+      const result = schema.safeParse(decoded, { reportInput: true });
       onParsedChange(result.success ? { success: true, values: result.data } : { success: false });
     };
     // RHF's watch() only emits on *change*, so a user who accepts every

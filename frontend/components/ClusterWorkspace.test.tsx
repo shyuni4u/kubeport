@@ -138,6 +138,14 @@ const nodesSnapshot = {
       items: [
         {
           kind: "Pod",
+          name: "pending-pod",
+          namespace: "beta",
+          status: "Pending",
+          details: ["node: ", "eviction: blocked: pod is not assigned to a node"],
+          evictable: true,
+        },
+        {
+          kind: "Pod",
           name: "allowed-pod",
           namespace: "beta",
           status: "Running",
@@ -195,6 +203,7 @@ describe("node operations eviction", () => {
     await screen.findByText("alpha/refused-pod");
     expect(evictButtonFor("alpha/refused-pod")).toBeDisabled();
     expect(evictButtonFor("beta/allowed-pod")).toBeEnabled();
+    expect(evictButtonFor("beta/pending-pod")).toBeDisabled();
     // Unanswered is not a refusal: Kubernetes RBAC gives the real answer.
     expect(evictButtonFor("gamma/unknown-pod")).toBeEnabled();
   });

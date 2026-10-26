@@ -125,7 +125,7 @@ export function KindPicker({
               onChange={(e) => setKindInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); pickFromGv(); } }}
               placeholder={t("kindPlaceholder")}
-              aria-label="Kind"
+              aria-label={t("kindLabel")}
               className="flex-1"
             />
             <Button

@@ -564,7 +564,7 @@
         "quickPick": "Quick pick",
         "starterHelp": "Adds an example with required structure. Enter a template name to save a draft. Review images, commands and connections before deployment. Match Service selectors to target Pod labels and provide a headless Service matching the StatefulSet serviceName. CronJobs start suspended.",
         "allGroupVersions": "All GroupVersions ({count})",
-        "kindPlaceholder": "Kind (e.g. Deployment)",
+        "kindLabel": "Kind", "kindPlaceholder": "Kind (e.g. Deployment)",
         "add": "Add",
         "indexFetchFailed": "Failed to fetch the OpenAPI index (HTTP {status})."
       },
@@ -731,6 +731,7 @@
     "revoke": "Signing out of this browser session revokes its connection tokens. CLI logout only removes the local copy. Tokens expire after at most one hour; creating another does not revoke earlier tokens."
   },
   "operations": {
+    "namespace": "Namespace", "apiUrl": "Kubernetes API URL", "oidcIssuerUrl": "OIDC issuer URL", "caBundle": "CA bundle (PEM)", "cordon": "Cordon", "uncordon": "Uncordon",
     "title": "Deployment operations",
     "newDeployment": "New deployment",
     "scope": "Shows releases registered in kubeport: accessible releases for admins and your own releases for users. Counts and search cover the current page.",

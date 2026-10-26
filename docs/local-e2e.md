@@ -332,7 +332,7 @@ NODE_EXTRA_CA_CERTS="$(pwd)/../deploy/docker/certs/dex.crt" pnpm dev
 so a page that works here can still be blocked live. To see the production
 policy, run `pnpm build && NODE_EXTRA_CA_CERTS=... pnpm start` and watch the
 browser console for "Refused to …" messages — the YAML editor (Monaco, loaded
-from cdn.jsdelivr.net) is the page most likely to hit one.
+from the local /vendor/monaco path) is the page most likely to hit one.
 
 ### 9. Register the cluster + seed a template
 

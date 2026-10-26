@@ -427,7 +427,7 @@ export function schemaFromUISpec(
               const halves = SURROGATE.test(v);
               const target = halves ? reUnicode : re;
               if (!target || target.test(halves ? withLoneSurrogatesReplaced(v) : v)) return;
-              ctx.addIssue({ code: z.ZodIssueCode.invalid_string, validation: "regex", message: "Invalid" });
+              ctx.addIssue({ code: z.ZodIssueCode.invalid_format, format: "regex", message: "Invalid" });
             })
           : s;
         break;
@@ -456,7 +456,7 @@ export function schemaFromUISpec(
         // `enum:` typed, `values:` not written yet — an ordinary moment while
         // editing, not a broken spec. Leave the field out until it has one.
         if (first === undefined) continue;
-        zs = z.enum([first, ...rest]);
+        zs = z.string().pipe(z.enum([first, ...rest]));
         break;
       }
       // Not `never`: the union is a compile-time claim about YAML that is
