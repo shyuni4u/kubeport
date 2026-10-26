@@ -44,3 +44,6 @@ next-env.d.ts
 tests/e2e/.auth/
 test-results/
 playwright-report/
+
+# Generated from the pinned npm distribution
+/public/vendor/monaco/

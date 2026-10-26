@@ -242,19 +242,8 @@ jobs:
     # repo can clear. A pnpm.overrides entry would zero them while changing no
     # shipped byte, which is why there is none.
     #
-    # Measured 2026-10-11 — --prod: 0 critical, 0 high, 0 moderate, 2 low
-    # (both Monaco's DOMPurify). Dev included: see the step summary; every
-    # high there is transitive under dev tooling and waiting on it to move.
-    #
-    # When an advisory does land on Monaco's DOMPurify at high, this gate goes
-    # red on a finding no change here can clear, and `audit` is a required
-    # check — every merge, and so every deploy, stops. The escape hatch is a
-    # dated exception in frontend/package.json, not a lower gate:
-    #   "pnpm": { "auditConfig": { "ignoreGhsas": ["GHSA-xxxx-xxxx-xxxx"] } }
-    # (verified 2026-09-21 on pnpm 10.15.0: an ignored advisory takes the step
-    # from exit 1 to exit 0 and is counted as "(1 ignored)"). Name the issue
-    # and the Monaco release being waited on, and delete the entry the moment
-    # that release is pinned in frontend/lib/monaco-cdn.ts.
+    # Temporary Monaco exceptions and removal criteria: docs/security-dependency-exceptions.md (#478).
+    # Self-hosting removes CDN execution but does not patch the vendored sanitizer.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

@@ -15,8 +15,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/jackc/pgx/v5"
 
 	"kubeport/internal/auth"
+	"kubeport/internal/k8s"
 )
 
 type openapiCacheKey struct {
@@ -91,6 +93,14 @@ func (h *Handlers) GetOpenAPIGroupVersion(c *gin.Context) {
 
 func (h *Handlers) RefreshOpenAPI(c *gin.Context) {
 	cluster := c.Param("name")
+	if _, err := h.deps.Store.GetClusterByName(c, cluster); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(c, http.StatusNotFound, "not-found", "cluster")
+			return
+		}
+		internalError(c, "RefreshOpenAPI", err)
+		return
+	}
 	u, ok := auth.UserFrom(c.Request.Context())
 	if !ok {
 		writeError(c, http.StatusUnauthorized, "unauthenticated", "user not in context")
@@ -113,6 +123,10 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 	cluster, err := h.deps.Store.GetClusterByName(c, name)
 	if err != nil {
 		writeError(c, http.StatusNotFound, "not-found", "cluster "+name)
+		return
+	}
+	if err := k8s.ValidateAPIURL(cluster.ApiUrl, os.Getenv("KBP_DEV_ALLOW_INSECURE_CLUSTERS") == "true"); err != nil {
+		internalError(c, "OpenAPI cluster URL", err)
 		return
 	}
 	u, ok := auth.UserFrom(c.Request.Context())
@@ -188,8 +202,9 @@ func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 		return
 	}
 	client := &http.Client{
-		Transport: tr,
-		Timeout:   30 * time.Second,
+		Transport:     tr,
+		Timeout:       30 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	resp, err := client.Do(req)
 	if err != nil {

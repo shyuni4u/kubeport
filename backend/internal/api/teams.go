@@ -47,6 +47,9 @@ func (h *Handlers) CreateTeam(c *gin.Context) {
 }
 
 func (h *Handlers) ListTeams(c *gin.Context) {
+	if !onlyQuery(c) {
+		return
+	}
 	u, _ := auth.UserFrom(c.Request.Context())
 	demo := auth.IsDemoEmail(u.Email, h.deps.DemoEmailDomain)
 
@@ -260,6 +263,14 @@ func (h *Handlers) RemoveTeamMember(c *gin.Context) {
 	}
 	uid, ok := parseUUIDParam(c, "user_id")
 	if !ok {
+		return
+	}
+	if _, err := h.deps.Store.GetTeamByID(c, tid); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(c, http.StatusNotFound, "not-found", "team not found")
+			return
+		}
+		internalError(c, "RemoveTeamMember", err)
 		return
 	}
 	if err := h.deps.Store.DeleteTeamMembership(c, store.DeleteTeamMembershipParams{TeamID: tid, UserID: uid}); err != nil {

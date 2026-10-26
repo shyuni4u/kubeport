@@ -98,6 +98,20 @@ jobs:
             -f deploy/helm/kubeport/ci/smoke-values.yaml \
             --wait --timeout 5m
 
+      - name: Verify hardened PostgreSQL and reuse its data volume
+        run: |
+          kubectl -n kubeport exec statefulset/kp-kubeport-postgres -- sh -ec '
+            test "$(id -u)" = 70
+            grep -Eq "^CapEff:[[:space:]]+0+$" /proc/1/status
+            psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "CREATE TABLE hardening_probe (id integer); INSERT INTO hardening_probe VALUES (42);"
+          '
+          kubectl -n kubeport rollout restart statefulset/kp-kubeport-postgres
+          kubectl -n kubeport rollout status statefulset/kp-kubeport-postgres --timeout=180s
+          kubectl -n kubeport exec statefulset/kp-kubeport-postgres -- sh -ec '
+            test "$(psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT id FROM hardening_probe")" = 42
+            psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "DROP TABLE hardening_probe;"
+          '
+
       - name: Verify backend /healthz
         run: |
           kubectl --namespace kubeport port-forward svc/kp-kubeport-backend 18080:8080 &
