@@ -28,7 +28,7 @@ const EMPTY: unknown[] = [null, "", "   ", undefined];
 function isRequiredIssue(issue: ZodIssue | undefined): boolean {
   return (
     issue?.code === "invalid_type" &&
-    (issue.received === "undefined" || issue.received === "null")
+    (issue.input === undefined || issue.input === null)
   );
 }
 
@@ -38,13 +38,13 @@ describe("integer field, empty values (#309)", () => {
       it("refuses empty on a required field with the required issue", () => {
         const schema = schemaFromUISpec(specFor(true, bounds));
         for (const empty of EMPTY) {
-          const r = schema.safeParse({ [path]: empty });
+          const r = schema.safeParse({ [path]: empty }, { reportInput: true });
           expect(r.success, JSON.stringify(empty)).toBe(false);
           expect(r.error?.issues).toHaveLength(1);
           expect(isRequiredIssue(r.error?.issues[0]), JSON.stringify(empty)).toBe(true);
           expect(r.error?.issues[0].path).toEqual([path]);
         }
-        const missing = schema.safeParse({});
+        const missing = schema.safeParse({}, { reportInput: true });
         expect(missing.success).toBe(false);
         expect(isRequiredIssue(missing.error?.issues[0])).toBe(true);
       });
@@ -52,14 +52,14 @@ describe("integer field, empty values (#309)", () => {
       it("reads empty on an optional field as no value, like a missing key", () => {
         const schema = schemaFromUISpec(specFor(false, bounds));
         for (const empty of EMPTY) {
-          const r = schema.safeParse({ [path]: empty });
+          const r = schema.safeParse({ [path]: empty }, { reportInput: true });
           expect(r.success, JSON.stringify(empty)).toBe(true);
           expect(r.data?.[path]).toBeUndefined();
           // The payload leaves the key out, so the backend fills the ui-spec
           // default instead of receiving a 0 or a null.
           expect(JSON.stringify(r.data)).toBe("{}");
         }
-        const missing = schema.safeParse({});
+        const missing = schema.safeParse({}, { reportInput: true });
         expect(missing.success).toBe(true);
         expect(JSON.stringify(missing.data)).toBe("{}");
       });
@@ -69,19 +69,19 @@ describe("integer field, empty values (#309)", () => {
 
         it(`${kind}: accepts 0 and numeric strings, as before`, () => {
           const schema = schemaFromUISpec(specFor(required, bounds));
-          const zero = schema.safeParse({ [path]: 0 });
+          const zero = schema.safeParse({ [path]: 0 }, { reportInput: true });
           expect(zero.success).toBe(true);
           expect(zero.data?.[path]).toBe(0);
-          const three = schema.safeParse({ [path]: "3" });
+          const three = schema.safeParse({ [path]: "3" }, { reportInput: true });
           expect(three.success).toBe(true);
           expect(three.data?.[path]).toBe(3);
-          expect(schema.safeParse({ [path]: " 4 " }).data?.[path]).toBe(4);
+          expect(schema.safeParse({ [path]: " 4 " }, { reportInput: true }).data?.[path]).toBe(4);
         });
 
         it(`${kind}: still refuses what is not an integer`, () => {
           const schema = schemaFromUISpec(specFor(required, bounds));
           for (const bad of ["abc", 1.5, "1.5", NaN]) {
-            const r = schema.safeParse({ [path]: bad });
+            const r = schema.safeParse({ [path]: bad }, { reportInput: true });
             expect(r.success, String(bad)).toBe(false);
             expect(isRequiredIssue(r.error?.issues[0]), String(bad)).toBe(false);
           }
@@ -91,7 +91,7 @@ describe("integer field, empty values (#309)", () => {
         it(`${kind}: refuses a boolean, array or object instead of reading it as a number`, () => {
           const schema = schemaFromUISpec(specFor(required, bounds));
           for (const bad of [false, true, [], [3], {}]) {
-            const r = schema.safeParse({ [path]: bad });
+            const r = schema.safeParse({ [path]: bad }, { reportInput: true });
             expect(r.success, JSON.stringify(bad)).toBe(false);
             expect(r.error?.issues[0].code).toBe("invalid_type");
             expect(isRequiredIssue(r.error?.issues[0])).toBe(false);
@@ -103,18 +103,18 @@ describe("integer field, empty values (#309)", () => {
 
   it("keeps the min/max issues it has always given", () => {
     const schema = schemaFromUISpec(specFor(false, { min: 1, max: 10 }));
-    const low = schema.safeParse({ [path]: 0 });
-    expect(low.error?.issues[0]).toMatchObject({ code: "too_small", type: "number", minimum: 1 });
-    const lowString = schema.safeParse({ [path]: "0" });
-    expect(lowString.error?.issues[0]).toMatchObject({ code: "too_small", type: "number", minimum: 1 });
-    const high = schema.safeParse({ [path]: 11 });
-    expect(high.error?.issues[0]).toMatchObject({ code: "too_big", type: "number", maximum: 10 });
-    expect(schema.safeParse({ [path]: 10 }).data?.[path]).toBe(10);
+    const low = schema.safeParse({ [path]: 0 }, { reportInput: true });
+    expect(low.error?.issues[0]).toMatchObject({ code: "too_small", origin: "number", minimum: 1 });
+    const lowString = schema.safeParse({ [path]: "0" }, { reportInput: true });
+    expect(lowString.error?.issues[0]).toMatchObject({ code: "too_small", origin: "number", minimum: 1 });
+    const high = schema.safeParse({ [path]: 11 }, { reportInput: true });
+    expect(high.error?.issues[0]).toMatchObject({ code: "too_big", origin: "number", maximum: 10 });
+    expect(schema.safeParse({ [path]: 10 }, { reportInput: true }).data?.[path]).toBe(10);
   });
 
   it("still coerces a large port-like string", () => {
     const schema = schemaFromUISpec(specFor(true, {}));
-    expect(schema.safeParse({ [path]: "8080" }).data?.[path]).toBe(8080);
+    expect(schema.safeParse({ [path]: "8080" }, { reportInput: true }).data?.[path]).toBe(8080);
   });
 
   it("keeps an optional empty integer from affecting the fields beside it", () => {
@@ -124,7 +124,7 @@ describe("integer field, empty values (#309)", () => {
         { path: "metadata.name", label: "Name", type: "string", required: true },
       ],
     };
-    const r = schemaFromUISpec(spec).safeParse({ [path]: null, "metadata.name": "web" });
+    const r = schemaFromUISpec(spec).safeParse({ [path]: null, "metadata.name": "web" }, { reportInput: true });
     expect(r.success).toBe(true);
     expect(JSON.parse(JSON.stringify(r.data))).toEqual({ "metadata.name": "web" });
   });

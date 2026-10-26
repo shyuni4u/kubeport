@@ -947,24 +947,14 @@ long policy can be written as a YAML block.
 
 The default policy allows scripts, styles, fonts, images, workers, form posts
 and connections from the app's own origin, plus `data:` and `blob:` where
-Monaco inlines its font and runs its workers, plus Monaco's pinned CDN path
-for the YAML editor. Inline scripts and styles are still allowed (Next.js
-needs them without nonces). `object-src 'none'` and `base-uri 'self'` close
-the rest.
+Monaco inlines its font and runs its workers. The YAML editor is served from
+`/vendor/monaco/<version>/min/vs` on the app's own origin; no CDN source is needed.
+Inline scripts and styles are still allowed (Next.js needs them without nonces).
+`object-src 'none'` and `base-uri 'self'` close the rest.
 
-That pinned path carries a version that moves with the image, so do not copy
-it out of this README. Read it from the install you are about to customise,
-while `contentSecurityPolicy` is still empty:
-
-```bash
-curl -sI https://<host>/ | grep -i '^content-security-policy'
-```
-
-Take the `https://cdn.jsdelivr.net/npm/monaco-editor@.../` token from
-`script-src` and `style-src` into your own policy, and re-read it whenever you
-upgrade. In the source the version is `frontend/lib/monaco-cdn.ts` — the app
-configures the Monaco loader from that same constant — and the whole policy is
-built in `frontend/lib/security-headers.ts`.
+Custom policies should allow the app origin for scripts, styles and workers.
+The version pin lives in `frontend/lib/monaco-cdn.ts`; dev/build copies assets
+from the locked npm package, and Docker includes them in `public/`.
 
 **CSP keywords keep their single quotes inside the value.** In a values file
 write `frameAncestors: "'self' https://portal.example.com"`; on the command
@@ -1267,3 +1257,9 @@ For a real install on a kind cluster, follow the kind-smoke job in
 - [ADR 0001](../../../docs/decisions/0001-frontend-deployment-helm-over-vercel.md) — frontend in same Helm chart as backend
 - [ADR 0003](../../../docs/decisions/0003-hosting-oci-always-free.md) — 3-Phase hosting decision tree
 - [docs/deploy/images.md](../../../docs/deploy/images.md) — multi-arch image build pipeline
+
+### Embedded PostgreSQL security and upgrades
+
+The default `postgres:16-alpine` runs as UID/GID 70, with privilege escalation disabled, all capabilities dropped and a read-only root filesystem. Writable paths are the existing data PVC, `/var/run/postgresql` and `/tmp` (the latter two use emptyDir). `postgres.podSecurityContext` and `postgres.securityContext` are separate from application container settings.
+
+For a custom image or an existing Debian-based PostgreSQL data volume, match `postgres.podSecurityContext.runAsUser`, `runAsGroup` and `fsGroup` to the existing data owner (normally 999 for Debian, 70 for Alpine) **before upgrading**. Do not change data ownership blindly. Verify a fresh database and a restart with the same PVC before production rollout. Official image definitions: https://github.com/docker-library/postgres/tree/master/16.

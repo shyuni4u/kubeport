@@ -17,13 +17,13 @@ spec:
         {{- include "kubeport.postgres.labels" . | nindent 8 }}
     spec:
       securityContext:
-        # postgres image runs as uid 999 (postgres). fsGroup so it can write
-        # the mounted PVC.
-        fsGroup: 999
+        {{- toYaml .Values.postgres.podSecurityContext | nindent 8 }}
       containers:
         - name: postgres
           image: {{ .Values.postgres.image }}
           imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- toYaml .Values.postgres.securityContext | nindent 12 }}
           ports:
             - name: postgres
               containerPort: {{ .Values.postgres.service.port }}
@@ -39,6 +39,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            - name: postgres-run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             exec:
               command:
@@ -57,6 +61,11 @@ spec:
             periodSeconds: 30
           resources:
             {{- toYaml .Values.postgres.resources | nindent 12 }}
+      volumes:
+        - name: postgres-run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
   volumeClaimTemplates:
     - metadata:
         name: data

@@ -15,6 +15,10 @@ test.describe("demo admin edits the seeded draft", () => {
   const MARKER = "# e2e-touched";
 
   async function openDraftEditor(page: Page): Promise<void> {
+    const externalEditorRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("cdn.jsdelivr.net")) externalEditorRequests.push(request.url());
+    });
     // Ask the API which version is the draft (the seed keeps exactly one)
     // rather than guessing from link order on the detail page.
     const res = await page.request.get("/api/v1/templates/web-app/versions");
@@ -30,6 +34,7 @@ test.describe("demo admin edits the seeded draft", () => {
       const values = m?.editor.getModels().map((x) => x.getValue()) ?? [];
       return values.some((v) => v.includes("fields:")) && values.some((v) => v.includes("kind:"));
     }, undefined, { timeout: 20_000 });
+    expect(externalEditorRequests, "Monaco must load entirely from the installation").toEqual([]);
   }
 
   type MonacoLike = { editor: { getModels(): Array<{ getValue(): string; setValue(v: string): void }> } };

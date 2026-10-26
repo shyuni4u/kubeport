@@ -7,3 +7,4 @@
 *.yml text eol=lf
 *.sh text eol=lf
 *.tpl text eol=lf
+deploy/helm/kubeport/files/*.html text eol=lf

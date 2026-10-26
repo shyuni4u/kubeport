@@ -787,7 +787,7 @@ describe("normalizeUISpec", () => {
     };
     // Within the bound the pattern still reports, with the code DynamicForm
     // turns into its "not an allowed format" message.
-    expect(issues("A".repeat(256))).toEqual(["too_big", "invalid_string"]);
+    expect(issues("A".repeat(256))).toEqual(["too_big", "invalid_format"]);
     // Past it only the length check reports; the API still checks the pattern.
     expect(issues("A".repeat(257))).toEqual(["too_big"]);
   });

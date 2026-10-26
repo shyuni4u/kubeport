@@ -44,7 +44,7 @@ export const config = {
 // GET /api/auth/logout, and it has to be able to say "you are already logged
 // out" rather than bounce a logged-out visitor into a login flow (#28). So are
 // "/" (the landing page) and Next's own assets.
-const LOGIN_GUARDED = /^\/(?!api\/|_next|favicon\.ico|logout$|$)/;
+const LOGIN_GUARDED = /^\/(?!api\/|_next|vendor\/monaco\/|favicon\.ico|logout$|$)/;
 
 export function proxy(req: NextRequest) {
   return applySecurityHeaders(route(req));

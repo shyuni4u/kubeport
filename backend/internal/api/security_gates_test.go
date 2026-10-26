@@ -41,12 +41,11 @@ func TestOpenAPIRefresh_RefusedForDemoAccounts(t *testing.T) {
 	require.Contains(t, w.Body.String(), "demo-restricted")
 }
 
-// A real admin still gets through: an unknown cluster name is fine here
-// because RefreshOpenAPI only evicts cache entries, so it answers 204.
-func TestOpenAPIRefresh_AllowedForRealAdmin(t *testing.T) {
+// A real admin passes authorization, then gets 404 for an unknown cluster.
+func TestOpenAPIRefresh_UnknownClusterForRealAdmin(t *testing.T) {
 	r := api.NewRouter(config.Config{}, api.Deps{Verifier: adminVerifier{}, Store: testStore(t)})
 	w := do(t, r, http.MethodPost, "/v1/clusters/oci-a1/openapi/refresh", nil)
-	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
 }
 
 // Every SSAR turns into a real call to the target apiserver, so the proxy only

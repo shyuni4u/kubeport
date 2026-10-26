@@ -14,6 +14,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"k8s.io/apimachinery/pkg/util/validation"
+	"kubeport/internal/k8s"
 	"kubeport/internal/store"
 )
 
@@ -116,6 +118,21 @@ func normalizeAPIURL(raw string) string {
 func (h *Handlers) CreateCluster(c *gin.Context) {
 	var r createClusterReq
 	if !bindJSON(c, &r) {
+		return
+	}
+	if len(validation.IsDNS1123Subdomain(r.Name)) != 0 {
+		writeError(c, 400, "validation-error", "valid cluster name required")
+		return
+	}
+	if r.DefaultNamespace == "" {
+		r.DefaultNamespace = "default"
+	}
+	if len(validation.IsDNS1123Label(r.DefaultNamespace)) != 0 {
+		writeError(c, 400, "validation-error", "valid default namespace required")
+		return
+	}
+	if err := k8s.ValidateAPIURL(r.APIURL, os.Getenv("KBP_DEV_ALLOW_INSECURE_CLUSTERS") == "true"); err != nil {
+		writeError(c, 400, "validation-error", err.Error())
 		return
 	}
 	// Refuse here rather than at deploy time. Without a CA the k8s factory now
