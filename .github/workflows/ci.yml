@@ -84,7 +84,7 @@ jobs:
           docker compose -f deploy/docker/docker-compose.yml logs
           exit 1
 
-      - uses: ariga/setup-atlas@2f3c785c89a15e1c0d07bcae3900fb5feb969eea # v0.3
+      - uses: ariga/setup-atlas@4060c70f266b5c63d372dc0c707ea54303139494 # v0.4
 
       - name: Apply DB schema
         run: cd backend/migrations && atlas schema apply --env local --auto-approve
