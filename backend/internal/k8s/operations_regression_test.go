@@ -25,6 +25,25 @@ func TestEvictRejectsMissingNodeBeforeClusterCall(t *testing.T) {
 	require.Contains(t, evictionBlock(pod), "blocked: pod is not assigned")
 }
 
+func TestClassAndServiceRejectedBeforeClusterCall(t *testing.T) {
+	cases := []OperationRequest{
+		{Action: "create-pvc", Class: "", SizeGi: 1},
+		{Action: "create-pvc", Class: "../other", SizeGi: 1},
+		{Action: "create-ingress", Class: "", Service: "web", Host: "a.example.com", Path: "/", Port: 80},
+		{Action: "create-ingress", Class: "a/b", Service: "web", Host: "a.example.com", Path: "/", Port: 80},
+		{Action: "create-ingress", Class: "nginx", Service: "", Host: "a.example.com", Path: "/", Port: 80},
+		{Action: "create-ingress", Class: "nginx", Service: "Bad Svc", Host: "a.example.com", Path: "/", Port: 80},
+	}
+	for _, r := range cases {
+		r.Name, r.Namespace = "res", "team"
+		c, cs := opsClient()
+		err := c.RunOperation(context.Background(), r)
+		var invalid *OperationValidationError
+		require.ErrorAs(t, err, &invalid, "%+v", r)
+		require.Empty(t, cs.Actions(), "%+v", r)
+	}
+}
+
 func TestIngressPermissionIncludesClusterWideConflictRead(t *testing.T) {
 	for _, allowed := range []bool{false, true} {
 		c, cs := opsClient()
