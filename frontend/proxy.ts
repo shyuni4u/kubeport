@@ -4,6 +4,7 @@ import type { NextRequest } from "next/server";
 // Import-free modules on purpose — see lib/demo-config.
 import { demoConfigured } from "@/lib/demo-config";
 import { SESSION_COOKIE } from "@/lib/cookie-names";
+import { isSessionId } from "@/lib/session-id";
 import { applySecurityHeaders } from "@/lib/security-headers";
 
 // The security headers belong on every response, and they moved here from
@@ -52,7 +53,9 @@ export function proxy(req: NextRequest) {
 
 function route(req: NextRequest): NextResponse {
   if (!LOGIN_GUARDED.test(req.nextUrl.pathname)) return NextResponse.next();
-  const hasSession = req.cookies.has(SESSION_COOKIE);
+  // A malformed value is no session (#487): send it to login, which
+  // replaces the cookie, instead of letting every page fail on it.
+  const hasSession = isSessionId(req.cookies.get(SESSION_COOKIE)?.value);
   if (hasSession) return NextResponse.next();
 
   // Where they were trying to go, so the round trip can put them back there

@@ -3,6 +3,7 @@ import { pool } from "./db";
 import { getConfig, client, parseProvider } from "./oidc";
 import type { Provider } from "./oidc";
 import crypto from "node:crypto";
+import { isSessionId } from "./session-id";
 import { AUTH_COOKIE_ATTRS, SESSION_COOKIE, clearAuthCookie } from "./cookie-names";
 
 export interface Session {
@@ -81,13 +82,14 @@ export async function createSession(
 export async function getSession(): Promise<Session | null> {
   const cookieStore = await cookies();
   const id = cookieStore.get(SESSION_COOKIE)?.value;
-  if (!id) return null;
+  if (!isSessionId(id)) return null;
   return getSessionById(id);
 }
 
 // Only call with a cookie or an authenticated, decrypted CLI credential.
 // The DB expiry/revocation check remains authoritative for both entry points.
 export async function getSessionById(id: string): Promise<Session | null> {
+  if (!isSessionId(id)) return null;
   const { rows } = await pool.query(
     `SELECT id, user_id, id_token_encrypted, refresh_token_encrypted, id_token_exp, provider
        FROM sessions WHERE id=$1 AND expires_at > now()`,
@@ -135,8 +137,16 @@ export async function updateSessionTokens(
 export async function destroySession() {
   const cookieStore = await cookies();
   const id = cookieStore.get(SESSION_COOKIE)?.value;
-  if (id) await pool.query("DELETE FROM sessions WHERE id=$1", [id]);
+  // The browser credential goes first and does not depend on the DB: if the
+  // delete below fails, the user who pressed logout must still be logged out
+  // (#486). A row left behind expires on its own (expires_at + cleanup).
   clearAuthCookie(cookieStore, SESSION_COOKIE);
+  if (!isSessionId(id)) return;
+  try {
+    await pool.query("DELETE FROM sessions WHERE id=$1", [id]);
+  } catch (err) {
+    console.error("destroySession: session row delete failed", (err as Error)?.message);
+  }
 }
 
 /**

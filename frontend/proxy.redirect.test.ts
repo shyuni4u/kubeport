@@ -9,9 +9,9 @@ import { SESSION_COOKIE } from "./lib/cookie-names";
 // the landing page, so anyone arriving on a deep link or a stale bookmark never
 // saw them — they were asked to pick an account they do not have.
 
-function req(path: string, opts?: { session?: boolean }) {
+function req(path: string, opts?: { session?: boolean | string }) {
   const r = new NextRequest(new URL(`https://kubeport.enzo.kr${path}`));
-  if (opts?.session) r.cookies.set(SESSION_COOKIE, "abc");
+  if (opts?.session) r.cookies.set(SESSION_COOKIE, opts.session === true ? "6f1c2a4e-9b3d-4c8a-a1e2-3f4b5c6d7e8f" : opts.session);
   return r;
 }
 
@@ -48,6 +48,13 @@ describe("proxy redirect", () => {
     withDemo(true);
     const res = proxy(req("/catalog", { session: true }));
     expect(res.headers.get("location")).toBeNull();
+  });
+
+  // #487: a malformed session cookie is no session, so the visitor goes to
+  // login (which replaces it) instead of reaching pages that all fail on it.
+  it("sends a malformed session cookie to login", () => {
+    const res = proxy(req("/catalog", { session: "sid-1" }));
+    expect(res.headers.get("location")).not.toBeNull();
   });
 
   describe("with a demo IdP configured", () => {
