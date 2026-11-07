@@ -52,7 +52,11 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          # Same major as frontend/Dockerfile (node:24-alpine) and ci.yml's
+          # frontend job: this job runs the app itself, so it is the only
+          # runtime gate for route handlers, proxy.ts and the pg pool (#488).
+          # frontend/lib/toolchain-pin.test.ts keeps the three in step.
+          node-version: 24
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 
