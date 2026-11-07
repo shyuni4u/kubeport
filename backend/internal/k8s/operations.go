@@ -634,6 +634,9 @@ func (c *Client) RunOperation(ctx context.Context, r OperationRequest) error {
 		}
 		return c.cs.PolicyV1().Evictions(r.Namespace).Evict(ctx, &policy.Eviction{ObjectMeta: meta.ObjectMeta{Name: p.Name, Namespace: p.Namespace}, DeleteOptions: &meta.DeleteOptions{Preconditions: &meta.Preconditions{UID: &p.UID}}})
 	case "create-pvc":
+		if !validName(r.Class) {
+			return invalidOperation("valid storage class name required")
+		}
 		sc, e := c.cs.StorageV1().StorageClasses().Get(ctx, r.Class, meta.GetOptions{})
 		if e != nil {
 			return e
@@ -725,6 +728,9 @@ func (c *Client) RunOperation(ctx context.Context, r OperationRequest) error {
 		_, e = c.cs.AppsV1().Deployments(r.Namespace).Update(ctx, d, meta.UpdateOptions{})
 		return e
 	case "create-ingress":
+		if !validName(r.Class) || !validName(r.Service) {
+			return invalidOperation("valid ingress class and service name required")
+		}
 		cl, e := c.cs.NetworkingV1().IngressClasses().Get(ctx, r.Class, meta.GetOptions{})
 		if e != nil {
 			return e
