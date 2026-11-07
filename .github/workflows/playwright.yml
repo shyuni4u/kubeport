@@ -91,7 +91,7 @@ jobs:
           done
           echo "dex failed to start"; exit 1
 
-      - uses: ariga/setup-atlas@2f3c785c89a15e1c0d07bcae3900fb5feb969eea # v0.3
+      - uses: ariga/setup-atlas@4060c70f266b5c63d372dc0c707ea54303139494 # v0.4
 
       - name: Apply DB schema
         # atlas.hcl lives in backend/migrations/ — matches docs/local-e2e.md §3.
