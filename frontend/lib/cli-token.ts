@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
+import { isSessionId } from "./session-id";
 
 // Separate key/purpose from encrypted OIDC tokens. In particular, the session
 // ID itself is a browser credential and must never be exposed in a signed JWT.
@@ -41,7 +42,7 @@ export function readCliToken(token: string, origin: string, now = Date.now()): s
     if (payload.origin !== origin || !Number.isSafeInteger(payload.expiresAt) ||
         payload.expiresAt <= now || payload.expiresAt > now + CLI_TOKEN_TTL_MS ||
         typeof payload.sessionId !== "string" ||
-        !/^[0-9a-f-]{36}$/i.test(payload.sessionId)) return null;
+        !isSessionId(payload.sessionId)) return null;
     return payload.sessionId;
   } catch {
     return null;
