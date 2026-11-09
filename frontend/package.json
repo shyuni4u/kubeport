@@ -42,7 +42,7 @@
   },
   "devDependencies": {
     "@openai/apps-sdk-ui": "0.2.2",
-    "@playwright/test": "^1.64.1",
+    "@playwright/test": "^1.65.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
@@ -60,7 +60,7 @@
     "shadcn": "^4.23.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vite": "^8.3.5",
+    "vite": "^8.3.6",
     "vitest": "^4.1.11"
   },
   "pnpm": {
