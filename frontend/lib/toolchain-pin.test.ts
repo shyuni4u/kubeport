@@ -23,8 +23,13 @@ describe("toolchain pin", () => {
     // ci.yml's frontend/audit jobs and playwright.yml's app run. The cli
     // (22) and hooks (20) jobs do not run the app and are left out.
     const ci = read(".github/workflows/ci.yml");
-    const frontendJob = ci.slice(ci.indexOf("\n  frontend:"), ci.indexOf("\n  audit:"));
-    expect(frontendJob).toMatch(new RegExp(`node-version: ${image}\\b`));
+    const jobs = ci.split(/\n(?=  [\w-]+:)/);
+    for (const name of ["frontend", "audit"]) {
+      const job = jobs.find((block) => block.startsWith(`  ${name}:`));
+      expect(job, `${name} job must exist`).toBeDefined();
+      const versions = [...job!.matchAll(/node-version: (\d+)/g)].map((m) => m[1]);
+      expect(versions, `${name} must use the image Node major`).toEqual([image]);
+    }
     const playwright = [
       ...read(".github/workflows/playwright.yml").matchAll(/node-version: (\d+)/g),
     ].map((m) => m[1]);

@@ -121,8 +121,12 @@ func (h *Handlers) RefreshOpenAPI(c *gin.Context) {
 func (h *Handlers) proxyOpenAPI(c *gin.Context, gv string) {
 	name := c.Param("name")
 	cluster, err := h.deps.Store.GetClusterByName(c, name)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, http.StatusNotFound, "not-found", "cluster "+name)
+		return
+	}
+	if err != nil {
+		internalError(c, "proxyOpenAPI", err)
 		return
 	}
 	if err := k8s.ValidateAPIURL(cluster.ApiUrl, os.Getenv("KBP_DEV_ALLOW_INSECURE_CLUSTERS") == "true"); err != nil {

@@ -5,7 +5,10 @@ import { apiFetch } from "@/lib/api-server";
 export default async function ReleasesPage() {
   const t = await getTranslations("releases");
   const res = await apiFetch("/v1/releases");
-  const d = res.ok ? await res.json() : { releases: [] };
+  if (!res.ok) {
+    throw new Error(`GET /v1/releases failed: HTTP ${res.status}`);
+  }
+  const d = await res.json();
 
   return (
     <div>

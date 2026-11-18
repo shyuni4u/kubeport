@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, stat, rm, rmdir } from 'node:fs/promises';
+import { mkdtemp, readFile, stat, rm, rmdir, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -145,3 +145,20 @@ test('rejects irrelevant flags instead of silently changing operation semantics'
   assert.equal(result.code, 1);
   assert.match(result.stderr, /not supported/);
 });
+
+for (const linked of [false, true]) {
+  test(`rejects oversized request files (symlink=${linked}) before HTTP`, async t => {
+    const dir = await mkdtemp(join(tmpdir(), 'kbp-size-'));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const file = join(dir, 'large.json');
+    await writeFile(file, ' '.repeat(4 * 1024 * 1024 + 1));
+    const input = linked ? join(dir, 'link.json') : file;
+    if (linked) await symlink(file, input);
+    let calls = 0;
+    const origin = await server(t, (_req, res) => { calls++; res.end('{}'); });
+    const result = await run(['api', 'POST', '/v1/releases', '--file', input], { KUBEPORT_URL: origin, KUBEPORT_TOKEN: token });
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /Request file exceeds 4 MiB/);
+    assert.equal(calls, 0);
+  });
+}

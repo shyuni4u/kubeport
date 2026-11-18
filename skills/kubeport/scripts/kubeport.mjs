@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Node 22+, no npm dependencies. Connect only to the explicitly selected install.
 import { parseArgs } from 'node:util';
-import { readFile, writeFile, mkdir, rename, rm, lstat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, rm, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -163,7 +163,7 @@ async function readCredential() {
 
 async function jsonFile(filename) {
   if (!filename) throw new Error('--file <JSON file> is required.');
-  if ((await lstat(filename)).size > 4 * 1024 * 1024) throw new Error('Request file exceeds 4 MiB.');
+  if ((await stat(filename)).size > 4 * 1024 * 1024) throw new Error('Request file exceeds 4 MiB.');
   return JSON.parse(await readFile(filename, 'utf8'));
 }
 

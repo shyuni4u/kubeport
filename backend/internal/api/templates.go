@@ -312,8 +312,12 @@ func (h *Handlers) versionHiddenByDemoScope(c *gin.Context, name, detail string)
 		return false
 	}
 	tpl, err := h.deps.Store.GetTemplateByName(c.Request.Context(), name)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, http.StatusNotFound, "not-found", detail)
+		return true
+	}
+	if err != nil {
+		internalError(c, "versionHiddenByDemoScope", err)
 		return true
 	}
 	return h.templateHiddenByDemoScope(c, tpl.OwnerUserID, detail)
@@ -322,8 +326,12 @@ func (h *Handlers) versionHiddenByDemoScope(c *gin.Context, name, detail string)
 func (h *Handlers) GetTemplate(c *gin.Context) {
 	ctx := c.Request.Context()
 	t, err := h.deps.Store.GetTemplateByName(ctx, c.Param("name"))
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, http.StatusNotFound, "not-found", "template")
+		return
+	}
+	if err != nil {
+		internalError(c, "GetTemplate", err)
 		return
 	}
 	if h.templateHiddenByDemoScope(c, t.OwnerUserID, "template") {
@@ -416,8 +424,12 @@ func (h *Handlers) GetTemplateVersion(c *gin.Context) {
 		Name:    name,
 		Version: int32(v64),
 	})
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, http.StatusNotFound, "not-found", "template version")
+		return
+	}
+	if err != nil {
+		internalError(c, "GetTemplateVersion", err)
 		return
 	}
 	if h.versionHiddenByDemoScope(c, name, "template version") {
@@ -448,8 +460,12 @@ func hasDraft(vs []store.TemplateVersion) bool {
 func (h *Handlers) templateDraftAccess(c *gin.Context, name string) (denial *accessDenial, published bool, ok bool) {
 	ctx := c.Request.Context()
 	tpl, err := h.deps.Store.GetTemplateByName(ctx, name)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, http.StatusNotFound, "not-found", "template "+name)
+		return nil, false, false
+	}
+	if err != nil {
+		internalError(c, "templateDraftAccess", err)
 		return nil, false, false
 	}
 	d, err := h.evaluateTemplateAccess(ctx, nil, ownershipOf(tpl), false)
@@ -510,8 +526,12 @@ func (h *Handlers) PublishVersion(c *gin.Context) {
 		Name:    c.Param("name"),
 		Version: int32(v64),
 	})
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, http.StatusNotFound, "not-found", "template version")
+		return
+	}
+	if err != nil {
+		internalError(c, "PublishVersion", err)
 		return
 	}
 
@@ -709,8 +729,12 @@ func (h *Handlers) UpdateTemplateVersion(c *gin.Context) {
 		return
 	}
 	tv, err := h.deps.Store.GetTemplateVersion(c, store.GetTemplateVersionParams{Name: name, Version: int32(vnum)})
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, http.StatusNotFound, "not-found", "template version")
+		return
+	}
+	if err != nil {
+		internalError(c, "UpdateTemplateVersion", err)
 		return
 	}
 	if tv.Status != "draft" {
@@ -818,8 +842,12 @@ func (h *Handlers) DeleteTemplateVersion(c *gin.Context) {
 		return
 	}
 	tv, err := h.deps.Store.GetTemplateVersion(c, store.GetTemplateVersionParams{Name: name, Version: int32(vnum)})
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, http.StatusNotFound, "not-found", "template version")
+		return
+	}
+	if err != nil {
+		internalError(c, "DeleteTemplateVersion", err)
 		return
 	}
 	if tv.Status != "draft" {
@@ -855,8 +883,12 @@ func (h *Handlers) setVersionStatus(c *gin.Context, expected, newStatus string) 
 		return
 	}
 	tv, err := h.deps.Store.GetTemplateVersion(c, store.GetTemplateVersionParams{Name: name, Version: int32(vnum)})
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, http.StatusNotFound, "not-found", "template version")
+		return
+	}
+	if err != nil {
+		internalError(c, "setVersionStatus", err)
 		return
 	}
 	if tv.Status != expected {

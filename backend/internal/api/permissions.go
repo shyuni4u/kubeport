@@ -237,8 +237,12 @@ func (h *Handlers) evaluateTemplateAccess(ctx context.Context, rc *reqCache, own
 // can see — published ones, or a team viewer's own team's.
 func (h *Handlers) ensureTemplateEditor(c *gin.Context, name string) (store.GetTemplateByNameRow, bool) {
 	tpl, err := h.deps.Store.GetTemplateByName(c, name)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, http.StatusNotFound, "not-found", "template "+name)
+		return store.GetTemplateByNameRow{}, false
+	}
+	if err != nil {
+		internalError(c, "ensureTemplateEditor", err)
 		return store.GetTemplateByNameRow{}, false
 	}
 	// The demo line comes first, as on the read routes: team roles do not

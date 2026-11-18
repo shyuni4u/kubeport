@@ -61,7 +61,10 @@ export async function createSession(
   provider: Provider = "primary",
 ) {
   const id = crypto.randomUUID();
-  const expiresAt = new Date(Date.now() + SESSION_TTL_MS[provider]);
+  const expiresAt = new Date(Math.min(
+    Date.now() + SESSION_TTL_MS[provider],
+    refreshToken ? Infinity : exp.getTime(),
+  ));
   await pool.query(
     `INSERT INTO sessions (id, user_id, id_token_encrypted, refresh_token_encrypted, id_token_exp, expires_at, provider)
      VALUES ($1,$2,$3,$4,$5,$6,$7)`,
@@ -151,15 +154,20 @@ export async function destroySession() {
 
 /**
  * Returns a valid id_token for the session, refreshing if it's within 60s of expiring.
- * Returns null if the session is already expired and refresh fails — caller should 401.
+ * Returns null when no token can be issued — API callers should 401.
+ * Page guards can request a thrown transient failure to preserve the cookie.
  */
 export async function getValidToken(
   session: Session,
+  options: { throwOnTransientFailure?: boolean } = {},
 ): Promise<string | null> {
   if (session.idTokenExp.getTime() > Date.now() + 60_000) {
     return session.idToken;
   }
-  if (!session.refreshToken) return null;
+  // Without refresh, use the token until its actual expiry (no 60s dead zone).
+  if (!session.refreshToken) {
+    return session.idTokenExp.getTime() > Date.now() ? session.idToken : null;
+  }
 
   try {
     const config = await getConfig(session.provider);
@@ -177,8 +185,14 @@ export async function getValidToken(
       exp,
     );
     return tokens.id_token;
-  } catch {
-    await pool.query("DELETE FROM sessions WHERE id=$1", [session.id]);
+  } catch (err) {
+    // Transport, IdP 5xx and DB write failures must not revoke a usable grant.
+    if (err instanceof client.ResponseBodyError &&
+        ["invalid_grant", "invalid_client"].includes(err.error)) {
+      await pool.query("DELETE FROM sessions WHERE id=$1", [session.id]);
+    } else if (options.throwOnTransientFailure) {
+      throw new Error("Session refresh temporarily unavailable");
+    }
     return null;
   }
 }

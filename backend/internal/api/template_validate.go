@@ -3,11 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"kubeport/internal/auth"
 	"kubeport/internal/template"
@@ -60,8 +62,12 @@ func (h *Handlers) ValidateTemplate(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()
 	cluster, err := h.deps.Store.GetClusterByName(ctx, r.Cluster)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(c, http.StatusNotFound, "not-found", "cluster")
+		return
+	}
 	if err != nil {
-		writeError(c, 404, "not-found", "cluster")
+		internalError(c, "ValidateTemplate", err)
 		return
 	}
 	user, _ := auth.UserFrom(ctx)

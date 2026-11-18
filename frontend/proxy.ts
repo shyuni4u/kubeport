@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-// Import-free modules on purpose — see lib/demo-config.
+// Configuration helpers stay import-free; session validation runs in Node Proxy.
 import { demoConfigured } from "@/lib/demo-config";
-import { SESSION_COOKIE } from "@/lib/cookie-names";
+import { getSessionById, getValidToken } from "@/lib/session";
+import { clearAuthCookie, SESSION_COOKIE } from "@/lib/cookie-names";
 import { isSessionId } from "@/lib/session-id";
 import { applySecurityHeaders } from "@/lib/security-headers";
 
@@ -35,7 +36,7 @@ export const config = {
   ],
 };
 
-// Only pages redirect to login when there is no session cookie — the paths the
+// Only pages redirect to login when there is no usable session — the paths the
 // old matcher named. The whole /api/ surface is excluded on purpose: /api/v1/*
 // is the machine API, and its route handler answers with a JSON 401 that a
 // script can branch on. Redirecting it instead sends clients to Google's
@@ -47,16 +48,29 @@ export const config = {
 // "/" (the landing page) and Next's own assets.
 const LOGIN_GUARDED = /^\/(?!api\/|_next|vendor\/monaco\/|favicon\.ico|logout$|$)/;
 
-export function proxy(req: NextRequest) {
-  return applySecurityHeaders(route(req));
+export async function proxy(req: NextRequest) {
+  return applySecurityHeaders(await route(req));
 }
 
-function route(req: NextRequest): NextResponse {
+async function route(req: NextRequest): Promise<NextResponse> {
   if (!LOGIN_GUARDED.test(req.nextUrl.pathname)) return NextResponse.next();
   // A malformed value is no session (#487): send it to login, which
   // replaces the cookie, instead of letting every page fail on it.
-  const hasSession = isSessionId(req.cookies.get(SESSION_COOKIE)?.value);
-  if (hasSession) return NextResponse.next();
+  const id = req.cookies.get(SESSION_COOKIE)?.value;
+  if (isSessionId(id)) {
+    try {
+      const session = await getSessionById(id);
+      if (session && await getValidToken(session, { throwOnTransientFailure: true })) {
+        return NextResponse.next();
+      }
+    } catch {
+      // Keep the browser credential on transient DB/IdP failures so reload can recover.
+      return new NextResponse("Sign-in is temporarily unavailable. Please reload to retry.", {
+        status: 503,
+        headers: { "Cache-Control": "no-store", "Retry-After": "5" },
+      });
+    }
+  }
 
   // Where they were trying to go, so the round trip can put them back there
   // instead of on the catalog. Only the path — the origin is this request's.
@@ -74,5 +88,8 @@ function route(req: NextRequest): NextResponse {
     ? new URL("/", req.nextUrl.origin)
     : new URL("/api/auth/login", req.nextUrl.origin);
   target.searchParams.set("next", next);
-  return NextResponse.redirect(target);
+  const response = NextResponse.redirect(target);
+  if (id) clearAuthCookie(response.cookies, SESSION_COOKIE);
+  response.headers.set("Cache-Control", "no-store");
+  return response;
 }

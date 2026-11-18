@@ -179,3 +179,24 @@ describe("BFF proxy — body cap", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe("authenticated responses are never stored", () => {
+  it.each([200, 404, 500])("overrides upstream cache policy for HTTP %s", async status => {
+    fetchMock.mockResolvedValue(new Response("body", { status, headers: { "Cache-Control": "public, max-age=3600" } }));
+    const response = await GET(req(), params);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+  });
+  it("also protects missing-session errors", async () => {
+    getSession.mockResolvedValue(null);
+    const response = await GET(req(), params);
+    expect(response.status).toBe(401);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+  });
+  it("keeps SSE streaming while disabling storage", async () => {
+    fetchMock.mockResolvedValue(new Response("data: hello\n\n", { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } }));
+    const response = await GET(req(), params);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.get("Content-Type")).toBe("text/event-stream");
+    expect(await response.text()).toBe("data: hello\n\n");
+  });
+});
