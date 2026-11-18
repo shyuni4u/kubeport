@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/gin-contrib/sse"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"kubeport/internal/auth"
@@ -26,8 +28,12 @@ func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 	rel, err := h.deps.Store.GetReleaseByID(ctx, id)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, http.StatusNotFound, "not-found", "release")
+		return
+	}
+	if err != nil {
+		internalError(c, "StreamReleaseLogs", err)
 		return
 	}
 

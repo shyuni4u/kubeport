@@ -30,7 +30,7 @@
 
 스타일: `px-2.5 py-0.5 rounded-full text-[11px] font-medium`
 
-구현: `components/role-badge.tsx`
+구현: `frontend/components/RoleBadge.tsx`
 ```tsx
 type Props = { role: "admin" | "user"; withLabel?: boolean }
 ```
@@ -47,7 +47,7 @@ shadcn `Badge` variant 확장:
 | `danger` (red) | 실패 |
 | `muted` (gray) | deprecated |
 
-구현: `components/status-chip.tsx`. 내부에서 shadcn `Badge` 를 wrap.
+구현: `frontend/components/StatusChip.tsx`. 내부에서 shadcn `Badge` 를 wrap.
 
 ### 1.3 Monaco 코드 패널
 
@@ -57,7 +57,7 @@ shadcn `Badge` variant 확장:
 - YAML 신택스 하이라이팅: Monaco 빌트인 (`@monaco-editor/react` 기본 포함)
 
 ```tsx
-// components/monaco-panel.tsx
+// frontend/components/MonacoPanel.tsx
 "use client"
 import dynamic from "next/dynamic"
 const Editor = dynamic(() => import("@monaco-editor/react"), { ssr: false })
@@ -194,7 +194,7 @@ Button·Badge 기본 variant 에 `dark:[a]:hover:bg-primary/90`(4.67:1 이상)�
 
 ### 2.1 AppShell
 
-`components/app-shell/top-bar.tsx` — 모든 로그인 후 페이지의 공통 상단 바.
+`frontend/components/AppShell.tsx` — 로그인 후 페이지의 공통 셸과 상단 바. 사용자 메뉴는 `frontend/components/TopBarUserMenu.tsx`에서 구현한다.
 
 구조 (왼쪽 → 오른쪽):
 1. 로고 "kubeport"
@@ -236,10 +236,10 @@ Button·Badge 기본 variant 에 `dark:[a]:hover:bg-primary/90`(4.67:1 이상)�
 | 컴포넌트 | 종류 | 경로 | 주요 prop |
 |---|---|---|---|
 | ResizablePanelGroup | shadcn | `components/ui/resizable.tsx` | — |
-| SchemaTree | 커스텀 | `components/template-editor/schema-tree.tsx` | `resources, selectedPath, onSelect` |
+| SchemaTree | 커스텀 | `frontend/components/SchemaTree.tsx` | `resources, selectedPath, onSelect` |
 | KindPicker | 커스텀 | 동상 | `availableKinds, selectedKinds, onAdd` |
-| FieldInspector | 커스텀 | `components/template-editor/field-inspector.tsx` | `field, onChange` |
-| YamlPreview | 커스텀 | `components/template-editor/yaml-preview.tsx` | `resourcesYaml, uiSpecYaml, tab` |
+| FieldInspector | 커스텀 | `frontend/components/FieldInspector.tsx` | `field, onChange` |
+| YamlPreview | 커스텀 | `frontend/components/YamlPreview.tsx` | `resourcesYaml, uiSpecYaml, tab` |
 
 SchemaTree 내부 아이템:
 - "고정" 배지 (회색) / "● exposed" 배지 (blue-50 / blue-800)
@@ -319,7 +319,7 @@ TanStack Query 로 감싸는 걸 추천:
 
 | 컴포넌트 | 경로 | prop |
 |---|---|---|
-| CatalogCard | `components/catalog/catalog-card.tsx` | `template: TemplateListItem` |
+| CatalogCard | `frontend/components/CatalogCard.tsx` | `template: TemplateListItem` |
 | 태그 필터 | inline, shadcn `ToggleGroup` (type="single") | — |
 
 CatalogCard 내부:

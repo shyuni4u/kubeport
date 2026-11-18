@@ -1,7 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
+vi.mock("@/lib/session", () => ({
+  getSessionById: vi.fn(async () => ({ id: "valid" })),
+  getValidToken: vi.fn(async () => "token"),
+}));
+
 import { proxy } from "./proxy";
+import { getSessionById, getValidToken } from "./lib/session";
 import { SESSION_COOKIE } from "./lib/cookie-names";
 
 // #41: an unauthenticated page request went straight to /api/auth/login, which
@@ -44,35 +50,35 @@ function withDemo(on: boolean) {
 }
 
 describe("proxy redirect", () => {
-  it("lets a request with a session through", () => {
+  it("lets a request with a session through", async () => {
     withDemo(true);
-    const res = proxy(req("/catalog", { session: true }));
+    const res = await proxy(req("/catalog", { session: true }));
     expect(res.headers.get("location")).toBeNull();
   });
 
   // #487: a malformed session cookie is no session, so the visitor goes to
   // login (which replaces it) instead of reaching pages that all fail on it.
-  it("sends a malformed session cookie to login", () => {
-    const res = proxy(req("/catalog", { session: "sid-1" }));
+  it("sends a malformed session cookie to login", async () => {
+    const res = await proxy(req("/catalog", { session: "sid-1" }));
     expect(res.headers.get("location")).not.toBeNull();
   });
 
   describe("with a demo IdP configured", () => {
     beforeEach(() => withDemo(true));
 
-    it("sends an unauthenticated visitor to landing, not to the IdP", () => {
-      const loc = new URL(proxy(req("/catalog")).headers.get("location")!);
+    it("sends an unauthenticated visitor to landing, not to the IdP", async () => {
+      const loc = new URL((await proxy(req("/catalog"))).headers.get("location")!);
       expect(loc.pathname).toBe("/");
       expect(loc.searchParams.get("next")).toBe("/catalog");
     });
 
-    it("remembers the whole path, query included", () => {
-      const loc = new URL(proxy(req("/catalog?tag=db")).headers.get("location")!);
+    it("remembers the whole path, query included", async () => {
+      const loc = new URL((await proxy(req("/catalog?tag=db"))).headers.get("location")!);
       expect(loc.searchParams.get("next")).toBe("/catalog?tag=db");
     });
 
-    it("stays on this origin", () => {
-      const loc = new URL(proxy(req("/releases/abc")).headers.get("location")!);
+    it("stays on this origin", async () => {
+      const loc = new URL((await proxy(req("/releases/abc"))).headers.get("location")!);
       expect(loc.origin).toBe("https://kubeport.enzo.kr");
     });
   });
@@ -83,10 +89,42 @@ describe("proxy redirect", () => {
     // Nothing to choose between, so bouncing through landing would only add a
     // click to every deep link on a self-hosted install. It still carries the
     // destination, which it did not before.
-    it("goes straight to the IdP, carrying the destination", () => {
-      const loc = new URL(proxy(req("/catalog")).headers.get("location")!);
+    it("goes straight to the IdP, carrying the destination", async () => {
+      const loc = new URL((await proxy(req("/catalog"))).headers.get("location")!);
       expect(loc.pathname).toBe("/api/auth/login");
       expect(loc.searchParams.get("next")).toBe("/catalog");
     });
   });
+});
+
+describe("stale page sessions", () => {
+  afterEach(() => vi.mocked(getValidToken).mockResolvedValue("token"));
+  it("clears an expired session and preserves the destination", async () => {
+    withDemo(false);
+    vi.mocked(getValidToken).mockResolvedValueOnce(null);
+    const res = await proxy(req("/releases?filter=mine", { session: true }));
+    const target = new URL(res.headers.get("location")!);
+    expect(target.pathname).toBe("/api/auth/login");
+    expect(target.searchParams.get("next")).toBe("/releases?filter=mine");
+    expect(res.headers.get("set-cookie")).toContain(`${SESSION_COOKIE}=;`);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+  it("rejects revoked or missing database sessions", async () => {
+    vi.mocked(getSessionById).mockResolvedValueOnce(null);
+    const res = await proxy(req("/catalog", { session: true }));
+    expect(res.headers.get("location")).not.toBeNull();
+  });
+  it("leaves machine requests to the JSON authentication handler", async () => {
+    vi.mocked(getSessionById).mockClear();
+    await proxy(req("/api/v1/me", { session: true }));
+    expect(getSessionById).not.toHaveBeenCalled();
+  });
+});
+
+it("preserves the cookie when refresh is temporarily unavailable", async () => {
+  vi.mocked(getValidToken).mockRejectedValueOnce(new Error("temporary failure"));
+  const res = await proxy(req("/releases", { session: true }));
+  expect(res.status).toBe(503);
+  expect(res.headers.get("set-cookie")).toBeNull();
+  expect(res.headers.get("cache-control")).toBe("no-store");
 });

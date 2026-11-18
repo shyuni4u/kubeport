@@ -150,8 +150,12 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 		Name:    r.Template,
 		Version: int32(r.Version),
 	})
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, http.StatusNotFound, "not-found", "template version")
+		return
+	}
+	if err != nil {
+		internalError(c, "CreateRelease", err)
 		return
 	}
 	tpl, err := h.deps.Store.GetTemplateByName(ctx, r.Template)
@@ -197,8 +201,12 @@ func (h *Handlers) CreateRelease(c *gin.Context) {
 	}
 
 	cluster, err := h.deps.Store.GetClusterByName(ctx, r.Cluster)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, http.StatusNotFound, "not-found", "cluster")
+		return
+	}
+	if err != nil {
+		internalError(c, "CreateRelease", err)
 		return
 	}
 
@@ -439,8 +447,12 @@ func (h *Handlers) GetRelease(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 	rel, err := h.deps.Store.GetReleaseByID(ctx, id)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, http.StatusNotFound, "not-found", "release")
+		return
+	}
+	if err != nil {
+		internalError(c, "GetRelease", err)
 		return
 	}
 
@@ -605,8 +617,12 @@ func (h *Handlers) DeleteRelease(c *gin.Context) {
 	}
 
 	rel, err := h.deps.Store.GetReleaseByID(ctx, id)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, http.StatusNotFound, "not-found", "release")
+		return
+	}
+	if err != nil {
+		internalError(c, "DeleteRelease", err)
 		return
 	}
 

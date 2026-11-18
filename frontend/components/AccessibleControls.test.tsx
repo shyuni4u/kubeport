@@ -33,7 +33,7 @@ describe.each([
       mount(<LogsPanel releaseId="fixture" instances={[{ name: "p1" }]} />);
       const trigger = screen.getByRole("combobox", { name: logLabel });
       await userEvent.click(trigger);
-      await userEvent.click(screen.getByRole("option", { name: "p1" }));
+      await userEvent.click(await screen.findByRole("option", { name: "p1" }));
       expect(trigger).toHaveAccessibleName(logLabel);
       expect(trigger).toHaveTextContent("p1");
     } finally { vi.unstubAllGlobals(); }

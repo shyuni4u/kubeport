@@ -1,11 +1,13 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 
 	"kubeport/internal/auth"
 	"kubeport/internal/k8s"
@@ -111,8 +113,12 @@ func (h *Handlers) CheckSelfSubjectAccess(c *gin.Context) {
 
 	ctx := c.Request.Context()
 	cluster, err := h.deps.Store.GetClusterByName(ctx, req.Cluster)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, http.StatusNotFound, "not-found", "cluster")
+		return
+	}
+	if err != nil {
+		internalError(c, "CheckSelfSubjectAccess", err)
 		return
 	}
 

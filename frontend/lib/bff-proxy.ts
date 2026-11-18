@@ -136,5 +136,8 @@ export async function proxyApi(req: NextRequest, ctx: { params: Promise<{ path: 
   authenticate: () => Promise<Awaited<ReturnType<typeof getSession>>>,
   missingAuth = 'no session cookie',
 ) {
-  return applySecurityHeaders(await proxy(req, ctx, authenticate, missingAuth));
+  const response = await proxy(req, ctx, authenticate, missingAuth);
+  // Both cookie and CLI authentication can return private data, including SSE.
+  response.headers.set("Cache-Control", "no-store");
+  return applySecurityHeaders(response);
 }

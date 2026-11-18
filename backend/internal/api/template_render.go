@@ -69,8 +69,12 @@ func (h *Handlers) PreviewRender(c *gin.Context) {
 			return
 		}
 		rel, err := h.deps.Store.GetReleaseByID(c.Request.Context(), id)
-		if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(c, http.StatusNotFound, "not-found", "release")
+			return
+		}
+		if err != nil {
+			internalError(c, "PreviewRender", err)
 			return
 		}
 		// The same gate as reading the release: its stored values are what
@@ -150,12 +154,12 @@ func (h *Handlers) resolveTemplateVersion(c *gin.Context, name, versionQuery str
 			Name:    name,
 			Version: int32(v64),
 		})
-		if err != nil {
-			// ErrNoRows → legitimate 404. Real DB errors also surface as 404
-			// here to match h.GetTemplate's behavior (see templates.go). A DB
-			// outage will look like "template not found" — improving the
-			// overall pattern is outside Task 1's scope.
+		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(c, http.StatusNotFound, "not-found", "template version")
+			return store.TemplateVersion{}, false
+		}
+		if err != nil {
+			internalError(c, "resolveTemplateVersion", err)
 			return store.TemplateVersion{}, false
 		}
 		// Rendering returns the template's substance, so it follows the same

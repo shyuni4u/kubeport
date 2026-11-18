@@ -228,9 +228,13 @@ func (h *Handlers) AddTeamMember(c *gin.Context) {
 		return
 	}
 	target, err := h.deps.Store.GetUserByEmail(c, store.PgText(r.Email))
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(c, http.StatusNotFound, "user-not-found",
 			"user must have logged in at least once before being added to a team")
+		return
+	}
+	if err != nil {
+		internalError(c, "AddTeamMember", err)
 		return
 	}
 	m, err := h.deps.Store.InsertTeamMembership(c, store.InsertTeamMembershipParams{

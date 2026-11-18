@@ -80,8 +80,7 @@ func (h *Handlers) UpdateRelease(c *gin.Context) {
 			writeError(c, http.StatusNotFound, "not-found", "release")
 			return
 		}
-		log.Printf("UpdateRelease GetReleaseByID: %v", err)
-		writeError(c, http.StatusNotFound, "not-found", "release")
+		internalError(c, "UpdateRelease: release", err)
 		return
 	}
 

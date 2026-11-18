@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
+vi.mock("@/lib/session", () => ({
+  getSessionById: vi.fn(async () => ({ id: "valid" })),
+  getValidToken: vi.fn(async () => "token"),
+}));
+
 import { config, proxy } from "./proxy";
 
 // Security review of #80: a Node proxy makes Next clone the request body and
@@ -8,7 +13,7 @@ import { config, proxy } from "./proxy";
 // (no body read before the session check) and #266 (4 MiB cap while
 // streaming) depend on /api requests with a body never being matched.
 describe("proxy matcher", () => {
-  it("matches /api only for requests without a body", () => {
+  it("matches /api only for requests without a body", async () => {
     const api = config.matcher.find((m) => typeof m === "object" && m.source === "/api/:path*");
     expect(api).toBeDefined();
     expect(api && typeof api === "object" ? api.missing : undefined).toEqual([
@@ -48,31 +53,31 @@ describe("proxy security headers", () => {
     ["a Next static asset", "/_next/static/chunks/main.js"],
     ["the logout screen", "/logout"],
     ["an unknown path (404)", "/no-such-page"],
-  ])("sets them on %s", (_label, path) => {
-    const res = proxy(req(path));
+  ])("sets them on %s", async (_label, path) => {
+    const res = await proxy(req(path));
     expect(res.headers.get("Strict-Transport-Security")).toBe("max-age=63072000; includeSubDomains");
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(res.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
     expect(res.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
   });
 
-  it("sets them on the login redirect it makes itself", () => {
-    const res = proxy(req("/catalog"));
+  it("sets them on the login redirect it makes itself", async () => {
+    const res = await proxy(req("/catalog"));
     expect(res.status).toBeGreaterThanOrEqual(300);
     expect(res.status).toBeLessThan(400);
     expect(res.headers.get("Strict-Transport-Security")).toBe("max-age=63072000; includeSubDomains");
     expect(res.headers.get("Content-Security-Policy")).toContain("default-src 'self'");
   });
 
-  it("does not redirect the API, assets or landing to login (the old matcher's exclusions)", () => {
+  it("does not redirect the API, assets or landing to login (the old matcher's exclusions)", async () => {
     for (const path of ["/", "/api/v1/templates", "/_next/static/x.js", "/favicon.ico", "/logout"]) {
-      expect(proxy(req(path)).headers.get("location"), path).toBeNull();
+      expect((await proxy(req(path))).headers.get("location"), path).toBeNull();
     }
   });
 
-  it("follows SECURITY_HEADERS=off at request time", () => {
+  it("follows SECURITY_HEADERS=off at request time", async () => {
     vi.stubEnv("SECURITY_HEADERS", "off");
-    const res = proxy(req("/api/healthz"));
+    const res = await proxy(req("/api/healthz"));
     expect(res.headers.get("Strict-Transport-Security")).toBeNull();
     expect(res.headers.get("Content-Security-Policy")).toBeNull();
   });
