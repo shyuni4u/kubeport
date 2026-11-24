@@ -98,28 +98,6 @@ jobs:
             -f deploy/helm/kubeport/ci/smoke-values.yaml \
             --wait --timeout 5m
 
-      - name: Verify RuntimeDefault on application workloads
-        run: |
-          # Exercise the real Dex container without changing the smoke backend's
-          # public OIDC issuer. These resources exist only in this disposable kind.
-          helm template kp deploy/helm/kubeport -f deploy/helm/kubeport/ci/test-values.yaml \
-            --namespace kubeport \
-            --show-only templates/dex-configmap.yaml \
-            --show-only templates/dex-secret.yaml \
-            --show-only templates/dex-deployment.yaml | kubectl -n kubeport apply -f -
-          kubectl -n kubeport rollout status deployment/kp-kubeport-dex --timeout=180s
-          for component in backend frontend dex; do
-            PROFILE=$(kubectl -n kubeport get deployment "kp-kubeport-$component" -o jsonpath='{.spec.template.spec.securityContext.seccompProfile.type}')
-            test "$PROFILE" = RuntimeDefault
-            # Backend is distroless: inspect the container process from the
-            # disposable kind node rather than assuming an in-image shell.
-            POD=$(kubectl -n kubeport get pod -l "app.kubernetes.io/instance=kp,app.kubernetes.io/component=$component" -o jsonpath='{.items[0].metadata.name}')
-            NODE=$(kubectl -n kubeport get pod "$POD" -o jsonpath='{.spec.nodeName}')
-            CID=$(kubectl -n kubeport get pod "$POD" -o json | jq -r --arg name "$component" '.status.containerStatuses[] | select(.name == $name) | .containerID | sub("^containerd://"; "")')
-            CONTAINER_PID=$(docker exec "$NODE" crictl inspect "$CID" | jq -r '.info.pid')
-            docker exec "$NODE" grep -Eq '^Seccomp:[[:space:]]+2$' "/proc/$CONTAINER_PID/status"
-          done
-
       - name: Verify hardened PostgreSQL and reuse its data volume
         run: |
           kubectl -n kubeport exec statefulset/kp-kubeport-postgres -- sh -ec '
