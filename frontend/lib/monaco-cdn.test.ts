@@ -38,13 +38,19 @@ function atLeast(a: string, b: string): boolean {
   return true;
 }
 
-// The first Monaco build that vendors DOMPurify 3.4.15. 0.55.1 carried 3.2.7
+// The first Monaco build that vendors DOMPurify 3.4.17. 0.55.1 carried 3.2.7
 // (18 advisories in `pnpm audit --prod`, #438) and 0.56.0 carried 3.4.8 (four
 // XSS advisories, #450). Going back below this reintroduces them in the code
 // an admin's browser runs.
-const DOMPURIFY_FLOOR = "0.57.0";
+const DOMPURIFY_FLOOR = "0.58.0";
 
 describe("the Monaco build this app runs", () => {
+  it("ships the patched DOMPurify in its vendored source", () => {
+    const source = readFileSync(join(__dirname, "../node_modules/monaco-editor/esm/vs/base/browser/dompurify/dompurify.js"), "utf8");
+    const version = /DOMPurify (\d+\.\d+\.\d+)/.exec(source)?.[1];
+    expect(version).toBeTruthy();
+    expect(atLeast(version!, "3.4.17")).toBe(true);
+  });
   // Monaco vendors its own DOMPurify, so this version — not the npm
   // dependency tree — decides which sanitizer runs in the browser (#438).
   it("is pinned to one version across the CDN path, the vs path and the types", () => {

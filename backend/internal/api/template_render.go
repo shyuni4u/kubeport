@@ -46,6 +46,9 @@ type previewRenderReq struct {
 //     field, pattern mismatch, min/max, etc.) → 400 validation-error
 //     (surfaced verbatim so the UI can highlight the offending field)
 func (h *Handlers) PreviewRender(c *gin.Context) {
+	if !onlyQuery(c, "version") {
+		return
+	}
 	var r previewRenderReq
 	if !bindJSON(c, &r) {
 		return

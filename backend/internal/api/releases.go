@@ -440,6 +440,9 @@ func (h *Handlers) ListReleases(c *gin.Context) {
 }
 
 func (h *Handlers) GetRelease(c *gin.Context) {
+	if !onlyQuery(c, "include") {
+		return
+	}
 	id, err := parseUUID(c.Param("id"))
 	if err != nil {
 		writeError(c, http.StatusBadRequest, "validation-error", "invalid release id")
@@ -590,6 +593,9 @@ func abstractStatus(instances []k8s.Instance) string {
 }
 
 func (h *Handlers) DeleteRelease(c *gin.Context) {
+	if !onlyQuery(c, "force") {
+		return
+	}
 	id, err := parseUUID(c.Param("id"))
 	if err != nil {
 		writeError(c, http.StatusBadRequest, "validation-error", "invalid release id")

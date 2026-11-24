@@ -21,6 +21,9 @@ import (
 // the release, multiplexed over Server-Sent Events. ?instance=<name>
 // filters to a single pod; default ("all") follows every pod.
 func (h *Handlers) StreamReleaseLogs(c *gin.Context) {
+	if !onlyQuery(c, "since", "instance") {
+		return
+	}
 	id, err := parseUUID(c.Param("id"))
 	if err != nil {
 		writeError(c, http.StatusBadRequest, "validation-error", "invalid release id")

@@ -40,3 +40,17 @@ func TestDeleteTemplate_InUseKeepsVersions(t *testing.T) {
 	w = do(t, r, http.MethodGet, "/v1/templates/"+name+"/versions/1", nil)
 	require.Equal(t, http.StatusOK, w.Code)
 }
+
+func TestDeleteTemplate_DemoAuthoringGate(t *testing.T) {
+	s := testStore(t)
+	optedIn := newDemoAdminRouterWithTemplateCreate(t, s)
+	name := seedGlobalTemplate(t, optedIn)
+	denied := newDemoAdminRouter(t, s, &fakeK8sApplier{})
+	w := do(t, denied, http.MethodDelete, "/v1/templates/"+name, nil)
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "demo-restricted")
+	w = do(t, optedIn, http.MethodGet, "/v1/templates/"+name, nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	w = do(t, optedIn, http.MethodDelete, "/v1/templates/"+name, nil)
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+}

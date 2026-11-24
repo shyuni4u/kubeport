@@ -99,6 +99,9 @@ func (h *Handlers) UpdateClusterSettings(c *gin.Context) {
 }
 
 func (h *Handlers) DiagnoseCluster(c *gin.Context) {
+	if !onlyQuery(c, "namespace") {
+		return
+	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 	c.Request = c.Request.WithContext(ctx)
