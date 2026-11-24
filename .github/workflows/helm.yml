@@ -98,6 +98,22 @@ jobs:
             -f deploy/helm/kubeport/ci/smoke-values.yaml \
             --wait --timeout 5m
 
+      - name: Verify RuntimeDefault on application workloads
+        run: |
+          # Exercise the real Dex container without changing the smoke backend's
+          # public OIDC issuer. These resources exist only in this disposable kind.
+          helm template kp deploy/helm/kubeport -f deploy/helm/kubeport/ci/test-values.yaml \
+            --namespace kubeport \
+            --show-only templates/dex-configmap.yaml \
+            --show-only templates/dex-secret.yaml \
+            --show-only templates/dex-deployment.yaml | kubectl -n kubeport apply -f -
+          kubectl -n kubeport rollout status deployment/kp-kubeport-dex --timeout=180s
+          for component in backend frontend dex; do
+            PROFILE=$(kubectl -n kubeport get deployment "kp-kubeport-$component" -o jsonpath='{.spec.template.spec.securityContext.seccompProfile.type}')
+            test "$PROFILE" = RuntimeDefault
+            kubectl -n kubeport exec "deployment/kp-kubeport-$component" -c "$component" -- sh -ec 'grep -Eq "^Seccomp:[[:space:]]+2$" /proc/self/status'
+          done
+
       - name: Verify hardened PostgreSQL and reuse its data volume
         run: |
           kubectl -n kubeport exec statefulset/kp-kubeport-postgres -- sh -ec '

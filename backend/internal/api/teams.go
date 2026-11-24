@@ -183,7 +183,11 @@ func (h *Handlers) ListTeamMembers(c *gin.Context) {
 		// 403 causes: user-not-yet-warm vs. genuine non-member, so an API
 		// caller can tell which fix they need.
 		caller, err := h.deps.Store.GetUserByOidcSubject(c, u.Subject)
-		if err != nil {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			internalError(c, "ListTeamMembers: caller", err)
+			return
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(c, http.StatusForbidden, "rbac-denied",
 				"user not registered yet; call GET /v1/me first, then retry")
 			return
@@ -192,6 +196,10 @@ func (h *Handlers) ListTeamMembers(c *gin.Context) {
 			TeamID: tid,
 			UserID: caller.ID,
 		}); err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				internalError(c, "ListTeamMembers: membership", err)
+				return
+			}
 			writeError(c, http.StatusForbidden, "rbac-denied", "team member or kubeport-admin required")
 			return
 		}

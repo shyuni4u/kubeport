@@ -237,7 +237,7 @@ jobs:
     # DOMPurify into its dist and pins the npm package to the same version, so
     # this number is a faithful proxy for the sanitizer the editor actually
     # runs — and it moves only when Monaco cuts a release. monaco-editor
-    # 0.57.0 carries DOMPurify 3.4.15 (0.56.0 carried 3.4.8, #450); whenever
+    # 0.58.0 carries DOMPurify 3.4.17 (0.56.0 carried 3.4.8, #450); whenever
     # upstream DOMPurify moves ahead again, the gap is findings nothing in this
     # repo can clear. A pnpm.overrides entry would zero them while changing no
     # shipped byte, which is why there is none.

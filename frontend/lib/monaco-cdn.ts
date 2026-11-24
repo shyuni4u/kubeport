@@ -1,6 +1,6 @@
 /** Same-origin Monaco distribution copied from the locked npm package by scripts/prepare-monaco.mjs. The vendored DOMPurify version still follows Monaco, not pnpm overrides. */
 
-export const MONACO_VERSION = "0.57.0";
+export const MONACO_VERSION = "0.58.0";
 
 export const MONACO_ASSET_ROOT = `/vendor/monaco/${MONACO_VERSION}/`;
 

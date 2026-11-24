@@ -1097,6 +1097,8 @@ spec:
         runAsGroup: 65532
         runAsNonRoot: true
         runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
       # Migration runs as initContainers (not a Helm hook) so that fresh
       # `helm install` works with embedded Postgres — at pre-install hook time
       # the Postgres StatefulSet/Service don't exist yet, so a hook Job can't
@@ -1233,6 +1235,8 @@ spec:
         runAsGroup: 65532
         runAsNonRoot: true
         runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: dex
           image: "ghcr.io/dexidp/dex:v2.39.0"
@@ -1323,6 +1327,8 @@ spec:
         runAsGroup: 65532
         runAsNonRoot: true
         runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
       # Frontend reads/writes the same DB as backend. Wait until the backend
       # Service is responding /healthz — that signals migrations have been
       # applied and the schema is current.
@@ -1543,6 +1549,8 @@ spec:
             runAsGroup: 65532
             runAsNonRoot: true
             runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
           initContainers:
             # Runs before wipe-k8s on purpose. The seeder proves its own
             # dependencies before it deletes database rows, but that only
